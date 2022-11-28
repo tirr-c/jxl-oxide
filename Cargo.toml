@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "crates/jxl-bitstream",
+  "crates/jxl-info",
+  "crates/jxl-coding",
+]
