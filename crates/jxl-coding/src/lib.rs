@@ -9,6 +9,7 @@ mod prefix;
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug)]
 pub struct Decoder {
     lz77: Lz77,
     inner: DecoderInner,
@@ -85,6 +86,7 @@ impl Decoder {
     }
 }
 
+#[derive(Debug)]
 enum Lz77 {
     Disabled,
     Enabled {
@@ -117,6 +119,17 @@ struct Lz77State {
     num_to_copy: u32,
     copy_pos: u32,
     num_decoded: u32,
+}
+
+impl std::fmt::Debug for Lz77State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Lz77State")
+            .field("lz_len_conf", &self.lz_len_conf)
+            .field("num_to_copy", &self.num_to_copy)
+            .field("copy_pos", &self.copy_pos)
+            .field("num_decoded", &self.num_decoded)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Lz77State {
