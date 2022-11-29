@@ -18,4 +18,5 @@ name = "jxl-info"
 version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
+ "jxl-coding",
 ]
