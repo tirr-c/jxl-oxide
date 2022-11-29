@@ -11,16 +11,19 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Decoder {
     lz77: Lz77,
-    num_clusters: u32,
-    clusters: Vec<u8>, // num_dist, [0, num_clusters)
-    configs: Vec<IntegerConfig>, // num_clusters
-    code: Coder,
+    inner: DecoderInner,
 }
 
 impl Decoder {
     pub fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
         let lz77 = Lz77::parse(bitstream)?;
-        Self::parse_inner(bitstream, num_dist, lz77)
+        let num_dist = if let Lz77::Disabled = &lz77 {
+            num_dist
+        } else {
+            num_dist + 1
+        };
+        let inner = DecoderInner::parse(bitstream, num_dist)?;
+        Ok(Self { lz77, inner })
     }
 
     fn parse_assume_no_lz77<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
@@ -28,89 +31,57 @@ impl Decoder {
         if lz77_enabled {
             return Err(Error::Lz77NotAllowed);
         }
-        Self::parse_inner(bitstream, num_dist, Lz77::Disabled)
+        let inner = DecoderInner::parse(bitstream, num_dist)?;
+        Ok(Self { lz77: Lz77::Disabled, inner })
     }
 
-    fn parse_inner<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32, lz77: Lz77) -> Result<Self> {
-        let num_dist = if let Lz77::Disabled = &lz77 {
-            num_dist
-        } else {
-            num_dist + 1
-        };
-        let (num_clusters, clusters) = Self::read_clusters(bitstream, num_dist)?;
-        let use_prefix_code = read_bits!(bitstream, Bool)?;
-        let log_alphabet_size = if use_prefix_code {
-            15
-        } else {
-            read_bits!(bitstream, 5 + u(2))?
-        };
-        let configs = (0..num_clusters)
-            .map(|_| IntegerConfig::parse(bitstream, log_alphabet_size))
-            .collect::<Result<Vec<_>>>()?;
-        let code = if use_prefix_code {
-            let dist = (0..num_clusters)
-                .map(|_| -> Result<_> {
-                    let count = if read_bits!(bitstream, Bool)? {
-                        let n = bitstream.read_bits(4)?;
-                        1 + (1 << n) + bitstream.read_bits(n)?
+    pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32) -> Result<u32> {
+        self.read_varint_with_multiplier(bitstream, ctx, 0)
+    }
+
+    pub fn read_varint_with_multiplier<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32, dist_multiplier: u32) -> Result<u32> {
+        let cluster = self.inner.clusters[ctx as usize];
+        Ok(if let Lz77::Enabled { state, min_symbol, min_length } = &mut self.lz77 {
+            let min_symbol = *min_symbol as u16;
+            let min_length = *min_length;
+            let r;
+            if state.num_to_copy > 0 {
+                r = state.window[(state.copy_pos & 0xfffff) as usize];
+                state.copy_pos += 1;
+                state.num_to_copy -= 1;
+            } else {
+                let token = self.inner.code.read_symbol(bitstream, cluster)?;
+                if token >= min_symbol {
+                    let lz_dist_cluster = self.inner.lz_dist_cluster();
+
+                    state.num_to_copy = self.inner.read_uint(bitstream, &state.lz_len_conf, (token - min_symbol) as u32)? + min_length;
+                    let token = self.inner.code.read_symbol(bitstream, lz_dist_cluster)?;
+                    let distance = self.inner.read_uint(bitstream, &self.inner.configs[lz_dist_cluster as usize], token as u32)?;
+                    let distance = if dist_multiplier == 0 {
+                        distance + 1
+                    } else if distance < 120 {
+                        todo!()
                     } else {
-                        1
+                        distance - 119
                     };
-                    if count > 1 << 15 {
-                        return Err(Error::InvalidPrefixHistogram);
-                    }
-                    prefix::Histogram::parse(bitstream, count)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Coder::PrefixCode(dist)
-        } else {
-            let dist = (0..num_clusters)
-                .map(|_| ans::Histogram::parse(bitstream, log_alphabet_size))
-                .collect::<Result<Vec<_>>>()?;
-            Coder::Ans {
-                dist,
-                state: 0,
-                initial: true,
+
+                    let distance = (1 << 20).min(distance).min(state.num_decoded);
+                    state.copy_pos = state.num_decoded - distance;
+
+                    r = state.window[(state.copy_pos & 0xfffff) as usize];
+                    state.copy_pos += 1;
+                    state.num_to_copy -= 1;
+                } else {
+                    r = self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token as u32)?;
+                }
             }
-        };
-        Ok(Self {
-            lz77,
-            num_clusters,
-            clusters,
-            configs,
-            code,
-        })
-    }
-
-    fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
-        if num_dist == 1 {
-            return Ok((1, vec![0u8]));
-        }
-
-        Ok(if read_bits!(bitstream, Bool)? {
-            // simple dist
-            let nbits = bitstream.read_bits(2)?;
-            let ret = (0..num_dist)
-                .map(|_| bitstream.read_bits(nbits).map(|b| b as u8).map_err(From::from))
-                .collect::<Result<Vec<_>>>()?;
-            let num_clusters = *ret.iter().max().unwrap() as u32;
-            (num_clusters, ret)
+            state.window[(state.num_decoded & 0xfffff) as usize] = r;
+            state.num_decoded += 1;
+            r
         } else {
-            let use_mtf = read_bits!(bitstream, Bool)?;
-            let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
-            let mut ret = (0..num_dist)
-                .map(|_| decoder.read_varint(bitstream).map(|b| b as u8))
-                .collect::<Result<Vec<_>>>()?;
-            if use_mtf {
-                todo!()
-            }
-            let num_clusters = *ret.iter().max().unwrap() as u32;
-            (num_clusters, ret)
+            let token = self.inner.code.read_symbol(bitstream, cluster)?;
+            self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token as u32)?
         })
-    }
-
-    pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<u32> {
-        todo!()
     }
 }
 
@@ -162,6 +133,7 @@ impl Lz77State {
     }
 }
 
+#[derive(Debug)]
 struct IntegerConfig {
     split_exponent: u32,
     msb_in_token: u32,
@@ -193,6 +165,111 @@ impl IntegerConfig {
     }
 }
 
+#[derive(Debug)]
+struct DecoderInner {
+    clusters: Vec<u8>, // num_dist, [0, num_clusters)
+    configs: Vec<IntegerConfig>, // num_clusters
+    code: Coder,
+}
+
+impl DecoderInner {
+    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
+        let (num_clusters, clusters) = Self::read_clusters(bitstream, num_dist)?;
+        let use_prefix_code = read_bits!(bitstream, Bool)?;
+        let log_alphabet_size = if use_prefix_code {
+            15
+        } else {
+            read_bits!(bitstream, 5 + u(2))?
+        };
+        let configs = (0..num_clusters)
+            .map(|_| IntegerConfig::parse(bitstream, log_alphabet_size))
+            .collect::<Result<Vec<_>>>()?;
+        let code = if use_prefix_code {
+            let dist = (0..num_clusters)
+                .map(|_| -> Result<_> {
+                    let count = if read_bits!(bitstream, Bool)? {
+                        let n = bitstream.read_bits(4)?;
+                        1 + (1 << n) + bitstream.read_bits(n)?
+                    } else {
+                        1
+                    };
+                    if count > 1 << 15 {
+                        return Err(Error::InvalidPrefixHistogram);
+                    }
+                    prefix::Histogram::parse(bitstream, count)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Coder::PrefixCode(dist)
+        } else {
+            let dist = (0..num_clusters)
+                .map(|_| ans::Histogram::parse(bitstream, log_alphabet_size))
+                .collect::<Result<Vec<_>>>()?;
+            Coder::Ans {
+                dist,
+                state: 0,
+                initial: true,
+            }
+        };
+        Ok(Self {
+            clusters,
+            configs,
+            code,
+        })
+    }
+
+    fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
+        if num_dist == 1 {
+            return Ok((1, vec![0u8]));
+        }
+
+        Ok(if read_bits!(bitstream, Bool)? {
+            // simple dist
+            let nbits = bitstream.read_bits(2)?;
+            let ret = (0..num_dist)
+                .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
+            (num_clusters, ret)
+        } else {
+            let use_mtf = read_bits!(bitstream, Bool)?;
+            let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
+            let mut ret = (0..num_dist)
+                .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
+                .collect::<Result<Vec<_>>>()?;
+            if use_mtf {
+                let mut mtfmap = [0u8; 256];
+                for (idx, mtf) in mtfmap.iter_mut().enumerate() {
+                    *mtf = idx as u8;
+                }
+                for cluster in &mut ret {
+                    let idx = *cluster as usize;
+                    *cluster = mtfmap[idx];
+                    mtfmap.copy_within(0..idx, 1);
+                    mtfmap[0] = *cluster;
+                }
+            }
+            let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
+            (num_clusters, ret)
+        })
+    }
+
+    fn read_uint<R: std::io::Read>(&self, bitstream: &mut Bitstream<R>, config: &IntegerConfig, token: u32) -> Result<u32> {
+        if token < config.split() {
+            return Ok(token);
+        }
+
+        let &IntegerConfig { split_exponent, msb_in_token, lsb_in_token, .. } = config;
+        let n = split_exponent - (msb_in_token + lsb_in_token) +
+            ((token - config.split()) >> (msb_in_token + lsb_in_token));
+        let low_bits = token & ((1 << lsb_in_token) - 1);
+        let token = (token >> lsb_in_token) & ((1 << msb_in_token) - 1) | (1 << msb_in_token);
+        Ok((((token << n) | bitstream.read_bits(n)?) << lsb_in_token) | low_bits)
+    }
+
+    fn lz_dist_cluster(&self) -> u8 {
+        *self.clusters.last().unwrap()
+    }
+}
 #[derive(Debug)]
 enum Coder {
     PrefixCode(Vec<prefix::Histogram>),
