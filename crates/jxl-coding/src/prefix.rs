@@ -295,3 +295,60 @@ impl TreeInstr {
         }
     }
 }
+
+impl Histogram {
+    pub(crate) fn prefix_code_for_ans() -> Self {
+        use TreeInstr::*;
+
+        let instr = Read {
+            bits: 3,
+            children: vec![
+                Leaf(10),
+                Leaf(6),
+                Leaf(7),
+                Leaf(9),
+                Read {
+                    bits: 1,
+                    children: vec![
+                        Read {
+                            bits: 1,
+                            children: vec![
+                                Read {
+                                    bits: 1,
+                                    children: vec![
+                                        Read {
+                                            bits: 1,
+                                            children: vec![
+                                                Leaf(12),
+                                                Leaf(13),
+                                            ],
+                                        },
+                                        Leaf(11),
+                                    ],
+                                },
+                                Leaf(0),
+                            ],
+                        },
+                        Leaf(4),
+                    ],
+                },
+                Leaf(8),
+                Read {
+                    bits: 1,
+                    children: vec![
+                        Leaf(3),
+                        Leaf(1),
+                    ],
+                },
+                Read {
+                    bits: 1,
+                    children: vec![
+                        Leaf(5),
+                        Leaf(2),
+                    ],
+                },
+            ],
+        };
+        Self { instr }
+    }
+}

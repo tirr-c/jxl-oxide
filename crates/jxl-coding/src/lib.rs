@@ -64,7 +64,9 @@ impl Decoder {
                 .collect::<Result<Vec<_>>>()?;
             Coder::PrefixCode(dist)
         } else {
-            let dist = todo!();
+            let dist = (0..num_clusters)
+                .map(|_| ans::Histogram::parse(bitstream, log_alphabet_size))
+                .collect::<Result<Vec<_>>>()?;
             Coder::Ans {
                 dist,
                 state: 0,
@@ -85,8 +87,26 @@ impl Decoder {
             return Ok((1, vec![0u8]));
         }
 
-        let is_simple = read_bits!(bitstream, Bool)?;
-        todo!()
+        Ok(if read_bits!(bitstream, Bool)? {
+            // simple dist
+            let nbits = bitstream.read_bits(2)?;
+            let ret = (0..num_dist)
+                .map(|_| bitstream.read_bits(nbits).map(|b| b as u8).map_err(From::from))
+                .collect::<Result<Vec<_>>>()?;
+            let num_clusters = *ret.iter().max().unwrap() as u32;
+            (num_clusters, ret)
+        } else {
+            let use_mtf = read_bits!(bitstream, Bool)?;
+            let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
+            let mut ret = (0..num_dist)
+                .map(|_| decoder.read_varint(bitstream).map(|b| b as u8))
+                .collect::<Result<Vec<_>>>()?;
+            if use_mtf {
+                todo!()
+            }
+            let num_clusters = *ret.iter().max().unwrap() as u32;
+            (num_clusters, ret)
+        })
     }
 
     pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<u32> {
