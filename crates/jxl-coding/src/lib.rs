@@ -198,7 +198,7 @@ impl DecoderInner {
             .map(|_| IntegerConfig::parse(bitstream, log_alphabet_size))
             .collect::<Result<Vec<_>>>()?;
         let code = if use_prefix_code {
-            let dist = (0..num_clusters)
+            let counts = (0..num_clusters)
                 .map(|_| -> Result<_> {
                     let count = if read_bits!(bitstream, Bool)? {
                         let n = bitstream.read_bits(4)?;
@@ -209,8 +209,12 @@ impl DecoderInner {
                     if count > 1 << 15 {
                         return Err(Error::InvalidPrefixHistogram);
                     }
-                    prefix::Histogram::parse(bitstream, count)
+                    Ok(count)
                 })
+                .collect::<Result<Vec<_>>>()?;
+            let dist = counts
+                .into_iter()
+                .map(|count| prefix::Histogram::parse(bitstream, count))
                 .collect::<Result<Vec<_>>>()?;
             Coder::PrefixCode(dist)
         } else {
