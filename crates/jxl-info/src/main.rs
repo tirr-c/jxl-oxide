@@ -8,9 +8,7 @@ fn main() {
     if headers.metadata.colour_encoding.want_icc {
         let enc_size = jxl_bitstream::read_bits!(bitstream, U64).unwrap();
         dbg!(enc_size);
-        dbg!(bitstream.global_pos());
-        let decoder = jxl_coding::Decoder::parse(bitstream, 41);
+        let decoder = jxl_coding::Decoder::parse(bitstream, 41).expect("failed to decode ICC entropy coding distribution");
         dbg!(decoder);
-        dbg!(bitstream.global_pos());
     }
 }
