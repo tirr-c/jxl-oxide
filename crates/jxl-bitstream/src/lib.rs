@@ -163,6 +163,7 @@ macro_rules! read_bits {
 }
 
 pub struct Bitstream<R> {
+    global_pos: u64,
     buf: Vec<u8>,
     buf_valid_len: usize,
     buf_offset: usize,
@@ -174,6 +175,7 @@ pub struct Bitstream<R> {
 impl<R> Bitstream<R> {
     pub fn new(reader: R) -> Self {
         Self {
+            global_pos: 0,
             buf: Vec::new(),
             buf_valid_len: 0,
             buf_offset: 0,
@@ -185,6 +187,10 @@ impl<R> Bitstream<R> {
 
     fn left_in_buffer(&self) -> &[u8] {
         &self.buf[self.buf_offset..self.buf_valid_len]
+    }
+
+    pub fn global_pos(&self) -> (u64, u32) {
+        (self.global_pos / 8, (self.global_pos % 8) as u32)
     }
 }
 
@@ -237,6 +243,7 @@ impl<R: Read> Bitstream<R> {
         let data = self.current & mask;
         self.current >>= n;
         self.bits_left -= n;
+        self.global_pos += n as u64;
         data
     }
 
