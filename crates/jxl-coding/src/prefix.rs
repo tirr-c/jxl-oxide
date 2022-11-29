@@ -23,6 +23,7 @@ enum TreeInstr {
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> Result<Self> {
         let mut syms_for_length = BTreeMap::new();
+        let mut nonzero_lengths = 0usize;
         for (sym, len) in code_lengths.into_iter().enumerate() {
             let sym = sym as u16;
             if len > 0 {
@@ -30,6 +31,7 @@ impl Histogram {
                     .entry(len)
                     .or_insert_with(Vec::new)
                     .push(sym);
+                nonzero_lengths += 1;
             }
         }
 
@@ -43,24 +45,28 @@ impl Histogram {
         let mut current_len = 0u8;
         let mut current_children = Vec::new();
         let mut target_bits = 0u8;
-        for (len, sym) in it {
+        for (idx, (len, sym)) in it.enumerate() {
             if current_len == len {
                 current_children.push(TreeInstr::Leaf(sym));
-                if current_children.len() == (1 << target_bits) {
+                while current_children.len() == (1 << target_bits) {
+                    let Some((parent_len, parent_target_bits, parent_children)) = node_stack.pop() else {
+                        if idx != nonzero_lengths - 1 {
+                            return Err(Error::InvalidPrefixHistogram);
+                        }
+                        break;
+                    };
                     let node = TreeInstr::Read {
                         bits: target_bits,
                         children: current_children,
                     };
-                    let (parent_len, parent_children) = node_stack
-                        .pop()
-                        .ok_or(Error::InvalidPrefixHistogram)?;
                     current_len = parent_len;
                     current_children = parent_children;
                     current_children.push(node);
+                    target_bits = parent_target_bits;
                 }
             } else {
+                node_stack.push((current_len, target_bits, current_children));
                 target_bits = len - current_len;
-                node_stack.push((current_len, current_children));
                 current_children = vec![TreeInstr::Leaf(sym)];
                 current_len = len;
             }
