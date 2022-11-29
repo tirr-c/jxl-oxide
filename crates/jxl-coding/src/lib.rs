@@ -155,12 +155,12 @@ struct IntegerConfig {
 
 impl IntegerConfig {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, log_alphabet_size: u32) -> Result<Self> {
-        let split_exponent_bits = log_alphabet_size.next_power_of_two().trailing_zeros();
+        let split_exponent_bits = add_log2_ceil(log_alphabet_size);
         let split_exponent = bitstream.read_bits(split_exponent_bits)?;
         let (msb_in_token, lsb_in_token) = if split_exponent != log_alphabet_size {
-            let msb_bits = split_exponent.next_power_of_two().trailing_zeros();
+            let msb_bits = add_log2_ceil(split_exponent);
             let msb_in_token = bitstream.read_bits(msb_bits)?;
-            let lsb_bits = (split_exponent - msb_in_token).next_power_of_two().trailing_zeros();
+            let lsb_bits = add_log2_ceil(split_exponent - msb_in_token);
             let lsb_in_token = bitstream.read_bits(lsb_bits)?;
             (msb_in_token, lsb_in_token)
         } else {
@@ -310,4 +310,8 @@ impl Coder {
             },
         }
     }
+}
+
+fn add_log2_ceil(x: u32) -> u32 {
+    (x + 1).next_power_of_two().trailing_zeros()
 }

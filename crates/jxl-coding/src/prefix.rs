@@ -95,7 +95,7 @@ impl Histogram {
     }
 
     fn parse_simple<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
-        let alphabet_bits = (alphabet_size - 1).next_power_of_two().trailing_zeros();
+        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros();
         let nsym = read_bits!(bitstream, u(2))? + 1;
         let it = match nsym {
             1 => {
