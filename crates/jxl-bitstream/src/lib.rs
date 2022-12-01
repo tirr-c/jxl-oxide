@@ -38,6 +38,9 @@ pub struct Bitstream<R> {
     reader: R,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Bookmark(u64);
+
 impl<R> std::fmt::Debug for Bitstream<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
@@ -68,8 +71,8 @@ impl<R> Bitstream<R> {
         &self.buf[self.buf_offset..self.buf_valid_len]
     }
 
-    pub fn global_pos(&self) -> (u64, u32) {
-        (self.global_pos / 8, (self.global_pos % 8) as u32)
+    pub fn bookmark(&self) -> Bookmark {
+        Bookmark(self.global_pos)
     }
 }
 
@@ -209,5 +212,23 @@ impl<R: Read> Bitstream<R> {
 
     pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> Result<B> {
         B::parse(self, ctx)
+    }
+}
+
+impl<R: Read + Seek> Bitstream<R> {
+    pub fn seek_to_bookmark(&mut self, bookmark: Bookmark) -> Result<()> {
+        let byte_offset = bookmark.0 / 8;
+        let bit_offset = bookmark.0 % 8;
+
+        self.buf_valid_len = 0;
+        self.buf_offset = 0;
+        self.current = 0;
+        self.bits_left = 0;
+
+        self.reader.seek(std::io::SeekFrom::Start(byte_offset))?;
+        self.global_pos = byte_offset * 8;
+        self.read_bits(bit_offset as u32)?;
+
+        Ok(())
     }
 }

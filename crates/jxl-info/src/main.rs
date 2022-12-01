@@ -29,7 +29,6 @@ fn main() {
     }
 
     bitstream.zero_pad_to_byte().expect("Zero-padding failed");
-    dbg!(bitstream.global_pos());
     let test_frame = jxl_bitstream::read_bits!(bitstream, Bundle(jxl_bitstream::header::FrameHeader), &headers).expect("Failed to read frame header");
     dbg!(test_frame);
 }
