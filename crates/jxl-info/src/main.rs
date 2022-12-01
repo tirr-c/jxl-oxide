@@ -7,10 +7,8 @@ fn main() {
 
     if headers.metadata.colour_encoding.want_icc {
         let enc_size = jxl_bitstream::read_bits!(bitstream, U64).unwrap();
-        dbg!(enc_size);
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)
             .expect("failed to decode ICC entropy coding distribution");
-        dbg!(&decoder);
 
         let mut encoded_icc = vec![0u8; enc_size as usize];
         let mut b1 = 0u8;
@@ -30,6 +28,8 @@ fn main() {
         std::fs::write("encoded_icc", &encoded_icc).unwrap();
     }
 
+    bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+    dbg!(bitstream.global_pos());
     let test_frame = jxl_bitstream::read_bits!(bitstream, Bundle(jxl_bitstream::header::FrameHeader), &headers).expect("Failed to read frame header");
     dbg!(test_frame);
 }

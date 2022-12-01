@@ -630,12 +630,12 @@ define_bundle! {
         pub frame_type: ty(Bundle(FrameType)) cond(!all_default) default(FrameType::RegularFrame),
         pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),
         pub flags: ty(Bundle(FrameFlags)) cond(!all_default),
-        pub do_ycbcr: ty(Bool) cond(!all_default && headers.metadata.xyb_encoded),
+        pub do_ycbcr: ty(Bool) cond(!all_default && !headers.metadata.xyb_encoded),
         pub jpeg_upsampling: ty(Array[u(2)]; 3) cond(do_ycbcr && !flags.use_lf_frame()),
-        pub upsampling: ty(U32(1, 2, 4, 8)) cond(do_ycbcr && !flags.use_lf_frame()) default(1),
+        pub upsampling: ty(U32(1, 2, 4, 8)) cond(!all_default && !flags.use_lf_frame()) default(1),
         pub ec_upsampling:
             ty(Vec[U32(1, 2, 4, 8)]; headers.metadata.num_extra)
-            cond(do_ycbcr && !flags.use_lf_frame())
+            cond(!all_default && !flags.use_lf_frame())
             default(vec![1; headers.metadata.num_extra as usize]),
         pub group_size_shift: ty(u(2)) cond(encoding == Encoding::Modular) default(1),
         pub x_qm_scale:
@@ -762,7 +762,8 @@ define_bundle! {
     #[derive(Debug)]
     pub struct RestorationFilter ctx(encoding: Encoding) {
         all_default: ty(Bool) default(true),
-        pub gab: ty(Bundle(Gabor)) cond(!all_default),
+        gab_enabled: ty(Bool) cond(!all_default) default(true),
+        pub gab: ty(Bundle(Gabor)) cond(gab_enabled) default(Gabor::Disabled),
         pub epf: ty(Bundle(EdgePreservingFilter)) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
     }
@@ -925,11 +926,6 @@ impl Default for Gabor {
 
 impl<Ctx> Bundle<Ctx> for Gabor {
     fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        let enabled = crate::read_bits!(bitstream, Bool)?;
-        if !enabled {
-            return Ok(Self::Disabled);
-        }
-
         let custom = crate::read_bits!(bitstream, Bool)?;
         if !custom {
             return Ok(Self::default());

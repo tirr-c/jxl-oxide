@@ -221,6 +221,19 @@ pub struct Bitstream<R> {
     reader: R,
 }
 
+impl<R> std::fmt::Debug for Bitstream<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("Bitstream")
+            .field("global_pos", &self.global_pos)
+            .field("buf_valid_len", &self.buf_valid_len)
+            .field("buf_offset", &self.buf_offset)
+            .field("current", &self.current)
+            .field("bits_left", &self.bits_left)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<R> Bitstream<R> {
     pub fn new(reader: R) -> Self {
         Self {
@@ -306,10 +319,8 @@ impl<R: Read> Bitstream<R> {
         if self.bits_left >= n {
             Ok(self.read_bits_inner(n) as u32)
         } else {
-            let mut ret = self.current;
             let mut bits = self.bits_left;
-            self.current = 0;
-            self.bits_left = 0;
+            let mut ret = self.read_bits_inner(self.bits_left);
 
             while bits < n {
                 self.fill()?;
