@@ -1,6 +1,6 @@
 use std::io::Read;
-use jxl_bitstream::{Bitstream, Bundle, Result as BitstreamResult};
-use crate::header::Encoding;
+use jxl_bitstream::{Bitstream, Bundle};
+use crate::{header::Encoding, Result};
 
 #[derive(Debug, Clone)]
 pub enum Gabor {
@@ -15,7 +15,9 @@ impl Default for Gabor {
 }
 
 impl<Ctx> Bundle<Ctx> for Gabor {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let custom = bitstream.read_bool()?;
         if !custom {
             return Ok(Self::default());
@@ -61,7 +63,9 @@ impl Default for EdgePreservingFilter {
 }
 
 impl Bundle<Encoding> for EdgePreservingFilter {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> Result<Self> {
         let iters = bitstream.read_bits(2)?;
         if iters == 0 {
             return Ok(Self::Disabled);
@@ -137,7 +141,9 @@ impl Default for EpfSigma {
 }
 
 impl Bundle<Encoding> for EpfSigma {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> Result<Self> {
         Ok(Self {
             quant_mul: if encoding == Encoding::VarDct { bitstream.read_f16_as_f32()? } else { 0.46 },
             pass0_sigma_scale: bitstream.read_f16_as_f32()?,

@@ -89,14 +89,17 @@ macro_rules! read_bits {
             (0..count)
                 .into_iter()
                 .map(|_| $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?))
-                .collect::<$crate::Result<Vec<_>>>()
+                .collect::<::std::result::Result<Vec<_>, _>>()
         }
     };
     ($bitstream:ident, Array[$($inner:tt)*]; $count:expr $(, $ctx:expr)?) => {
-        (|| -> $crate::Result<[_; $count]> {
+        (|| -> ::std::result::Result<[_; $count], _> {
             let mut ret = [Default::default(); $count];
             for point in &mut ret {
-                *point = $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?)?;
+                *point = match $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?) {
+                    ::std::result::Result::Ok(v) => v,
+                    ::std::result::Result::Err(err) => return ::std::result::Result::Err(err),
+                };
             }
             Ok(ret)
         })()
@@ -161,12 +164,20 @@ macro_rules! make_parse {
     (@select_ctx; $ctx_id:ident;) => {
         $ctx_id
     };
-    ($bundle_name:ident {
+    (@select_error_ty;) => {
+        $crate::Error
+    };
+    (@select_error_ty; $err:ty) => {
+        $err
+    };
+    ($bundle_name:ident $(error($err:ty))? {
         $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         impl<Ctx: Copy> $crate::Bundle<Ctx> for $bundle_name {
+            type Error = $crate::make_parse!(@select_error_ty; $($err)?);
+
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, ctx: Ctx) -> $crate::Result<Self> where Self: Sized {
+            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;
@@ -194,12 +205,14 @@ macro_rules! make_parse {
             }
         }
     };
-    ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) {
+    ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) $(error($err:ty))? {
         $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         impl $crate::Bundle<$ctx> for $bundle_name {
+            type Error = $crate::make_parse!(@select_error_ty; $($err)?);
+
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, $ctx_id: $ctx) -> $crate::Result<Self> where Self: Sized {
+            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;
@@ -233,12 +246,19 @@ macro_rules! make_parse {
 macro_rules! define_bundle {
     (
         $(
-            $(#[$attrs:meta])* $v:vis struct $bundle_name:ident $(aligned($aligned:literal))? $(ctx($ctx_id:ident : $ctx:ty))? { $($body:tt)* }
+            $(#[$attrs:meta])*
+            $v:vis struct $bundle_name:ident
+            $(aligned($aligned:literal))?
+            $(ctx($ctx_id:ident : $ctx:ty))?
+            $(error($err:ty))?
+            {
+                $($body:tt)*
+            }
         )*
     ) => {
         $(
             $crate::make_def!($(#[$attrs])* $v struct $bundle_name { $($body)* });
-            $crate::make_parse!($bundle_name $(aligned($aligned))? $(ctx($ctx_id: $ctx))? { $($body)* });
+            $crate::make_parse!($bundle_name $(aligned($aligned))? $(ctx($ctx_id: $ctx))? $(error($err))? { $($body)* });
         )*
     };
 }

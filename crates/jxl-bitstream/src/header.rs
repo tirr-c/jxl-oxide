@@ -170,6 +170,8 @@ impl Default for BitDepth {
 }
 
 impl<Ctx> Bundle<Ctx> for BitDepth {
+    type Error = crate::Error;
+
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         if bitstream.read_bool()? { // float_sample
             let bits_per_sample = read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
@@ -261,8 +263,8 @@ define_bundle! {
 
     #[derive(Debug, PartialEq, Eq)]
     pub struct Customxy {
-        pub ux: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21))),
-        pub uy: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21))),
+        pub x: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
+        pub y: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
     }
 
     #[derive(Debug)]
@@ -331,6 +333,8 @@ pub enum WhitePoint {
 }
 
 impl<Ctx> Bundle<Ctx> for WhitePoint {
+    type Error = crate::Error;
+
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
         Ok(match d {
@@ -382,6 +386,8 @@ pub enum Primaries {
 }
 
 impl<Ctx> Bundle<Ctx> for Primaries {
+    type Error = crate::Error;
+
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
         Ok(match d {
@@ -429,6 +435,8 @@ impl TryFrom<u32> for TransferFunction {
 }
 
 impl<Ctx> Bundle<Ctx> for TransferFunction {
+    type Error = crate::Error;
+
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let has_gamma = bitstream.read_bool()?;
         if has_gamma {

@@ -9,7 +9,9 @@ pub use error::{Error, Result};
 pub use macros::{unpack_signed, unpack_signed_u64};
 
 pub trait Bundle<Ctx = ()>: Sized {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> Result<Self>;
+    type Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> std::result::Result<Self, Self::Error>;
 }
 
 pub trait BundleDefault<Ctx = ()>: Sized {
@@ -23,7 +25,9 @@ impl<T, Ctx> BundleDefault<Ctx> for T where T: Default + Sized {
 }
 
 impl<T, Ctx> Bundle<Ctx> for Option<T> where T: Bundle<Ctx> {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> Result<Self> {
+    type Error = T::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> std::result::Result<Self, Self::Error> {
         T::parse(bitstream, ctx).map(Some)
     }
 }
@@ -206,11 +210,11 @@ impl<R: Read> Bitstream<R> {
         }
     }
 
-    pub fn read_bundle<B: Bundle<()>>(&mut self) -> Result<B> {
+    pub fn read_bundle<B: Bundle<()>>(&mut self) -> std::result::Result<B, B::Error> {
         B::parse(self, ())
     }
 
-    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> Result<B> {
+    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> std::result::Result<B, B::Error> {
         B::parse(self, ctx)
     }
 }
@@ -219,6 +223,23 @@ impl<R: Read + Seek> Bitstream<R> {
     pub fn seek_to_bookmark(&mut self, bookmark: Bookmark) -> Result<()> {
         let byte_offset = bookmark.0 / 8;
         let bit_offset = bookmark.0 % 8;
+
+        self.buf_valid_len = 0;
+        self.buf_offset = 0;
+        self.current = 0;
+        self.bits_left = 0;
+
+        self.reader.seek(std::io::SeekFrom::Start(byte_offset))?;
+        self.global_pos = byte_offset * 8;
+        self.read_bits(bit_offset as u32)?;
+
+        Ok(())
+    }
+
+    pub fn seek_to_bookmark_and_offset(&mut self, bookmark: Bookmark, offset: u64) -> Result<()> {
+        let final_offset = bookmark.0 + offset;
+        let byte_offset = final_offset / 8;
+        let bit_offset = final_offset % 8;
 
         self.buf_valid_len = 0;
         self.buf_offset = 0;

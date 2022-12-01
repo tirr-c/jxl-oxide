@@ -1,5 +1,5 @@
 use jxl_bitstream::{header::Headers, read_bits};
-use jxl_frame::FrameHeader;
+use jxl_frame::{FrameHeader, Toc};
 
 fn main() {
     let file = std::fs::File::open("input.jxl").expect("Failed to open file");
@@ -30,9 +30,30 @@ fn main() {
         std::fs::write("encoded_icc", &encoded_icc).unwrap();
     }
 
-    bitstream.zero_pad_to_byte().expect("Zero-padding failed");
-    let test_frame = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
-    dbg!(test_frame);
+    if headers.metadata.have_preview {
+        bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+
+        let preview_frame_header = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
+        dbg!(&preview_frame_header);
+        let toc = read_bits!(bitstream, Bundle(Toc), &preview_frame_header).expect("Failed to read TOC");
+        dbg!(&toc);
+
+        bitstream.seek_to_bookmark_and_offset(toc.bookmark(), toc.total_byte_size() * 8).expect("Failed to seek");
+    }
+
+    loop {
+        bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+
+        let frame_header = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
+        dbg!(&frame_header);
+        let toc = read_bits!(bitstream, Bundle(Toc), &frame_header).expect("Failed to read TOC");
+        dbg!(&toc);
+
+        if frame_header.is_last {
+            break;
+        }
+        bitstream.seek_to_bookmark_and_offset(toc.bookmark(), toc.total_byte_size() * 8).expect("Failed to seek");
+    }
 }
 
 fn get_icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {

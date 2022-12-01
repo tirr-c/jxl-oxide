@@ -5,12 +5,12 @@ use jxl_bitstream::{
     read_bits,
     Bitstream,
     Bundle,
-    Result as BitstreamResult,
 };
+use crate::Result;
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct FrameHeader ctx(headers: &Headers) {
+    pub struct FrameHeader ctx(headers: &Headers) error(crate::Error) {
         all_default: ty(Bool) default(true),
         pub frame_type: ty(Bundle(FrameType)) cond(!all_default) default(FrameType::RegularFrame),
         pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),
@@ -44,10 +44,12 @@ define_bundle! {
             cond(have_crop && frame_type != FrameType::ReferenceOnly),
         pub width:
             ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
-            cond(have_crop),
+            cond(have_crop)
+            default(headers.size.width),
         pub height:
             ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
-            cond(have_crop),
+            cond(have_crop)
+            default(headers.size.height),
         pub blending_info:
             ty(Bundle(BlendingInfo))
             ctx((
@@ -119,7 +121,7 @@ define_bundle! {
     }
 
     #[derive(Debug)]
-    pub struct Passes {
+    pub struct Passes error(crate::Error) {
         pub num_passes: ty(U32(1, 2, 3, 4 + u(3))) default(1),
         pub num_ds: ty(U32(0, 1, 2, 3 + u(1))) cond(num_passes != 1) default(0),
         pub shift: ty(Vec[u(2)]; num_passes - 1) cond(num_passes != 1) default(vec![0; num_passes as usize - 1]),
@@ -128,7 +130,7 @@ define_bundle! {
     }
 
     #[derive(Debug)]
-    pub struct BlendingInfo ctx(context: (bool, Option<BlendMode>, bool)) {
+    pub struct BlendingInfo ctx(context: (bool, Option<BlendMode>, bool)) error(crate::Error) {
         pub mode: ty(Bundle(BlendMode)),
         pub alpha_channel:
             ty(U32(0, 1, 2, 3 + u(3)))
@@ -145,7 +147,7 @@ define_bundle! {
     }
 
     #[derive(Debug)]
-    pub struct RestorationFilter ctx(encoding: Encoding) {
+    pub struct RestorationFilter ctx(encoding: Encoding) error(crate::Error) {
         all_default: ty(Bool) default(true),
         gab_enabled: ty(Bool) cond(!all_default) default(true),
         pub gab: ty(Bundle(crate::filter::Gabor)) cond(gab_enabled) default(crate::filter::Gabor::Disabled),
@@ -185,6 +187,56 @@ impl FrameHeader {
         }
     }
 
+    pub fn sample_width(&self) -> u32 {
+        let &Self { mut width, upsampling, lf_level, .. } = self;
+
+        if upsampling > 1 {
+            width = (width + upsampling - 1) / upsampling;
+        }
+        if lf_level > 0 {
+            let div = 1u32 << (3 * lf_level);
+            width = (width + div - 1) / div;
+        }
+
+        width
+    }
+
+    pub fn sample_height(&self) -> u32 {
+        let &Self { mut height, upsampling, lf_level, .. } = self;
+
+        if upsampling > 1 {
+            height = (height + upsampling - 1) / upsampling;
+        }
+        if lf_level > 0 {
+            let div = 1u32 << (3 * lf_level);
+            height = (height + div - 1) / div;
+        }
+
+        height
+    }
+
+    pub fn num_groups(&self) -> u32 {
+        let width = self.sample_width();
+        let height = self.sample_height();
+        let group_dim = self.group_dim();
+
+        let hgroups = (width + group_dim - 1) / group_dim;
+        let vgroups = (height + group_dim - 1) / group_dim;
+
+        hgroups * vgroups
+    }
+
+    pub fn num_lf_groups(&self) -> u32 {
+        let width = self.sample_width();
+        let height = self.sample_height();
+        let lf_group_dim = self.group_dim() * 8;
+
+        let hgroups = (width + lf_group_dim - 1) / lf_group_dim;
+        let vgroups = (height + lf_group_dim - 1) / lf_group_dim;
+
+        hgroups * vgroups
+    }
+
     pub fn group_dim(&self) -> u32 {
         128 << self.group_size_shift
     }
@@ -207,7 +259,9 @@ impl FrameType {
 }
 
 impl<Ctx> Bundle<Ctx> for FrameType {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(2)? {
             0 => Self::RegularFrame,
             1 => Self::LfFrame,
@@ -227,7 +281,9 @@ pub enum Encoding {
 }
 
 impl<Ctx> Bundle<Ctx> for Encoding {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(1)? {
             0 => Self::VarDct,
             1 => Self::Modular,
@@ -268,8 +324,10 @@ impl FrameFlags {
 }
 
 impl<Ctx> Bundle<Ctx> for FrameFlags {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> BitstreamResult<Self> {
-        bitstream.read_u64().map(Self)
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        Ok(Self(bitstream.read_u64()?))
     }
 }
 
@@ -285,14 +343,16 @@ pub enum BlendMode {
 }
 
 impl<Ctx> Bundle<Ctx> for BlendMode {
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> BitstreamResult<Self> {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         Ok(match read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
             0 => Self::Replace,
             1 => Self::Add,
             2 => Self::Blend,
             3 => Self::MulAdd,
             4 => Self::Mul,
-            value => return Err(jxl_bitstream::Error::InvalidEnum { name: "BlendMode", value }),
+            value => return Err(jxl_bitstream::Error::InvalidEnum { name: "BlendMode", value }.into()),
         })
     }
 }
