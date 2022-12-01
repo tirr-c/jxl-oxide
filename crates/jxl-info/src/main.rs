@@ -1,20 +1,22 @@
+use jxl_bitstream::{header::Headers, read_bits};
+use jxl_frame::FrameHeader;
+
 fn main() {
     let file = std::fs::File::open("input.jxl").expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
-    let bitstream = &mut bitstream;
-    let headers = jxl_bitstream::read_bits!(bitstream, Bundle(jxl_bitstream::header::Headers)).expect("Failed to read headers");
+    let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
     dbg!(&headers);
 
     if headers.metadata.colour_encoding.want_icc {
-        let enc_size = jxl_bitstream::read_bits!(bitstream, U64).unwrap();
-        let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)
+        let enc_size = read_bits!(bitstream, U64).unwrap();
+        let mut decoder = jxl_coding::Decoder::parse(&mut bitstream, 41)
             .expect("failed to decode ICC entropy coding distribution");
 
         let mut encoded_icc = vec![0u8; enc_size as usize];
         let mut b1 = 0u8;
         let mut b2 = 0u8;
         for (idx, b) in encoded_icc.iter_mut().enumerate() {
-            let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))
+            let sym = decoder.read_varint(&mut bitstream, get_icc_ctx(idx, b1, b2))
                 .expect("Failed to read encoded ICC stream");
             if sym >= 256 {
                 panic!("Decoded symbol out of range");
@@ -29,7 +31,7 @@ fn main() {
     }
 
     bitstream.zero_pad_to_byte().expect("Zero-padding failed");
-    let test_frame = jxl_bitstream::read_bits!(bitstream, Bundle(jxl_bitstream::header::FrameHeader), &headers).expect("Failed to read frame header");
+    let test_frame = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
     dbg!(test_frame);
 }
 

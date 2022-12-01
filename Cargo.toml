@@ -2,5 +2,6 @@
 members = [
   "crates/jxl-bitstream",
   "crates/jxl-coding",
+  "crates/jxl-frame",
   "crates/jxl-info",
 ]

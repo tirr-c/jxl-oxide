@@ -14,9 +14,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-frame"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+]
+
+[[package]]
 name = "jxl-info"
 version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
+ "jxl-frame",
 ]
