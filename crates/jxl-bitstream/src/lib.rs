@@ -1,214 +1,31 @@
 use std::io::prelude::*;
 
+mod error;
+mod macros;
+
 pub mod header;
 
-pub trait Bundle<Ctx = ()> {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, ctx: Ctx) -> crate::Result<Self> where Self: Sized;
+pub use error::{Error, Result};
+pub use macros::{unpack_signed, unpack_signed_u64};
+
+pub trait Bundle<Ctx = ()>: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> Result<Self>;
 }
 
-pub trait BundleDefault<Ctx = ()> {
-    fn default_with_context(ctx: Ctx) -> Self where Self: Sized;
+pub trait BundleDefault<Ctx = ()>: Sized {
+    fn default_with_context(ctx: Ctx) -> Self;
 }
 
-impl<T, Ctx> BundleDefault<Ctx> for T where T: Default {
-    fn default_with_context(_: Ctx) -> Self where Self: Sized {
+impl<T, Ctx> BundleDefault<Ctx> for T where T: Default + Sized {
+    fn default_with_context(_: Ctx) -> Self {
         Default::default()
     }
 }
 
 impl<T, Ctx> Bundle<Ctx> for Option<T> where T: Bundle<Ctx> {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, ctx: Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> Result<Self> {
         T::parse(bitstream, ctx).map(Some)
     }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Io(std::io::Error),
-    NonZeroPadding,
-    InvalidFloat,
-    InvalidEnum {
-        name: &'static str,
-        value: u32,
-    },
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => {
-                write!(f, "I/O error: {}", e)
-            },
-            Self::NonZeroPadding => {
-                write!(f, "PadZeroToByte() read non-zero bits")
-            },
-            Self::InvalidFloat => {
-                write!(f, "F16() read NaN or Infinity")
-            },
-            Self::InvalidEnum { name, value } => {
-                write!(f, "Enum({}) read invalid enum value of {}", name, value)
-            },
-        }
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-#[macro_export]
-macro_rules! expand_u32 {
-    ($bitstream:ident; $($rest:tt)*) => {
-        $bitstream.read_bits(2)
-            .and_then(|selector| $crate::expand_u32!(@expand $bitstream, selector, 0; $($rest)*,))
-    };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr;) => {
-        unreachable!()
-    };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; $c:literal, $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, $c)
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
-    };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; u($n:literal), $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, u($n))
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
-    };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; $c:literal + u($n:literal), $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, $c + u($n))
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
-    };
-}
-
-pub fn unpack_signed(x: u32) -> i32 {
-    let base = (x >> 1) as i32;
-    if x & 1 == 0 {
-        base
-    } else {
-        -base - 1
-    }
-}
-
-pub fn unpack_signed_u64(x: u64) -> i64 {
-    let base = (x >> 1) as i64;
-    if x & 1 == 0 {
-        base
-    } else {
-        -base - 1
-    }
-}
-
-#[macro_export]
-macro_rules! read_bits {
-    ($bistream:ident, $c:literal $(, $ctx:expr)?) => {
-        $crate::Result::Ok($c)
-    };
-    ($bitstream:ident, u($n:literal) $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n)
-    };
-    ($bitstream:ident, u($n:literal); UnpackSigned $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n).map($crate::unpack_signed)
-    };
-    ($bitstream:ident, $c:literal + u($n:literal) $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n).map(|v| v.wrapping_add($c))
-    };
-    ($bitstream:ident, $c:literal + u($n:literal); UnpackSigned $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n).map(|v| $crate::unpack_signed(v.wrapping_add($c)))
-    };
-    ($bitstream:ident, U32($($args:tt)+) $(, $ctx:expr)?) => {
-        $crate::expand_u32!($bitstream; $($args)+)
-    };
-    ($bitstream:ident, U32($($args:tt)+); UnpackSigned $(, $ctx:expr)?) => {
-        $crate::expand_u32!($bitstream; $($args)+).map($crate::unpack_signed)
-    };
-    ($bitstream:ident, U64 $(, $ctx:expr)?) => {
-        $bitstream.read_bits(2)
-            .and_then(|selector| match selector {
-                0 => Ok(0u64),
-                1 => $crate::read_bits!($bitstream, 1 + u(4)).map(|v| v as u64),
-                2 => $crate::read_bits!($bitstream, 17 + u(8)).map(|v| v as u64),
-                3 => (|| -> $crate::Result<u64> {
-                    let mut value = $bitstream.read_bits(12)? as u64;
-                    let mut shift = 12u32;
-                    while $bitstream.read_bits(1)? == 1 {
-                        if shift == 60 {
-                            value |= ($bitstream.read_bits(4)? as u64) << shift;
-                            break;
-                        }
-                        value |= ($bitstream.read_bits(8)? as u64) << shift;
-                        shift += 8;
-                    }
-                    Ok(value)
-                })(),
-                _ => unreachable!(),
-            })
-    };
-    ($bitstream:ident, U64; UnpackSigned $(, $ctx:expr)?) => {
-        read_bits!($bitstream, U64 $(, $ctx)?).map($crate::unpack_signed_u64)
-    };
-    ($bitstream:ident, F16 $(, $ctx:expr)?) => {
-        $bitstream.read_f16_as_f32()
-    };
-    ($bitstream:ident, Bool $(, $ctx:expr)?) => {
-        $bitstream.read_bits(1).map(|v| v == 1)
-    };
-    ($bitstream:ident, Enum($enumtype:ty) $(, $ctx:expr)?) => {
-        $crate::read_bits!($bitstream, U32(0, 1, 2 + u(4), 18 + u(6)))
-            .and_then(|v| {
-                <$enumtype as TryFrom<u32>>::try_from(v).map_err(|_| $crate::Error::InvalidEnum {
-                    name: stringify!($enumtype),
-                    value: v,
-                })
-            })
-    };
-    ($bitstream:ident, ZeroPadToByte $(, $ctx:expr)?) => {
-        $bitstream.zero_pad_to_byte()
-    };
-    ($bitstream:ident, Bundle($bundle:ty)) => {
-        <$bundle as $crate::Bundle<_>>::parse($bitstream, &())
-    };
-    ($bitstream:ident, Bundle($bundle:ty), $ctx:expr) => {
-        <$bundle as $crate::Bundle<_>>::parse($bitstream, $ctx)
-    };
-    ($bitstream:ident, Vec[$($inner:tt)*]; $count:expr $(, $ctx:expr)?) => {
-        {
-            let count = $count as usize;
-            (0..count)
-                .into_iter()
-                .map(|_| $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?))
-                .collect::<$crate::Result<Vec<_>>>()
-        }
-    };
-    ($bitstream:ident, Array[$($inner:tt)*]; $count:expr $(, $ctx:expr)?) => {
-        (|| -> $crate::Result<[_; $count]> {
-            let mut ret = [Default::default(); $count];
-            for point in &mut ret {
-                *point = $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?)?;
-            }
-            Ok(ret)
-        })()
-    };
 }
 
 pub struct Bitstream<R> {
@@ -334,6 +151,33 @@ impl<R: Read> Bitstream<R> {
         }
     }
 
+    pub fn read_u64(&mut self) -> Result<u64> {
+        let selector = self.read_bits(2)?;
+        Ok(match selector {
+            0 => 0u64,
+            1 => self.read_bits(4)? as u64 + 1,
+            2 => self.read_bits(8)? as u64 + 17,
+            3 => {
+                let mut value = self.read_bits(12)? as u64;
+                let mut shift = 12u32;
+                while self.read_bits(1)? == 1 {
+                    if shift == 60 {
+                        value |= (self.read_bits(4)? as u64) << shift;
+                        break;
+                    }
+                    value |= (self.read_bits(8)? as u64) << shift;
+                    shift += 8;
+                }
+                value
+            },
+            _ => unreachable!(),
+        })
+    }
+
+    pub fn read_bool(&mut self) -> Result<bool> {
+        Ok(self.read_bits(1)? == 1)
+    }
+
     pub fn read_f16_as_f32(&mut self) -> Result<f32> {
         let v = self.read_bits(16)?;
         let mantissa = v & 0x3ff; // 10 bits
@@ -357,5 +201,13 @@ impl<R: Read> Bitstream<R> {
         } else {
             Ok(())
         }
+    }
+
+    pub fn read_bundle<B: Bundle<()>>(&mut self) -> Result<B> {
+        B::parse(self, ())
+    }
+
+    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> Result<B> {
+        B::parse(self, ctx)
     }
 }

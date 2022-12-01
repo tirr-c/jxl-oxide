@@ -1,142 +1,6 @@
 #![allow(dead_code, clippy::excessive_precision)]
-use crate::{Bitstream, Bundle};
-
-macro_rules! make_def {
-    (@ty; $c:literal) => { u32 };
-    (@ty; u($n:literal)) => { u32 };
-    (@ty; u($n:literal); UnpackSigned) => { i32 };
-    (@ty; $c:literal + u($n:literal)) => { u32 };
-    (@ty; $c:literal + u($n:literal); UnpackSigned) => { i32 };
-    (@ty; U32($($args:tt)*)) => { u32 };
-    (@ty; U32($($args:tt)*); UnpackSigned) => { i32 };
-    (@ty; U64) => { u64 };
-    (@ty; U64; UnpackSigned) => { i64 };
-    (@ty; F16) => { f32 };
-    (@ty; Bool) => { bool };
-    (@ty; Enum($enum:ty)) => { $enum };
-    (@ty; Bundle($bundle:ty)) => { $bundle };
-    (@ty; Vec[$($inner:tt)*]; $count:expr) => { Vec<make_def!(@ty; $($inner)*)> };
-    (@ty; Array[$($inner:tt)*]; $count:expr) => { [make_def!(@ty; $($inner)*); $count] };
-    ($(#[$attrs:meta])* $v:vis struct $bundle_name:ident {
-        $($vfield:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
-    }) => {
-        $(#[$attrs])*
-        $v struct $bundle_name {
-            $($vfield $field: make_def!(@ty; $($expr)*),)*
-        }
-    };
-}
-
-macro_rules! make_parse {
-    (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*); ctx($ctx:expr)) => {
-        if $cond {
-            $crate::read_bits!($bitstream, $($spec)*, $ctx)?
-        } else {
-            $def_expr
-        }
-    };
-    (@parse $bitstream:ident; cond($cond:expr); ty($($spec:tt)*); ctx($ctx:expr)) => {
-        if $cond {
-            $crate::read_bits!($bitstream, $($spec)*, $ctx)?
-        } else {
-            $crate::BundleDefault::default_with_context($ctx)
-        }
-    };
-    (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*); ctx($ctx:expr)) => {
-        $crate::read_bits!($bitstream, $($spec)*, $ctx)?
-    };
-    (@default; ; $ctx:expr) => {
-        $crate::BundleDefault::default_with_context($ctx)
-    };
-    (@default; $def_expr:expr $(; $ctx:expr)?) => {
-        $def_expr
-    };
-    (@select_ctx; $ctx_id:ident; $ctx:expr) => {
-        $ctx
-    };
-    (@select_ctx; $ctx_id:ident;) => {
-        $ctx_id
-    };
-    ($bundle_name:ident {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
-    }) => {
-        impl<Ctx: Copy> $crate::Bundle<Ctx> for $bundle_name {
-            #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-                $(
-                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
-                        @parse bitstream;
-                        $(cond($cond);)?
-                        $(default($def_expr);)?
-                        ty($($expr)*);
-                        ctx(make_parse!(@select_ctx; ctx; $($ctx_for_field)?))
-                    );
-                )*
-                Ok(Self { $($field,)* })
-            }
-        }
-
-        impl<Ctx: Copy> $crate::BundleDefault<Ctx> for $bundle_name {
-            #[allow(unused_variables)]
-            fn default_with_context(_ctx: Ctx) -> Self where Self: Sized {
-                $(
-                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
-                        @default;
-                        $($def_expr)?;
-                        make_parse!(@select_ctx; _ctx; $($ctx_for_field)?)
-                    );
-                )*
-                Self { $($field,)* }
-            }
-        }
-    };
-    ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
-    }) => {
-        impl $crate::Bundle<$ctx> for $bundle_name {
-            #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, $ctx_id: $ctx) -> crate::Result<Self> where Self: Sized {
-                $(
-                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
-                        @parse bitstream;
-                        $(cond($cond);)?
-                        $(default($def_expr);)?
-                        ty($($expr)*);
-                        ctx(make_parse!(@select_ctx; $ctx_id; $($ctx_for_field)?))
-                    );
-                )*
-                Ok(Self { $($field,)* })
-            }
-        }
-
-        impl $crate::BundleDefault<$ctx> for $bundle_name {
-            #[allow(unused_variables)]
-            fn default_with_context($ctx_id: $ctx) -> Self where Self: Sized {
-                $(
-                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
-                        @default;
-                        $($def_expr)?;
-                        make_parse!(@select_ctx; $ctx_id; $($ctx_for_field)?)
-                    );
-                )*
-                Self { $($field,)* }
-            }
-        }
-    };
-}
-
-macro_rules! define_bundle {
-    (
-        $(
-            $(#[$attrs:meta])* $v:vis struct $bundle_name:ident $(aligned($aligned:literal))? $(ctx($ctx_id:ident : $ctx:ty))? { $($body:tt)* }
-        )*
-    ) => {
-        $(
-            make_def!($(#[$attrs])* $v struct $bundle_name { $($body)* });
-            make_parse!($bundle_name $(aligned($aligned))? $(ctx($ctx_id: $ctx))? { $($body)* });
-        )*
-    };
-}
+use std::io::Read;
+use crate::{define_bundle, read_bits, Bitstream, Bundle, Error, Result};
 
 define_bundle! {
     #[derive(Debug)]
@@ -272,7 +136,7 @@ pub enum ExtraChannelType {
 impl TryFrom<u32> for ExtraChannelType {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             0 => Self::Alpha,
             1 => Self::Depth,
@@ -306,13 +170,13 @@ impl Default for BitDepth {
 }
 
 impl<Ctx> Bundle<Ctx> for BitDepth {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        if crate::read_bits!(bitstream, Bool)? { // float_sample
-            let bits_per_sample = crate::read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
-            let exp_bits = crate::read_bits!(bitstream, 1 + u(4))?;
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        if bitstream.read_bool()? { // float_sample
+            let bits_per_sample = read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
+            let exp_bits = read_bits!(bitstream, 1 + u(4))?;
             Ok(Self::FloatSample { bits_per_sample, exp_bits })
         } else {
-            let bits_per_sample = crate::read_bits!(bitstream, U32(8, 10, 12, 1 + u(6)))?;
+            let bits_per_sample = read_bits!(bitstream, U32(8, 10, 12, 1 + u(6)))?;
             Ok(Self::IntegerSample { bits_per_sample })
         }
     }
@@ -423,7 +287,7 @@ pub enum ColourSpace {
 impl TryFrom<u32> for ColourSpace {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             0 => Self::Rgb,
             1 => Self::Grey,
@@ -446,7 +310,7 @@ enum WhitePointDiscriminator {
 impl TryFrom<u32> for WhitePointDiscriminator {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             1 => Self::D65,
             2 => Self::Custom,
@@ -467,14 +331,14 @@ pub enum WhitePoint {
 }
 
 impl<Ctx> Bundle<Ctx> for WhitePoint {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        let d = crate::read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        let d = read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
             WhitePointDiscriminator::E => Self::E,
             WhitePointDiscriminator::Dci => Self::Dci,
             WhitePointDiscriminator::Custom => {
-                let white = crate::read_bits!(bitstream, Bundle(Customxy))?;
+                let white = read_bits!(bitstream, Bundle(Customxy))?;
                 Self::Custom(white)
             },
         })
@@ -493,7 +357,7 @@ enum PrimariesDiscriminator {
 impl TryFrom<u32> for PrimariesDiscriminator {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             1 => Self::Srgb,
             2 => Self::Custom,
@@ -518,16 +382,16 @@ pub enum Primaries {
 }
 
 impl<Ctx> Bundle<Ctx> for Primaries {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        let d = crate::read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        let d = read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
             PrimariesDiscriminator::Bt2100 => Self::Bt2100,
             PrimariesDiscriminator::P3 => Self::P3,
             PrimariesDiscriminator::Custom => {
-                let red = crate::read_bits!(bitstream, Bundle(Customxy))?;
-                let green = crate::read_bits!(bitstream, Bundle(Customxy))?;
-                let blue = crate::read_bits!(bitstream, Bundle(Customxy))?;
+                let red = read_bits!(bitstream, Bundle(Customxy))?;
+                let green = read_bits!(bitstream, Bundle(Customxy))?;
+                let blue = read_bits!(bitstream, Bundle(Customxy))?;
                 Self::Custom { red, green, blue }
             },
         })
@@ -550,7 +414,7 @@ pub enum TransferFunction {
 impl TryFrom<u32> for TransferFunction {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             1 => Self::Bt709,
             2 => Self::Unknown,
@@ -565,13 +429,13 @@ impl TryFrom<u32> for TransferFunction {
 }
 
 impl<Ctx> Bundle<Ctx> for TransferFunction {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        let has_gamma = crate::read_bits!(bitstream, Bool)?;
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        let has_gamma = bitstream.read_bool()?;
         if has_gamma {
-            let gamma = crate::read_bits!(bitstream, u(24))?;
+            let gamma = bitstream.read_bits(24)?;
             Ok(Self::Gamma(gamma))
         } else {
-            crate::read_bits!(bitstream, Enum(TransferFunction))
+            read_bits!(bitstream, Enum(TransferFunction))
         }
     }
 }
@@ -589,7 +453,7 @@ pub enum RenderingIntent {
 impl TryFrom<u32> for RenderingIntent {
     type Error = ();
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             0 => Self::Perceptual,
             1 => Self::Relative,
@@ -822,7 +686,7 @@ impl FrameType {
 }
 
 impl<Ctx> Bundle<Ctx> for FrameType {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(2)? {
             0 => Self::RegularFrame,
             1 => Self::LfFrame,
@@ -842,7 +706,7 @@ pub enum Encoding {
 }
 
 impl<Ctx> Bundle<Ctx> for Encoding {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(1)? {
             0 => Self::VarDct,
             1 => Self::Modular,
@@ -883,8 +747,8 @@ impl FrameFlags {
 }
 
 impl<Ctx> Bundle<Ctx> for FrameFlags {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        crate::read_bits!(bitstream, U64).map(Self)
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        bitstream.read_u64().map(Self)
     }
 }
 
@@ -900,14 +764,14 @@ pub enum BlendMode {
 }
 
 impl<Ctx> Bundle<Ctx> for BlendMode {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        Ok(match crate::read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        Ok(match read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
             0 => Self::Replace,
             1 => Self::Add,
             2 => Self::Blend,
             3 => Self::MulAdd,
             4 => Self::Mul,
-            value => return Err(crate::Error::InvalidEnum { name: "BlendMode", value }),
+            value => return Err(Error::InvalidEnum { name: "BlendMode", value }),
         })
     }
 }
@@ -925,8 +789,8 @@ impl Default for Gabor {
 }
 
 impl<Ctx> Bundle<Ctx> for Gabor {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
-        let custom = crate::read_bits!(bitstream, Bool)?;
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        let custom = bitstream.read_bool()?;
         if !custom {
             return Ok(Self::default());
         }
@@ -934,7 +798,7 @@ impl<Ctx> Bundle<Ctx> for Gabor {
         let mut weights = [[0.0f32; 2]; 3];
         for chan_weight in &mut weights {
             for weight in chan_weight {
-                *weight = crate::read_bits!(bitstream, F16)?;
+                *weight = bitstream.read_f16_as_f32()?;
             }
         }
         Ok(Self::Enabled(weights))
@@ -971,32 +835,32 @@ impl Default for EdgePreservingFilter {
 }
 
 impl Bundle<Encoding> for EdgePreservingFilter {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, encoding: Encoding) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> Result<Self> {
         let iters = bitstream.read_bits(2)?;
         if iters == 0 {
             return Ok(Self::Disabled);
         }
 
         let sharp_custom = if encoding == Encoding::VarDct {
-            crate::read_bits!(bitstream, Bool)?
+            bitstream.read_bool()?
         } else {
             false
         };
         let sharp_lut = if sharp_custom {
             let mut ret = [0.0; 8];
             for out in &mut ret {
-                *out = crate::read_bits!(bitstream, F16)?;
+                *out = bitstream.read_f16_as_f32()?;
             }
             ret
         } else {
             Self::SHARP_LUT_DEFAULT
         };
 
-        let weight_custom = crate::read_bits!(bitstream, Bool)?;
+        let weight_custom = bitstream.read_bool()?;
         let channel_scale = if weight_custom {
             let mut ret = [0.0; 3];
             for out in &mut ret {
-                *out = crate::read_bits!(bitstream, F16)?;
+                *out = bitstream.read_f16_as_f32()?;
             }
             bitstream.read_bits(32)?; // ignored
             ret
@@ -1004,7 +868,7 @@ impl Bundle<Encoding> for EdgePreservingFilter {
             Self::CHANNEL_SCALE_DEFAULT
         };
 
-        let sigma_custom = crate::read_bits!(bitstream, Bool)?;
+        let sigma_custom = bitstream.read_bool()?;
         let sigma = if sigma_custom {
             EpfSigma::parse(bitstream, encoding)?
         } else {
@@ -1012,7 +876,7 @@ impl Bundle<Encoding> for EdgePreservingFilter {
         };
 
         let sigma_for_modular = if encoding == Encoding::Modular {
-            crate::read_bits!(bitstream, F16)?
+            bitstream.read_f16_as_f32()?
         } else {
             1.0
         };
@@ -1047,12 +911,12 @@ impl Default for EpfSigma {
 }
 
 impl Bundle<Encoding> for EpfSigma {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, encoding: Encoding) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, encoding: Encoding) -> Result<Self> {
         Ok(Self {
-            quant_mul: if encoding == Encoding::VarDct { crate::read_bits!(bitstream, F16)? } else { 0.46 },
-            pass0_sigma_scale: crate::read_bits!(bitstream, F16)?,
-            pass2_sigma_scale: crate::read_bits!(bitstream, F16)?,
-            border_sad_mul: crate::read_bits!(bitstream, F16)?,
+            quant_mul: if encoding == Encoding::VarDct { bitstream.read_f16_as_f32()? } else { 0.46 },
+            pass0_sigma_scale: bitstream.read_f16_as_f32()?,
+            pass2_sigma_scale: bitstream.read_f16_as_f32()?,
+            border_sad_mul: bitstream.read_f16_as_f32()?,
         })
     }
 }
