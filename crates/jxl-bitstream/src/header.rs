@@ -4,9 +4,13 @@ use crate::{Bitstream, Bundle};
 macro_rules! make_def {
     (@ty; $c:literal) => { u32 };
     (@ty; u($n:literal)) => { u32 };
+    (@ty; u($n:literal); UnpackSigned) => { i32 };
     (@ty; $c:literal + u($n:literal)) => { u32 };
+    (@ty; $c:literal + u($n:literal); UnpackSigned) => { i32 };
     (@ty; U32($($args:tt)*)) => { u32 };
+    (@ty; U32($($args:tt)*); UnpackSigned) => { i32 };
     (@ty; U64) => { u64 };
+    (@ty; U64; UnpackSigned) => { i64 };
     (@ty; F16) => { f32 };
     (@ty; Bool) => { bool };
     (@ty; Enum($enum:ty)) => { $enum };
@@ -14,7 +18,7 @@ macro_rules! make_def {
     (@ty; Vec[$($inner:tt)*]; $count:expr) => { Vec<make_def!(@ty; $($inner)*)> };
     (@ty; Array[$($inner:tt)*]; $count:expr) => { [make_def!(@ty; $($inner)*); $count] };
     ($(#[$attrs:meta])* $v:vis struct $bundle_name:ident {
-        $($vfield:vis $field:ident: ty($($expr:tt)*) $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($vfield:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         $(#[$attrs])*
         $v struct $bundle_name {
@@ -24,60 +28,82 @@ macro_rules! make_def {
 }
 
 macro_rules! make_parse {
-    (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*) ctx($ctx:ident)) => {
+    (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*); ctx($ctx:expr)) => {
         if $cond {
             $crate::read_bits!($bitstream, $($spec)*, $ctx)?
         } else {
             $def_expr
         }
     };
-    (@parse $bitstream:ident; cond($cond:expr); ty($($spec:tt)*) ctx($ctx:ident)) => {
+    (@parse $bitstream:ident; cond($cond:expr); ty($($spec:tt)*); ctx($ctx:expr)) => {
         if $cond {
             $crate::read_bits!($bitstream, $($spec)*, $ctx)?
         } else {
             $crate::BundleDefault::default_with_context($ctx)
         }
     };
-    (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*) ctx($ctx:ident)) => {
+    (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*); ctx($ctx:expr)) => {
         $crate::read_bits!($bitstream, $($spec)*, $ctx)?
     };
-    (@default; ; $ctx:ident) => {
+    (@default; ; $ctx:expr) => {
         $crate::BundleDefault::default_with_context($ctx)
     };
-    (@default; $def_expr:expr $(; $ctx:ident)?) => {
+    (@default; $def_expr:expr $(; $ctx:expr)?) => {
         $def_expr
     };
+    (@select_ctx; $ctx_id:ident; $ctx:expr) => {
+        $ctx
+    };
+    (@select_ctx; $ctx_id:ident;) => {
+        $ctx_id
+    };
     ($bundle_name:ident {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
-        impl<Ctx> $crate::Bundle<Ctx> for $bundle_name {
+        impl<Ctx: Copy> $crate::Bundle<Ctx> for $bundle_name {
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> crate::Result<Self> where Self: Sized {
                 $(
-                    let $field = make_parse!(@parse bitstream; $(cond($cond);)? $(default($def_expr);)? ty($($expr)*) ctx(ctx));
+                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
+                        @parse bitstream;
+                        $(cond($cond);)?
+                        $(default($def_expr);)?
+                        ty($($expr)*);
+                        ctx(make_parse!(@select_ctx; ctx; $($ctx_for_field)?))
+                    );
                 )*
                 Ok(Self { $($field,)* })
             }
         }
 
-        impl<Ctx> $crate::BundleDefault<Ctx> for $bundle_name {
+        impl<Ctx: Copy> $crate::BundleDefault<Ctx> for $bundle_name {
             #[allow(unused_variables)]
-            fn default_with_context(_ctx: &Ctx) -> Self where Self: Sized {
+            fn default_with_context(_ctx: Ctx) -> Self where Self: Sized {
                 $(
-                    let $field = make_parse!(@default; $($def_expr)?; _ctx);
+                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
+                        @default;
+                        $($def_expr)?;
+                        make_parse!(@select_ctx; _ctx; $($ctx_for_field)?)
+                    );
                 )*
                 Self { $($field,)* }
             }
         }
     };
     ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         impl $crate::Bundle<$ctx> for $bundle_name {
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, $ctx_id: &$ctx) -> crate::Result<Self> where Self: Sized {
+            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, $ctx_id: $ctx) -> crate::Result<Self> where Self: Sized {
                 $(
-                    let $field = make_parse!(@parse bitstream; $(cond($cond);)? $(default($def_expr);)? ty($($expr)*) ctx($ctx_id));
+                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
+                        @parse bitstream;
+                        $(cond($cond);)?
+                        $(default($def_expr);)?
+                        ty($($expr)*);
+                        ctx(make_parse!(@select_ctx; $ctx_id; $($ctx_for_field)?))
+                    );
                 )*
                 Ok(Self { $($field,)* })
             }
@@ -85,9 +111,13 @@ macro_rules! make_parse {
 
         impl $crate::BundleDefault<$ctx> for $bundle_name {
             #[allow(unused_variables)]
-            fn default_with_context($ctx_id: &$ctx) -> Self where Self: Sized {
+            fn default_with_context($ctx_id: $ctx) -> Self where Self: Sized {
                 $(
-                    let $field = make_parse!(@default; $($def_expr)?; $ctx_id);
+                    let $field: make_def!(@ty; $($expr)*) = make_parse!(
+                        @default;
+                        $($def_expr)?;
+                        make_parse!(@select_ctx; $ctx_id; $($ctx_for_field)?)
+                    );
                 )*
                 Self { $($field,)* }
             }
@@ -276,7 +306,7 @@ impl Default for BitDepth {
 }
 
 impl<Ctx> Bundle<Ctx> for BitDepth {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         if crate::read_bits!(bitstream, Bool)? { // float_sample
             let bits_per_sample = crate::read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
             let exp_bits = crate::read_bits!(bitstream, 1 + u(4))?;
@@ -437,7 +467,7 @@ pub enum WhitePoint {
 }
 
 impl<Ctx> Bundle<Ctx> for WhitePoint {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         let d = crate::read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
@@ -488,7 +518,7 @@ pub enum Primaries {
 }
 
 impl<Ctx> Bundle<Ctx> for Primaries {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         let d = crate::read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
@@ -535,7 +565,7 @@ impl TryFrom<u32> for TransferFunction {
 }
 
 impl<Ctx> Bundle<Ctx> for TransferFunction {
-    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         let has_gamma = crate::read_bits!(bitstream, Bool)?;
         if has_gamma {
             let gamma = crate::read_bits!(bitstream, u(24))?;
@@ -595,7 +625,7 @@ define_bundle! {
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct FrameHeader ctx(headers: Headers) {
+    pub struct FrameHeader ctx(headers: &Headers) {
         all_default: ty(Bool) default(true),
         pub frame_type: ty(Bundle(FrameType)) cond(!all_default) default(FrameType::RegularFrame),
         pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),
@@ -611,7 +641,7 @@ define_bundle! {
         pub x_qm_scale:
             ty(u(3))
             cond(!all_default && headers.metadata.xyb_encoded && encoding == Encoding::VarDct)
-            default(d_xqms),
+            default(Self::compute_default_xqms(encoding, headers.metadata.xyb_encoded)),
         pub b_qm_scale:
             ty(u(3))
             cond(!all_default && headers.metadata.xyb_encoded && encoding == Encoding::VarDct)
@@ -621,11 +651,11 @@ define_bundle! {
             cond(!all_default && frame_type != FrameType::ReferenceOnly),
         pub lf_level: ty(1 + u(2)) cond(frame_type == FrameType::LfFrame) default(0),
         pub have_crop: ty(Bool) cond(!all_default && frame_type != FrameType::LfFrame) default(false),
-        pub ux0:
-            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+        pub x0:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)); UnpackSigned)
             cond(have_crop && frame_type != FrameType::ReferenceOnly),
-        pub uy0:
-            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+        pub y0:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)); UnpackSigned)
             cond(have_crop && frame_type != FrameType::ReferenceOnly),
         pub width:
             ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
@@ -635,9 +665,31 @@ define_bundle! {
             cond(have_crop),
         pub blending_info:
             ty(Bundle(BlendingInfo))
+            ctx((
+                headers.metadata.num_extra > 0,
+                None,
+                Self::resets_canvas(
+                    None,
+                    have_crop,
+                    x0, y0,
+                    width, height,
+                    &headers.size,
+                ),
+            ))
             cond(!all_default && frame_type.is_normal_frame()),
         pub ec_blending_info:
             ty(Vec[Bundle(BlendingInfo)]; headers.metadata.num_extra)
+            ctx((
+                headers.metadata.num_extra > 0,
+                Some(blending_info.mode),
+                Self::resets_canvas(
+                    Some(blending_info.mode),
+                    have_crop,
+                    x0, y0,
+                    width, height,
+                    &headers.size,
+                ),
+            ))
             cond(!all_default && frame_type.is_normal_frame()),
         pub duration:
             ty(U32(0, 1, u(8), u(32)))
@@ -655,10 +707,104 @@ define_bundle! {
             ty(u(2))
             cond(!all_default && frame_type != FrameType::LfFrame && !is_last)
             default(0),
+        pub save_before_ct:
+            ty(Bool)
+            cond(
+                !all_default && (
+                    frame_type == FrameType::ReferenceOnly || (
+                        Self::resets_canvas(
+                            Some(blending_info.mode),
+                            have_crop,
+                            x0, y0,
+                            width, height,
+                            &headers.size,
+                        ) &&
+                        (!is_last && (duration == 0 || save_as_reference != 0) && frame_type != FrameType::LfFrame)
+                    )
+                )
+            )
+            default(!frame_type.is_normal_frame()),
+        name_len:
+            ty(U32(0, u(4), 16 + u(5), 48 + u(10)))
+            cond(!all_default)
+            default(0),
+        pub name: ty(Vec[u(8)]; name_len) default(vec![0; name_len as usize]),
+        pub restoration_filter: ty(Bundle(RestorationFilter)) ctx(encoding) cond(!all_default),
+        pub extensions: ty(Bundle(Extensions)) cond(!all_default),
+    }
+
+    #[derive(Debug)]
+    pub struct Passes {
+        pub num_passes: ty(U32(1, 2, 3, 4 + u(3))) default(1),
+        pub num_ds: ty(U32(0, 1, 2, 3 + u(1))) cond(num_passes != 1) default(0),
+        pub shift: ty(Vec[u(2)]; num_passes - 1) cond(num_passes != 1) default(vec![0; num_passes as usize - 1]),
+        pub downsample: ty(Vec[U32(1, 2, 4, 8)]; num_ds) cond(num_passes != 1) default(vec![1; num_ds as usize]),
+        pub last_pass: ty(Vec[U32(0, 1, 2, u(3))]; num_ds) cond(num_passes != 1) default(vec![0; num_ds as usize]),
+    }
+
+    #[derive(Debug)]
+    pub struct BlendingInfo ctx(context: (bool, Option<BlendMode>, bool)) {
+        pub mode: ty(Bundle(BlendMode)),
+        pub alpha_channel:
+            ty(U32(0, 1, 2, 3 + u(3)))
+            cond(context.0 && (mode == BlendMode::Blend || mode == BlendMode::MulAdd))
+            default(0),
+        pub clamp:
+            ty(Bool)
+            cond(context.0 && (mode == BlendMode::Blend || mode == BlendMode::MulAdd || mode == BlendMode::Mul))
+            default(false),
+        pub source:
+            ty(u(2))
+            cond(context.1.unwrap_or(mode) != BlendMode::Replace || !context.2)
+            default(0),
+    }
+
+    #[derive(Debug)]
+    pub struct RestorationFilter ctx(encoding: Encoding) {
+        all_default: ty(Bool) default(true),
+        pub gab: ty(Bundle(Gabor)) cond(!all_default),
+        pub epf: ty(Bundle(EdgePreservingFilter)) cond(!all_default),
+        pub extensions: ty(Bundle(Extensions)) cond(!all_default),
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+impl FrameHeader {
+    fn test_full_image(x0: i32, y0: i32, width: u32, height: u32, size: &SizeHeader) -> bool {
+        if x0 > 0 || y0 > 0 {
+            return false;
+        }
+
+        let right = x0 as i64 + (width as i64);
+        let bottom = y0 as i64 + (height as i64);
+        (right >= size.width as i64) && (bottom >= size.height as i64)
+    }
+
+    fn resets_canvas(
+        blending_mode: Option<BlendMode>,
+        have_crop: bool,
+        x0: i32, y0: i32,
+        width: u32, height: u32,
+        size: &SizeHeader,
+    ) -> bool
+    {
+        blending_mode.map(|mode| mode == BlendMode::Replace).unwrap_or(true) &&
+        (!have_crop || Self::test_full_image(x0, y0, width, height, size))
+    }
+
+    fn compute_default_xqms(encoding: Encoding, xyb_encoded: bool) -> u32 {
+        if xyb_encoded && encoding == Encoding::VarDct {
+            3
+        } else {
+            2
+        }
+    }
+
+    pub fn group_dim(&self) -> u32 {
+        128 << self.group_size_shift
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 pub enum FrameType {
     #[default]
@@ -670,15 +816,12 @@ pub enum FrameType {
 
 impl FrameType {
     pub fn is_normal_frame(&self) -> bool {
-        match self {
-            Self::RegularFrame | Self::SkipProgressive => true,
-            _ => false,
-        }
+        matches!(self, Self::RegularFrame | Self::SkipProgressive)
     }
 }
 
 impl<Ctx> Bundle<Ctx> for FrameType {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         Ok(match bitstream.read_bits(2)? {
             0 => Self::RegularFrame,
             1 => Self::LfFrame,
@@ -689,7 +832,7 @@ impl<Ctx> Bundle<Ctx> for FrameType {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 pub enum Encoding {
     #[default]
@@ -698,7 +841,7 @@ pub enum Encoding {
 }
 
 impl<Ctx> Bundle<Ctx> for Encoding {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         Ok(match bitstream.read_bits(1)? {
             0 => Self::VarDct,
             1 => Self::Modular,
@@ -707,7 +850,7 @@ impl<Ctx> Bundle<Ctx> for Encoding {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 pub struct FrameFlags(u64);
 
 impl FrameFlags {
@@ -739,7 +882,181 @@ impl FrameFlags {
 }
 
 impl<Ctx> Bundle<Ctx> for FrameFlags {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
         crate::read_bits!(bitstream, U64).map(Self)
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
+#[repr(u8)]
+pub enum BlendMode {
+    #[default]
+    Replace = 0,
+    Add = 1,
+    Blend = 2,
+    MulAdd = 3,
+    Mul = 4,
+}
+
+impl<Ctx> Bundle<Ctx> for BlendMode {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
+        Ok(match crate::read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
+            0 => Self::Replace,
+            1 => Self::Add,
+            2 => Self::Blend,
+            3 => Self::MulAdd,
+            4 => Self::Mul,
+            value => return Err(crate::Error::InvalidEnum { name: "BlendMode", value }),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Gabor {
+    Disabled,
+    Enabled([[f32; 2]; 3]),
+}
+
+impl Default for Gabor {
+    fn default() -> Self {
+        Self::Enabled([[0.115169525, 0.061248592]; 3])
+    }
+}
+
+impl<Ctx> Bundle<Ctx> for Gabor {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: Ctx) -> crate::Result<Self> where Self: Sized {
+        let enabled = crate::read_bits!(bitstream, Bool)?;
+        if !enabled {
+            return Ok(Self::Disabled);
+        }
+
+        let custom = crate::read_bits!(bitstream, Bool)?;
+        if !custom {
+            return Ok(Self::default());
+        }
+
+        let mut weights = [[0.0f32; 2]; 3];
+        for chan_weight in &mut weights {
+            for weight in chan_weight {
+                *weight = crate::read_bits!(bitstream, F16)?;
+            }
+        }
+        Ok(Self::Enabled(weights))
+    }
+}
+
+#[derive(Debug)]
+pub enum EdgePreservingFilter {
+    Disabled,
+    Enabled {
+        iters: u32,
+        sharp_lut: [f32; 8],
+        channel_scale: [f32; 3],
+        sigma: EpfSigma,
+        sigma_for_modular: f32,
+    },
+}
+
+impl EdgePreservingFilter {
+    const SHARP_LUT_DEFAULT: [f32; 8] = [0.0, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0];
+    const CHANNEL_SCALE_DEFAULT: [f32; 3] = [40.0, 5.0, 3.5];
+}
+
+impl Default for EdgePreservingFilter {
+    fn default() -> Self {
+        Self::Enabled {
+            iters: 2,
+            sharp_lut: Self::SHARP_LUT_DEFAULT,
+            channel_scale: Self::CHANNEL_SCALE_DEFAULT,
+            sigma: Default::default(),
+            sigma_for_modular: 1.0,
+        }
+    }
+}
+
+impl Bundle<Encoding> for EdgePreservingFilter {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, encoding: Encoding) -> crate::Result<Self> where Self: Sized {
+        let iters = bitstream.read_bits(2)?;
+        if iters == 0 {
+            return Ok(Self::Disabled);
+        }
+
+        let sharp_custom = if encoding == Encoding::VarDct {
+            crate::read_bits!(bitstream, Bool)?
+        } else {
+            false
+        };
+        let sharp_lut = if sharp_custom {
+            let mut ret = [0.0; 8];
+            for out in &mut ret {
+                *out = crate::read_bits!(bitstream, F16)?;
+            }
+            ret
+        } else {
+            Self::SHARP_LUT_DEFAULT
+        };
+
+        let weight_custom = crate::read_bits!(bitstream, Bool)?;
+        let channel_scale = if weight_custom {
+            let mut ret = [0.0; 3];
+            for out in &mut ret {
+                *out = crate::read_bits!(bitstream, F16)?;
+            }
+            bitstream.read_bits(32)?; // ignored
+            ret
+        } else {
+            Self::CHANNEL_SCALE_DEFAULT
+        };
+
+        let sigma_custom = crate::read_bits!(bitstream, Bool)?;
+        let sigma = if sigma_custom {
+            EpfSigma::parse(bitstream, encoding)?
+        } else {
+            EpfSigma::default()
+        };
+
+        let sigma_for_modular = if encoding == Encoding::Modular {
+            crate::read_bits!(bitstream, F16)?
+        } else {
+            1.0
+        };
+
+        Ok(Self::Enabled {
+            iters,
+            sharp_lut,
+            channel_scale,
+            sigma,
+            sigma_for_modular,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EpfSigma {
+    quant_mul: f32,
+    pass0_sigma_scale: f32,
+    pass2_sigma_scale: f32,
+    border_sad_mul: f32,
+}
+
+impl Default for EpfSigma {
+    fn default() -> Self {
+        Self {
+            quant_mul: 0.46,
+            pass0_sigma_scale: 0.9,
+            pass2_sigma_scale: 6.5,
+            border_sad_mul: 2.0 / 3.0,
+        }
+    }
+}
+
+impl Bundle<Encoding> for EpfSigma {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, encoding: Encoding) -> crate::Result<Self> where Self: Sized {
+        Ok(Self {
+            quant_mul: if encoding == Encoding::VarDct { crate::read_bits!(bitstream, F16)? } else { 0.46 },
+            pass0_sigma_scale: crate::read_bits!(bitstream, F16)?,
+            pass2_sigma_scale: crate::read_bits!(bitstream, F16)?,
+            border_sad_mul: crate::read_bits!(bitstream, F16)?,
+        })
     }
 }

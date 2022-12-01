@@ -29,6 +29,9 @@ fn main() {
 
         std::fs::write("encoded_icc", &encoded_icc).unwrap();
     }
+
+    let test_frame = jxl_bitstream::read_bits!(bitstream, Bundle(jxl_bitstream::header::FrameHeader), &headers).expect("Failed to read frame header");
+    dbg!(test_frame);
 }
 
 fn get_icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {
