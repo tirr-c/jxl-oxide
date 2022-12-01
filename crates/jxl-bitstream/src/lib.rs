@@ -2,8 +2,24 @@ use std::io::prelude::*;
 
 pub mod header;
 
-pub trait Bundle {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>) -> crate::Result<Self> where Self: Sized;
+pub trait Bundle<Ctx = ()> {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, ctx: &Ctx) -> crate::Result<Self> where Self: Sized;
+}
+
+pub trait BundleDefault<Ctx = ()> {
+    fn default_with_context(ctx: &Ctx) -> Self where Self: Sized;
+}
+
+impl<T, Ctx> BundleDefault<Ctx> for T where T: Default {
+    fn default_with_context(_: &Ctx) -> Self where Self: Sized {
+        Default::default()
+    }
+}
+
+impl<T, Ctx> Bundle<Ctx> for Option<T> where T: Bundle<Ctx> {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+        T::parse(bitstream, ctx).map(Some)
+    }
 }
 
 #[derive(Debug)]
@@ -87,19 +103,19 @@ macro_rules! expand_u32 {
 
 #[macro_export]
 macro_rules! read_bits {
-    ($bistream:ident, $c:literal) => {
+    ($bistream:ident, $c:literal $(, $ctx:ident)?) => {
         $crate::Result::Ok($c)
     };
-    ($bitstream:ident, u($n:literal)) => {
+    ($bitstream:ident, u($n:literal) $(, $ctx:ident)?) => {
         $bitstream.read_bits($n)
     };
-    ($bitstream:ident, $c:literal + u($n:literal)) => {
+    ($bitstream:ident, $c:literal + u($n:literal) $(, $ctx:ident)?) => {
         $bitstream.read_bits($n).map(|v| v.wrapping_add($c))
     };
-    ($bitstream:ident, U32($($args:tt)+)) => {
+    ($bitstream:ident, U32($($args:tt)+) $(, $ctx:ident)?) => {
         $crate::expand_u32!($bitstream; $($args)+)
     };
-    ($bitstream:ident, U64) => {
+    ($bitstream:ident, U64 $(, $ctx:ident)?) => {
         $bitstream.read_bits(2)
             .and_then(|selector| match selector {
                 0 => Ok(0u64),
@@ -121,13 +137,13 @@ macro_rules! read_bits {
                 _ => unreachable!(),
             })
     };
-    ($bitstream:ident, F16) => {
+    ($bitstream:ident, F16 $(, $ctx:ident)?) => {
         $bitstream.read_f16_as_f32()
     };
-    ($bitstream:ident, Bool) => {
+    ($bitstream:ident, Bool $(, $ctx:ident)?) => {
         $bitstream.read_bits(1).map(|v| v == 1)
     };
-    ($bitstream:ident, Enum($enumtype:ty)) => {
+    ($bitstream:ident, Enum($enumtype:ty) $(, $ctx:ident)?) => {
         $crate::read_bits!($bitstream, U32(0, 1, 2 + u(4), 18 + u(6)))
             .and_then(|v| {
                 <$enumtype as TryFrom<u32>>::try_from(v).map_err(|_| $crate::Error::InvalidEnum {
@@ -136,26 +152,29 @@ macro_rules! read_bits {
                 })
             })
     };
-    ($bitstream:ident, ZeroPadToByte) => {
+    ($bitstream:ident, ZeroPadToByte $(, $ctx:ident)?) => {
         $bitstream.zero_pad_to_byte()
     };
     ($bitstream:ident, Bundle($bundle:ty)) => {
-        <$bundle as $crate::Bundle>::parse($bitstream)
+        <$bundle as $crate::Bundle<_>>::parse($bitstream, &())
     };
-    ($bitstream:ident, Vec[$($inner:tt)*]; $count:expr) => {
+    ($bitstream:ident, Bundle($bundle:ty), $ctx:ident) => {
+        <$bundle as $crate::Bundle<_>>::parse($bitstream, $ctx)
+    };
+    ($bitstream:ident, Vec[$($inner:tt)*]; $count:expr $(, $ctx:ident)?) => {
         {
             let count = $count as usize;
             (0..count)
                 .into_iter()
-                .map(|_| $crate::read_bits!($bitstream, $($inner)*))
+                .map(|_| $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?))
                 .collect::<$crate::Result<Vec<_>>>()
         }
     };
-    ($bitstream:ident, Array[$($inner:tt)*]; $count:expr) => {
+    ($bitstream:ident, Array[$($inner:tt)*]; $count:expr $(, $ctx:ident)?) => {
         (|| -> $crate::Result<[_; $count]> {
             let mut ret = [Default::default(); $count];
             for point in &mut ret {
-                *point = $crate::read_bits!($bitstream, $($inner)*)?;
+                *point = $crate::read_bits!($bitstream, $($inner)* $(, $ctx)?)?;
             }
             Ok(ret)
         })()

@@ -24,46 +24,70 @@ macro_rules! make_def {
 }
 
 macro_rules! make_parse {
-    (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*)) => {
+    (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*) ctx($ctx:ident)) => {
         if $cond {
-            $crate::read_bits!($bitstream, $($spec)*)?
+            $crate::read_bits!($bitstream, $($spec)*, $ctx)?
         } else {
             $def_expr
         }
     };
-    (@parse $bitstream:ident; cond($cond:expr); ty($($spec:tt)*)) => {
+    (@parse $bitstream:ident; cond($cond:expr); ty($($spec:tt)*) ctx($ctx:ident)) => {
         if $cond {
-            $crate::read_bits!($bitstream, $($spec)*)?
+            $crate::read_bits!($bitstream, $($spec)*, $ctx)?
         } else {
-            Default::default()
+            $crate::BundleDefault::default_with_context($ctx)
         }
     };
-    (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*)) => {
-        $crate::read_bits!($bitstream, $($spec)*)?
+    (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*) ctx($ctx:ident)) => {
+        $crate::read_bits!($bitstream, $($spec)*, $ctx)?
     };
-    (@default;) => {
-        Default::default()
+    (@default; ; $ctx:ident) => {
+        $crate::BundleDefault::default_with_context($ctx)
     };
-    (@default; $def_expr:expr) => {
+    (@default; $def_expr:expr $(; $ctx:ident)?) => {
         $def_expr
     };
     ($bundle_name:ident {
         $($v:vis $field:ident: ty($($expr:tt)*) $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
-        impl Bundle for $bundle_name {
+        impl<Ctx> $crate::Bundle<Ctx> for $bundle_name {
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>) -> crate::Result<Self> where Self: Sized {
+            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
                 $(
-                    let $field = make_parse!(@parse bitstream; $(cond($cond);)? $(default($def_expr);)? ty($($expr)*));
+                    let $field = make_parse!(@parse bitstream; $(cond($cond);)? $(default($def_expr);)? ty($($expr)*) ctx(ctx));
                 )*
                 Ok(Self { $($field,)* })
             }
         }
 
-        impl Default for $bundle_name {
-            fn default() -> Self {
+        impl<Ctx> $crate::BundleDefault<Ctx> for $bundle_name {
+            #[allow(unused_variables)]
+            fn default_with_context(_ctx: &Ctx) -> Self where Self: Sized {
                 $(
-                    let $field = make_parse!(@default; $($def_expr)?);
+                    let $field = make_parse!(@default; $($def_expr)?; _ctx);
+                )*
+                Self { $($field,)* }
+            }
+        }
+    };
+    ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) {
+        $($v:vis $field:ident: ty($($expr:tt)*) $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+    }) => {
+        impl $crate::Bundle<$ctx> for $bundle_name {
+            #[allow(unused_variables)]
+            fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, $ctx_id: &$ctx) -> crate::Result<Self> where Self: Sized {
+                $(
+                    let $field = make_parse!(@parse bitstream; $(cond($cond);)? $(default($def_expr);)? ty($($expr)*) ctx($ctx_id));
+                )*
+                Ok(Self { $($field,)* })
+            }
+        }
+
+        impl $crate::BundleDefault<$ctx> for $bundle_name {
+            #[allow(unused_variables)]
+            fn default_with_context($ctx_id: &$ctx) -> Self where Self: Sized {
+                $(
+                    let $field = make_parse!(@default; $($def_expr)?; $ctx_id);
                 )*
                 Self { $($field,)* }
             }
@@ -74,12 +98,12 @@ macro_rules! make_parse {
 macro_rules! define_bundle {
     (
         $(
-            $(#[$attrs:meta])* $v:vis struct $bundle_name:ident { $($body:tt)* }
+            $(#[$attrs:meta])* $v:vis struct $bundle_name:ident $(aligned($aligned:literal))? $(ctx($ctx_id:ident : $ctx:ty))? { $($body:tt)* }
         )*
     ) => {
         $(
             make_def!($(#[$attrs])* $v struct $bundle_name { $($body)* });
-            make_parse!($bundle_name { $($body)* });
+            make_parse!($bundle_name $(aligned($aligned))? $(ctx($ctx_id: $ctx))? { $($body)* });
         )*
     };
 }
@@ -251,8 +275,8 @@ impl Default for BitDepth {
     }
 }
 
-impl Bundle for BitDepth {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>) -> crate::Result<Self> where Self: Sized {
+impl<Ctx> Bundle<Ctx> for BitDepth {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
         if crate::read_bits!(bitstream, Bool)? { // float_sample
             let bits_per_sample = crate::read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
             let exp_bits = crate::read_bits!(bitstream, 1 + u(4))?;
@@ -412,8 +436,8 @@ pub enum WhitePoint {
     Dci,
 }
 
-impl Bundle for WhitePoint {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>) -> crate::Result<Self> where Self: Sized {
+impl<Ctx> Bundle<Ctx> for WhitePoint {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
         let d = crate::read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
@@ -463,8 +487,8 @@ pub enum Primaries {
     P3,
 }
 
-impl Bundle for Primaries {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>) -> crate::Result<Self> where Self: Sized {
+impl<Ctx> Bundle<Ctx> for Primaries {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
         let d = crate::read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
@@ -510,8 +534,8 @@ impl TryFrom<u32> for TransferFunction {
     }
 }
 
-impl Bundle for TransferFunction {
-    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>) -> crate::Result<Self> where Self: Sized {
+impl<Ctx> Bundle<Ctx> for TransferFunction {
+    fn parse<R: ::std::io::Read>(bitstream: &mut Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
         let has_gamma = crate::read_bits!(bitstream, Bool)?;
         if has_gamma {
             let gamma = crate::read_bits!(bitstream, u(24))?;
@@ -566,5 +590,156 @@ define_bundle! {
         quant_bias1: ty(F16) cond(!all_default) default(1.0 - 0.07005449891748593),
         quant_bias2: ty(F16) cond(!all_default) default(1.0 - 0.049935103337343655),
         quant_bias_numerator: ty(F16) cond(!all_default) default(0.145),
+    }
+}
+
+define_bundle! {
+    #[derive(Debug)]
+    pub struct FrameHeader ctx(headers: Headers) {
+        all_default: ty(Bool) default(true),
+        pub frame_type: ty(Bundle(FrameType)) cond(!all_default) default(FrameType::RegularFrame),
+        pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),
+        pub flags: ty(Bundle(FrameFlags)) cond(!all_default),
+        pub do_ycbcr: ty(Bool) cond(!all_default && headers.metadata.xyb_encoded),
+        pub jpeg_upsampling: ty(Array[u(2)]; 3) cond(do_ycbcr && !flags.use_lf_frame()),
+        pub upsampling: ty(U32(1, 2, 4, 8)) cond(do_ycbcr && !flags.use_lf_frame()) default(1),
+        pub ec_upsampling:
+            ty(Vec[U32(1, 2, 4, 8)]; headers.metadata.num_extra)
+            cond(do_ycbcr && !flags.use_lf_frame())
+            default(vec![1; headers.metadata.num_extra as usize]),
+        pub group_size_shift: ty(u(2)) cond(encoding == Encoding::Modular) default(1),
+        pub x_qm_scale:
+            ty(u(3))
+            cond(!all_default && headers.metadata.xyb_encoded && encoding == Encoding::VarDct)
+            default(d_xqms),
+        pub b_qm_scale:
+            ty(u(3))
+            cond(!all_default && headers.metadata.xyb_encoded && encoding == Encoding::VarDct)
+            default(2),
+        pub passes:
+            ty(Bundle(Passes))
+            cond(!all_default && frame_type != FrameType::ReferenceOnly),
+        pub lf_level: ty(1 + u(2)) cond(frame_type == FrameType::LfFrame) default(0),
+        pub have_crop: ty(Bool) cond(!all_default && frame_type != FrameType::LfFrame) default(false),
+        pub ux0:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+            cond(have_crop && frame_type != FrameType::ReferenceOnly),
+        pub uy0:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+            cond(have_crop && frame_type != FrameType::ReferenceOnly),
+        pub width:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+            cond(have_crop),
+        pub height:
+            ty(U32(u(8), 256 + u(11), 2304 + u(14), 18688 + u(30)))
+            cond(have_crop),
+        pub blending_info:
+            ty(Bundle(BlendingInfo))
+            cond(!all_default && frame_type.is_normal_frame()),
+        pub ec_blending_info:
+            ty(Vec[Bundle(BlendingInfo)]; headers.metadata.num_extra)
+            cond(!all_default && frame_type.is_normal_frame()),
+        pub duration:
+            ty(U32(0, 1, u(8), u(32)))
+            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.have_animation)
+            default(0),
+        pub timecode:
+            ty(u(32))
+            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.animation.have_timecodes)
+            default(0),
+        pub is_last:
+            ty(Bool)
+            cond(!all_default && frame_type.is_normal_frame())
+            default(frame_type == FrameType::RegularFrame),
+        pub save_as_reference:
+            ty(u(2))
+            cond(!all_default && frame_type != FrameType::LfFrame && !is_last)
+            default(0),
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FrameType {
+    #[default]
+    RegularFrame = 0,
+    LfFrame,
+    ReferenceOnly,
+    SkipProgressive,
+}
+
+impl FrameType {
+    pub fn is_normal_frame(&self) -> bool {
+        match self {
+            Self::RegularFrame | Self::SkipProgressive => true,
+            _ => false,
+        }
+    }
+}
+
+impl<Ctx> Bundle<Ctx> for FrameType {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+        Ok(match bitstream.read_bits(2)? {
+            0 => Self::RegularFrame,
+            1 => Self::LfFrame,
+            2 => Self::ReferenceOnly,
+            3 => Self::SkipProgressive,
+            _ => unreachable!(),
+        })
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Encoding {
+    #[default]
+    VarDct = 0,
+    Modular,
+}
+
+impl<Ctx> Bundle<Ctx> for Encoding {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+        Ok(match bitstream.read_bits(1)? {
+            0 => Self::VarDct,
+            1 => Self::Modular,
+            _ => unreachable!(),
+        })
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct FrameFlags(u64);
+
+impl FrameFlags {
+    const NOISE: u64 = 0x1;
+    const PATCHES: u64 = 0x2;
+    const SPLINES: u64 = 0x10;
+    const USE_LF_FRAME: u64 = 0x20;
+    const SKIP_ADAPTIVE_LF_SMOOTHING: u64 = 0x80;
+
+    pub fn noise(&self) -> bool {
+        self.0 & Self::NOISE != 0
+    }
+
+    pub fn patches(&self) -> bool {
+        self.0 & Self::PATCHES != 0
+    }
+
+    pub fn splines(&self) -> bool {
+        self.0 & Self::SPLINES != 0
+    }
+
+    pub fn use_lf_frame(&self) -> bool {
+        self.0 & Self::USE_LF_FRAME != 0
+    }
+
+    pub fn skip_adaptive_lf_smoothing(&self) -> bool {
+        self.0 & Self::SKIP_ADAPTIVE_LF_SMOOTHING != 0
+    }
+}
+
+impl<Ctx> Bundle<Ctx> for FrameFlags {
+    fn parse<R: std::io::Read>(bitstream: &mut crate::Bitstream<R>, _ctx: &Ctx) -> crate::Result<Self> where Self: Sized {
+        crate::read_bits!(bitstream, U64).map(Self)
     }
 }
