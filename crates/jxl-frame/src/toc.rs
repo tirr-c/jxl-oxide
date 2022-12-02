@@ -6,7 +6,6 @@ use jxl_bitstream::{
 };
 use crate::Result;
 
-#[derive(Debug)]
 pub struct Toc {
     bookmark: jxl_bitstream::Bookmark,
     num_lf_groups: usize,
@@ -14,7 +13,41 @@ pub struct Toc {
     has_hf_global: bool,
     offsets: Vec<u64>,
     sizes: Vec<u32>,
+    linear_groups: Vec<(TocGroupKind, u32)>,
     total_size: u64,
+}
+
+impl std::fmt::Debug for Toc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("Toc")
+            .field("bookmark", &self.bookmark)
+            .field("num_lf_groups", &self.num_lf_groups)
+            .field("num_groups", &self.num_groups)
+            .field("has_hf_global", &self.has_hf_global)
+            .field("total_size", &self.total_size)
+            .field(
+                "offsets",
+                &format_args!(
+                    "({} {})",
+                    self.offsets.len(),
+                    if self.offsets.len() == 1 { "entry" } else { "entries" },
+                ),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum TocGroupKind {
+    All,
+    LfGlobal,
+    LfGroup(u32),
+    HfGlobal,
+    GroupPass {
+        pass_idx: u32,
+        group_idx: u32,
+    },
 }
 
 impl Toc {
@@ -27,7 +60,11 @@ impl Toc {
     }
 
     pub fn lf_global_byte_offset(&self) -> (u64, u32) {
-        (self.offsets[0], self.sizes[0])
+        if self.is_single_entry() {
+            (0, self.total_size as u32)
+        } else {
+            (self.offsets[0], self.sizes[0])
+        }
     }
 
     pub fn lf_group_byte_offset(&self, idx: u32) -> (u64, u32) {
@@ -74,11 +111,12 @@ impl Bundle<&crate::FrameHeader> for Toc {
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: &crate::FrameHeader) -> Result<Self> {
         let num_groups = ctx.num_groups();
         let num_passes = ctx.passes.num_passes;
+        let has_hf_global = ctx.encoding == crate::header::Encoding::VarDct;
 
         let entry_count = if num_groups == 1 && num_passes == 1 {
             1
         } else {
-            1 + ctx.num_lf_groups() + 1 + num_groups * num_passes
+            1 + ctx.num_lf_groups() + (has_hf_global as u32) + num_groups * num_passes
         };
 
         let permutated_toc = bitstream.read_bool()?;
@@ -118,16 +156,40 @@ impl Bundle<&crate::FrameHeader> for Toc {
             offsets.push(acc);
             acc += size as u64;
         }
-        let (sizes, offsets) = if permutated_toc {
+
+        let section_kinds = if entry_count == 1 {
+            vec![TocGroupKind::All]
+        } else {
+            let mut out = Vec::with_capacity(entry_count as usize);
+            out.push(TocGroupKind::LfGlobal);
+            for idx in 0..ctx.num_lf_groups() {
+                out.push(TocGroupKind::LfGroup(idx));
+            }
+            if has_hf_global {
+                out.push(TocGroupKind::HfGlobal);
+            }
+            for pass_idx in 0..num_passes {
+                for group_idx in 0..num_groups {
+                    out.push(TocGroupKind::GroupPass { pass_idx, group_idx });
+                }
+            }
+            out
+        };
+
+        let (sizes, offsets, linear_groups) = if permutated_toc {
             let mut new_sizes = Vec::with_capacity(sizes.len());
             let mut new_offsets = Vec::with_capacity(offsets.len());
-            for idx in permutation {
+            let mut new_section_kinds = vec![TocGroupKind::All; section_kinds.len()];
+            for (section_kind, idx) in section_kinds.into_iter().zip(permutation) {
                 new_sizes.push(sizes[idx]);
                 new_offsets.push(offsets[idx]);
+                new_section_kinds[idx] = section_kind;
             }
-            (new_sizes, new_offsets)
+            let linear_groups = new_section_kinds.into_iter().zip(sizes.iter().copied()).collect();
+            (new_sizes, new_offsets, linear_groups)
         } else {
-            (sizes, offsets)
+            let linear_groups = section_kinds.into_iter().zip(sizes.iter().copied()).collect();
+            (sizes, offsets, linear_groups)
         };
 
         bitstream.zero_pad_to_byte()?;
@@ -136,9 +198,10 @@ impl Bundle<&crate::FrameHeader> for Toc {
             bookmark,
             num_lf_groups: ctx.num_lf_groups() as usize,
             num_groups: num_groups as usize,
-            has_hf_global: entry_count > 1 && ctx.encoding == crate::header::Encoding::VarDct,
+            has_hf_global: entry_count > 1 && has_hf_global,
             sizes,
             offsets,
+            linear_groups,
             total_size: acc,
         })
     }
