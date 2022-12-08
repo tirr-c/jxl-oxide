@@ -136,6 +136,13 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
 
 #[derive(Debug)]
 pub struct GlobalModular {
+    ma_config: Option<crate::encoding::modular::MaConfig>,
+}
+
+impl GlobalModular {
+    pub fn make_context(&self) -> Option<crate::encoding::modular::MaContext> {
+        Some(self.ma_config.as_ref()?.make_context())
+    }
 }
 
 impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {

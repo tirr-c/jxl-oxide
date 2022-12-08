@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, read_bits};
 
@@ -9,7 +10,7 @@ mod prefix;
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Decoder {
     lz77: Lz77,
     inner: DecoderInner,
@@ -86,7 +87,7 @@ impl Decoder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Lz77 {
     Disabled,
     Enabled {
@@ -113,6 +114,7 @@ impl Lz77 {
     }
 }
 
+#[derive(Clone)]
 struct Lz77State {
     lz_len_conf: IntegerConfig,
     window: Vec<u32>,
@@ -146,7 +148,7 @@ impl Lz77State {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct IntegerConfig {
     split_exponent: u32,
     msb_in_token: u32,
@@ -178,7 +180,7 @@ impl IntegerConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DecoderInner {
     clusters: Vec<u8>, // num_dist, [0, num_clusters)
     configs: Vec<IntegerConfig>, // num_clusters
@@ -216,13 +218,13 @@ impl DecoderInner {
                 .into_iter()
                 .map(|count| prefix::Histogram::parse(bitstream, count))
                 .collect::<Result<Vec<_>>>()?;
-            Coder::PrefixCode(dist)
+            Coder::PrefixCode(Arc::new(dist))
         } else {
             let dist = (0..num_clusters)
                 .map(|_| ans::Histogram::parse(bitstream, log_alphabet_size))
                 .collect::<Result<Vec<_>>>()?;
             Coder::Ans {
-                dist,
+                dist: Arc::new(dist),
                 state: 0,
                 initial: true,
             }
@@ -251,11 +253,11 @@ impl DecoderInner {
         *self.clusters.last().unwrap()
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Coder {
-    PrefixCode(Vec<prefix::Histogram>),
+    PrefixCode(Arc<Vec<prefix::Histogram>>),
     Ans {
-        dist: Vec<ans::Histogram>,
+        dist: Arc<Vec<ans::Histogram>>,
         state: u32,
         initial: bool,
     },

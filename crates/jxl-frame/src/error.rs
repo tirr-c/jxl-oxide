@@ -6,6 +6,8 @@ pub enum Error {
     IncompleteFrameData {
         field: &'static str,
     },
+    InvalidMaTree,
+    GlobalMaTreeNotAvailable,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -27,6 +29,8 @@ impl std::fmt::Display for Error {
             Self::Decoder(err) => write!(f, "entropy decoder error: {}", err),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
             Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
+            Self::InvalidMaTree => write!(f, "invalid meta-adaptive tree"),
+            Self::GlobalMaTreeNotAvailable => write!(f, "global meta-adaptive tree not available"),
         }
     }
 }
