@@ -2,11 +2,17 @@ use jxl_bitstream::{define_bundle, read_bits, header::Headers, Bitstream, Bundle
 
 use crate::{FrameHeader, Result};
 
+mod noise;
+mod patch;
+mod spline;
+mod toc;
+pub use toc::{Toc, TocGroup, TocGroupKind};
+
 #[derive(Debug)]
 pub struct LfGlobal {
-    patches: Option<crate::patch::Patches>,
-    splines: Option<crate::spline::Splines>,
-    noise: Option<crate::noise::NoiseParameters>,
+    patches: Option<patch::Patches>,
+    splines: Option<spline::Splines>,
+    noise: Option<noise::NoiseParameters>,
     lf_dequant: LfChannelDequantization,
     vardct: Option<LfGlobalVarDct>,
     gmodular: GlobalModular,

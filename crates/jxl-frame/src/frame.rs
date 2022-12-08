@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Seek};
 use jxl_bitstream::{read_bits, Bitstream, Bundle, header::Headers};
 use crate::{
-    data::*,
-    toc::{TocGroup, TocGroupKind},
+    frame_data::*,
     Error,
     FrameHeader,
     Result,
@@ -22,7 +21,7 @@ pub struct Frame<'a> {
 impl<'a> Bundle<&'a Headers> for Frame<'a> {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &Headers) -> Result<Self> {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &'a Headers) -> Result<Self> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
@@ -71,7 +70,7 @@ impl Frame<'_> {
                 Ok(())
             },
             TocGroupKind::LfGlobal => {
-                let lf_global = read_bits!(bitstream, Bundle(crate::data::LfGlobal), (self.image_header, &self.header))?;
+                let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
                 self.data.lf_global(lf_global);
                 self.try_pending_blocks()?;
                 Ok(())

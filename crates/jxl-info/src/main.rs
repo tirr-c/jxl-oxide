@@ -38,7 +38,8 @@ fn main() {
         let toc = read_bits!(bitstream, Bundle(Toc), &preview_frame_header).expect("Failed to read TOC");
         dbg!(&toc);
 
-        bitstream.seek_to_bookmark_and_offset(toc.bookmark(), toc.total_byte_size() * 8).expect("Failed to seek");
+        let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
+        bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
     }
 
     loop {
@@ -52,7 +53,8 @@ fn main() {
         if frame_header.is_last {
             break;
         }
-        bitstream.seek_to_bookmark_and_offset(toc.bookmark(), toc.total_byte_size() * 8).expect("Failed to seek");
+        let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
+        bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
     }
 }
 
