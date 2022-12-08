@@ -3,6 +3,9 @@ pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
     InvalidTocPermutation,
+    IncompleteFrameData {
+        field: &'static str,
+    },
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -23,6 +26,7 @@ impl std::fmt::Display for Error {
             Self::Bitstream(err) => write!(f, "bitstream error: {}", err),
             Self::Decoder(err) => write!(f, "entropy decoder error: {}", err),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
+            Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
         }
     }
 }

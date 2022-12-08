@@ -7,6 +7,8 @@ pub enum Error {
         name: &'static str,
         value: u32,
     },
+    CannotSkip,
+    NotAligned,
 }
 
 impl std::error::Error for Error {
@@ -32,6 +34,12 @@ impl std::fmt::Display for Error {
             },
             Self::InvalidEnum { name, value } => {
                 write!(f, "Enum({}) read invalid enum value of {}", name, value)
+            },
+            Self::CannotSkip => {
+                write!(f, "target bookmark already passed")
+            },
+            Self::NotAligned => {
+                write!(f, "bitstream is unaligned")
             },
         }
     }

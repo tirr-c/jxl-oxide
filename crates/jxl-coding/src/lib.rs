@@ -187,7 +187,7 @@ struct DecoderInner {
 
 impl DecoderInner {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
-        let (num_clusters, clusters) = Self::read_clusters(bitstream, num_dist)?;
+        let (num_clusters, clusters) = read_clusters(bitstream, num_dist)?;
         let use_prefix_code = read_bits!(bitstream, Bool)?;
         let log_alphabet_size = if use_prefix_code {
             15
@@ -231,42 +231,6 @@ impl DecoderInner {
             clusters,
             configs,
             code,
-        })
-    }
-
-    fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
-        if num_dist == 1 {
-            return Ok((1, vec![0u8]));
-        }
-
-        Ok(if read_bits!(bitstream, Bool)? {
-            // simple dist
-            let nbits = bitstream.read_bits(2)?;
-            let ret = (0..num_dist)
-                .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
-            (num_clusters, ret)
-        } else {
-            let use_mtf = read_bits!(bitstream, Bool)?;
-            let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
-            let mut ret = (0..num_dist)
-                .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
-                .collect::<Result<Vec<_>>>()?;
-            if use_mtf {
-                let mut mtfmap = [0u8; 256];
-                for (idx, mtf) in mtfmap.iter_mut().enumerate() {
-                    *mtf = idx as u8;
-                }
-                for cluster in &mut ret {
-                    let idx = *cluster as usize;
-                    *cluster = mtfmap[idx];
-                    mtfmap.copy_within(0..idx, 1);
-                    mtfmap[0] = *cluster;
-                }
-            }
-            let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
-            (num_clusters, ret)
         })
     }
 
@@ -318,4 +282,40 @@ impl Coder {
 
 fn add_log2_ceil(x: u32) -> u32 {
     (x + 1).next_power_of_two().trailing_zeros()
+}
+
+pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
+    if num_dist == 1 {
+        return Ok((1, vec![0u8]));
+    }
+
+    Ok(if read_bits!(bitstream, Bool)? {
+        // simple dist
+        let nbits = bitstream.read_bits(2)?;
+        let ret = (0..num_dist)
+            .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
+        (num_clusters, ret)
+    } else {
+        let use_mtf = read_bits!(bitstream, Bool)?;
+        let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
+        let mut ret = (0..num_dist)
+            .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
+            .collect::<Result<Vec<_>>>()?;
+        if use_mtf {
+            let mut mtfmap = [0u8; 256];
+            for (idx, mtf) in mtfmap.iter_mut().enumerate() {
+                *mtf = idx as u8;
+            }
+            for cluster in &mut ret {
+                let idx = *cluster as usize;
+                *cluster = mtfmap[idx];
+                mtfmap.copy_within(0..idx, 1);
+                mtfmap[0] = *cluster;
+            }
+        }
+        let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
+        (num_clusters, ret)
+    })
 }

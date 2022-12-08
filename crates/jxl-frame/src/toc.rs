@@ -2,18 +2,17 @@ use std::io::Read;
 use jxl_bitstream::{
     read_bits,
     Bitstream,
+    Bookmark,
     Bundle,
 };
 use crate::Result;
 
 pub struct Toc {
-    bookmark: jxl_bitstream::Bookmark,
     num_lf_groups: usize,
     num_groups: usize,
     has_hf_global: bool,
-    offsets: Vec<u64>,
-    sizes: Vec<u32>,
-    linear_groups: Vec<(TocGroupKind, u32)>,
+    groups: Vec<TocGroup>,
+    bitstream_order: Vec<usize>,
     total_size: u64,
 }
 
@@ -21,21 +20,27 @@ impl std::fmt::Debug for Toc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
             .debug_struct("Toc")
-            .field("bookmark", &self.bookmark)
             .field("num_lf_groups", &self.num_lf_groups)
             .field("num_groups", &self.num_groups)
             .field("has_hf_global", &self.has_hf_global)
             .field("total_size", &self.total_size)
             .field(
-                "offsets",
+                "groups",
                 &format_args!(
                     "({} {})",
-                    self.offsets.len(),
-                    if self.offsets.len() == 1 { "entry" } else { "entries" },
+                    self.groups.len(),
+                    if self.groups.len() == 1 { "entry" } else { "entries" },
                 ),
             )
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct TocGroup {
+    pub kind: TocGroupKind,
+    pub offset: Bookmark,
+    pub size: u32,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -50,44 +55,73 @@ pub enum TocGroupKind {
     },
 }
 
+impl Ord for TocGroupKind {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (x, y) if x == y => std::cmp::Ordering::Equal,
+            (Self::All, _) => std::cmp::Ordering::Less,
+            (_, Self::All) => std::cmp::Ordering::Greater,
+            (Self::LfGlobal, _) => std::cmp::Ordering::Less,
+            (_, Self::LfGlobal) => std::cmp::Ordering::Greater,
+            (Self::LfGroup(g_self), Self::LfGroup(g_other)) => g_self.cmp(g_other),
+            (Self::LfGroup(_), _) => std::cmp::Ordering::Less,
+            (_, Self::LfGroup(_)) => std::cmp::Ordering::Greater,
+            (Self::HfGlobal, _) => std::cmp::Ordering::Less,
+            (_, Self::HfGlobal) => std::cmp::Ordering::Greater,
+            (Self::GroupPass { pass_idx: p_self, group_idx: g_self },
+             Self::GroupPass { pass_idx: p_other, group_idx: g_other }) =>
+                p_self.cmp(p_other).then(g_self.cmp(g_other))
+        }
+    }
+}
+
+impl PartialOrd for TocGroupKind {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Toc {
-    pub fn bookmark(&self) -> jxl_bitstream::Bookmark {
-        self.bookmark
+    pub fn bookmark(&self) -> Bookmark {
+        self.groups[0].offset
     }
 
     pub fn is_single_entry(&self) -> bool {
-        self.offsets.len() <= 1
+        self.groups.len() <= 1
     }
 
-    pub fn lf_global_byte_offset(&self) -> (u64, u32) {
-        if self.is_single_entry() {
-            (0, self.total_size as u32)
+    fn group(&self, idx: usize) -> TocGroup {
+        let idx = if self.bitstream_order.is_empty() {
+            idx
         } else {
-            (self.offsets[0], self.sizes[0])
-        }
+            self.bitstream_order[idx]
+        };
+        self.groups[idx]
     }
 
-    pub fn lf_group_byte_offset(&self, idx: u32) -> (u64, u32) {
+    pub fn lf_global(&self) -> TocGroup {
+        self.group(0)
+    }
+
+    pub fn lf_group(&self, idx: u32) -> TocGroup {
         if self.is_single_entry() {
             panic!("cannot obtain LfGroup offset of single entry frame");
         } else if (idx as usize) >= self.num_lf_groups {
             panic!("index out of range: {} >= {} (num_lf_groups)", idx, self.num_lf_groups);
         } else {
-            let idx = idx as usize + 1;
-            (self.offsets[idx], self.sizes[idx])
+            self.group(idx as usize + 1)
         }
     }
 
-    pub fn hf_global_byte_offset(&self) -> (u64, u32) {
+    pub fn hf_global(&self) -> TocGroup {
         if self.has_hf_global {
-            let idx = self.num_lf_groups + 1;
-            (self.offsets[idx], self.sizes[idx])
+            self.group(self.num_lf_groups + 1)
         } else {
             panic!("this frame does not have HfGlobal offset");
         }
     }
 
-    pub fn pass_group_byte_offset(&self, pass_idx: u32, group_idx: u32) -> (u64, u32) {
+    pub fn pass_group(&self, pass_idx: u32, group_idx: u32) -> TocGroup {
         if self.is_single_entry() {
             panic!("cannot obtain PassGroup offset of single entry frame");
         } else {
@@ -96,7 +130,7 @@ impl Toc {
                 idx += 1;
             }
             idx += (pass_idx as usize * self.num_groups) + group_idx as usize;
-            (self.offsets[idx], self.sizes[idx])
+            self.group(idx)
         }
     }
 
@@ -150,11 +184,15 @@ impl Bundle<&crate::FrameHeader> for Toc {
         let sizes = (0..entry_count)
             .map(|_| read_bits!(bitstream, U32(u(10), 1024 + u(14), 17408 + u(22), 4211712 + u(30))))
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        bitstream.zero_pad_to_byte()?;
+
         let mut offsets = Vec::with_capacity(sizes.len());
-        let mut acc = 0u64;
+        let mut acc = bitstream.bookmark();
+        let mut total_size = 0u64;
         for &size in &sizes {
             offsets.push(acc);
-            acc += size as u64;
+            acc += size as u64 * 8;
+            total_size += size as u64;
         }
 
         let section_kinds = if entry_count == 1 {
@@ -176,33 +214,29 @@ impl Bundle<&crate::FrameHeader> for Toc {
             out
         };
 
-        let (sizes, offsets, linear_groups) = if permutated_toc {
-            let mut new_sizes = Vec::with_capacity(sizes.len());
-            let mut new_offsets = Vec::with_capacity(offsets.len());
-            let mut new_section_kinds = vec![TocGroupKind::All; section_kinds.len()];
-            for (section_kind, idx) in section_kinds.into_iter().zip(permutation) {
-                new_sizes.push(sizes[idx]);
-                new_offsets.push(offsets[idx]);
-                new_section_kinds[idx] = section_kind;
-            }
-            let linear_groups = new_section_kinds.into_iter().zip(sizes.iter().copied()).collect();
-            (new_sizes, new_offsets, linear_groups)
+        let groups = sizes
+            .into_iter()
+            .zip(offsets)
+            .zip(section_kinds)
+            .map(|((size, offset), kind)| TocGroup {
+                kind,
+                offset,
+                size,
+            })
+            .collect::<Vec<_>>();
+        let bitstream_order = if permutated_toc {
+            permutation
         } else {
-            let linear_groups = section_kinds.into_iter().zip(sizes.iter().copied()).collect();
-            (sizes, offsets, linear_groups)
+            Vec::new()
         };
 
-        bitstream.zero_pad_to_byte()?;
-        let bookmark = bitstream.bookmark();
         Ok(Self {
-            bookmark,
             num_lf_groups: ctx.num_lf_groups() as usize,
             num_groups: num_groups as usize,
             has_hf_global: entry_count > 1 && has_hf_global,
-            sizes,
-            offsets,
-            linear_groups,
-            total_size: acc,
+            groups,
+            bitstream_order,
+            total_size,
         })
     }
 }

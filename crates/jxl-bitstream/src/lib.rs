@@ -45,6 +45,20 @@ pub struct Bitstream<R> {
 #[derive(Debug, Copy, Clone)]
 pub struct Bookmark(u64);
 
+impl std::ops::Add<u64> for Bookmark {
+    type Output = Bookmark;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Bookmark(self.0 + rhs)
+    }
+}
+
+impl std::ops::AddAssign<u64> for Bookmark {
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 += rhs;
+    }
+}
+
 impl<R> std::fmt::Debug for Bitstream<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
@@ -217,29 +231,51 @@ impl<R: Read> Bitstream<R> {
     pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> std::result::Result<B, B::Error> {
         B::parse(self, ctx)
     }
-}
 
-impl<R: Read + Seek> Bitstream<R> {
-    pub fn seek_to_bookmark(&mut self, bookmark: Bookmark) -> Result<()> {
-        let byte_offset = bookmark.0 / 8;
-        let bit_offset = bookmark.0 % 8;
-
-        self.buf_valid_len = 0;
-        self.buf_offset = 0;
-        self.current = 0;
-        self.bits_left = 0;
-
-        self.reader.seek(std::io::SeekFrom::Start(byte_offset))?;
-        self.global_pos = byte_offset * 8;
-        self.read_bits(bit_offset as u32)?;
-
+    pub fn skip_to_bookmark(&mut self, Bookmark(target): Bookmark) -> Result<()> {
+        let Some(mut diff) = target.checked_sub(self.global_pos) else {
+            return Err(Error::CannotSkip);
+        };
+        while diff > 0 {
+            let bits = diff.min(4096 * 8);
+            self.read_bits(bits as u32)?;
+            diff -= bits;
+        }
         Ok(())
     }
 
-    pub fn seek_to_bookmark_and_offset(&mut self, bookmark: Bookmark, offset: u64) -> Result<()> {
-        let final_offset = bookmark.0 + offset;
-        let byte_offset = final_offset / 8;
-        let bit_offset = final_offset % 8;
+    pub fn read_bytes_aligned(&mut self, mut buf: &mut [u8]) -> Result<()> {
+        if self.global_pos % 8 != 0 {
+            return Err(Error::NotAligned);
+        }
+        let direct_read_bytes = ((buf.len() as u64 * 8).min(self.bits_left as u64) / 8) as usize;
+        for b in &mut buf[0..direct_read_bytes] {
+            *b = self.read_bits_inner(8) as u8;
+        }
+        buf = &mut buf[direct_read_bytes..];
+        if buf.is_empty() {
+            return Ok(());
+        }
+
+        let byte_copy_len = self.left_in_buffer().len().min(buf.len());
+        buf[..byte_copy_len].copy_from_slice(&self.left_in_buffer()[..byte_copy_len]);
+        self.buf_offset += byte_copy_len;
+        self.global_pos += byte_copy_len as u64 * 8;
+        buf = &mut buf[byte_copy_len..];
+        if buf.is_empty() {
+            return Ok(());
+        }
+
+        self.reader.read_exact(buf)?;
+        self.global_pos += buf.len() as u64 * 8;
+        Ok(())
+    }
+}
+
+impl<R: Read + Seek> Bitstream<R> {
+    pub fn seek_to_bookmark(&mut self, Bookmark(target): Bookmark) -> Result<()> {
+        let byte_offset = target / 8;
+        let bit_offset = target % 8;
 
         self.buf_valid_len = 0;
         self.buf_offset = 0;
