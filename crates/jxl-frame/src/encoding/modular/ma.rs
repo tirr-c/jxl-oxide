@@ -34,10 +34,9 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
             nodes_left -= 1;
             let property = tree_decoder.read_varint(bitstream, 1)?;
             let node = if let Some(property) = property.checked_sub(1) {
-                let property = MaProperty::try_from(property)?;
                 let value = unpack_signed(tree_decoder.read_varint(bitstream, 0)?);
                 let node = MaTreeNode::Decision {
-                    property,
+                    property: property as usize,
                     value,
                     left_idx: nodes.len() + nodes_left + 1,
                     right_idx: nodes.len() + nodes_left + 2,
@@ -100,7 +99,7 @@ struct MaTree {
 #[derive(Debug)]
 enum MaTreeNode {
     Decision {
-        property: MaProperty,
+        property: usize,
         value: i32,
         left_idx: usize,
         right_idx: usize,
@@ -111,61 +110,4 @@ enum MaTreeNode {
         offset: i32,
         multiplier: u32,
     },
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-#[repr(u8)]
-enum MaProperty {
-    ChannelIndex = 0,
-    StreamIndex,
-    Y,
-    X,
-    /// abs(N)
-    AbsN,
-    /// abs(W)
-    AbsW,
-    N,
-    W,
-    /// if x > 0, then W - (W + N - NW), else W
-    WsProp9,
-    /// W + N - NW
-    WpNsNw,
-    /// W - NW
-    WsNw,
-    /// NW - N
-    NwsN,
-    /// N - NE
-    NsNe,
-    /// N - NN
-    NsNn,
-    /// W - WW
-    WsWw,
-    MaxError,
-}
-
-impl TryFrom<u32> for MaProperty {
-    type Error = jxl_bitstream::Error;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        use MaProperty::*;
-        Ok(match value {
-            0 => ChannelIndex,
-            1 => StreamIndex,
-            2 => Y,
-            3 => X,
-            4 => AbsN,
-            5 => AbsW,
-            6 => N,
-            7 => W,
-            8 => WsProp9,
-            9 => WpNsNw,
-            10 => WsNw,
-            11 => NwsN,
-            12 => NsNe,
-            13 => NsNn,
-            14 => WsWw,
-            15 => MaxError,
-            _ => return Err(jxl_bitstream::Error::InvalidEnum { name: "MaProperty", value }),
-        })
-    }
 }
