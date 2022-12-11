@@ -62,7 +62,7 @@ impl Frame<'_> {
                 let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
 
                 let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
-                self.data.lf_global(lf_global);
+                self.data.set_lf_global(lf_global);
                 // self.read_group(bitstream, TocGroupKind::LfGroup(0))?;
                 if has_hf_global {
                     // self.read_group(bitstream, TocGroupKind::HfGlobal)?;
@@ -72,23 +72,36 @@ impl Frame<'_> {
             },
             TocGroupKind::LfGlobal => {
                 let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
-                self.data.lf_global(lf_global);
+                self.data.set_lf_global(lf_global);
                 self.try_pending_blocks()?;
                 Ok(())
             },
             TocGroupKind::LfGroup(lf_group_idx) => {
+                let Some(lf_global) = self.data.lf_global() else {
+                    let mut buf = vec![0u8; group.size as usize];
+                    bitstream.read_bytes_aligned(&mut buf)?;
+                    self.pending_groups.insert(group.kind, buf);
+                    return Ok(());
+                };
                 let lf_group = todo!();
-                self.data.lf_group(lf_group_idx, lf_group);
+                self.data.set_lf_group(lf_group_idx, lf_group);
                 Ok(())
             },
             TocGroupKind::HfGlobal => {
                 let hf_global = todo!();
-                self.data.hf_global(hf_global);
+                self.data.set_hf_global(hf_global);
+                self.try_pending_blocks()?;
                 Ok(())
             },
             TocGroupKind::GroupPass { pass_idx, group_idx } => {
+                let (Some(lf_global), Some(hf_global)) = (self.data.lf_global(), self.data.hf_global()) else {
+                    let mut buf = vec![0u8; group.size as usize];
+                    bitstream.read_bytes_aligned(&mut buf)?;
+                    self.pending_groups.insert(group.kind, buf);
+                    return Ok(());
+                };
                 let group_pass = todo!();
-                self.data.group_pass(pass_idx, group_idx, group_pass);
+                self.data.set_group_pass(pass_idx, group_idx, group_pass);
                 Ok(())
             },
         }
@@ -113,6 +126,7 @@ pub enum FrameData {
         group_pass: BTreeMap<(u32, u32), PassGroup>,
     },
     Complete {
+        num_groups: usize,
         lf_global: LfGlobal,
         lf_group: Vec<LfGroup>,
         hf_global: Option<HfGlobal>,
@@ -137,7 +151,14 @@ impl FrameData {
         }
     }
 
-    fn lf_global(&mut self, lf_global: LfGlobal) -> &mut Self {
+    fn lf_global(&self) -> Option<&LfGlobal> {
+        match self {
+            Self::Partial { lf_global, .. } => lf_global.as_ref(),
+            Self::Complete { lf_global, .. } => Some(lf_global),
+        }
+    }
+
+    fn set_lf_global(&mut self, lf_global: LfGlobal) -> &mut Self {
         let Self::Partial { lf_global: target @ None, .. } = self else {
             panic!()
         };
@@ -145,7 +166,14 @@ impl FrameData {
         self
     }
 
-    fn lf_group(&mut self, lf_group_idx: u32, lf_group: LfGroup) -> &mut Self {
+    fn lf_group(&self, lf_group_idx: u32) -> Option<&LfGroup> {
+        match self {
+            Self::Partial { lf_group, .. } => lf_group.get(&lf_group_idx),
+            Self::Complete { lf_group, .. } => lf_group.get(lf_group_idx as usize),
+        }
+    }
+
+    fn set_lf_group(&mut self, lf_group_idx: u32, lf_group: LfGroup) -> &mut Self {
         let Self::Partial { lf_group: target, .. } = self else {
             panic!()
         };
@@ -153,7 +181,14 @@ impl FrameData {
         self
     }
 
-    fn hf_global(&mut self, hf_global: HfGlobal) -> &mut Self {
+    fn hf_global(&self) -> Option<Option<&HfGlobal>> {
+        match self {
+            Self::Partial { hf_global, .. } => hf_global.as_ref().map(|x| x.as_ref()),
+            Self::Complete { hf_global, .. } => Some(hf_global.as_ref()),
+        }
+    }
+
+    fn set_hf_global(&mut self, hf_global: HfGlobal) -> &mut Self {
         let Self::Partial { hf_global: target @ None, .. } = self else {
             panic!()
         };
@@ -161,7 +196,16 @@ impl FrameData {
         self
     }
 
-    fn group_pass(&mut self, pass_idx: u32, group_idx: u32, group_pass: PassGroup) -> &mut Self {
+    fn group_pass(&self, pass_idx: u32, group_idx: u32) -> Option<&PassGroup> {
+        match self {
+            Self::Partial { group_pass, .. } => group_pass.get(&(pass_idx, group_idx)),
+            Self::Complete { num_groups, group_pass, .. } => {
+                group_pass.get(pass_idx as usize * *num_groups + group_idx as usize)
+            },
+        }
+    }
+
+    fn set_group_pass(&mut self, pass_idx: u32, group_idx: u32, group_pass: PassGroup) -> &mut Self {
         let Self::Partial { group_pass: target, .. } = self else {
             panic!()
         };
@@ -200,6 +244,7 @@ impl FrameData {
             .into_values()
             .collect();
         *self = Self::Complete {
+            num_groups,
             lf_global,
             lf_group,
             hf_global,
