@@ -301,7 +301,11 @@ pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u
         (num_clusters, ret)
     } else {
         let use_mtf = read_bits!(bitstream, Bool)?;
-        let mut decoder = Decoder::parse_assume_no_lz77(bitstream, 1)?;
+        let mut decoder = if num_dist <= 2 {
+            Decoder::parse_assume_no_lz77(bitstream, 1)?
+        } else {
+            Decoder::parse(bitstream, 1)?
+        };
         let mut ret = (0..num_dist)
             .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
             .collect::<Result<Vec<_>>>()?;
