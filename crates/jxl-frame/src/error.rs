@@ -8,6 +8,8 @@ pub enum Error {
     },
     InvalidMaTree,
     GlobalMaTreeNotAvailable,
+    InvalidPaletteParams,
+    InvalidSqueezeParams,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -31,6 +33,8 @@ impl std::fmt::Display for Error {
             Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
             Self::InvalidMaTree => write!(f, "invalid meta-adaptive tree"),
             Self::GlobalMaTreeNotAvailable => write!(f, "global meta-adaptive tree not available"),
+            Self::InvalidPaletteParams => write!(f, "invalid Palette transform parameters"),
+            Self::InvalidSqueezeParams => write!(f, "invalid Squeeze transform parameters"),
         }
     }
 }

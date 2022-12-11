@@ -13,20 +13,20 @@ pub use ma::{MaConfig, MaContext};
 pub struct Modular {
     header: ModularHeader,
     ma_ctx: ma::MaContext,
-    channels: Vec<ModularChannelInfo>,
+    channels: ModularChannels,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct ModularParams<'a> {
-    pub channels: u32,
     pub width: u32,
     pub height: u32,
+    pub channel_shifts: Vec<i32>,
     pub gmodular: &'a GlobalModular,
 }
 
 impl<'a> ModularParams<'a> {
-    pub fn new(channels: u32, width: u32, height: u32, gmodular: &'a GlobalModular) -> Self {
-        Self { channels, width, height, gmodular }
+    pub fn new(width: u32, height: u32, channel_shifts: Vec<i32>, gmodular: &'a GlobalModular) -> Self {
+        Self { width, height, channel_shifts, gmodular }
     }
 }
 
@@ -37,14 +37,18 @@ impl Bundle<(ModularParams<'_>, &Headers, &FrameHeader)> for Modular {
         bitstream: &mut Bitstream<R>,
         (params, image_header, frame_header): (ModularParams<'_>, &Headers, &FrameHeader),
     ) -> std::result::Result<Self, Self::Error> {
-        let header = read_bits!(bitstream, Bundle(ModularHeader))?;
+        let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         let ma_ctx = if header.use_global_tree {
             params.gmodular.make_context().ok_or(crate::Error::GlobalMaTreeNotAvailable)?
         } else {
             read_bits!(bitstream, Bundle(ma::MaConfig))?.into()
         };
-        // TODO
-        let channels = Vec::new();
+
+        let mut channels = ModularChannels::from_params(&params);
+        for transform in &mut header.transform {
+            transform.or_default(&mut channels);
+            transform.transform_channel_info(&mut channels)?;
+        }
 
         Ok(Self {
             header,
@@ -65,5 +69,40 @@ define_bundle! {
 }
 
 #[derive(Debug)]
+struct ModularChannels {
+    info: Vec<ModularChannelInfo>,
+    nb_meta_channels: u32,
+}
+
+impl ModularChannels {
+    fn from_params(params: &ModularParams<'_>) -> Self {
+        let width = params.width;
+        let height = params.height;
+        let info = params.channel_shifts.iter()
+            .map(|&shift| ModularChannelInfo::new(width, height, shift))
+            .collect();
+        Self {
+            info,
+            nb_meta_channels: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ModularChannelInfo {
+    width: u32,
+    height: u32,
+    hshift: i32,
+    vshift: i32,
+}
+
+impl ModularChannelInfo {
+    fn new(width: u32, height: u32, shift: i32) -> Self {
+        Self {
+            width,
+            height,
+            hshift: shift,
+            vshift: shift,
+        }
+    }
 }

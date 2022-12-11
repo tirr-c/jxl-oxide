@@ -61,7 +61,8 @@ impl Frame<'_> {
             TocGroupKind::All => {
                 let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
 
-                // self.read_group(bitstream, TocGroupKind::LfGlobal)?;
+                let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
+                self.data.lf_global(lf_global);
                 // self.read_group(bitstream, TocGroupKind::LfGroup(0))?;
                 if has_hf_global {
                     // self.read_group(bitstream, TocGroupKind::HfGlobal)?;
