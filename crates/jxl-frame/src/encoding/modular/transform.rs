@@ -146,7 +146,7 @@ impl Squeeze {
             let SqueezeParams { horizontal, in_place, begin_c: begin, num_c } = *sp;
             let end = begin + num_c;
 
-            if end as usize >= channels.info.len() {
+            if end as usize > channels.info.len() {
                 return Err(Error::InvalidSqueezeParams);
             }
             if begin < channels.nb_meta_channels {
