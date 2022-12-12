@@ -11,6 +11,11 @@ pub use ma::{MaConfig, MaContext};
 
 #[derive(Debug)]
 pub struct Modular {
+    inner: Option<ModularData>,
+}
+
+#[derive(Debug)]
+struct ModularData {
     header: ModularHeader,
     ma_ctx: ma::MaContext,
     channels: ModularChannels,
@@ -80,6 +85,22 @@ impl<'a> ModularParams<'a> {
 }
 
 impl Bundle<ModularParams<'_>> for Modular {
+    type Error = crate::Error;
+
+    fn parse<R: Read>(
+        bitstream: &mut Bitstream<R>,
+        params: ModularParams<'_>,
+    ) -> Result<Self> {
+        let inner = if params.channel_shifts.is_empty() {
+            None
+        } else {
+            Some(read_bits!(bitstream, Bundle(ModularData), params)?)
+        };
+        Ok(Self { inner })
+    }
+}
+
+impl Bundle<ModularParams<'_>> for ModularData {
     type Error = crate::Error;
 
     fn parse<R: Read>(
