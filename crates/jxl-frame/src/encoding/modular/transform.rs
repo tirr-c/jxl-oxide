@@ -93,7 +93,7 @@ impl Palette {
         }
 
         channels.info.drain((begin_c as usize + 1)..(end_c as usize));
-        channels.info.insert(0, ModularChannelInfo::new(self.nb_colours, self.num_c, ChannelShift::NoShift));
+        channels.info.insert(0, ModularChannelInfo::new_shifted(self.nb_colours, self.num_c, -1, -1));
         Ok(())
     }
 }

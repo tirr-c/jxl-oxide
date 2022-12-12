@@ -229,7 +229,7 @@ impl FrameHeader {
     pub fn num_lf_groups(&self) -> u32 {
         let width = self.sample_width();
         let height = self.sample_height();
-        let lf_group_dim = self.group_dim() * 8;
+        let lf_group_dim = self.lf_group_dim();
 
         let hgroups = (width + lf_group_dim - 1) / lf_group_dim;
         let vgroups = (height + lf_group_dim - 1) / lf_group_dim;
@@ -239,6 +239,39 @@ impl FrameHeader {
 
     pub fn group_dim(&self) -> u32 {
         128 << self.group_size_shift
+    }
+
+    pub fn lf_group_dim(&self) -> u32 {
+        self.group_dim() * 8
+    }
+
+    pub fn group_size_at(&self, row: u32, col: u32) -> (u32, u32) {
+        self.size_at(self.group_dim(), row, col)
+    }
+
+    pub fn lf_group_size_at(&self, row: u32, col: u32) -> (u32, u32) {
+        self.size_at(self.lf_group_dim(), row, col)
+    }
+
+    fn size_at(&self, group_dim: u32, row: u32, col: u32) -> (u32, u32) {
+        let width = self.sample_width();
+        let height = self.sample_height();
+        let full_rows = height / group_dim;
+        let rows_remainder = height % group_dim;
+        let full_cols = width / group_dim;
+        let cols_remainder = width % group_dim;
+
+        let group_width = if col >= full_cols {
+            cols_remainder
+        } else {
+            group_dim
+        };
+        let group_height = if row >= full_rows {
+            rows_remainder
+        } else {
+            group_dim
+        };
+        (group_width, group_height)
     }
 }
 

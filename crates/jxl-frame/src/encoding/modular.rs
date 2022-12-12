@@ -33,12 +33,11 @@ pub struct ModularParams<'a> {
 pub enum ChannelShift {
     JpegUpsampling(bool, bool),
     Shifts(u32),
-    NoShift,
 }
 
 impl ChannelShift {
-    pub fn from_upsampling_factor(upsampling: u32) -> ChannelShift {
-        Self::Shifts(upsampling.next_power_of_two().trailing_zeros())
+    pub fn from_shift(shift: u32) -> ChannelShift {
+        Self::Shifts(shift)
     }
 
     pub fn from_upsampling_factor_and_shift(upsampling: u32, dim_shift: u32) -> ChannelShift {
@@ -60,7 +59,6 @@ impl ChannelShift {
         match self {
             Self::JpegUpsampling(h, _) => *h as i32,
             Self::Shifts(s) => *s as i32,
-            Self::NoShift => -1,
         }
     }
 
@@ -68,7 +66,6 @@ impl ChannelShift {
         match self {
             Self::JpegUpsampling(_, v) => *v as i32,
             Self::Shifts(s) => *s as i32,
-            Self::NoShift => -1,
         }
     }
 }
@@ -167,12 +164,29 @@ struct ModularChannelInfo {
 }
 
 impl ModularChannelInfo {
-    fn new(width: u32, height: u32, shift: ChannelShift) -> Self {
+    fn new(mut width: u32, mut height: u32, shift: ChannelShift) -> Self {
+        let hshift = shift.hshift();
+        let vshift = shift.vshift();
+        if hshift >= 0 {
+            width >>= hshift;
+        }
+        if vshift >= 0 {
+            height >>= vshift;
+        }
         Self {
             width,
             height,
-            hshift: shift.hshift(),
-            vshift: shift.vshift(),
+            hshift,
+            vshift,
+        }
+    }
+
+    fn new_shifted(width: u32, height: u32, hshift: i32, vshift: i32) -> Self {
+        Self {
+            width,
+            height,
+            hshift,
+            vshift,
         }
     }
 }

@@ -161,14 +161,12 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
         let mut shifts = Vec::new();
         if header.encoding == Encoding::Modular {
             if header.do_ycbcr {
-                shifts.extend(
-                    header.jpeg_upsampling
-                        .iter()
-                        .copied()
-                        .map(ChannelShift::from_jpeg_upsampling)
-                );
+                // Cb, Y, Cr
+                shifts.push(ChannelShift::from_jpeg_upsampling(header.jpeg_upsampling[1]));
+                shifts.push(ChannelShift::from_jpeg_upsampling(header.jpeg_upsampling[0]));
+                shifts.push(ChannelShift::from_jpeg_upsampling(header.jpeg_upsampling[2]));
             } else {
-                let shift = ChannelShift::from_upsampling_factor(header.upsampling);
+                let shift = ChannelShift::from_shift(0);
                 let is_single_channel = !image_header.metadata.xyb_encoded && image_header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
                 let channels = if is_single_channel { 3 } else { 1 };
                 shifts.extend(std::iter::repeat(shift).take(channels));
@@ -181,7 +179,7 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
             shifts.push(shift);
         }
 
-        let modular_params = ModularParams::new(header.width, header.height, shifts, ma_config.as_ref());
+        let modular_params = ModularParams::new(header.sample_width(), header.sample_height(), shifts, ma_config.as_ref());
         let modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
 
         Ok(Self {
