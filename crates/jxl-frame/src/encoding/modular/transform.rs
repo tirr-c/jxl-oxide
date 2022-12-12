@@ -1,6 +1,7 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
 use crate::{Error, Result};
+use super::{ChannelShift, ModularChannelInfo};
 
 #[derive(Debug)]
 pub enum TransformInfo {
@@ -92,7 +93,7 @@ impl Palette {
         }
 
         channels.info.drain((begin_c as usize + 1)..(end_c as usize));
-        channels.info.insert(0, super::ModularChannelInfo::new(self.nb_colours, self.num_c, -1));
+        channels.info.insert(0, ModularChannelInfo::new(self.nb_colours, self.num_c, ChannelShift::NoShift));
         Ok(())
     }
 }

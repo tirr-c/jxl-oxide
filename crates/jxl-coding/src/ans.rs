@@ -8,7 +8,7 @@ use crate::{Error, Result};
 pub struct Histogram {
     dist: Vec<u16>,
     symbols: Vec<u16>,
-    offsets: Vec<u16>,
+    offsets: Vec<i16>,
     cutoffs: Vec<u16>,
     log_bucket_size: u32,
 }
@@ -55,7 +55,7 @@ impl Histogram {
                     break;
                 }
             }
-            let shift = (bitstream.read_bits(len)? + (1 << len) - 1) as u16;
+            let shift = (bitstream.read_bits(len)? + (1 << len) - 1) as i16;
             if shift > 13 {
                 return Err(Error::InvalidAnsHistogram);
             }
@@ -85,25 +85,40 @@ impl Histogram {
                         *data = Some((dist[idx], idx));
                     },
                 }
+                idx += 1;
             }
             let (_, omit_pos) = omit_data.unwrap();
             if dist.get(omit_pos + 1) == Some(&13) {
                 return Err(Error::InvalidAnsHistogram);
             }
 
+            let mut repeat_range_idx = 0usize;
             let mut acc = 0;
+            let mut prev_dist = 0u16;
             for (idx, code) in dist.iter_mut().enumerate() {
+                if repeat_range_idx < repeat_ranges.len() && repeat_ranges[repeat_range_idx].start <= idx {
+                    if repeat_ranges[repeat_range_idx].end == idx {
+                        repeat_range_idx += 1;
+                    } else {
+                        *code = prev_dist;
+                        continue;
+                    }
+                }
+
                 if *code == 0 {
+                    prev_dist = 0;
                     continue;
                 }
                 if idx == omit_pos {
+                    prev_dist = 0;
                     continue;
                 }
                 if *code > 1 {
-                    let zeros = *code - 1;
-                    let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
+                    let zeros = (*code - 1) as i16;
+                    let bitcount = (shift - ((12 - zeros) >> 1) as i16).clamp(0, zeros);
                     *code = (1 << zeros) + ((bitstream.read_bits(bitcount as u32)? as u16) << (zeros - bitcount));
                 }
+                prev_dist = *code;
                 acc += *code;
                 if acc > (1 << 12) {
                     return Err(Error::InvalidAnsHistogram);
@@ -114,7 +129,7 @@ impl Histogram {
 
         if let Some(single_sym_idx) = dist.iter().position(|&d| d == 1 << 12) {
             let symbols = vec![single_sym_idx as u16; table_size as usize];
-            let offsets = (0..table_size).map(|i| (bucket_size * i) as u16).collect();
+            let offsets = (0..table_size).map(|i| (bucket_size * i) as i16).collect();
             let cutoffs = vec![0u16; table_size as usize];
             return Ok(Self {
                 dist,
@@ -128,7 +143,7 @@ impl Histogram {
         let mut cutoffs = dist.clone();
         let mut symbols = (0..(alphabet_size as u16)).collect::<Vec<_>>();
         symbols.resize(table_size as usize, 0);
-        let mut offsets = vec![0u16; table_size as usize];
+        let mut offsets = vec![0i16; table_size as usize];
 
         let mut underfull = Vec::new();
         let mut overfull = Vec::new();
@@ -143,7 +158,7 @@ impl Histogram {
             let by = bucket_size - cutoffs[u];
             cutoffs[o] -= by;
             symbols[u] = o as u16;
-            offsets[u] = cutoffs[o];
+            offsets[u] = cutoffs[o] as i16;
             match cutoffs[o].cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(o),
                 std::cmp::Ordering::Equal => {},
@@ -157,7 +172,7 @@ impl Histogram {
                 offsets[idx] = 0;
                 cutoffs[idx] = 0;
             } else {
-                offsets[idx] -= cutoffs[idx];
+                offsets[idx] -= cutoffs[idx] as i16;
             }
         }
 
@@ -185,7 +200,7 @@ impl Histogram {
         let i = (idx >> self.log_bucket_size) as usize;
         let pos = idx & ((1 << self.log_bucket_size) - 1);
         if pos >= self.cutoffs[i] {
-            (self.symbols[i], self.offsets[i] + pos)
+            (self.symbols[i], (self.offsets[i] + pos as i16) as u16)
         } else {
             (i as u16, pos)
         }

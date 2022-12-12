@@ -1,6 +1,11 @@
-use jxl_bitstream::{define_bundle, read_bits, header::Headers, Bitstream, Bundle};
+use jxl_bitstream::{define_bundle, read_bits, header::{Headers, ColourSpace}, Bitstream, Bundle};
 
-use crate::{FrameHeader, Result};
+use crate::{
+    FrameHeader,
+    Result,
+    header::Encoding,
+    encoding::{modular::ChannelShift, Modular, ModularParams},
+};
 
 mod noise;
 mod patch;
@@ -137,6 +142,7 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
 #[derive(Debug)]
 pub struct GlobalModular {
     ma_config: Option<crate::encoding::modular::MaConfig>,
+    modular: Modular,
 }
 
 impl GlobalModular {
@@ -149,7 +155,39 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
     type Error = crate::Error;
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&Headers, &FrameHeader)) -> Result<Self> {
-        todo!()
+        let ma_config = bitstream.read_bool()?
+            .then(|| read_bits!(bitstream, Bundle(crate::encoding::modular::MaConfig)))
+            .transpose()?;
+        let mut shifts = Vec::new();
+        if header.encoding == Encoding::Modular {
+            if header.do_ycbcr {
+                shifts.extend(
+                    header.jpeg_upsampling
+                        .iter()
+                        .copied()
+                        .map(ChannelShift::from_jpeg_upsampling)
+                );
+            } else {
+                let shift = ChannelShift::from_upsampling_factor(header.upsampling);
+                let is_single_channel = !image_header.metadata.xyb_encoded && image_header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
+                let channels = if is_single_channel { 3 } else { 1 };
+                shifts.extend(std::iter::repeat(shift).take(channels));
+            }
+        }
+
+        for (&ec_upsampling, ec_info) in header.ec_upsampling.iter().zip(image_header.metadata.ec_info.iter()) {
+            let dim_shift = ec_info.dim_shift;
+            let shift = ChannelShift::from_upsampling_factor_and_shift(ec_upsampling, dim_shift);
+            shifts.push(shift);
+        }
+
+        let modular_params = ModularParams::new(header.width, header.height, shifts, ma_config.as_ref());
+        let modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
+
+        Ok(Self {
+            ma_config,
+            modular,
+        })
     }
 }
 

@@ -1,5 +1,5 @@
 use jxl_bitstream::{header::Headers, read_bits};
-use jxl_frame::{FrameHeader, Toc};
+use jxl_frame::Frame;
 
 fn main() {
     let file = std::fs::File::open("input.jxl").expect("Failed to open file");
@@ -33,11 +33,10 @@ fn main() {
     if headers.metadata.have_preview {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
-        let preview_frame_header = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
-        dbg!(&preview_frame_header);
-        let toc = read_bits!(bitstream, Bundle(Toc), &preview_frame_header).expect("Failed to read TOC");
-        dbg!(&toc);
+        let frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
+        dbg!(&frame);
 
+        let toc = frame.toc();
         let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
         bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
     }
@@ -45,14 +44,17 @@ fn main() {
     loop {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
-        let frame_header = read_bits!(bitstream, Bundle(FrameHeader), &headers).expect("Failed to read frame header");
-        dbg!(&frame_header);
-        let toc = read_bits!(bitstream, Bundle(Toc), &frame_header).expect("Failed to read TOC");
-        dbg!(&toc);
+        let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
 
-        if frame_header.is_last {
+        let toc_lf_global = frame.toc().lf_global();
+        frame.read_group(&mut bitstream, toc_lf_global).expect("Failed to read LfGlobal");
+        dbg!(&frame);
+
+        if frame.header().is_last {
             break;
         }
+
+        let toc = frame.toc();
         let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
         bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
     }

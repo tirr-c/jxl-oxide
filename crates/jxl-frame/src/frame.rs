@@ -55,7 +55,7 @@ impl Frame<'_> {
         todo!()
     }
 
-    fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
+    pub fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
         bitstream.skip_to_bookmark(group.offset)?;
         match group.kind {
             TocGroupKind::All => {

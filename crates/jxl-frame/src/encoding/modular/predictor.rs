@@ -4,6 +4,17 @@ define_bundle! {
     #[derive(Debug)]
     pub struct WpHeader error(crate::Error) {
         default_wp: ty(Bool) default(true),
+        wp_p1: ty(u(5)) cond(!default_wp) default(16),
+        wp_p2: ty(u(5)) cond(!default_wp) default(10),
+        wp_p3a: ty(u(5)) cond(!default_wp) default(7),
+        wp_p3b: ty(u(5)) cond(!default_wp) default(7),
+        wp_p3c: ty(u(5)) cond(!default_wp) default(7),
+        wp_p3d: ty(u(5)) cond(!default_wp) default(0),
+        wp_p3e: ty(u(5)) cond(!default_wp) default(0),
+        wp_w0: ty(u(4)) cond(!default_wp) default(13),
+        wp_w1: ty(u(4)) cond(!default_wp) default(12),
+        wp_w2: ty(u(4)) cond(!default_wp) default(12),
+        wp_w3: ty(u(4)) cond(!default_wp) default(12),
     }
 }
 

@@ -1,8 +1,8 @@
 use std::io::Read;
 
-use jxl_bitstream::{define_bundle, read_bits, header::Headers, Bitstream, Bundle};
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
-use crate::{FrameHeader, Result, frame_data::GlobalModular};
+use crate::{Result, frame_data::GlobalModular};
 
 mod ma;
 mod predictor;
@@ -20,26 +20,75 @@ pub struct Modular {
 pub struct ModularParams<'a> {
     pub width: u32,
     pub height: u32,
-    pub channel_shifts: Vec<i32>,
-    pub gmodular: &'a GlobalModular,
+    pub channel_shifts: Vec<ChannelShift>,
+    pub ma_config: Option<&'a MaConfig>,
 }
 
-impl<'a> ModularParams<'a> {
-    pub fn new(width: u32, height: u32, channel_shifts: Vec<i32>, gmodular: &'a GlobalModular) -> Self {
-        Self { width, height, channel_shifts, gmodular }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelShift {
+    JpegUpsampling(bool, bool),
+    Shifts(u32),
+    NoShift,
+}
+
+impl ChannelShift {
+    pub fn from_upsampling_factor(upsampling: u32) -> ChannelShift {
+        Self::Shifts(upsampling.next_power_of_two().trailing_zeros())
+    }
+
+    pub fn from_upsampling_factor_and_shift(upsampling: u32, dim_shift: u32) -> ChannelShift {
+        Self::Shifts(upsampling.next_power_of_two().trailing_zeros() + dim_shift)
+    }
+
+    pub fn from_jpeg_upsampling(jpeg_upsampling: u32) -> Self {
+        let (h, v) = match jpeg_upsampling {
+            0 => (false, false),
+            1 => (true, true),
+            2 => (true, false),
+            3 => (false, true),
+            _ => panic!("Invalid jpeg_upsampling value of {}", jpeg_upsampling),
+        };
+        Self::JpegUpsampling(h, v)
+    }
+
+    fn hshift(&self) -> i32 {
+        match self {
+            Self::JpegUpsampling(h, _) => *h as i32,
+            Self::Shifts(s) => *s as i32,
+            Self::NoShift => -1,
+        }
+    }
+
+    fn vshift(&self) -> i32 {
+        match self {
+            Self::JpegUpsampling(_, v) => *v as i32,
+            Self::Shifts(s) => *s as i32,
+            Self::NoShift => -1,
+        }
     }
 }
 
-impl Bundle<(ModularParams<'_>, &Headers, &FrameHeader)> for Modular {
+impl<'a> ModularParams<'a> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        channel_shifts: Vec<ChannelShift>,
+        ma_config: Option<&'a MaConfig>,
+    ) -> Self {
+        Self { width, height, channel_shifts, ma_config }
+    }
+}
+
+impl Bundle<ModularParams<'_>> for Modular {
     type Error = crate::Error;
 
     fn parse<R: Read>(
         bitstream: &mut Bitstream<R>,
-        (params, image_header, frame_header): (ModularParams<'_>, &Headers, &FrameHeader),
-    ) -> std::result::Result<Self, Self::Error> {
+        params: ModularParams<'_>,
+    ) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         let ma_ctx = if header.use_global_tree {
-            params.gmodular.make_context().ok_or(crate::Error::GlobalMaTreeNotAvailable)?
+            params.ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.make_context()
         } else {
             read_bits!(bitstream, Bundle(ma::MaConfig))?.into()
         };
@@ -97,12 +146,12 @@ struct ModularChannelInfo {
 }
 
 impl ModularChannelInfo {
-    fn new(width: u32, height: u32, shift: i32) -> Self {
+    fn new(width: u32, height: u32, shift: ChannelShift) -> Self {
         Self {
             width,
             height,
-            hshift: shift,
-            vshift: shift,
+            hshift: shift.hshift(),
+            vshift: shift.vshift(),
         }
     }
 }
