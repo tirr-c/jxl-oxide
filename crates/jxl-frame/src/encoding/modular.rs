@@ -2,7 +2,7 @@ use std::io::Read;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
-use crate::{Result, frame_data::GlobalModular};
+use crate::{Grid, Result};
 
 mod ma;
 mod predictor;
@@ -138,6 +138,7 @@ define_bundle! {
 #[derive(Debug)]
 struct ModularChannels {
     info: Vec<ModularChannelInfo>,
+    grids: Vec<Grid<u32>>,
     nb_meta_channels: u32,
 }
 
@@ -150,8 +151,13 @@ impl ModularChannels {
             .collect();
         Self {
             info,
+            grids: Vec::new(),
             nb_meta_channels: 0,
         }
+    }
+
+    fn init_grids(&mut self) {
+        todo!()
     }
 }
 
