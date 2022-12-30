@@ -80,7 +80,7 @@ impl Palette {
     fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
         let begin_c = self.begin_c;
         let end_c = begin_c + self.num_c;
-        if end_c as usize >= channels.info.len() {
+        if end_c as usize > channels.info.len() {
             return Err(Error::InvalidPaletteParams);
         }
         if begin_c < channels.nb_meta_channels {

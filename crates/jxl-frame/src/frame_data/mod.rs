@@ -41,6 +41,7 @@ impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
             read_bits!(bitstream, Bundle(LfGlobalVarDct))
         }).transpose()?;
         let gmodular = read_bits!(bitstream, Bundle(GlobalModular), (image_header, header))?;
+
         Ok(Self {
             patches,
             splines,
@@ -168,7 +169,7 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
             } else {
                 let shift = ChannelShift::from_shift(0);
                 let is_single_channel = !image_header.metadata.xyb_encoded && image_header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
-                let channels = if is_single_channel { 3 } else { 1 };
+                let channels = if is_single_channel { 1 } else { 3 };
                 shifts.extend(std::iter::repeat(shift).take(channels));
             }
         }
@@ -179,8 +180,10 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
             shifts.push(shift);
         }
 
-        let modular_params = ModularParams::new(header.sample_width(), header.sample_height(), shifts, ma_config.as_ref());
-        let modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
+        let group_dim = header.group_dim();
+        let modular_params = ModularParams::new(header.sample_width(), header.sample_height(), group_dim, shifts, ma_config.as_ref());
+        let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
+        modular.decode_image_gmodular(bitstream)?;
 
         Ok(Self {
             ma_config,

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
 
+use crate::{Result, Error};
 use super::predictor::Predictor;
 
 #[derive(Debug, Clone)]
@@ -56,12 +57,12 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
                     return Err(crate::Error::InvalidMaTree);
                 }
                 let multiplier = (mul_bits + 1) << mul_log;
-                let node = MaTreeNode::Leaf {
+                let node = MaTreeNode::Leaf(MaTreeLeaf {
                     ctx,
                     predictor,
                     offset,
                     multiplier,
-                };
+                });
                 ctx += 1;
                 node
             };
@@ -91,6 +92,20 @@ impl From<MaConfig> for MaContext {
     }
 }
 
+impl MaContext {
+    pub fn decode_sample<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        properties: &[i32],
+        dist_multiplier: u32,
+    ) -> Result<(i32, super::predictor::Predictor)> {
+        let leaf = self.tree.get_leaf(properties)?;
+        let diff = self.decoder.read_varint_with_multiplier(bitstream, leaf.ctx, dist_multiplier)?;
+        let diff = unpack_signed(diff) * leaf.multiplier as i32 + leaf.offset;
+        Ok((diff, leaf.predictor))
+    }
+}
+
 #[derive(Debug)]
 struct MaTree {
     nodes: Vec<MaTreeNode>,
@@ -104,10 +119,35 @@ enum MaTreeNode {
         left_idx: usize,
         right_idx: usize,
     },
-    Leaf {
-        ctx: u32,
-        predictor: super::predictor::Predictor,
-        offset: i32,
-        multiplier: u32,
-    },
+    Leaf(MaTreeLeaf),
+}
+
+#[derive(Debug)]
+struct MaTreeLeaf {
+    ctx: u32,
+    predictor: super::predictor::Predictor,
+    offset: i32,
+    multiplier: u32,
+}
+
+impl MaTree {
+    fn get_leaf(&self, properties: &[i32]) -> Result<&MaTreeLeaf> {
+        let mut current_node = &self.nodes[0];
+        loop {
+            match current_node {
+                &MaTreeNode::Decision { property, value, left_idx, right_idx } => {
+                    let prop_value = properties
+                        .get(property)
+                        .copied()
+                        .ok_or(Error::PropertyNotFound {
+                            num_properties: properties.len(),
+                            property_ref: property,
+                        })?;
+                    let next_node = if prop_value > value { left_idx } else { right_idx };
+                    current_node = &self.nodes[next_node];
+                },
+                MaTreeNode::Leaf(leaf) => return Ok(leaf),
+            }
+        }
+    }
 }

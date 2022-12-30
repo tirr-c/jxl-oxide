@@ -124,7 +124,7 @@ impl<R: Read> Bitstream<R> {
 
         let mut buf_current = [0u8; 8];
         let buf_to_read = std::cmp::min(buf_left.len(), 8);
-        buf_current.copy_from_slice(&buf_left[..buf_to_read]);
+        buf_current[..buf_to_read].copy_from_slice(&buf_left[..buf_to_read]);
 
         self.buf_offset += buf_to_read;
         self.current = u64::from_le_bytes(buf_current);
