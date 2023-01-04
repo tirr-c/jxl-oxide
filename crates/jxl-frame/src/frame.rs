@@ -108,7 +108,8 @@ impl Frame<'_> {
     }
 
     fn try_pending_blocks(&mut self) -> Result<()> {
-        todo!()
+        // TODO: parse pending blocks
+        Ok(())
     }
 
     pub fn complete(&mut self) -> Result<()> {

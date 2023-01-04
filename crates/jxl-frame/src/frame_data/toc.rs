@@ -10,7 +10,6 @@ use crate::Result;
 pub struct Toc {
     num_lf_groups: usize,
     num_groups: usize,
-    has_hf_global: bool,
     groups: Vec<TocGroup>,
     bitstream_order: Vec<usize>,
     total_size: u64,
@@ -22,7 +21,6 @@ impl std::fmt::Debug for Toc {
             .debug_struct("Toc")
             .field("num_lf_groups", &self.num_lf_groups)
             .field("num_groups", &self.num_groups)
-            .field("has_hf_global", &self.has_hf_global)
             .field("total_size", &self.total_size)
             .field(
                 "groups",
@@ -30,6 +28,13 @@ impl std::fmt::Debug for Toc {
                     "({} {})",
                     self.groups.len(),
                     if self.groups.len() == 1 { "entry" } else { "entries" },
+                ),
+            )
+            .field(
+                "bitstream_order",
+                &format_args!(
+                    "({})",
+                    if self.bitstream_order.is_empty() { "empty" } else { "non-empty" },
                 ),
             )
             .finish_non_exhaustive()
@@ -114,21 +119,14 @@ impl Toc {
     }
 
     pub fn hf_global(&self) -> TocGroup {
-        if self.has_hf_global {
-            self.group(self.num_lf_groups + 1)
-        } else {
-            panic!("this frame does not have HfGlobal offset");
-        }
+        self.group(self.num_lf_groups + 1)
     }
 
     pub fn pass_group(&self, pass_idx: u32, group_idx: u32) -> TocGroup {
         if self.is_single_entry() {
             panic!("cannot obtain PassGroup offset of single entry frame");
         } else {
-            let mut idx = 1 + self.num_lf_groups;
-            if self.has_hf_global {
-                idx += 1;
-            }
+            let mut idx = 1 + self.num_lf_groups + 1;
             idx += (pass_idx as usize * self.num_groups) + group_idx as usize;
             self.group(idx)
         }
@@ -145,12 +143,11 @@ impl Bundle<&crate::FrameHeader> for Toc {
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: &crate::FrameHeader) -> Result<Self> {
         let num_groups = ctx.num_groups();
         let num_passes = ctx.passes.num_passes;
-        let has_hf_global = ctx.encoding == crate::header::Encoding::VarDct;
 
         let entry_count = if num_groups == 1 && num_passes == 1 {
             1
         } else {
-            1 + ctx.num_lf_groups() + (has_hf_global as u32) + num_groups * num_passes
+            1 + ctx.num_lf_groups() + 1 + num_groups * num_passes
         };
 
         let permutated_toc = bitstream.read_bool()?;
@@ -203,9 +200,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
             for idx in 0..ctx.num_lf_groups() {
                 out.push(TocGroupKind::LfGroup(idx));
             }
-            if has_hf_global {
-                out.push(TocGroupKind::HfGlobal);
-            }
+            out.push(TocGroupKind::HfGlobal);
             for pass_idx in 0..num_passes {
                 for group_idx in 0..num_groups {
                     out.push(TocGroupKind::GroupPass { pass_idx, group_idx });
@@ -233,7 +228,6 @@ impl Bundle<&crate::FrameHeader> for Toc {
         Ok(Self {
             num_lf_groups: ctx.num_lf_groups() as usize,
             num_groups: num_groups as usize,
-            has_hf_global: entry_count > 1 && has_hf_global,
             groups,
             bitstream_order,
             total_size,

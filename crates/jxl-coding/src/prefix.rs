@@ -138,12 +138,12 @@ impl Histogram {
                     bitstream.read_bits(alphabet_bits)? as usize,
                     bitstream.read_bits(alphabet_bits)? as usize,
                 ];
-                let tree_selector = read_bits!(bitstream, Bool)?;
+                let tree_selector = bitstream.read_bool()?;
 
                 if tree_selector {
-                    syms.into_iter().zip([2u8, 2, 2, 2])
-                } else {
                     syms.into_iter().zip([1u8, 2, 3, 3])
+                } else {
+                    syms.into_iter().zip([2u8, 2, 2, 2])
                 }
             },
             _ => unreachable!(),

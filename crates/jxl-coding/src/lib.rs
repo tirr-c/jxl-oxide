@@ -291,7 +291,7 @@ pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u
         return Ok((1, vec![0u8]));
     }
 
-    Ok(if read_bits!(bitstream, Bool)? {
+    Ok(if bitstream.read_bool()? {
         // simple dist
         let nbits = bitstream.read_bits(2)?;
         let ret = (0..num_dist)
