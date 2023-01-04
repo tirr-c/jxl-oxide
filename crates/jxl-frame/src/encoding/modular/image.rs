@@ -8,12 +8,13 @@ use super::{ModularChannels, MaContext, predictor::{SelfCorrectingPredictor, WpH
 #[derive(Debug)]
 pub struct Image {
     group_dim: u32,
+    bit_depth: u32,
     channels: ModularChannels,
     data: Vec<Grid<i32>>,
 }
 
 impl Image {
-    pub(super) fn new(channels: ModularChannels, group_dim: u32) -> Self {
+    pub(super) fn new(channels: ModularChannels, group_dim: u32, bit_depth: u32) -> Self {
         let data = channels.info
             .iter()
             .map(|info| {
@@ -33,6 +34,7 @@ impl Image {
             .collect::<Vec<_>>();
         Self {
             group_dim,
+            bit_depth,
             channels,
             data,
         }
@@ -61,7 +63,7 @@ impl Image {
             let (prev, left) = channels.split_at_mut(idx);
             let (i, (info, ref mut grid)) = left[0];
 
-            let mut sc_predictor = SelfCorrectingPredictor::new(info, wp_header.clone());
+            let mut sc_predictor = SelfCorrectingPredictor::new(info.width, wp_header.clone());
             let width = grid.width();
             let height = grid.height();
 
@@ -125,6 +127,16 @@ impl Image {
 }
 
 impl Image {
+    pub fn group_dim(&self) -> u32 {
+        self.group_dim
+    }
+
+    pub fn bit_depth(&self) -> u32 {
+        self.bit_depth
+    }
+}
+
+impl Image {
     pub(super) fn for_global_modular(&self) -> (Image, Vec<SubimageChannelInfo>) {
         let group_dim = self.group_dim;
         let (channel_info, channel_mapping) = self.channels.info
@@ -142,7 +154,7 @@ impl Image {
             info: channel_info,
             nb_meta_channels: self.channels.nb_meta_channels,
         };
-        (Image::new(channels, group_dim), channel_mapping)
+        (Image::new(channels, group_dim, self.bit_depth), channel_mapping)
     }
 
     pub(super) fn copy_from_image(&mut self, subimage: Image, mapping: &[super::SubimageChannelInfo]) -> &mut Self {
@@ -151,5 +163,13 @@ impl Image {
             self.data[channel_id].insert_subgrid(grid, base_x as i32, base_y as i32);
         }
         self
+    }
+
+    pub(super) fn channel_data(&self) -> &[Grid<i32>] {
+        &self.data
+    }
+
+    pub(super) fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
+        &mut self.data
     }
 }

@@ -118,20 +118,11 @@ impl Frame<'_> {
 }
 
 #[derive(Debug)]
-pub enum FrameData {
-    Partial {
-        lf_global: Option<LfGlobal>,
-        lf_group: BTreeMap<u32, LfGroup>,
-        hf_global: Option<Option<HfGlobal>>,
-        group_pass: BTreeMap<(u32, u32), PassGroup>,
-    },
-    Complete {
-        num_groups: usize,
-        lf_global: LfGlobal,
-        lf_group: Vec<LfGroup>,
-        hf_global: Option<HfGlobal>,
-        group_pass: Vec<PassGroup>,
-    },
+pub struct FrameData {
+    lf_global: Option<LfGlobal>,
+    lf_group: BTreeMap<u32, LfGroup>,
+    hf_global: Option<Option<HfGlobal>>,
+    group_pass: BTreeMap<(u32, u32), PassGroup>,
 }
 
 impl FrameData {
@@ -143,7 +134,7 @@ impl FrameData {
             Some(None)
         };
 
-        Self::Partial {
+        Self {
             lf_global: None,
             lf_group: Default::default(),
             hf_global,
@@ -152,64 +143,38 @@ impl FrameData {
     }
 
     fn lf_global(&self) -> Option<&LfGlobal> {
-        match self {
-            Self::Partial { lf_global, .. } => lf_global.as_ref(),
-            Self::Complete { lf_global, .. } => Some(lf_global),
-        }
+        self.lf_global.as_ref()
     }
 
     fn set_lf_global(&mut self, lf_global: LfGlobal) -> &mut Self {
-        let Self::Partial { lf_global: target @ None, .. } = self else {
-            panic!()
-        };
-        *target = Some(lf_global);
+        self.lf_global = Some(lf_global);
         self
     }
 
     fn lf_group(&self, lf_group_idx: u32) -> Option<&LfGroup> {
-        match self {
-            Self::Partial { lf_group, .. } => lf_group.get(&lf_group_idx),
-            Self::Complete { lf_group, .. } => lf_group.get(lf_group_idx as usize),
-        }
+        self.lf_group.get(&lf_group_idx)
     }
 
     fn set_lf_group(&mut self, lf_group_idx: u32, lf_group: LfGroup) -> &mut Self {
-        let Self::Partial { lf_group: target, .. } = self else {
-            panic!()
-        };
-        target.entry(lf_group_idx).or_insert(lf_group);
+        self.lf_group.entry(lf_group_idx).or_insert(lf_group);
         self
     }
 
     fn hf_global(&self) -> Option<Option<&HfGlobal>> {
-        match self {
-            Self::Partial { hf_global, .. } => hf_global.as_ref().map(|x| x.as_ref()),
-            Self::Complete { hf_global, .. } => Some(hf_global.as_ref()),
-        }
+        self.hf_global.as_ref().map(|x| x.as_ref())
     }
 
     fn set_hf_global(&mut self, hf_global: HfGlobal) -> &mut Self {
-        let Self::Partial { hf_global: target @ None, .. } = self else {
-            panic!()
-        };
-        *target = Some(Some(hf_global));
+        self.hf_global = Some(Some(hf_global));
         self
     }
 
     fn group_pass(&self, pass_idx: u32, group_idx: u32) -> Option<&PassGroup> {
-        match self {
-            Self::Partial { group_pass, .. } => group_pass.get(&(pass_idx, group_idx)),
-            Self::Complete { num_groups, group_pass, .. } => {
-                group_pass.get(pass_idx as usize * *num_groups + group_idx as usize)
-            },
-        }
+        self.group_pass.get(&(pass_idx, group_idx))
     }
 
     fn set_group_pass(&mut self, pass_idx: u32, group_idx: u32, group_pass: PassGroup) -> &mut Self {
-        let Self::Partial { group_pass: target, .. } = self else {
-            panic!()
-        };
-        target.entry((pass_idx, group_idx)).or_insert(group_pass);
+        self.group_pass.entry((pass_idx, group_idx)).or_insert(group_pass);
         self
     }
 
@@ -218,38 +183,26 @@ impl FrameData {
         let num_passes = frame_header.passes.num_passes as usize;
         let num_lf_groups = frame_header.num_lf_groups() as usize;
 
-        let Self::Partial { lf_global, lf_group, hf_global, group_pass } = self else {
-            return Ok(self);
-        };
-
-        if lf_global.is_none() {
-            return Err(Error::IncompleteFrameData { field: "lf_global" });
-        }
-        if lf_group.len() < num_lf_groups {
-            return Err(Error::IncompleteFrameData { field: "lf_group" });
-        }
-        if hf_global.is_none() {
-            return Err(Error::IncompleteFrameData { field: "hf_global" });
-        }
-        if group_pass.len() < num_groups * num_passes {
-            return Err(Error::IncompleteFrameData { field: "group_pass" });
-        }
-
-        let lf_global = lf_global.take().unwrap();
-        let lf_group = std::mem::take(lf_group)
-            .into_values()
-            .collect();
-        let hf_global = hf_global.take().unwrap();
-        let group_pass = std::mem::take(group_pass)
-            .into_values()
-            .collect();
-        *self = Self::Complete {
-            num_groups,
+        let Self {
             lf_global,
             lf_group,
             hf_global,
             group_pass,
+        } = self;
+
+        let Some(lf_global) = lf_global else {
+            return Err(Error::IncompleteFrameData { field: "lf_global" });
         };
+        for lf_group in lf_group.values() {
+            // TODO: copy modular into lf_global
+        }
+        for group in group_pass.values() {
+            // TODO: copy modular into lf_global
+        }
+
+        lf_global.apply_modular_inverse_transform();
+
+        // TODO: perform vardct
 
         Ok(self)
     }

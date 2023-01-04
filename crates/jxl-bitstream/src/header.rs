@@ -169,6 +169,15 @@ impl Default for BitDepth {
     }
 }
 
+impl BitDepth {
+    pub fn bits_per_sample(&self) -> u32 {
+        match *self {
+            Self::IntegerSample { bits_per_sample } => bits_per_sample,
+            Self::FloatSample { bits_per_sample, .. } => bits_per_sample,
+        }
+    }
+}
+
 impl<Ctx> Bundle<Ctx> for BitDepth {
     type Error = crate::Error;
 

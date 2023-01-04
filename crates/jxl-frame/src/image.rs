@@ -56,6 +56,7 @@ impl Sample for f32 {
 pub struct Grid<S: Sample> {
     width: u32,
     height: u32,
+    group_size: (u32, u32),
     buffer: GridBuffer<S>,
 }
 
@@ -82,6 +83,7 @@ impl<S: Sample> Grid<S> {
         Self {
             width,
             height,
+            group_size,
             buffer: GridBuffer::new(width, height, group_size),
         }
     }
@@ -92,6 +94,10 @@ impl<S: Sample> Grid<S> {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    pub fn group_size(&self) -> (u32, u32) {
+        self.group_size
     }
 
     pub fn mirror(&self, x: i32, y: i32) -> (u32, u32) {
@@ -121,6 +127,44 @@ impl<S: Sample> Grid<S> {
     pub fn anchor(&self, x: i32, y: i32) -> GridAnchor<'_, S> {
         GridAnchor { grid: self, x, y }
     }
+
+    pub fn anchor_mut(&mut self, x: i32, y: i32) -> GridAnchorMut<'_, S> {
+        GridAnchorMut { grid: self, x, y }
+    }
+
+    pub fn iter_init_mut(&mut self, mut f: impl FnMut(u32, u32, &mut S)) {
+        let (gw, gh) = self.group_size;
+        let groups = match &mut self.buffer {
+            GridBuffer::Single(buf) => vec![(0u32, 0u32, buf)],
+            GridBuffer::Grouped { group_stride, groups, .. } => {
+                groups.iter_mut().map(|(&idx, v)| {
+                    let group_left = idx % *group_stride;
+                    let group_top = idx / *group_stride;
+                    let x = group_left * gw;
+                    let y = group_top * gh;
+                    (x, y, v)
+                }).collect()
+            },
+        };
+
+        for (base_x, base_y, group) in groups {
+            let stride = group.stride;
+            for (idx, sample) in group.buf.iter_mut().enumerate() {
+                let y = idx as u32 / stride;
+                let x = idx as u32 % stride;
+                f(base_x + x, base_y + y, sample);
+            }
+        }
+    }
+
+    pub fn set_lock_uninit(&mut self, lock_uninit: bool) {
+        match &mut self.buffer {
+            GridBuffer::Single(_) => {},
+            GridBuffer::Grouped { lock_uninit: target, .. } => {
+                *target = lock_uninit;
+            },
+        }
+    }
 }
 
 impl<S: Sample> Grid<S> {
@@ -135,24 +179,25 @@ impl<S: Sample> Grid<S> {
             return;
         }
 
-        let (gw, gh, group_stride, subgrid_group_stride, groups, subgrid_groups) = match (&mut self.buffer, &mut subgrid.buffer) {
+        let (gw, gh) = self.group_size;
+
+        let (group_stride, subgrid_group_stride, groups, subgrid_groups) = match (&mut self.buffer, &mut subgrid.buffer) {
             (GridBuffer::Single(_), _) | (_, GridBuffer::Single(_)) => {
                 self.insert_subgrid_slow(subgrid, left, top);
                 return;
             },
-            (GridBuffer::Grouped { group_size, group_stride, groups }, GridBuffer::Grouped { group_size: subgrid_group_size, group_stride: subgrid_group_stride, groups: subgrid_groups }) => {
+            (GridBuffer::Grouped { group_size, group_stride, groups, .. }, GridBuffer::Grouped { group_size: subgrid_group_size, group_stride: subgrid_group_stride, groups: subgrid_groups, .. }) => {
                 if group_size != subgrid_group_size {
                     // group size mismatch
                     self.insert_subgrid_slow(subgrid, left, top);
                     return;
                 }
-                let (gw, gh) = *group_size;
                 if left % gw as i32 != 0 || top % gh as i32 != 0 {
                     // not aligned
                     self.insert_subgrid_slow(subgrid, left, top);
                     return;
                 }
-                (gw, gh, *group_stride, *subgrid_group_stride, groups, subgrid_groups)
+                (*group_stride, *subgrid_group_stride, groups, subgrid_groups)
             },
         };
 
@@ -184,7 +229,15 @@ impl<S: Sample> Grid<S> {
                 if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
                     *group = subgrid_group;
                 } else {
-                    todo!()
+                    let group_stride = group.stride as usize;
+                    let subgrid_group_stride = subgrid_group.stride as usize;
+                    let width = group_stride.min(subgrid_group_stride);
+                    let height = group.scanlines.min(subgrid_group.scanlines) as usize;
+                    for y in 0..height {
+                        for x in 0..width {
+                            group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                        }
+                    }
                 }
             }
         }
@@ -307,6 +360,8 @@ enum GridBuffer<S: Sample> {
         group_size: (u32, u32),
         group_stride: u32,
         groups: BTreeMap<u32, GridGroup<S>>,
+        lock_uninit: bool,
+        lock_scratch: S,
     },
 }
 
@@ -319,6 +374,8 @@ impl<S: Sample> GridBuffer<S> {
                 group_size: (gw, gh),
                 group_stride: (width + gw - 1) / gw,
                 groups: BTreeMap::new(),
+                lock_uninit: false,
+                lock_scratch: S::default(),
             }
         }
     }
@@ -333,7 +390,7 @@ impl<S: Sample> std::ops::Index<(u32, u32)> for GridBuffer<S> {
                 let idx = x as usize + y as usize * group.stride as usize;
                 &group.buf[idx]
             },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref groups } => {
+            Self::Grouped { group_size: (gw, gh), group_stride, ref groups, .. } => {
                 let group_row = y / gh;
                 let group_col = x / gw;
                 let y = y % gh;
@@ -357,17 +414,21 @@ impl<S: Sample> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
                 let idx = x as usize + y as usize * group.stride as usize;
                 &mut group.buf[idx]
             },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups } => {
+            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups, lock_uninit, ref mut lock_scratch } => {
                 let group_row = y / gh;
                 let group_col = x / gw;
                 let y = y % gh;
                 let x = x % gw;
                 let group_idx = group_row * group_stride + group_col;
-                let group = groups
-                    .entry(group_idx)
-                    .or_insert_with(|| GridGroup::new(gw, gh));
-                let idx = y * group.stride + x;
-                &mut group.buf[idx as usize]
+                let group = groups.entry(group_idx);
+                let is_init = matches!(group, std::collections::btree_map::Entry::Occupied(_));
+                if lock_uninit && !is_init {
+                    lock_scratch
+                } else {
+                    let group = group.or_insert_with(|| GridGroup::new(gw, gh));
+                    let idx = y * group.stride + x;
+                    &mut group.buf[idx as usize]
+                }
             },
         }
     }
@@ -413,7 +474,49 @@ pub struct GridAnchor<'g, S: Sample> {
     y: i32,
 }
 
+#[derive(Debug)]
+pub struct GridAnchorMut<'g, S: Sample> {
+    grid: &'g mut Grid<S>,
+    x: i32,
+    y: i32,
+}
+
+impl<S: Sample> GridAnchorMut<'_, S> {
+    pub fn grid_mut(&mut self) -> &mut Grid<S> {
+        self.grid
+    }
+
+    pub fn shared(&self) -> GridAnchor<'_, S> {
+        GridAnchor {
+            grid: &*self.grid,
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
 impl<'g, S: Sample> GridAnchor<'g, S> {
+    #[inline]
+    pub fn x(self) -> i32 {
+        self.x
+    }
+
+    #[inline]
+    pub fn y(self) -> i32 {
+        self.y
+    }
+
+    #[inline]
+    pub fn grid(self) -> &'g Grid<S> {
+        self.grid
+    }
+
+    #[inline]
+    pub fn c(self) -> S {
+        let GridAnchor { grid, x, y } = self;
+        grid[(x, y)]
+    }
+
     #[inline]
     pub fn w(self) -> S {
         let GridAnchor { grid, x, y } = self;
@@ -509,4 +612,57 @@ fn mirror_1d(len: u32, offset: i32) -> u32 {
 
 fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
     (mirror_1d(width, col), mirror_1d(height, row))
+}
+
+pub(crate) fn zip_iterate<S: Sample>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
+    if grids.is_empty() {
+        return;
+    }
+
+    let mut groups = grids
+        .iter_mut()
+        .map(|g| match &mut g.buffer {
+            GridBuffer::Single(buf) => vec![(0, buf)],
+            GridBuffer::Grouped { groups, .. } => {
+                groups.iter_mut().map(|(k, v)| (*k, v)).collect()
+            },
+        })
+        .collect::<Vec<_>>();
+    if groups.iter().any(|x| x.is_empty()) {
+        return;
+    }
+
+    let mut indices = vec![0usize; groups.len()];
+    'main_loop: loop {
+        let target_group_idx = groups.iter().zip(indices.iter().copied()).map(|(g, idx)| g[idx].0).max().unwrap();
+        for (g, idx) in groups.iter().zip(indices.iter_mut()) {
+            while g[*idx].0 < target_group_idx {
+                *idx += 1;
+                if *idx >= g.len() {
+                    return;
+                }
+            }
+            if g[*idx].0 > target_group_idx {
+                continue 'main_loop;
+            }
+        }
+
+        let mut target_groups = groups
+            .iter_mut()
+            .zip(indices.iter().copied())
+            .map(|(g, idx)| &mut g[idx].1.buf)
+            .collect::<Vec<_>>();
+        let len = target_groups.iter().map(|buf| buf.len()).min().unwrap();
+        for i in 0..len {
+            let mut samples = target_groups.iter_mut().map(|buf| &mut buf[i]).collect::<Vec<_>>();
+            f(&mut samples);
+        }
+
+        for (g, idx) in groups.iter().zip(indices.iter_mut()) {
+            *idx += 1;
+            if *idx >= g.len() {
+                return;
+            }
+        }
+    }
 }

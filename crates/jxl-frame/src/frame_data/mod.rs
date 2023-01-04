@@ -53,6 +53,12 @@ impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
     }
 }
 
+impl LfGlobal {
+    pub(crate) fn apply_modular_inverse_transform(&mut self) {
+        self.gmodular.modular.inverse_transform();
+    }
+}
+
 define_bundle! {
     #[derive(Debug)]
     struct LfChannelDequantization error(crate::Error) {
@@ -181,7 +187,14 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
         }
 
         let group_dim = header.group_dim();
-        let modular_params = ModularParams::new(header.sample_width(), header.sample_height(), group_dim, shifts, ma_config.as_ref());
+        let modular_params = ModularParams::new(
+            header.sample_width(),
+            header.sample_height(),
+            group_dim,
+            image_header.metadata.bit_depth.bits_per_sample(),
+            shifts,
+            ma_config.as_ref(),
+        );
         let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
         modular.decode_image_gmodular(bitstream)?;
 

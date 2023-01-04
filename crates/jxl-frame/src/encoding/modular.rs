@@ -2,7 +2,7 @@ use std::io::Read;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
-use crate::{Result, Sample};
+use crate::Result;
 
 mod image;
 mod ma;
@@ -33,6 +33,7 @@ pub struct ModularParams<'a> {
     pub width: u32,
     pub height: u32,
     pub group_dim: u32,
+    pub bit_depth: u32,
     pub channel_shifts: Vec<ChannelShift>,
     pub ma_config: Option<&'a MaConfig>,
     channel_mapping: Option<Vec<SubimageChannelInfo>>,
@@ -100,10 +101,11 @@ impl<'a> ModularParams<'a> {
         width: u32,
         height: u32,
         group_dim: u32,
+        bit_depth: u32,
         channel_shifts: Vec<ChannelShift>,
         ma_config: Option<&'a MaConfig>,
     ) -> Self {
-        Self { width, height, group_dim, channel_shifts, ma_config, channel_mapping: None }
+        Self { width, height, group_dim, bit_depth, channel_shifts, ma_config, channel_mapping: None }
     }
 }
 
@@ -141,12 +143,20 @@ impl Modular {
         image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx)
     }
 
+    pub fn inverse_transform(&mut self) {
+        let Some(image) = &mut self.inner else { return; };
+        for transform in image.header.transform.iter().rev() {
+            transform.inverse(&mut image.image);
+        }
+    }
+
     pub fn make_subimage_params_lf_group<'a>(&self, global_ma_config: Option<&'a MaConfig>, lf_group_idx: u32) -> ModularParams<'a> {
         let Some(image) = &self.inner else {
             return ModularParams {
                 width: 0,
                 height: 0,
                 group_dim: 128,
+                bit_depth: 8,
                 channel_shifts: Vec::new(),
                 ma_config: None,
                 channel_mapping: None,
@@ -157,6 +167,7 @@ impl Modular {
         let height = image.base_height;
         let group_dim = image.group_dim;
         let lf_dim = group_dim * 8;
+        let bit_depth = image.image.bit_depth();
 
         let lf_group_stride = (width + lf_dim - 1) / lf_dim;
         let lf_group_row = lf_group_idx / lf_group_stride;
@@ -184,7 +195,14 @@ impl Modular {
             })
             .unzip();
 
-        let mut params = ModularParams::new(width, height, group_dim, channel_shifts, global_ma_config);
+        let mut params = ModularParams::new(
+            width,
+            height,
+            group_dim,
+            bit_depth,
+            channel_shifts,
+            global_ma_config,
+        );
         params.channel_mapping = Some(channel_mapping);
         params
     }
@@ -222,7 +240,7 @@ impl Bundle<ModularParams<'_>> for ModularData {
             transform.transform_channel_info(&mut channels)?;
         }
 
-        let image = Image::new(channels.clone(), params.group_dim);
+        let image = Image::new(channels.clone(), params.group_dim, params.bit_depth);
 
         Ok(Self {
             base_width: params.width,
@@ -243,7 +261,7 @@ define_bundle! {
         use_global_tree: ty(Bool),
         wp_params: ty(Bundle(predictor::WpHeader)),
         nb_transforms: ty(U32(0, 1, 2 + u(4), 18 + u(8))),
-        transform: ty(Vec[Bundle(transform::TransformInfo)]; nb_transforms),
+        transform: ty(Vec[Bundle(transform::TransformInfo)]; nb_transforms) ctx(&wp_params),
     }
 }
 

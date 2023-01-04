@@ -48,6 +48,7 @@ fn main() {
 
         let toc_lf_global = frame.toc().lf_global();
         frame.read_group(&mut bitstream, toc_lf_global).expect("Failed to read LfGlobal");
+        frame.complete().expect("Failed to complete a frame");
         eprintln!("{:?}", frame);
 
         if frame.header().is_last {

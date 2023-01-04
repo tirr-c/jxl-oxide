@@ -22,9 +22,10 @@ define_bundle! {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
 #[repr(u8)]
 pub enum Predictor {
+    #[default]
     Zero = 0,
     West,
     North,
@@ -68,6 +69,14 @@ impl TryFrom<u32> for Predictor {
 
 impl Predictor {
     pub(super) fn predict(self, grid: &Grid<i32>, x: i32, y: i32, prediction_result: &PredictionResult) -> i32 {
+        if self == Predictor::SelfCorrecting {
+            (prediction_result.prediction + 3) >> 3
+        } else {
+            self.predict_non_sc(grid, x, y)
+        }
+    }
+
+    pub(super) fn predict_non_sc(self, grid: &Grid<i32>, x: i32, y: i32) -> i32 {
         use Predictor::*;
         let anchor = grid.anchor(x, y);
 
@@ -92,7 +101,7 @@ impl Predictor {
                 let nw = anchor.nw();
                 (w + n - nw).clamp(w.min(n), w.max(n))
             },
-            SelfCorrecting => (prediction_result.prediction + 3) >> 3,
+            SelfCorrecting => panic!("predict_non_sc called with SelfCorrecting predictor"),
             NorthEast => anchor.ne(),
             NorthWest => anchor.nw(),
             WestWest => anchor.ww(),
@@ -130,8 +139,7 @@ pub struct SelfCorrectingPredictor {
 }
 
 impl SelfCorrectingPredictor {
-    pub fn new(channel_info: &ModularChannelInfo, wp_header: WpHeader) -> Self {
-        let width = channel_info.width;
+    pub fn new(width: u32, wp_header: WpHeader) -> Self {
         Self {
             width,
             true_err_prev_row: Vec::new(),
