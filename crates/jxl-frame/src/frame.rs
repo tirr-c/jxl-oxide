@@ -15,6 +15,7 @@ pub struct Frame<'a> {
     header: FrameHeader,
     toc: Toc,
     data: FrameData,
+    pass_shifts: BTreeMap<u32, (i32, i32)>,
     pending_groups: BTreeMap<TocGroupKind, Vec<u8>>,
 }
 
@@ -26,11 +27,23 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
         let data = FrameData::new(&header);
+
+        let passes = &header.passes;
+        let mut pass_shifts = BTreeMap::new();
+        let mut maxshift = 3i32;
+        for (&downsample, &last_pass) in passes.downsample.iter().zip(&passes.last_pass) {
+            let minshift = downsample.trailing_zeros() as i32;
+            pass_shifts.insert(last_pass, (minshift, maxshift));
+            maxshift = minshift;
+        }
+        pass_shifts.insert(header.passes.num_passes - 1, (0i32, maxshift));
+
         Ok(Self {
             image_header,
             header,
             toc,
             data,
+            pass_shifts,
             pending_groups: Default::default(),
         })
     }
@@ -52,22 +65,52 @@ impl Frame<'_> {
 
 impl Frame<'_> {
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        todo!()
+        if self.toc.is_single_entry() {
+            let group = self.toc.lf_global();
+            self.read_group(bitstream, group)?;
+            return Ok(());
+        }
+
+        for group in self.toc.iter_bitstream_order() {
+            self.read_group(bitstream, group)?;
+        }
+
+        Ok(())
     }
 
     pub fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
         bitstream.skip_to_bookmark(group.offset)?;
+        let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
         match group.kind {
             TocGroupKind::All => {
-                let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
-
                 let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
                 self.data.set_lf_global(lf_global);
-                // self.read_group(bitstream, TocGroupKind::LfGroup(0))?;
+
+                let lf_group = {
+                    let lf_global = self.data.lf_global().unwrap();
+                    let lf_group_params = LfGroupParams::new(&self.header, lf_global, 0);
+                    read_bits!(bitstream, Bundle(LfGroup), lf_group_params)?
+                };
+                self.data.set_lf_group(0, lf_group);
+
                 if has_hf_global {
-                    // self.read_group(bitstream, TocGroupKind::HfGlobal)?;
+                    let hf_global = todo!();
+                    self.data.set_hf_global(hf_global);
                 }
-                // self.read_group(bitstream, TocGroupKind::GroupPass { pass_idx: 0, group_idx: 0 })?;
+
+                let lf_global = self.data.lf_global().unwrap();
+                let hf_global = self.data.hf_global().unwrap();
+                let params = PassGroupParams::new(
+                    &self.header,
+                    lf_global,
+                    hf_global,
+                    0,
+                    0,
+                    Some((0, 3)),
+                );
+                let group_pass = read_bits!(bitstream, Bundle(PassGroup), params)?;
+                self.data.set_group_pass(0, 0, group_pass);
+
                 Ok(())
             },
             TocGroupKind::LfGlobal => {
@@ -83,14 +126,17 @@ impl Frame<'_> {
                     self.pending_groups.insert(group.kind, buf);
                     return Ok(());
                 };
-                let lf_group = todo!();
+                let lf_group_params = LfGroupParams::new(&self.header, lf_global, lf_group_idx);
+                let lf_group = read_bits!(bitstream, Bundle(LfGroup), lf_group_params)?;
                 self.data.set_lf_group(lf_group_idx, lf_group);
                 Ok(())
             },
             TocGroupKind::HfGlobal => {
-                let hf_global = todo!();
-                self.data.set_hf_global(hf_global);
-                self.try_pending_blocks()?;
+                if has_hf_global {
+                    let hf_global = todo!();
+                    self.data.set_hf_global(hf_global);
+                    self.try_pending_blocks()?;
+                }
                 Ok(())
             },
             TocGroupKind::GroupPass { pass_idx, group_idx } => {
@@ -100,7 +146,17 @@ impl Frame<'_> {
                     self.pending_groups.insert(group.kind, buf);
                     return Ok(());
                 };
-                let group_pass = todo!();
+
+                let shift = self.pass_shifts.get(&pass_idx).copied();
+                let params = PassGroupParams::new(
+                    &self.header,
+                    lf_global,
+                    hf_global,
+                    pass_idx,
+                    group_idx,
+                    shift,
+                );
+                let group_pass = read_bits!(bitstream, Bundle(PassGroup), params)?;
                 self.data.set_group_pass(pass_idx, group_idx, group_pass);
                 Ok(())
             },
@@ -194,11 +250,11 @@ impl FrameData {
         let Some(lf_global) = lf_global else {
             return Err(Error::IncompleteFrameData { field: "lf_global" });
         };
-        for lf_group in lf_group.values() {
-            // TODO: copy modular into lf_global
+        for lf_group in std::mem::take(lf_group).into_values() {
+            lf_global.gmodular.modular.copy_from_modular(lf_group.mlf_group);
         }
-        for group in group_pass.values() {
-            // TODO: copy modular into lf_global
+        for group in std::mem::take(group_pass).into_values() {
+            lf_global.gmodular.modular.copy_from_modular(group.modular);
         }
 
         lf_global.apply_modular_inverse_transform();

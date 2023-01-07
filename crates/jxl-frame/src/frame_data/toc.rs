@@ -135,6 +135,15 @@ impl Toc {
     pub fn total_byte_size(&self) -> u64 {
         self.total_size
     }
+
+    pub fn iter_bitstream_order(&self) -> impl Iterator<Item = TocGroup> {
+        let groups = if self.bitstream_order.is_empty() {
+            self.groups.clone()
+        } else {
+            self.bitstream_order.iter().map(|&idx| self.groups[idx]).collect()
+        };
+        groups.into_iter()
+    }
 }
 
 impl Bundle<&crate::FrameHeader> for Toc {

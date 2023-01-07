@@ -14,6 +14,19 @@ pub struct Image {
 }
 
 impl Image {
+    pub(super) fn empty() -> Self {
+        Self {
+            group_dim: 128,
+            bit_depth: 8,
+            channels: ModularChannels {
+                base_size: Some((0, 0)),
+                info: Vec::new(),
+                nb_meta_channels: 0,
+            },
+            data: Vec::new(),
+        }
+    }
+
     pub(super) fn new(channels: ModularChannels, group_dim: u32, bit_depth: u32) -> Self {
         let data = channels.info
             .iter()
@@ -152,7 +165,7 @@ impl Image {
             .unzip();
         let channels = ModularChannels {
             info: channel_info,
-            nb_meta_channels: self.channels.nb_meta_channels,
+            ..self.channels
         };
         (Image::new(channels, group_dim, self.bit_depth), channel_mapping)
     }
@@ -165,11 +178,15 @@ impl Image {
         self
     }
 
-    pub(super) fn channel_data(&self) -> &[Grid<i32>] {
+    pub fn channel_data(&self) -> &[Grid<i32>] {
         &self.data
     }
 
-    pub(super) fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
+    pub fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
         &mut self.data
+    }
+
+    pub fn into_channel_data(self) -> Vec<Grid<i32>> {
+        self.data
     }
 }

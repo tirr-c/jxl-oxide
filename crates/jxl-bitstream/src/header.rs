@@ -152,7 +152,7 @@ impl TryFrom<u32> for ExtraChannelType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum BitDepth {
     IntegerSample {
         bits_per_sample: u32,

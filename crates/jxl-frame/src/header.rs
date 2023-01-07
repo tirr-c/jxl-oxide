@@ -118,6 +118,7 @@ define_bundle! {
         pub name: ty(Vec[u(8)]; name_len) default(vec![0; name_len as usize]),
         pub restoration_filter: ty(Bundle(RestorationFilter)) ctx(encoding) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
+        pub bit_depth: ty(Bundle(BitDepth)) cond(false) default(headers.metadata.bit_depth),
     }
 
     #[derive(Debug)]
@@ -245,21 +246,25 @@ impl FrameHeader {
         self.group_dim() * 8
     }
 
-    pub fn group_size_at(&self, row: u32, col: u32) -> (u32, u32) {
-        self.size_at(self.group_dim(), row, col)
+    pub fn group_size_for(&self, group_idx: u32) -> (u32, u32) {
+        self.size_for(self.group_dim(), group_idx)
     }
 
-    pub fn lf_group_size_at(&self, row: u32, col: u32) -> (u32, u32) {
-        self.size_at(self.lf_group_dim(), row, col)
+    pub fn lf_group_size_for(&self, lf_group_idx: u32) -> (u32, u32) {
+        self.size_for(self.lf_group_dim(), lf_group_idx)
     }
 
-    fn size_at(&self, group_dim: u32, row: u32, col: u32) -> (u32, u32) {
+    fn size_for(&self, group_dim: u32, group_idx: u32) -> (u32, u32) {
         let width = self.sample_width();
         let height = self.sample_height();
         let full_rows = height / group_dim;
         let rows_remainder = height % group_dim;
         let full_cols = width / group_dim;
         let cols_remainder = width % group_dim;
+
+        let stride = full_rows + (rows_remainder > 0) as u32;
+        let row = group_idx / stride;
+        let col = group_idx % stride;
 
         let group_width = if col >= full_cols {
             cols_remainder

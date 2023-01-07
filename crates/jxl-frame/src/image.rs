@@ -53,7 +53,7 @@ impl Sample for f32 {
 }
 
 #[derive(Debug, Clone)]
-pub struct Grid<S: Sample> {
+pub struct Grid<S> {
     width: u32,
     height: u32,
     group_size: (u32, u32),
@@ -61,7 +61,7 @@ pub struct Grid<S: Sample> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Subgrid<'g, S: Sample> {
+pub struct Subgrid<'g, S> {
     grid: &'g Grid<S>,
     left: i32,
     top: i32,
@@ -70,7 +70,7 @@ pub struct Subgrid<'g, S: Sample> {
 }
 
 #[derive(Debug)]
-pub struct SubgridMut<'g, S: Sample> {
+pub struct SubgridMut<'g, S> {
     grid: &'g mut Grid<S>,
     left: i32,
     top: i32,
@@ -78,7 +78,7 @@ pub struct SubgridMut<'g, S: Sample> {
     height: u32,
 }
 
-impl<S: Sample> Grid<S> {
+impl<S: Default + Clone> Grid<S> {
     pub fn new(width: u32, height: u32, group_size: (u32, u32)) -> Self {
         Self {
             width,
@@ -87,7 +87,9 @@ impl<S: Sample> Grid<S> {
             buffer: GridBuffer::new(width, height, group_size),
         }
     }
+}
 
+impl<S> Grid<S> {
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -154,15 +156,6 @@ impl<S: Sample> Grid<S> {
                 let x = idx as u32 % stride;
                 f(base_x + x, base_y + y, sample);
             }
-        }
-    }
-
-    pub fn set_lock_uninit(&mut self, lock_uninit: bool) {
-        match &mut self.buffer {
-            GridBuffer::Single(_) => {},
-            GridBuffer::Grouped { lock_uninit: target, .. } => {
-                *target = lock_uninit;
-            },
         }
     }
 }
@@ -267,7 +260,7 @@ impl<S: Sample> Grid<S> {
     }
 }
 
-impl<S: Sample> std::ops::Index<(i32, i32)> for Grid<S> {
+impl<S> std::ops::Index<(i32, i32)> for Grid<S> {
     type Output = S;
 
     fn index(&self, index: (i32, i32)) -> &Self::Output {
@@ -276,14 +269,14 @@ impl<S: Sample> std::ops::Index<(i32, i32)> for Grid<S> {
     }
 }
 
-impl<S: Sample> std::ops::IndexMut<(i32, i32)> for Grid<S> {
+impl<S: Default + Clone> std::ops::IndexMut<(i32, i32)> for Grid<S> {
     fn index_mut(&mut self, index: (i32, i32)) -> &mut Self::Output {
         let (x, y) = self.mirror(index.0, index.1);
         &mut self.buffer[(x, y)]
     }
 }
 
-impl<S: Sample> Subgrid<'_, S> {
+impl<S> Subgrid<'_, S> {
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -298,7 +291,7 @@ impl<S: Sample> Subgrid<'_, S> {
     }
 }
 
-impl<S: Sample> std::ops::Index<(u32, u32)> for Subgrid<'_, S> {
+impl<S> std::ops::Index<(u32, u32)> for Subgrid<'_, S> {
     type Output = S;
 
     fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
@@ -312,7 +305,7 @@ impl<S: Sample> std::ops::Index<(u32, u32)> for Subgrid<'_, S> {
     }
 }
 
-impl<S: Sample> SubgridMut<'_, S> {
+impl<S> SubgridMut<'_, S> {
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -327,7 +320,7 @@ impl<S: Sample> SubgridMut<'_, S> {
     }
 }
 
-impl<S: Sample> std::ops::Index<(u32, u32)> for SubgridMut<'_, S> {
+impl<S> std::ops::Index<(u32, u32)> for SubgridMut<'_, S> {
     type Output = S;
 
     fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
@@ -341,7 +334,7 @@ impl<S: Sample> std::ops::Index<(u32, u32)> for SubgridMut<'_, S> {
     }
 }
 
-impl<S: Sample> std::ops::IndexMut<(u32, u32)> for SubgridMut<'_, S> {
+impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for SubgridMut<'_, S> {
     fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
         if !self.in_bounds(x, y) {
             panic!("index out of range")
@@ -354,18 +347,16 @@ impl<S: Sample> std::ops::IndexMut<(u32, u32)> for SubgridMut<'_, S> {
 }
 
 #[derive(Clone)]
-enum GridBuffer<S: Sample> {
+enum GridBuffer<S> {
     Single(GridGroup<S>),
     Grouped {
         group_size: (u32, u32),
         group_stride: u32,
         groups: BTreeMap<u32, GridGroup<S>>,
-        lock_uninit: bool,
-        lock_scratch: S,
     },
 }
 
-impl<S: Sample> GridBuffer<S> {
+impl<S: Default + Clone> GridBuffer<S> {
     fn new(width: u32, height: u32, (gw, gh): (u32, u32)) -> Self {
         if width <= gw * 8 && height <= gh * 8 {
             Self::Single(GridGroup::new(width, height))
@@ -374,14 +365,12 @@ impl<S: Sample> GridBuffer<S> {
                 group_size: (gw, gh),
                 group_stride: (width + gw - 1) / gw,
                 groups: BTreeMap::new(),
-                lock_uninit: false,
-                lock_scratch: S::default(),
             }
         }
     }
 }
 
-impl<S: Sample> std::ops::Index<(u32, u32)> for GridBuffer<S> {
+impl<S> std::ops::Index<(u32, u32)> for GridBuffer<S> {
     type Output = S;
 
     fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
@@ -407,34 +396,29 @@ impl<S: Sample> std::ops::Index<(u32, u32)> for GridBuffer<S> {
     }
 }
 
-impl<S: Sample> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
+impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
     fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
         match *self {
             Self::Single(ref mut group) => {
                 let idx = x as usize + y as usize * group.stride as usize;
                 &mut group.buf[idx]
             },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups, lock_uninit, ref mut lock_scratch } => {
+            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups } => {
                 let group_row = y / gh;
                 let group_col = x / gw;
                 let y = y % gh;
                 let x = x % gw;
                 let group_idx = group_row * group_stride + group_col;
-                let group = groups.entry(group_idx);
-                let is_init = matches!(group, std::collections::btree_map::Entry::Occupied(_));
-                if lock_uninit && !is_init {
-                    lock_scratch
-                } else {
-                    let group = group.or_insert_with(|| GridGroup::new(gw, gh));
-                    let idx = y * group.stride + x;
-                    &mut group.buf[idx as usize]
-                }
+                let group = groups.entry(group_idx)
+                    .or_insert_with(|| GridGroup::new(gw, gh));
+                let idx = y * group.stride + x;
+                &mut group.buf[idx as usize]
             },
         }
     }
 }
 
-impl<S: Sample> std::fmt::Debug for GridBuffer<S> {
+impl<S> std::fmt::Debug for GridBuffer<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Single(_) => f.debug_tuple("Single").field(&format_args!("_")).finish(),
@@ -450,13 +434,13 @@ impl<S: Sample> std::fmt::Debug for GridBuffer<S> {
 }
 
 #[derive(Clone)]
-struct GridGroup<S: Sample> {
+struct GridGroup<S> {
     stride: u32,
     scanlines: u32,
     buf: Vec<S>,
 }
 
-impl<S: Sample> GridGroup<S> {
+impl<S: Default + Clone> GridGroup<S> {
     fn new(stride: u32, scanlines: u32) -> Self {
         let size = stride as usize * scanlines as usize;
         Self {
@@ -468,20 +452,20 @@ impl<S: Sample> GridGroup<S> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct GridAnchor<'g, S: Sample> {
+pub struct GridAnchor<'g, S> {
     grid: &'g Grid<S>,
     x: i32,
     y: i32,
 }
 
 #[derive(Debug)]
-pub struct GridAnchorMut<'g, S: Sample> {
+pub struct GridAnchorMut<'g, S> {
     grid: &'g mut Grid<S>,
     x: i32,
     y: i32,
 }
 
-impl<S: Sample> GridAnchorMut<'_, S> {
+impl<S> GridAnchorMut<'_, S> {
     pub fn grid_mut(&mut self) -> &mut Grid<S> {
         self.grid
     }
@@ -614,7 +598,7 @@ fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
     (mirror_1d(width, col), mirror_1d(height, row))
 }
 
-pub(crate) fn zip_iterate<S: Sample>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
+pub(crate) fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
     if grids.is_empty() {
         return;
     }

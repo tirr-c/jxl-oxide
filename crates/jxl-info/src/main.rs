@@ -45,9 +45,7 @@ fn main() {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
         let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
-
-        let toc_lf_global = frame.toc().lf_global();
-        frame.read_group(&mut bitstream, toc_lf_global).expect("Failed to read LfGlobal");
+        frame.load_all(&mut bitstream).expect("Failed to decode frame");
         frame.complete().expect("Failed to complete a frame");
         eprintln!("{:?}", frame);
 

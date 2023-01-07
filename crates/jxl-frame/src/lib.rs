@@ -1,7 +1,7 @@
 mod error;
 pub mod encoding;
 pub mod filter;
-pub mod frame_data;
+pub(crate) mod frame_data;
 pub mod frame;
 pub mod header;
 pub mod image;

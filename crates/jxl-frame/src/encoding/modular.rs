@@ -6,107 +6,26 @@ use crate::Result;
 
 mod image;
 mod ma;
+mod param;
 mod predictor;
 mod transform;
 pub use image::Image;
 pub use ma::{MaConfig, MaContext};
+pub use param::*;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
 }
 
 #[derive(Debug)]
 struct ModularData {
-    base_width: u32,
-    base_height: u32,
     group_dim: u32,
     header: ModularHeader,
     ma_ctx: ma::MaContext,
     channels: ModularChannels,
     subimage_channel_mapping: Option<Vec<SubimageChannelInfo>>,
     image: Image,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModularParams<'a> {
-    pub width: u32,
-    pub height: u32,
-    pub group_dim: u32,
-    pub bit_depth: u32,
-    pub channel_shifts: Vec<ChannelShift>,
-    pub ma_config: Option<&'a MaConfig>,
-    channel_mapping: Option<Vec<SubimageChannelInfo>>,
-}
-
-#[derive(Debug, Clone)]
-struct SubimageChannelInfo {
-    channel_id: usize,
-    base_x: u32,
-    base_y: u32,
-}
-
-impl SubimageChannelInfo {
-    fn new(channel_id: usize, base_x: u32, base_y: u32) -> Self {
-        SubimageChannelInfo { channel_id, base_x, base_y }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChannelShift {
-    JpegUpsampling(bool, bool),
-    Shifts(u32),
-    Raw(i32, i32),
-}
-
-impl ChannelShift {
-    pub fn from_shift(shift: u32) -> ChannelShift {
-        Self::Shifts(shift)
-    }
-
-    pub fn from_upsampling_factor_and_shift(upsampling: u32, dim_shift: u32) -> ChannelShift {
-        Self::Shifts(upsampling.next_power_of_two().trailing_zeros() + dim_shift)
-    }
-
-    pub fn from_jpeg_upsampling(jpeg_upsampling: u32) -> Self {
-        let (h, v) = match jpeg_upsampling {
-            0 => (false, false),
-            1 => (true, true),
-            2 => (true, false),
-            3 => (false, true),
-            _ => panic!("Invalid jpeg_upsampling value of {}", jpeg_upsampling),
-        };
-        Self::JpegUpsampling(h, v)
-    }
-
-    fn hshift(&self) -> i32 {
-        match self {
-            Self::JpegUpsampling(h, _) => *h as i32,
-            Self::Shifts(s) => *s as i32,
-            Self::Raw(h, _) => *h,
-        }
-    }
-
-    fn vshift(&self) -> i32 {
-        match self {
-            Self::JpegUpsampling(_, v) => *v as i32,
-            Self::Shifts(s) => *s as i32,
-            Self::Raw(_, v) => *v,
-        }
-    }
-}
-
-impl<'a> ModularParams<'a> {
-    pub fn new(
-        width: u32,
-        height: u32,
-        group_dim: u32,
-        bit_depth: u32,
-        channel_shifts: Vec<ChannelShift>,
-        ma_config: Option<&'a MaConfig>,
-    ) -> Self {
-        Self { width, height, group_dim, bit_depth, channel_shifts, ma_config, channel_mapping: None }
-    }
 }
 
 impl Bundle<ModularParams<'_>> for Modular {
@@ -116,12 +35,18 @@ impl Bundle<ModularParams<'_>> for Modular {
         bitstream: &mut Bitstream<R>,
         params: ModularParams<'_>,
     ) -> Result<Self> {
-        let inner = if params.channel_shifts.is_empty() {
+        let inner = if params.channels.is_empty() {
             None
         } else {
             Some(read_bits!(bitstream, Bundle(ModularData), params)?)
         };
         Ok(Self { inner })
+    }
+}
+
+impl Modular {
+    pub fn empty() -> Self {
+        Self::default()
     }
 }
 
@@ -153,18 +78,24 @@ impl Modular {
     pub fn make_subimage_params_lf_group<'a>(&self, global_ma_config: Option<&'a MaConfig>, lf_group_idx: u32) -> ModularParams<'a> {
         let Some(image) = &self.inner else {
             return ModularParams {
-                width: 0,
-                height: 0,
                 group_dim: 128,
                 bit_depth: 8,
-                channel_shifts: Vec::new(),
-                ma_config: None,
+                channels: Vec::new(),
                 channel_mapping: None,
+                ma_config: None,
             };
         };
 
-        let width = image.base_width;
-        let height = image.base_height;
+        let Some((width, height)) = image.channels.base_size else {
+            return ModularParams {
+                group_dim: 128,
+                bit_depth: 8,
+                channels: Vec::new(),
+                channel_mapping: None,
+                ma_config: None,
+            };
+        };
+
         let group_dim = image.group_dim;
         let lf_dim = group_dim * 8;
         let bit_depth = image.image.bit_depth();
@@ -208,7 +139,67 @@ impl Modular {
     }
 
     pub fn make_subimage_params_pass_group<'a>(&self, global_ma_config: Option<&'a MaConfig>, group_idx: u32, minshift: i32, maxshift: i32) -> ModularParams<'a> {
-        todo!()
+        let Some(image) = &self.inner else {
+            return ModularParams {
+                group_dim: 128,
+                bit_depth: 8,
+                channels: Vec::new(),
+                channel_mapping: None,
+                ma_config: None,
+            };
+        };
+
+        let Some((width, height)) = image.channels.base_size else {
+            return ModularParams {
+                group_dim: 128,
+                bit_depth: 8,
+                channels: Vec::new(),
+                channel_mapping: None,
+                ma_config: None,
+            };
+        };
+
+        let group_dim = image.group_dim;
+        let bit_depth = image.image.bit_depth();
+
+        let group_stride = (width + group_dim - 1) / group_dim;
+        let group_row = group_idx / group_stride;
+        let group_col = group_idx % group_stride;
+        let x = group_col * group_dim;
+        let y = group_row * group_dim;
+        let width = group_dim.min(width - x);
+        let height = group_dim.min(height - y);
+
+        let (channel_shifts, channel_mapping) = image.channels.info
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &ModularChannelInfo { width, height, hshift, vshift, .. })| {
+                let shift = hshift.min(vshift);
+                if i < image.channels.nb_meta_channels as usize ||
+                    (width <= group_dim && height <= group_dim) ||
+                    (hshift >= 3 && vshift >= 3) ||
+                    shift < minshift || maxshift <= shift
+                {
+                    None
+                } else {
+                    Some((
+                        ChannelShift::Raw(hshift, vshift),
+                        SubimageChannelInfo::new(i, x, y),
+                    ))
+                }
+            })
+            .unzip();
+
+        let mut params = ModularParams::new(
+            width,
+            height,
+            group_dim,
+            bit_depth,
+            channel_shifts,
+            global_ma_config,
+        );
+        params.channel_mapping = Some(channel_mapping);
+        params
     }
 
     pub fn copy_from_modular(&mut self, other: Modular) -> &mut Self {
@@ -217,6 +208,11 @@ impl Modular {
         let mapping = other.subimage_channel_mapping.expect("image being copied is not a subimage");
         image.image.copy_from_image(other.image, &mapping);
         self
+    }
+
+    pub fn into_image(self) -> Image {
+        let Some(image) = self.inner else { return Image::empty(); };
+        image.image
     }
 }
 
@@ -243,8 +239,6 @@ impl Bundle<ModularParams<'_>> for ModularData {
         let image = Image::new(channels.clone(), params.group_dim, params.bit_depth);
 
         Ok(Self {
-            base_width: params.width,
-            base_height: params.height,
             group_dim: params.group_dim,
             header,
             ma_ctx,
@@ -267,18 +261,26 @@ define_bundle! {
 
 #[derive(Debug, Clone)]
 struct ModularChannels {
+    base_size: Option<(u32, u32)>,
     info: Vec<ModularChannelInfo>,
     nb_meta_channels: u32,
 }
 
 impl ModularChannels {
     fn from_params(params: &ModularParams<'_>) -> Self {
-        let width = params.width;
-        let height = params.height;
-        let info = params.channel_shifts.iter()
-            .map(|&shift| ModularChannelInfo::new(width, height, shift))
+        let mut base_size = Some((params.channels[0].width, params.channels[0].height));
+        for &ModularChannelParams { width, height, .. } in &params.channels {
+            let (bw, bh) = base_size.unwrap();
+            if bw != width || bh != height {
+                base_size = None;
+                break;
+            }
+        }
+        let info = params.channels.iter()
+            .map(|ch| ModularChannelInfo::new(ch.width, ch.height, ch.shift))
             .collect();
         Self {
+            base_size,
             info,
             nb_meta_channels: 0,
         }
