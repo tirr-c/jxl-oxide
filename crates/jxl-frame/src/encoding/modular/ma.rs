@@ -4,8 +4,8 @@ use std::sync::Arc;
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
 
-use crate::{Result, Error};
-use super::predictor::Predictor;
+use crate::Result;
+use super::predictor::{Predictor, Properties};
 
 #[derive(Debug, Clone)]
 pub struct MaConfig {
@@ -71,7 +71,7 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
 
         let decoder = Decoder::parse(bitstream, ((nodes.len() + 1) / 2) as u32)?;
         Ok(Self {
-            tree: Arc::new(MaTree { nodes }),
+            tree: Arc::new(MaTree::new(nodes)),
             decoder,
         })
     }
@@ -93,10 +93,14 @@ impl From<MaConfig> for MaContext {
 }
 
 impl MaContext {
+    pub fn need_self_correcting(&self) -> bool {
+        self.tree.need_self_correcting
+    }
+
     pub fn decode_sample<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
-        properties: &[i32],
+        properties: &Properties,
         dist_multiplier: u32,
     ) -> Result<(i32, super::predictor::Predictor)> {
         let leaf = self.tree.get_leaf(properties)?;
@@ -109,6 +113,7 @@ impl MaContext {
 #[derive(Debug)]
 struct MaTree {
     nodes: Vec<MaTreeNode>,
+    need_self_correcting: bool,
 }
 
 #[derive(Debug)]
@@ -131,18 +136,21 @@ struct MaTreeLeaf {
 }
 
 impl MaTree {
-    fn get_leaf(&self, properties: &[i32]) -> Result<&MaTreeLeaf> {
+    fn new(nodes: Vec<MaTreeNode>) -> Self {
+        let need_self_correcting = nodes.iter().any(|node| match *node {
+            MaTreeNode::Decision { property, .. } => property == 15,
+            MaTreeNode::Leaf(MaTreeLeaf { predictor, .. }) => predictor == Predictor::SelfCorrecting,
+        });
+
+        Self { nodes, need_self_correcting }
+    }
+
+    fn get_leaf(&self, properties: &Properties) -> Result<&MaTreeLeaf> {
         let mut current_node = &self.nodes[0];
         loop {
             match current_node {
                 &MaTreeNode::Decision { property, value, left_idx, right_idx } => {
-                    let prop_value = properties
-                        .get(property)
-                        .copied()
-                        .ok_or(Error::PropertyNotFound {
-                            num_properties: properties.len(),
-                            property_ref: property,
-                        })?;
+                    let prop_value = properties.get(property)?;
                     let next_node = if prop_value > value { left_idx } else { right_idx };
                     current_node = &self.nodes[next_node];
                 },

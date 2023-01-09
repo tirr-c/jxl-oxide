@@ -168,6 +168,7 @@ impl Lz77State {
 #[derive(Debug, Clone)]
 struct IntegerConfig {
     split_exponent: u32,
+    split: u32,
     msb_in_token: u32,
     lsb_in_token: u32,
 }
@@ -187,13 +188,10 @@ impl IntegerConfig {
         };
         Ok(Self {
             split_exponent,
+            split: 1 << split_exponent,
             msb_in_token,
             lsb_in_token,
         })
-    }
-
-    pub fn split(&self) -> u32 {
-        1 << self.split_exponent
     }
 }
 
@@ -254,13 +252,13 @@ impl DecoderInner {
     }
 
     fn read_uint<R: std::io::Read>(&self, bitstream: &mut Bitstream<R>, config: &IntegerConfig, token: u32) -> Result<u32> {
-        if token < config.split() {
+        let &IntegerConfig { split_exponent, split, msb_in_token, lsb_in_token, .. } = config;
+        if token < split {
             return Ok(token);
         }
 
-        let &IntegerConfig { split_exponent, msb_in_token, lsb_in_token, .. } = config;
         let n = split_exponent - (msb_in_token + lsb_in_token) +
-            ((token - config.split()) >> (msb_in_token + lsb_in_token));
+            ((token - split) >> (msb_in_token + lsb_in_token));
         let low_bits = token & ((1 << lsb_in_token) - 1);
         let token = (token >> lsb_in_token) & ((1 << msb_in_token) - 1) | (1 << msb_in_token);
         Ok((((token << n) | bitstream.read_bits(n)?) << lsb_in_token) | low_bits)
@@ -270,6 +268,7 @@ impl DecoderInner {
         *self.clusters.last().unwrap()
     }
 }
+
 #[derive(Debug, Clone)]
 enum Coder {
     PrefixCode(Arc<Vec<prefix::Histogram>>),

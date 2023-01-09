@@ -3,7 +3,7 @@ use std::io::Read;
 use jxl_bitstream::Bitstream;
 
 use crate::{Grid, Result};
-use super::{ModularChannels, MaContext, predictor::{SelfCorrectingPredictor, WpHeader}, SubimageChannelInfo};
+use super::{ModularChannels, MaContext, predictor::{WpHeader, PredictorState}, SubimageChannelInfo};
 
 #[derive(Debug)]
 pub struct Image {
@@ -75,62 +75,33 @@ impl Image {
         for idx in 0..len {
             let (prev, left) = channels.split_at_mut(idx);
             let (i, (info, ref mut grid)) = left[0];
+            let prev = prev.into_iter()
+                .filter(|(_, (prev_info, _))| {
+                    info.width == prev_info.width &&
+                        info.height == prev_info.height &&
+                        info.hshift == prev_info.hshift &&
+                        info.vshift == prev_info.vshift
+                })
+                .collect::<Vec<_>>();
 
-            let mut sc_predictor = SelfCorrectingPredictor::new(info.width, wp_header.clone());
+            let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
             let width = grid.width();
             let height = grid.height();
+            let mut predictor = PredictorState::new(width, idx as u32, stream_index, prev.len(), wp_header);
+            let mut prev_channel_samples = vec![0i32; prev.len()];
 
             for y in 0..height as i32 {
-                let mut prev_prop9 = 0i32;
                 for x in 0..width as i32 {
-                    let prediction = sc_predictor.predict(grid, x, y);
-                    let anchor = grid.anchor(x, y);
-                    let mut properties = vec![
-                        i as i32,
-                        stream_index as i32,
-                        y,
-                        x,
-                        anchor.n().abs(),
-                        anchor.w().abs(),
-                        anchor.n(),
-                        anchor.w(),
-                        anchor.w() - prev_prop9,
-                        anchor.w() + anchor.n() - anchor.nw(),
-                        anchor.w() - anchor.nw(),
-                        anchor.nw() - anchor.n(),
-                        anchor.n() - anchor.ne(),
-                        anchor.n() - anchor.nn(),
-                        anchor.w() - anchor.ww(),
-                        prediction.max_error,
-                    ];
-                    prev_prop9 = properties[9];
-
-                    for &mut (_, (prev_info, ref prev_grid)) in prev.iter_mut().rev() {
-                        if info.width != prev_info.width ||
-                            info.height != prev_info.height ||
-                            info.hshift != prev_info.hshift ||
-                            info.vshift != prev_info.vshift {
-                                continue;
-                        }
-
-                        let c = prev_grid[(x, y)];
-                        let w = (x > 0).then(|| prev_grid[(x - 1, y)]).unwrap_or(0);
-                        let n = (y > 0).then(|| prev_grid[(x, y - 1)]).unwrap_or(w);
-                        let nw = (x > 0 && y > 0).then(|| prev_grid[(x - 1, y - 1)]).unwrap_or(w);
-                        let g = (w + n - nw).clamp(w.min(n), w.max(n));
-
-                        properties.push(c.abs());
-                        properties.push(c);
-                        properties.push((c - g).abs());
-                        properties.push(c - g);
+                    for ((_, (_, grid)), sample) in prev.iter().zip(&mut prev_channel_samples) {
+                        *sample = grid[(x, y)];
                     }
 
+                    let properties = predictor.properties(&prev_channel_samples);
                     let (diff, predictor) = ma_ctx.decode_sample(bitstream, &properties, dist_multiplier)?;
-                    let sample_prediction = predictor.predict(grid, x, y, &prediction);
+                    let sample_prediction = predictor.predict(&properties);
                     let true_value = diff + sample_prediction;
                     grid[(x, y)] = true_value;
-
-                    sc_predictor.record_error(prediction, true_value);
+                    properties.record(true_value);
                 }
             }
         }

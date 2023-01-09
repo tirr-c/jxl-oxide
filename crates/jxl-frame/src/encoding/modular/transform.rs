@@ -1,7 +1,7 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
 use crate::{Error, Grid, Result};
-use super::{ModularChannelInfo, Image, predictor::{Predictor, SelfCorrectingPredictor, WpHeader}};
+use super::{ModularChannelInfo, Image, predictor::{Predictor, PredictorState, WpHeader}};
 
 #[derive(Debug)]
 pub enum TransformInfo {
@@ -254,33 +254,29 @@ impl Palette {
             need_delta.sort_by(|(lx, ly), (rx, ry)| ly.cmp(ry).then(lx.cmp(rx)));
 
             let d_pred = self.d_pred;
-            if d_pred == Predictor::SelfCorrecting {
-                let width = grid.width() as i32;
-                let height = grid.height() as i32;
-
-                let mut predictor = SelfCorrectingPredictor::new(
-                    grid.width(),
-                    self.wp_header.clone().unwrap(),
-                );
-                let mut idx = 0;
-                'outer: for y in 0..height {
-                    for x in 0..width {
-                        let prediction = predictor.predict(&*grid, x, y);
-                        let diff = d_pred.predict(&*grid, x, y, &prediction);
-                        let sample = &mut grid[(x, y)];
-                        if need_delta[idx] == (x as u32, y as u32) {
-                            *sample += diff;
-                            idx += 1;
-                            if idx >= need_delta.len() {
-                                break 'outer;
-                            }
-                        }
-                        predictor.record_error(prediction, *sample);
-                    }
-                }
+            let wp_header = if d_pred == Predictor::SelfCorrecting {
+                self.wp_header.clone()
             } else {
-                for (x, y) in need_delta {
-                    d_pred.predict_non_sc(&*grid, x as i32, y as i32);
+                None
+            };
+            let width = grid.width() as i32;
+            let height = grid.height() as i32;
+            let mut predictor = PredictorState::new(grid.width(), 0, 0, 0, wp_header);
+
+            let mut idx = 0;
+            'outer: for y in 0..height {
+                for x in 0..width {
+                    let properties = predictor.properties(&[]);
+                    let diff = d_pred.predict(&properties);
+                    let sample = &mut grid[(x, y)];
+                    if need_delta[idx] == (x as u32, y as u32) {
+                        *sample += diff;
+                        idx += 1;
+                        if idx >= need_delta.len() {
+                            break 'outer;
+                        }
+                    }
+                    properties.record(*sample);
                 }
             }
         }

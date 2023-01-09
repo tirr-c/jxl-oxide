@@ -295,7 +295,7 @@ impl TreeInstr {
         match self {
             Self::Leaf(sym) => Ok(*sym),
             Self::Read { bits, children } => {
-                let selector: u32 = bitstream.read_bits(*bits as u32)?;
+                let selector = bitstream.read_bits(*bits as u32)?;
                 let selector = (selector.reverse_bits() >> (32 - *bits)) as usize;
                 children[selector].read_symbol(bitstream)
             },

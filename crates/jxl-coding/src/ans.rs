@@ -115,7 +115,7 @@ impl Histogram {
                 }
                 if *code > 1 {
                     let zeros = (*code - 1) as i16;
-                    let bitcount = (shift - ((12 - zeros) >> 1) as i16).clamp(0, zeros);
+                    let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
                     *code = (1 << zeros) + ((bitstream.read_bits(bitcount as u32)? as u16) << (zeros - bitcount));
                 }
                 prev_dist = *code;

@@ -5,3 +5,7 @@ members = [
   "crates/jxl-frame",
   "crates/jxl-info",
 ]
+
+[profile.release]
+debug = 1
+lto = true

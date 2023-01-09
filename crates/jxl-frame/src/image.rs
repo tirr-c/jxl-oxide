@@ -90,18 +90,22 @@ impl<S: Default + Clone> Grid<S> {
 }
 
 impl<S> Grid<S> {
+    #[inline]
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    #[inline]
     pub fn height(&self) -> u32 {
         self.height
     }
 
+    #[inline]
     pub fn group_size(&self) -> (u32, u32) {
         self.group_size
     }
 
+    #[inline]
     pub fn mirror(&self, x: i32, y: i32) -> (u32, u32) {
         mirror_2d(self.width, self.height, x, y)
     }
@@ -124,14 +128,6 @@ impl<S> Grid<S> {
             width,
             height,
         }
-    }
-
-    pub fn anchor(&self, x: i32, y: i32) -> GridAnchor<'_, S> {
-        GridAnchor { grid: self, x, y }
-    }
-
-    pub fn anchor_mut(&mut self, x: i32, y: i32) -> GridAnchorMut<'_, S> {
-        GridAnchorMut { grid: self, x, y }
     }
 
     pub fn iter_init_mut(&mut self, mut f: impl FnMut(u32, u32, &mut S)) {
@@ -263,16 +259,16 @@ impl<S: Sample> Grid<S> {
 impl<S> std::ops::Index<(i32, i32)> for Grid<S> {
     type Output = S;
 
-    fn index(&self, index: (i32, i32)) -> &Self::Output {
-        let (x, y) = self.mirror(index.0, index.1);
-        &self.buffer[(x, y)]
+    fn index(&self, (x, y): (i32, i32)) -> &Self::Output {
+        // let (x, y) = self.mirror(index.0, index.1);
+        &self.buffer[(x as u32, y as u32)]
     }
 }
 
 impl<S: Default + Clone> std::ops::IndexMut<(i32, i32)> for Grid<S> {
-    fn index_mut(&mut self, index: (i32, i32)) -> &mut Self::Output {
-        let (x, y) = self.mirror(index.0, index.1);
-        &mut self.buffer[(x, y)]
+    fn index_mut(&mut self, (x, y): (i32, i32)) -> &mut Self::Output {
+        // let (x, y) = self.mirror(index.0, index.1);
+        &mut self.buffer[(x as u32, y as u32)]
     }
 }
 
@@ -451,131 +447,46 @@ impl<S: Default + Clone> GridGroup<S> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct GridAnchor<'g, S> {
-    grid: &'g Grid<S>,
-    x: i32,
-    y: i32,
-}
-
-#[derive(Debug)]
-pub struct GridAnchorMut<'g, S> {
-    grid: &'g mut Grid<S>,
-    x: i32,
-    y: i32,
-}
-
-impl<S> GridAnchorMut<'_, S> {
-    pub fn grid_mut(&mut self) -> &mut Grid<S> {
-        self.grid
+impl<S> GridGroup<S> {
+    fn idx(&self, x: u32, y: u32) -> usize {
+        (y * self.stride + x) as usize
     }
 
-    pub fn shared(&self) -> GridAnchor<'_, S> {
-        GridAnchor {
-            grid: &*self.grid,
-            x: self.x,
-            y: self.y,
-        }
+    fn get(&self, x: u32, y: u32) -> Option<&S> {
+        self.buf.get(self.idx(x, y))
+    }
+
+    fn get_mut(&mut self, x: u32, y: u32) -> Option<&mut S> {
+        let idx = self.idx(x, y);
+        self.buf.get_mut(idx)
     }
 }
 
-impl<'g, S: Sample> GridAnchor<'g, S> {
-    #[inline]
-    pub fn x(self) -> i32 {
-        self.x
-    }
+impl<S> std::ops::Index<(u32, u32)> for GridGroup<S> {
+    type Output = S;
 
-    #[inline]
-    pub fn y(self) -> i32 {
-        self.y
-    }
-
-    #[inline]
-    pub fn grid(self) -> &'g Grid<S> {
-        self.grid
-    }
-
-    #[inline]
-    pub fn c(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        grid[(x, y)]
-    }
-
-    #[inline]
-    pub fn w(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        if x > 0 {
-            grid[(x - 1, y)]
-        } else if y > 0 {
-            grid[(x, y - 1)]
-        } else {
-            S::default()
-        }
-    }
-
-    #[inline]
-    pub fn n(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        if y > 0 {
-            grid[(x, y - 1)]
-        } else {
-            self.w()
-        }
-    }
-
-    #[inline]
-    pub fn nw(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        if x > 0 && y > 0 {
-            grid[(x - 1, y - 1)]
-        } else {
-            self.w()
-        }
-    }
-
-    #[inline]
-    pub fn ne(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        let w = grid.width as i32;
-        if x + 1 < w && y > 0 {
-            grid[(x + 1, y - 1)]
-        } else {
-            self.n()
-        }
-    }
-
-    #[inline]
-    pub fn nn(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        if y > 1 {
-            grid[(x, y - 2)]
-        } else {
-            self.n()
-        }
-    }
-
-    #[inline]
-    pub fn nee(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        let w = grid.width as i32;
-        if x + 2 < w && y > 0 {
-            grid[(x + 2, y - 1)]
-        } else {
-            self.ne()
-        }
-    }
-
-    #[inline]
-    pub fn ww(self) -> S {
-        let GridAnchor { grid, x, y } = self;
-        if x > 1 {
-            grid[(x - 2, y)]
-        } else {
-            self.w()
-        }
+    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
+        &self.buf[self.idx(x, y)]
     }
 }
 
+impl<S> std::ops::IndexMut<(u32, u32)> for GridGroup<S> {
+    fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
+        let idx = self.idx(x, y);
+        &mut self.buf[idx]
+    }
+}
+
+impl<S> std::fmt::Debug for GridGroup<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GridGroup")
+            .field("stride", &self.stride)
+            .field("scanlines", &self.scanlines)
+            .finish_non_exhaustive()
+    }
+}
+
+#[inline(always)]
 fn mirror_1d(len: u32, offset: i32) -> u32 {
     let offset = if offset < 0 {
         offset.abs_diff(-1)
@@ -594,6 +505,7 @@ fn mirror_1d(len: u32, offset: i32) -> u32 {
     }
 }
 
+#[inline(always)]
 fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
     (mirror_1d(width, col), mirror_1d(height, row))
 }
