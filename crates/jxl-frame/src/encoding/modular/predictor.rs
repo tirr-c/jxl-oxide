@@ -1,6 +1,4 @@
-use std::cell::Cell;
-
-use jxl_bitstream::{define_bundle, read_bits, Bitstream};
+use jxl_bitstream::define_bundle;
 
 use crate::{Error, Result};
 
@@ -151,8 +149,8 @@ impl PrevChannelState {
     fn new(width: u32) -> Self {
         Self {
             width,
-            prev_row: Vec::new(),
-            curr_row: Vec::new(),
+            prev_row: Vec::with_capacity(width as usize),
+            curr_row: Vec::with_capacity(width as usize),
         }
     }
 
@@ -185,7 +183,8 @@ impl PrevChannelState {
     fn record(&mut self, sample: i32) {
         self.curr_row.push(sample);
         if self.curr_row.len() >= self.width as usize {
-            self.prev_row = std::mem::take(&mut self.curr_row);
+            std::mem::swap(&mut self.prev_row, &mut self.curr_row);
+            self.curr_row.clear();
         }
     }
 }
@@ -197,9 +196,9 @@ impl PredictorState {
             width,
             channel_index,
             stream_index,
-            second_prev_row: Vec::new(),
-            prev_row: Vec::new(),
-            curr_row: Vec::new(),
+            second_prev_row: Vec::with_capacity(width as usize),
+            prev_row: Vec::with_capacity(width as usize),
+            curr_row: Vec::with_capacity(width as usize),
             prev_channels: (0..prev_channels).map(|_| PrevChannelState::new(width)).collect(),
             self_correcting,
             x: 0,
@@ -402,10 +401,10 @@ impl SelfCorrectingPredictor {
     fn new(width: u32, wp_header: WpHeader) -> Self {
         Self {
             width,
-            true_err_prev_row: Vec::new(),
-            true_err_curr_row: Vec::new(),
-            subpred_err_prev_row: Vec::new(),
-            subpred_err_curr_row: Vec::new(),
+            true_err_prev_row: Vec::with_capacity(width as usize),
+            true_err_curr_row: Vec::with_capacity(width as usize),
+            subpred_err_prev_row: Vec::with_capacity(width as usize),
+            subpred_err_curr_row: Vec::with_capacity(width as usize),
             wp: wp_header,
         }
     }
@@ -419,8 +418,10 @@ impl SelfCorrectingPredictor {
         self.true_err_curr_row.push(true_err);
         self.subpred_err_curr_row.push(subpred_err);
         if self.true_err_curr_row.len() >= self.width as usize {
-            self.true_err_prev_row = std::mem::take(&mut self.true_err_curr_row);
-            self.subpred_err_prev_row = std::mem::take(&mut self.subpred_err_curr_row);
+            std::mem::swap(&mut self.true_err_prev_row, &mut self.true_err_curr_row);
+            std::mem::swap(&mut self.subpred_err_prev_row, &mut self.subpred_err_curr_row);
+            self.true_err_curr_row.clear();
+            self.subpred_err_curr_row.clear();
         }
     }
 }
@@ -430,18 +431,14 @@ pub struct Properties<'p, 's> {
     predictor: &'p mut PredictorState,
     prev_channel_samples: &'s [i32],
     sc_prediction: Option<PredictionResult>,
-    cache: Vec<Cell<Option<i32>>>,
 }
 
 impl<'p, 's> Properties<'p, 's> {
     fn new(predictor: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
-        let property_count = 16 + prev_channel_samples.len() * 4;
-        let cache = vec![Cell::new(None); property_count];
         Self {
             predictor,
             prev_channel_samples,
             sc_prediction,
-            cache,
         }
     }
 }
@@ -452,15 +449,12 @@ impl Properties<'_, '_> {
     }
 
     pub fn get(&self, property: usize) -> Result<i32> {
-        let Some(cache_cell) = self.cache.get(property) else {
+        let property_count = 16 + self.prev_channel_samples.len() * 4;
+        if property >= property_count {
             return Err(Error::PropertyNotFound {
-                num_properties: self.cache.len(),
+                num_properties: property_count,
                 property_ref: property,
             });
-        };
-
-        if let Some(val) = cache_cell.get() {
-            return Ok(val);
         }
 
         let val = if let Some(property) = property.checked_sub(16) {
@@ -512,7 +506,6 @@ impl Properties<'_, '_> {
                 _ => unreachable!(),
             }
         };
-        cache_cell.set(Some(val));
         Ok(val)
     }
 
@@ -525,8 +518,9 @@ impl Properties<'_, '_> {
 
         pred.curr_row.push(sample);
         if pred.curr_row.len() >= pred.width as usize {
-            pred.second_prev_row = std::mem::take(&mut pred.prev_row);
-            pred.prev_row = std::mem::take(&mut pred.curr_row);
+            std::mem::swap(&mut pred.second_prev_row, &mut pred.prev_row);
+            std::mem::swap(&mut pred.prev_row, &mut pred.curr_row);
+            pred.curr_row.clear();
             pred.prev_prop9 = 0;
         } else {
             pred.prev_prop9 = prop9;

@@ -133,9 +133,13 @@ impl<R: Read> Bitstream<R> {
         Ok(())
     }
 
+    #[inline]
     fn read_bits_inner(&mut self, n: u32) -> u64 {
         if n == 0 {
             return 0;
+        }
+        if n == 1 {
+            return self.read_single_bit_inner();
         }
 
         assert!(self.bits_left >= n);
@@ -147,9 +151,23 @@ impl<R: Read> Bitstream<R> {
         data
     }
 
+    #[inline]
+    fn read_single_bit_inner(&mut self) -> u64 {
+        assert!(self.bits_left > 0);
+        let data = self.current & 1;
+        self.current >>= 1;
+        self.bits_left -= 1;
+        self.global_pos += 1;
+        data
+    }
+
     pub fn read_bits(&mut self, n: u32) -> Result<u32> {
         if n == 0 {
             return Ok(0);
+        }
+        if n == 1 {
+            let data = self.read_bool()? as u32;
+            return Ok(data);
         }
 
         debug_assert!(n <= 32);
@@ -196,7 +214,10 @@ impl<R: Read> Bitstream<R> {
     }
 
     pub fn read_bool(&mut self) -> Result<bool> {
-        Ok(self.read_bits(1)? == 1)
+        if self.bits_left == 0 {
+            self.fill()?;
+        }
+        Ok(self.read_single_bit_inner() != 0)
     }
 
     pub fn read_f16_as_f32(&mut self) -> Result<f32> {

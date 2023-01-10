@@ -168,24 +168,48 @@ impl<S: Sample> Grid<S> {
             return;
         }
 
+        if self.group_size != subgrid.group_size {
+            // group size mismatch
+            self.insert_subgrid_slow(subgrid, left, top);
+            return;
+        }
+
         let (gw, gh) = self.group_size;
+        if left % gw as i32 != 0 || top % gh as i32 != 0 {
+            // not aligned
+            self.insert_subgrid_slow(subgrid, left, top);
+            return;
+        }
 
         let (group_stride, subgrid_group_stride, groups, subgrid_groups) = match (&mut self.buffer, &mut subgrid.buffer) {
-            (GridBuffer::Single(_), _) | (_, GridBuffer::Single(_)) => {
+            (GridBuffer::Single(_), _) => {
                 self.insert_subgrid_slow(subgrid, left, top);
                 return;
             },
-            (GridBuffer::Grouped { group_size, group_stride, groups, .. }, GridBuffer::Grouped { group_size: subgrid_group_size, group_stride: subgrid_group_stride, groups: subgrid_groups, .. }) => {
-                if group_size != subgrid_group_size {
-                    // group size mismatch
-                    self.insert_subgrid_slow(subgrid, left, top);
+            (GridBuffer::Grouped { group_stride, groups, .. }, GridBuffer::Single(subgrid_group)) => {
+                if left < 0 || top < 0 {
                     return;
                 }
-                if left % gw as i32 != 0 || top % gh as i32 != 0 {
-                    // not aligned
-                    self.insert_subgrid_slow(subgrid, left, top);
-                    return;
+                let group_left = left as u32 / gw;
+                let group_top = top as u32 / gh;
+                let group_idx = group_top * *group_stride + group_left;
+                let Some(group) = groups.get_mut(&group_idx) else { return; };
+                if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
+                    std::mem::swap(group, subgrid_group);
+                } else {
+                    let group_stride = group.stride as usize;
+                    let subgrid_group_stride = subgrid_group.stride as usize;
+                    let width = group_stride.min(subgrid_group_stride);
+                    let height = group.scanlines.min(subgrid_group.scanlines) as usize;
+                    for y in 0..height {
+                        for x in 0..width {
+                            group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                        }
+                    }
                 }
+                return;
+            },
+            (GridBuffer::Grouped { group_stride, groups, .. }, GridBuffer::Grouped { group_stride: subgrid_group_stride, groups: subgrid_groups, .. }) => {
                 (*group_stride, *subgrid_group_stride, groups, subgrid_groups)
             },
         };

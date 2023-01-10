@@ -87,7 +87,7 @@ impl Image {
             let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
             let width = grid.width();
             let height = grid.height();
-            let mut predictor = PredictorState::new(width, idx as u32, stream_index, prev.len(), wp_header);
+            let mut predictor = PredictorState::new(width, i as u32, stream_index, prev.len(), wp_header);
             let mut prev_channel_samples = vec![0i32; prev.len()];
 
             for y in 0..height as i32 {
