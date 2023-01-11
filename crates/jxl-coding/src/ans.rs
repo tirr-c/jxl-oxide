@@ -61,12 +61,11 @@ impl Histogram {
             }
             alphabet_size = Self::read_u8(bitstream)? as usize + 3;
             let mut repeat_ranges = Vec::new();
-            let histogram = crate::prefix::Histogram::prefix_code_for_ans();
 
             let mut omit_data = None;
             let mut idx = 0;
             while idx < alphabet_size {
-                dist[idx] = histogram.read_symbol(bitstream)?;
+                dist[idx] = read_prefix(bitstream)?;
                 if dist[idx] == 13 {
                     let repeat_count = Self::read_u8(bitstream)? as usize + 4;
                     repeat_ranges.push(idx..(idx + repeat_count));
@@ -215,4 +214,37 @@ impl Histogram {
         }
         Ok(symbol)
     }
+}
+
+fn read_prefix<R: Read>(bitstream: &mut Bitstream<R>) -> Result<u16> {
+    Ok(match bitstream.read_bits(3)? {
+        0 => 10,
+        1 => {
+            for val in [4, 0, 11, 13] {
+                if bitstream.read_bool()? {
+                    return Ok(val);
+                }
+            }
+            12
+        },
+        2 => 7,
+        3 => {
+            if bitstream.read_bool()? {
+                1
+            } else {
+                3
+            }
+        },
+        4 => 6,
+        5 => 8,
+        6 => 9,
+        7 => {
+            if bitstream.read_bool()? {
+                2
+            } else {
+                5
+            }
+        },
+        _ => unreachable!(),
+    })
 }

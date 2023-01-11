@@ -8,22 +8,21 @@ use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Histogram {
-    instr: TreeInstr,
+    configs: Vec<TreeConfig>,
+    symbols: Vec<u16>,
 }
 
 #[derive(Debug)]
-enum TreeInstr {
-    Leaf(u16),
-    Read {
-        bits: u8,
-        children: Vec<TreeInstr>,
-    },
+struct TreeConfig {
+    bits: u8,
+    from: u32,
+    to: u32,
+    offset: usize,
 }
 
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> Result<Self> {
         let mut syms_for_length = BTreeMap::new();
-        let mut nonzero_lengths = 0usize;
         for (sym, len) in code_lengths.into_iter().enumerate() {
             let sym = sym as u16;
             if len > 0 {
@@ -31,55 +30,36 @@ impl Histogram {
                     .entry(len)
                     .or_insert_with(Vec::new)
                     .push(sym);
-                nonzero_lengths += 1;
             }
         }
 
-        let it = syms_for_length
-            .into_iter()
-            .flat_map(|(len, syms)| {
-                syms.into_iter().map(move |sym| (len, sym))
-            });
-
-        let mut node_stack = Vec::new();
+        let mut configs = Vec::new();
+        let mut symbols = Vec::new();
         let mut current_len = 0u8;
-        let mut current_children = Vec::new();
-        let mut target_bits = 0u8;
-        for (idx, (len, sym)) in it.enumerate() {
-            if current_len == len {
-                current_children.push(TreeInstr::Leaf(sym));
-                while current_children.len() == (1 << target_bits) {
-                    let Some((parent_len, parent_target_bits, parent_children)) = node_stack.pop() else {
-                        if idx != nonzero_lengths - 1 {
-                            return Err(Error::InvalidPrefixHistogram);
-                        }
-                        break;
-                    };
-                    let node = TreeInstr::Read {
-                        bits: target_bits,
-                        children: current_children,
-                    };
-                    current_len = parent_len;
-                    current_children = parent_children;
-                    current_children.push(node);
-                    target_bits = parent_target_bits;
-                }
-            } else {
-                node_stack.push((current_len, target_bits, current_children));
-                target_bits = len - current_len;
-                current_children = vec![TreeInstr::Leaf(sym)];
-                current_len = len;
-            }
+        let mut current_bits = 0u32;
+        for (len, syms) in syms_for_length {
+            let len_diff = len - current_len;
+
+            let sym_count = syms.len() as u32;
+            current_bits <<= len_diff;
+
+            configs.push(TreeConfig {
+                bits: len,
+                from: current_bits,
+                to: current_bits + sym_count,
+                offset: symbols.len(),
+            });
+            symbols.extend(syms);
+
+            current_bits += sym_count;
+            current_len = len;
         }
 
-        if !node_stack.is_empty() {
-            Err(Error::InvalidPrefixHistogram)
-        } else if let Some(instr) = current_children.pop() {
-            if current_children.is_empty() {
-                Ok(Self { instr })
-            } else {
-                Err(Error::InvalidPrefixHistogram)
-            }
+        if current_bits.checked_shl((15 - current_len) as u32) == Some(1 << 15) {
+            Ok(Self {
+                configs,
+                symbols
+            })
         } else {
             Err(Error::InvalidPrefixHistogram)
         }
@@ -87,7 +67,8 @@ impl Histogram {
 
     fn with_single_symbol(symbol: u16) -> Self {
         Self {
-            instr: TreeInstr::Leaf(symbol),
+            configs: vec![TreeConfig { bits: 0, from: 0, to: 1, offset: 0 }],
+            symbols: vec![symbol],
         }
     }
 
@@ -286,78 +267,21 @@ impl Histogram {
 impl Histogram {
     #[inline]
     pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<u16> {
-        self.instr.read_symbol(bitstream)
-    }
-}
-
-impl TreeInstr {
-    fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<u16> {
-        match self {
-            Self::Leaf(sym) => Ok(*sym),
-            Self::Read { bits, children } => {
-                let mut selector = 0usize;
-                for _ in 0..*bits {
-                    selector = (selector << 1) | (bitstream.read_bool()? as usize);
-                }
-                children[selector].read_symbol(bitstream)
-            },
+        let Self { configs, symbols } = self;
+        let mut bits = 0u32;
+        let mut prev_len = 0u8;
+        for config in configs {
+            for _ in prev_len..config.bits {
+                bits = (bits << 1) | (bitstream.read_bool()? as u32);
+            }
+            prev_len = config.bits;
+            if config.from <= bits && bits < config.to {
+                let diff = bits - config.from;
+                let idx = config.offset + diff as usize;
+                return Ok(symbols[idx]);
+            }
         }
-    }
-}
-
-impl Histogram {
-    pub(crate) fn prefix_code_for_ans() -> Self {
-        use TreeInstr::*;
-
-        let instr = Read {
-            bits: 3,
-            children: vec![
-                Leaf(10),
-                Leaf(6),
-                Leaf(7),
-                Leaf(9),
-                Read {
-                    bits: 1,
-                    children: vec![
-                        Read {
-                            bits: 1,
-                            children: vec![
-                                Read {
-                                    bits: 1,
-                                    children: vec![
-                                        Read {
-                                            bits: 1,
-                                            children: vec![
-                                                Leaf(12),
-                                                Leaf(13),
-                                            ],
-                                        },
-                                        Leaf(11),
-                                    ],
-                                },
-                                Leaf(0),
-                            ],
-                        },
-                        Leaf(4),
-                    ],
-                },
-                Leaf(8),
-                Read {
-                    bits: 1,
-                    children: vec![
-                        Leaf(3),
-                        Leaf(1),
-                    ],
-                },
-                Read {
-                    bits: 1,
-                    children: vec![
-                        Leaf(5),
-                        Leaf(2),
-                    ],
-                },
-            ],
-        };
-        Self { instr }
+        dbg!(self);
+        unreachable!()
     }
 }

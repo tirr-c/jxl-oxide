@@ -5,7 +5,7 @@ fn main() {
     let file = std::fs::File::open("input.jxl").expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
-    dbg!(&headers);
+    // dbg!(&headers);
 
     if headers.metadata.colour_encoding.want_icc {
         let enc_size = read_bits!(bitstream, U64).unwrap();
@@ -34,7 +34,6 @@ fn main() {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
         let frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
-        dbg!(&frame);
 
         let toc = frame.toc();
         let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
@@ -47,7 +46,7 @@ fn main() {
         let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
         frame.load_all(&mut bitstream).expect("Failed to decode frame");
         frame.complete().expect("Failed to complete a frame");
-        eprintln!("{:?}", frame);
+        // eprintln!("{:?}", frame);
 
         if frame.header().is_last {
             break;
