@@ -30,6 +30,9 @@ fn main() {
         std::fs::write("encoded_icc", &encoded_icc).unwrap();
     }
 
+    let pool = rayon::ThreadPoolBuilder::new().build().expect("failed to build thread pool");
+    eprintln!("Decoding with {} threads", pool.current_num_threads());
+
     if headers.metadata.have_preview {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
@@ -44,7 +47,7 @@ fn main() {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
         let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
-        frame.load_all(&mut bitstream).expect("Failed to decode frame");
+        frame.load_all_par(&mut bitstream, &pool).expect("Failed to decode frame");
         frame.complete().expect("Failed to complete a frame");
         // eprintln!("{:?}", frame);
 

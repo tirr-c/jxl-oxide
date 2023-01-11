@@ -136,7 +136,7 @@ impl Toc {
         self.total_size
     }
 
-    pub fn iter_bitstream_order(&self) -> impl Iterator<Item = TocGroup> {
+    pub fn iter_bitstream_order(&self) -> impl Iterator<Item = TocGroup> + Send {
         let groups = if self.bitstream_order.is_empty() {
             self.groups.clone()
         } else {

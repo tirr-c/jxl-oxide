@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
+rayon = "1.6.1"
 
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
@@ -15,3 +16,4 @@ path = "../jxl-coding"
 
 [dependencies.jxl-frame]
 path = "../jxl-frame"
+features = ["mt"]
