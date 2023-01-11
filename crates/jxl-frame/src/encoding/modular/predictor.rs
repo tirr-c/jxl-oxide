@@ -72,13 +72,13 @@ impl Predictor {
 
         match self {
             Zero => 0,
-            West => predictor.w(),
-            North => predictor.n(),
-            AvgWestAndNorth => (predictor.w() + predictor.n()) / 2,
+            West => predictor.w,
+            North => predictor.n,
+            AvgWestAndNorth => (predictor.w + predictor.n) / 2,
             Select => {
-                let n = predictor.n();
-                let w = predictor.w();
-                let nw = predictor.nw();
+                let n = predictor.n;
+                let w = predictor.w;
+                let nw = predictor.nw;
                 if n.abs_diff(nw) < w.abs_diff(nw) {
                     w
                 } else {
@@ -86,10 +86,9 @@ impl Predictor {
                 }
             },
             Gradient => {
-                let n = predictor.n();
-                let w = predictor.w();
-                let nw = predictor.nw();
-                (w + n - nw).clamp(w.min(n), w.max(n))
+                let n = predictor.n;
+                let w = predictor.w;
+                properties.grad.clamp(w.min(n), w.max(n))
             },
             SelfCorrecting => {
                 let prediction = properties
@@ -98,14 +97,14 @@ impl Predictor {
                 (prediction + 3) >> 3
             },
             NorthEast => predictor.ne(),
-            NorthWest => predictor.nw(),
+            NorthWest => predictor.nw,
             WestWest => predictor.ww(),
-            AvgWestAndNorthWest => (predictor.w() + predictor.nw()) / 2,
-            AvgNorthAndNorthWest => (predictor.n() + predictor.nw()) / 2,
-            AvgNorthAndNorthEast => (predictor.n() + predictor.ne()) / 2,
+            AvgWestAndNorthWest => (predictor.w + predictor.nw) / 2,
+            AvgNorthAndNorthWest => (predictor.n + predictor.nw) / 2,
+            AvgNorthAndNorthEast => (predictor.n + predictor.ne()) / 2,
             AvgAll => {
-                let n = predictor.n();
-                let w = predictor.w();
+                let n = predictor.n;
+                let w = predictor.w;
                 let nn = predictor.nn();
                 let ww = predictor.ww();
                 let nee = predictor.nee();
@@ -135,7 +134,10 @@ pub struct PredictorState {
     self_correcting: Option<SelfCorrectingPredictor>,
     x: u32,
     y: u32,
-    prev_prop9: i32,
+    w: i32,
+    n: i32,
+    nw: i32,
+    prev_grad: i32,
 }
 
 #[derive(Debug)]
@@ -203,7 +205,10 @@ impl PredictorState {
             self_correcting,
             x: 0,
             y: 0,
-            prev_prop9: 0,
+            w: 0,
+            n: 0,
+            nw: 0,
+            prev_grad: 0,
         }
     }
 
@@ -223,10 +228,10 @@ impl PredictorState {
         } = self.self_correcting.as_ref()?;
         let width = *width;
 
-        let n3 = self.n() << 3;
-        let nw3 = self.nw() << 3;
+        let n3 = self.n << 3;
+        let nw3 = self.nw << 3;
         let ne3 = self.ne() << 3;
-        let w3 = self.w() << 3;
+        let w3 = self.w << 3;
         let nn3 = self.nn() << 3;
 
         let x = self.x as usize;
@@ -325,46 +330,18 @@ impl PredictorState {
 }
 
 impl PredictorState {
-    fn w(&self) -> i32 {
-        let x = self.curr_row.len();
-        match (x.checked_sub(1), self.prev_row.is_empty()) {
-            (Some(x), _) => self.curr_row[x],
-            (None, false) => self.prev_row[x],
-            (None, true) => 0,
-        }
-    }
-
-    fn n(&self) -> i32 {
-        let x = self.curr_row.len();
-        match (x.checked_sub(1), self.prev_row.is_empty()) {
-            (_, false) => self.prev_row[x],
-            (Some(x), true) => self.curr_row[x],
-            (None, true) => 0,
-        }
-    }
-
     fn nn(&self) -> i32 {
         if self.second_prev_row.is_empty() {
-            self.n()
+            self.n
         } else {
             self.second_prev_row[self.curr_row.len()]
-        }
-    }
-
-    fn nw(&self) -> i32 {
-        let x = self.curr_row.len();
-        match (x.checked_sub(1), self.prev_row.is_empty()) {
-            (Some(x), false) => self.prev_row[x],
-            (Some(x), true) => self.curr_row[x],
-            (None, false) => self.prev_row[x],
-            (None, true) => 0,
         }
     }
 
     fn ne(&self) -> i32 {
         let x = self.curr_row.len();
         match self.prev_row.get(x + 1) {
-            None => self.n(),
+            None => self.n,
             Some(val) => *val,
         }
     }
@@ -382,7 +359,7 @@ impl PredictorState {
         if let Some(x) = x.checked_sub(2) {
             self.curr_row[x]
         } else {
-            self.w()
+            self.w
         }
     }
 }
@@ -431,14 +408,17 @@ pub struct Properties<'p, 's> {
     predictor: &'p mut PredictorState,
     prev_channel_samples: &'s [i32],
     sc_prediction: Option<PredictionResult>,
+    grad: i32,
 }
 
 impl<'p, 's> Properties<'p, 's> {
     fn new(predictor: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
+        let grad = predictor.w + predictor.n - predictor.nw;
         Self {
             predictor,
             prev_channel_samples,
             sc_prediction,
+            grad,
         }
     }
 }
@@ -485,17 +465,17 @@ impl Properties<'_, '_> {
                 1 => pred.stream_index as i32,
                 2 => pred.y as i32,
                 3 => pred.x as i32,
-                4 => pred.n().abs(),
-                5 => pred.w().abs(),
-                6 => pred.n(),
-                7 => pred.w(),
-                8 => pred.w() - pred.prev_prop9,
-                9 => pred.n() + pred.w() - pred.nw(),
-                10 => pred.w() - pred.nw(),
-                11 => pred.nw() - pred.n(),
-                12 => pred.n() - pred.ne(),
-                13 => pred.n() - pred.nn(),
-                14 => pred.w() - pred.ww(),
+                4 => pred.n.abs(),
+                5 => pred.w.abs(),
+                6 => pred.n,
+                7 => pred.w,
+                8 => pred.w - pred.prev_grad,
+                9 => self.grad,
+                10 => pred.w - pred.nw,
+                11 => pred.nw - pred.n,
+                12 => pred.n - pred.ne(),
+                13 => pred.n - pred.nn(),
+                14 => pred.w - pred.ww(),
                 15 => {
                     if let Some(prediction) = &self.sc_prediction {
                         prediction.max_error
@@ -510,7 +490,6 @@ impl Properties<'_, '_> {
     }
 
     pub fn record(self, sample: i32) {
-        let prop9 = self.get(9).unwrap();
         let pred = self.predictor;
         if let (Some(sc), Some(pred)) = (&mut pred.self_correcting, self.sc_prediction) {
             sc.record(pred, sample);
@@ -521,9 +500,24 @@ impl Properties<'_, '_> {
             std::mem::swap(&mut pred.second_prev_row, &mut pred.prev_row);
             std::mem::swap(&mut pred.prev_row, &mut pred.curr_row);
             pred.curr_row.clear();
-            pred.prev_prop9 = 0;
+            pred.prev_grad = 0;
+
+            let n = pred.prev_row[0];
+            pred.n = n;
+            pred.w = n;
+            pred.nw = n;
         } else {
-            pred.prev_prop9 = prop9;
+            pred.prev_grad = self.grad;
+
+            let x = pred.curr_row.len();
+            pred.w = sample;
+            if pred.prev_row.is_empty() {
+                pred.nw = sample;
+                pred.n = sample;
+            } else {
+                pred.nw = pred.prev_row[x - 1];
+                pred.n = pred.prev_row[x];
+            }
         }
 
         for (ch, sample) in pred.prev_channels.iter_mut().zip(self.prev_channel_samples) {
