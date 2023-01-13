@@ -132,7 +132,6 @@ pub struct PredictorState {
     curr_row: Vec<i32>,
     prev_channels: Vec<PrevChannelState>,
     self_correcting: Option<SelfCorrectingPredictor>,
-    x: u32,
     y: u32,
     w: i32,
     n: i32,
@@ -203,7 +202,6 @@ impl PredictorState {
             curr_row: Vec::with_capacity(width as usize),
             prev_channels: (0..prev_channels).map(|_| PrevChannelState::new(width)).collect(),
             self_correcting,
-            x: 0,
             y: 0,
             w: 0,
             n: 0,
@@ -234,7 +232,7 @@ impl PredictorState {
         let w3 = self.w << 3;
         let nn3 = self.nn() << 3;
 
-        let x = self.x as usize;
+        let x = true_err_curr_row.len();
 
         let true_err_n = true_err_prev_row.get(x).copied().unwrap_or(0);
         let true_err_w = x.checked_sub(1)
@@ -390,7 +388,7 @@ impl SelfCorrectingPredictor {
         let true_err = pred.prediction - (sample << 3);
         let mut subpred_err = [0u32; 4];
         for (err, subpred) in subpred_err.iter_mut().zip(pred.subpred) {
-            *err = ((subpred - (sample << 3)).unsigned_abs() + 3) >> 3;
+            *err = (subpred.abs_diff(sample << 3) + 3) >> 3;
         }
         self.true_err_curr_row.push(true_err);
         self.subpred_err_curr_row.push(subpred_err);
@@ -464,7 +462,7 @@ impl Properties<'_, '_> {
                 0 => pred.channel_index as i32,
                 1 => pred.stream_index as i32,
                 2 => pred.y as i32,
-                3 => pred.x as i32,
+                3 => pred.curr_row.len() as i32,
                 4 => pred.n.abs(),
                 5 => pred.w.abs(),
                 6 => pred.n,
@@ -497,6 +495,8 @@ impl Properties<'_, '_> {
 
         pred.curr_row.push(sample);
         if pred.curr_row.len() >= pred.width as usize {
+            pred.y += 1;
+
             std::mem::swap(&mut pred.second_prev_row, &mut pred.prev_row);
             std::mem::swap(&mut pred.prev_row, &mut pred.curr_row);
             pred.curr_row.clear();

@@ -68,6 +68,8 @@ impl Image {
             .max();
         let Some(dist_multiplier) = dist_multiplier else { return Ok(()); };
 
+        let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
+
         let mut channels: Vec<_> = self.channels.info.iter()
             .zip(self.data.iter_mut())
             .enumerate()
@@ -87,10 +89,9 @@ impl Image {
                 })
                 .collect::<Vec<_>>();
 
-            let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
             let width = grid.width();
             let height = grid.height();
-            let mut predictor = PredictorState::new(width, i as u32, stream_index, prev.len(), wp_header);
+            let mut predictor = PredictorState::new(width, i as u32, stream_index, prev.len(), wp_header.clone());
             let mut prev_channel_samples = vec![0i32; prev.len()];
 
             for y in 0..height as i32 {

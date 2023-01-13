@@ -436,7 +436,7 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
         let modular = if let Some((minshift, maxshift)) = shift {
             let modular_params = gmodular.modular.make_subimage_params_pass_group(gmodular.ma_config.as_ref(), group_idx, minshift, maxshift);
             let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
-            modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 1 + pass_idx * frame_header.num_groups() + group_idx)?;
+            modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx)?;
             modular.inverse_transform();
             modular
         } else {
