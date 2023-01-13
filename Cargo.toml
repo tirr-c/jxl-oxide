@@ -8,4 +8,4 @@ members = [
 
 [profile.release]
 debug = 1
-lto = true
+# lto = true

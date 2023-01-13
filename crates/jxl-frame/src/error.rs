@@ -14,6 +14,7 @@ pub enum Error {
         num_properties: usize,
         property_ref: usize,
     },
+    InvalidInterleaveOption,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -42,6 +43,7 @@ impl std::fmt::Display for Error {
             Self::PropertyNotFound { num_properties, property_ref } => {
                 write!(f, "property {} not found ({} given)", property_ref, num_properties)
             },
+            Self::InvalidInterleaveOption => write!(f, "invalid interleave option"),
         }
     }
 }

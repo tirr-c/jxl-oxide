@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
+png = "0.17.7"
 rayon = "1.6.1"
 
 [dependencies.clap]

@@ -210,6 +210,11 @@ impl Modular {
         self
     }
 
+    pub fn image(&self) -> &Image {
+        let Some(image) = &self.inner else { return &image::EMPTY; };
+        &image.image
+    }
+
     pub fn into_image(self) -> Image {
         let Some(image) = self.inner else { return Image::empty(); };
         image.image

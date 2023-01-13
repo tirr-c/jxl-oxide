@@ -13,8 +13,10 @@ pub struct Image {
     data: Vec<Grid<i32>>,
 }
 
+pub(crate) static EMPTY: Image = Image::empty();
+
 impl Image {
-    pub(super) fn empty() -> Self {
+    pub(super) const fn empty() -> Self {
         Self {
             group_dim: 128,
             bit_depth: 8,

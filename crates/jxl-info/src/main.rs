@@ -10,6 +10,9 @@ struct Args {
     /// Number of threads to use, 0 to choose the value automatically
     #[arg(short, long, default_value_t)]
     threads: usize,
+    /// Output file
+    #[arg(short, long)]
+    output: Option<PathBuf>,
     /// Input file
     input: PathBuf,
 }
@@ -21,6 +24,9 @@ fn main() {
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
     // dbg!(&headers);
+
+    let bit_depth = headers.metadata.bit_depth.bits_per_sample();
+    let has_alpha = headers.metadata.alpha().is_some();
 
     if headers.metadata.colour_encoding.want_icc {
         let enc_size = read_bits!(bitstream, U64).unwrap();
@@ -71,6 +77,33 @@ fn main() {
             // eprintln!("{:#?}", frame);
 
             if frame.header().is_last {
+                if let Some(output) = args.output {
+                    eprintln!("Encoding samples to PNG");
+                    let output = std::fs::File::create(output).expect("failed to open output file");
+                    let mut encoder = png::Encoder::new(output, frame.header().width, frame.header().height);
+                    encoder.set_color(if has_alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
+                    encoder.set_depth(if bit_depth == 8 { png::BitDepth::Eight } else { png::BitDepth::Sixteen });
+                    // TODO: set colorspace
+                    encoder.set_srgb(match headers.metadata.colour_encoding.rendering_intent {
+                        jxl_bitstream::header::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+                        jxl_bitstream::header::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+                        jxl_bitstream::header::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+                        jxl_bitstream::header::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+                    });
+                    let mut writer = encoder
+                        .write_header()
+                        .expect("failed to write header")
+                        .into_stream_writer()
+                        .unwrap();
+
+                    frame.rgba_be_interleaved(|buf| {
+                        std::io::Write::write_all(&mut writer, buf).expect("failed to write image data");
+                        Ok(())
+                    }).expect("failed to write image data");
+                    writer.finish().expect("failed to finish writing png");
+                } else {
+                    eprintln!("No output path specified, skipping PNG encoding");
+                }
                 break;
             }
 

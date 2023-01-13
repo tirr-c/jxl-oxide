@@ -258,6 +258,13 @@ impl ImageMetadata {
     ];
 }
 
+impl ImageMetadata {
+    pub fn alpha(&self) -> Option<usize> {
+        self.ec_info.iter()
+            .position(|info| info.d_alpha)
+    }
+}
+
 define_bundle! {
     #[derive(Debug)]
     pub struct ColourEncoding {

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::{Result, Error};
+
 pub trait Sample: Default + Copy + Sized {
     type Signed: Sample;
     type Unsigned: Sample;
@@ -193,19 +195,40 @@ impl<S: Sample> Grid<S> {
                 let group_left = left as u32 / gw;
                 let group_top = top as u32 / gh;
                 let group_idx = group_top * *group_stride + group_left;
-                let Some(group) = groups.get_mut(&group_idx) else { return; };
-                if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
-                    std::mem::swap(group, subgrid_group);
-                } else {
-                    let group_stride = group.stride as usize;
-                    let subgrid_group_stride = subgrid_group.stride as usize;
-                    let width = group_stride.min(subgrid_group_stride);
-                    let height = group.scanlines.min(subgrid_group.scanlines) as usize;
-                    for y in 0..height {
-                        for x in 0..width {
-                            group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                if let Some(group) = groups.get_mut(&group_idx) {
+                    if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
+                        std::mem::swap(group, subgrid_group);
+                    } else {
+                        let group_stride = group.stride as usize;
+                        let subgrid_group_stride = subgrid_group.stride as usize;
+                        let width = group_stride.min(subgrid_group_stride);
+                        let height = group.scanlines.min(subgrid_group.scanlines) as usize;
+                        for y in 0..height {
+                            for x in 0..width {
+                                group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                            }
                         }
                     }
+                } else {
+                    let stride = (self.width - left as u32).min(gw);
+                    let scanlines = (self.height - top as u32).min(gh);
+                    let subgrid_group = if stride == subgrid_group.stride && scanlines == subgrid_group.scanlines {
+                        std::mem::replace(subgrid_group, GridGroup::new(0, 0))
+                    } else {
+                        let group_stride = stride as usize;
+                        let subgrid_group_stride = subgrid_group.stride as usize;
+                        let width = group_stride.min(subgrid_group_stride);
+                        let height = scanlines.min(subgrid_group.scanlines) as usize;
+
+                        let mut group = GridGroup::new(stride, scanlines);
+                        for y in 0..height {
+                            for x in 0..width {
+                                group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                            }
+                        }
+                        group
+                    };
+                    groups.insert(group_idx, subgrid_group);
                 }
                 return;
             },
@@ -386,6 +409,15 @@ impl<S: Default + Clone> GridBuffer<S> {
                 group_stride: (width + gw - 1) / gw,
                 groups: BTreeMap::new(),
             }
+        }
+    }
+}
+
+impl<S> GridBuffer<S> {
+    fn get_group(&self, idx: u32) -> Option<&GridGroup<S>> {
+        match self {
+            Self::Single(buf) => (idx == 0).then_some(buf),
+            Self::Grouped { groups, .. } => groups.get(&idx),
         }
     }
 }
@@ -640,4 +672,69 @@ pub(crate) fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [
                 f(&mut samples);
             }
         });
+}
+
+pub(crate) fn rgba_be_interleaved<F>(
+    rgb: [&Grid<i32>; 3],
+    a: Option<&Grid<i32>>,
+    bit_depth: u32,
+    mut f: F,
+) -> Result<()>
+where
+    F: FnMut(&[u8]) -> Result<()>,
+{
+    if bit_depth != 8 && bit_depth != 16 {
+        return Err(Error::InvalidInterleaveOption);
+    }
+
+    let bytes_per_sample = (3 + (a.is_some() as usize)) * (bit_depth / 8) as usize;
+
+    let width = rgb[0].width;
+    let height = rgb[0].height;
+    let (gw, gh) = rgb[0].group_size;
+    let mut buf = vec![0u8; width as usize * gh as usize * bytes_per_sample];
+
+    let group_stride = (width + gw - 1) / gw;
+    let group_height = (height + gh - 1) / gh;
+    for gy in 0..group_height {
+        let scanlines = (height - gy * gh).min(gh);
+        for gx in 0..group_stride {
+            let idx = gy * group_stride + gx;
+            let stride = (width - gx * gw).min(gw);
+
+            let r = rgb[0].buffer.get_group(idx).unwrap();
+            let g = rgb[1].buffer.get_group(idx).unwrap();
+            let b = rgb[2].buffer.get_group(idx).unwrap();
+            let a = a.as_ref().map(|g| g.buffer.get_group(idx).unwrap());
+
+            for y in 0..scanlines {
+                for x in 0..stride {
+                    let buf_idx = (y as usize * width as usize + (gx * gw + x) as usize) * bytes_per_sample;
+                    let r = r.buf[(y * r.stride + x) as usize];
+                    let g = g.buf[(y * g.stride + x) as usize];
+                    let b = b.buf[(y * b.stride + x) as usize];
+                    let a = a.map(|g| g.buf[(y * g.stride + x) as usize]);
+                    if bit_depth == 8 {
+                        let buf = &mut buf[buf_idx..];
+                        buf[0] = r as u8;
+                        buf[1] = g as u8;
+                        buf[2] = b as u8;
+                        if let Some(a) = a {
+                            buf[3] = a as u8;
+                        }
+                    } else {
+                        let buf = &mut buf[buf_idx..];
+                        buf[0..2].copy_from_slice(&(r as u16).to_be_bytes());
+                        buf[2..4].copy_from_slice(&(g as u16).to_be_bytes());
+                        buf[4..6].copy_from_slice(&(b as u16).to_be_bytes());
+                        if let Some(a) = a {
+                            buf[6..8].copy_from_slice(&(a as u16).to_be_bytes());
+                        }
+                    }
+                }
+            }
+        }
+        f(&buf[..((scanlines * width) as usize * bytes_per_sample)])?;
+    }
+    Ok(())
 }
