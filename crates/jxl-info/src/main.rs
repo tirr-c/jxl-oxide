@@ -1,8 +1,23 @@
+use std::path::PathBuf;
+
+use clap::Parser;
 use jxl_bitstream::{header::Headers, read_bits};
 use jxl_frame::Frame;
 
+#[derive(Debug, Parser)]
+#[command(version, about)]
+struct Args {
+    /// Number of threads to use, 0 to choose the value automatically
+    #[arg(short, long, default_value_t)]
+    threads: usize,
+    /// Input file
+    input: PathBuf,
+}
+
 fn main() {
-    let file = std::fs::File::open("input.jxl").expect("Failed to open file");
+    let args = Args::parse();
+
+    let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
     // dbg!(&headers);
@@ -30,35 +45,40 @@ fn main() {
         std::fs::write("encoded_icc", &encoded_icc).unwrap();
     }
 
-    let pool = rayon::ThreadPoolBuilder::new().build().expect("failed to build thread pool");
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build()
+        .expect("failed to build thread pool");
     eprintln!("Decoding with {} threads", pool.current_num_threads());
 
-    if headers.metadata.have_preview {
-        bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+    pool.install(|| {
+        if headers.metadata.have_preview {
+            bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
-        let frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
+            let frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
 
-        let toc = frame.toc();
-        let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-        bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
-    }
-
-    loop {
-        bitstream.zero_pad_to_byte().expect("Zero-padding failed");
-
-        let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
-        frame.load_all_par(&mut bitstream, &pool).expect("Failed to decode frame");
-        frame.complete().expect("Failed to complete a frame");
-        // eprintln!("{:?}", frame);
-
-        if frame.header().is_last {
-            break;
+            let toc = frame.toc();
+            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
+            bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
         }
 
-        let toc = frame.toc();
-        let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-        bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
-    }
+        loop {
+            bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+
+            let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
+            frame.load_all_par(&mut bitstream).expect("Failed to decode frame");
+            frame.complete().expect("Failed to complete a frame");
+            // eprintln!("{:#?}", frame);
+
+            if frame.header().is_last {
+                break;
+            }
+
+            let toc = frame.toc();
+            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
+            bitstream.seek_to_bookmark(bookmark).expect("Failed to seek");
+        }
+    });
 }
 
 fn get_icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {

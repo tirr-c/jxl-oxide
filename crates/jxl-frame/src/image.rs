@@ -534,6 +534,7 @@ fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
     (mirror_1d(width, col), mirror_1d(height, row))
 }
 
+#[cfg(not(feature = "mt"))]
 pub(crate) fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
     if grids.is_empty() {
         return;
@@ -547,42 +548,96 @@ pub(crate) fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S
                 groups.iter_mut().map(|(k, v)| (*k, v)).collect()
             },
         })
+        .map(|v| v.into_iter().peekable())
         .collect::<Vec<_>>();
-    if groups.iter().any(|x| x.is_empty()) {
-        return;
-    }
 
-    let mut indices = vec![0usize; groups.len()];
+    let mut target_group_list = Vec::new();
     'main_loop: loop {
-        let target_group_idx = groups.iter().zip(indices.iter().copied()).map(|(g, idx)| g[idx].0).max().unwrap();
-        for (g, idx) in groups.iter().zip(indices.iter_mut()) {
-            while g[*idx].0 < target_group_idx {
-                *idx += 1;
-                if *idx >= g.len() {
-                    return;
-                }
-            }
-            if g[*idx].0 > target_group_idx {
-                continue 'main_loop;
-            }
+        let mut target_group_idx = 0;
+        for it in groups.iter_mut() {
+            let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
+            target_group_idx = target_group_idx.max(idx);
         }
 
-        let mut target_groups = groups
-            .iter_mut()
-            .zip(indices.iter().copied())
-            .map(|(g, idx)| &mut g[idx].1.buf)
-            .collect::<Vec<_>>();
+        let mut target_groups = Vec::with_capacity(groups.len());
+        for it in groups.iter_mut() {
+            loop {
+                let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
+                match idx.cmp(&target_group_idx) {
+                    std::cmp::Ordering::Greater => continue 'main_loop,
+                    std::cmp::Ordering::Equal => break,
+                    std::cmp::Ordering::Less => { it.next(); },
+                }
+            }
+        }
+        for it in groups.iter_mut() {
+            target_groups.push(&mut it.next().unwrap().1.buf);
+        }
+
+        target_group_list.push(target_groups);
+    }
+
+    for mut target_groups in target_group_list {
         let len = target_groups.iter().map(|buf| buf.len()).min().unwrap();
         for i in 0..len {
             let mut samples = target_groups.iter_mut().map(|buf| &mut buf[i]).collect::<Vec<_>>();
             f(&mut samples);
         }
+    }
+}
 
-        for (g, idx) in groups.iter().zip(indices.iter_mut()) {
-            *idx += 1;
-            if *idx >= g.len() {
-                return;
+#[cfg(feature = "mt")]
+pub(crate) fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S]) + Send + Sync) {
+    use rayon::prelude::*;
+
+    if grids.is_empty() {
+        return;
+    }
+
+    let mut groups = grids
+        .iter_mut()
+        .map(|g| match &mut g.buffer {
+            GridBuffer::Single(buf) => vec![(0, buf)],
+            GridBuffer::Grouped { groups, .. } => {
+                groups.iter_mut().map(|(k, v)| (*k, v)).collect()
+            },
+        })
+        .map(|v| v.into_iter().peekable())
+        .collect::<Vec<_>>();
+
+    let mut target_group_list = Vec::new();
+    'main_loop: loop {
+        let mut target_group_idx = 0;
+        for it in groups.iter_mut() {
+            let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
+            target_group_idx = target_group_idx.max(idx);
+        }
+
+        let mut target_groups = Vec::with_capacity(groups.len());
+        for it in groups.iter_mut() {
+            loop {
+                let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
+                match idx.cmp(&target_group_idx) {
+                    std::cmp::Ordering::Greater => continue 'main_loop,
+                    std::cmp::Ordering::Equal => break,
+                    std::cmp::Ordering::Less => { it.next(); },
+                }
             }
         }
+        for it in groups.iter_mut() {
+            target_groups.push(&mut it.next().unwrap().1.buf);
+        }
+
+        target_group_list.push(target_groups);
     }
+
+    target_group_list
+        .into_par_iter()
+        .for_each(|mut target_groups| {
+            let len = target_groups.iter().map(|buf| buf.len()).min().unwrap();
+            for i in 0..len {
+                let mut samples = target_groups.iter_mut().map(|buf| &mut buf[i]).collect::<Vec<_>>();
+                f(&mut samples);
+            }
+        });
 }

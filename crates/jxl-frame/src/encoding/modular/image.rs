@@ -75,7 +75,8 @@ impl Image {
         for idx in 0..len {
             let (prev, left) = channels.split_at_mut(idx);
             let (i, (info, ref mut grid)) = left[0];
-            let prev = prev.into_iter()
+            let prev = prev
+                .iter_mut()
                 .filter(|(_, (prev_info, _))| {
                     info.width == prev_info.width &&
                         info.height == prev_info.height &&

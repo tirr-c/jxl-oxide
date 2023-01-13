@@ -79,7 +79,7 @@ impl Frame<'_> {
     }
 
     #[cfg(feature = "mt")]
-    pub fn load_all_par<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, pool: &rayon::ThreadPool) -> Result<()> {
+    pub fn load_all_par<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         use rayon::prelude::*;
 
         if self.toc.is_single_entry() {
@@ -119,9 +119,9 @@ impl Frame<'_> {
 
         let mut lf_groups = Ok(BTreeMap::new());
         let mut pass_groups = Ok(BTreeMap::new());
-        let io_result = pool.scope(|scope| -> Result<()> {
-            let (lf_group_tx, lf_group_rx) = crossbeam_channel::bounded(8);
-            let (pass_group_tx, pass_group_rx) = crossbeam_channel::bounded(8);
+        let io_result = rayon::scope(|scope| -> Result<()> {
+            let (lf_group_tx, lf_group_rx) = crossbeam_channel::unbounded();
+            let (pass_group_tx, pass_group_rx) = crossbeam_channel::unbounded();
             scope.spawn(|_| {
                 lf_groups = lf_group_rx
                     .into_iter()
@@ -302,10 +302,6 @@ impl FrameData {
     }
 
     fn complete(&mut self, frame_header: &FrameHeader) -> Result<&mut Self> {
-        let num_groups = frame_header.num_groups() as usize;
-        let num_passes = frame_header.passes.num_passes as usize;
-        let num_lf_groups = frame_header.num_lf_groups() as usize;
-
         let Self {
             lf_global,
             lf_group,
