@@ -73,6 +73,10 @@ impl Histogram {
     }
 
     pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
+        if alphabet_size == 1 {
+            return Ok(Self::with_single_symbol(0));
+        }
+
         let hskip = read_bits!(bitstream, u(2))?;
         if hskip == 1 {
             Self::parse_simple(bitstream, alphabet_size)

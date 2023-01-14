@@ -101,7 +101,10 @@ impl Frame<'_> {
 
             match group.kind {
                 TocGroupKind::LfGlobal => {
-                    lf_global = Some(self.read_lf_global(bitstream)?);
+                    let mut buf = vec![0u8; group.size as usize];
+                    bitstream.read_bytes_aligned(&mut buf)?;
+                    let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
+                    lf_global = Some(self.read_lf_global(&mut bitstream)?);
                 },
                 TocGroupKind::HfGlobal => {
                     hf_global = Some(self.read_hf_global(bitstream)?);

@@ -716,17 +716,17 @@ where
                     let a = a.map(|g| g.buf[(y * g.stride + x) as usize]);
                     if bit_depth == 8 {
                         let buf = &mut buf[buf_idx..];
-                        buf[0] = r as u8;
-                        buf[1] = g as u8;
-                        buf[2] = b as u8;
+                        buf[0] = r.clamp(0, 255) as u8;
+                        buf[1] = g.clamp(0, 255) as u8;
+                        buf[2] = b.clamp(0, 255) as u8;
                         if let Some(a) = a {
-                            buf[3] = a as u8;
+                            buf[3] = a.clamp(0, 255) as u8;
                         }
                     } else {
                         let buf = &mut buf[buf_idx..];
-                        buf[0..2].copy_from_slice(&(r as u16).to_be_bytes());
-                        buf[2..4].copy_from_slice(&(g as u16).to_be_bytes());
-                        buf[4..6].copy_from_slice(&(b as u16).to_be_bytes());
+                        buf[0..2].copy_from_slice(&(r.clamp(0, 65535) as u16).to_be_bytes());
+                        buf[2..4].copy_from_slice(&(g.clamp(0, 65535) as u16).to_be_bytes());
+                        buf[4..6].copy_from_slice(&(b.clamp(0, 65535) as u16).to_be_bytes());
                         if let Some(a) = a {
                             buf[6..8].copy_from_slice(&(a as u16).to_be_bytes());
                         }

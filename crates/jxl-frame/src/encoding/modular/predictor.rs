@@ -191,6 +191,18 @@ impl PrevChannelState {
 }
 
 impl PredictorState {
+    const DIV_LOOKUP: [u32; 65] = Self::compute_div_lookup();
+
+    const fn compute_div_lookup() -> [u32; 65] {
+        let mut out = [0u32; 65];
+        let mut i = 1usize;
+        while i <= 64 {
+            out[i] = ((1 << 24) / i) as u32;
+            i += 1;
+        }
+        out
+    }
+
     pub fn new(width: u32, channel_index: u32, stream_index: u32, prev_channels: usize, wp_header: Option<WpHeader>) -> Self {
         let self_correcting = wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header));
         Self {
@@ -217,54 +229,22 @@ impl PredictorState {
 
     fn sc_predict(&self) -> Option<PredictionResult> {
         let SelfCorrectingPredictor {
-            width,
-            true_err_prev_row,
-            true_err_curr_row,
-            subpred_err_prev_row,
-            subpred_err_curr_row,
-            wp,
-        } = self.self_correcting.as_ref()?;
-        let width = *width;
+            ref wp,
+            true_err_w,
+            true_err_nw,
+            true_err_n,
+            true_err_ne,
+            subpred_err_nw_ww,
+            subpred_err_n_w,
+            subpred_err_ne,
+            ..
+        } = *self.self_correcting.as_ref()?;
 
         let n3 = self.n << 3;
         let nw3 = self.nw << 3;
         let ne3 = self.ne() << 3;
         let w3 = self.w << 3;
         let nn3 = self.nn() << 3;
-
-        let x = true_err_curr_row.len();
-
-        let true_err_n = true_err_prev_row.get(x).copied().unwrap_or(0);
-        let true_err_w = x.checked_sub(1)
-            .and_then(|x| true_err_curr_row.get(x))
-            .copied()
-            .unwrap_or(0);
-        let true_err_nw = x.checked_sub(1)
-            .and_then(|x| true_err_prev_row.get(x))
-            .copied()
-            .unwrap_or(true_err_n);
-        let true_err_ne = true_err_prev_row
-            .get(x + 1)
-            .copied()
-            .unwrap_or(true_err_n);
-
-        let subpred_err_n = subpred_err_prev_row.get(x).copied().unwrap_or_default();
-        let subpred_err_w = x.checked_sub(1)
-            .and_then(|x| subpred_err_curr_row.get(x))
-            .copied()
-            .unwrap_or_default();
-        let subpred_err_ww = x.checked_sub(2)
-            .and_then(|x| subpred_err_curr_row.get(x))
-            .copied()
-            .unwrap_or_default();
-        let subpred_err_nw = x.checked_sub(1)
-            .and_then(|x| subpred_err_prev_row.get(x))
-            .copied()
-            .unwrap_or(subpred_err_n);
-        let subpred_err_ne = subpred_err_prev_row
-            .get(x + 1)
-            .copied()
-            .unwrap_or(subpred_err_n);
 
         let subpred = [
             w3 + ne3 - n3,
@@ -279,10 +259,7 @@ impl PredictorState {
 
         let mut subpred_err_sum = [0u32; 4];
         for (i, sum) in subpred_err_sum.iter_mut().enumerate() {
-            *sum = subpred_err_n[i] + subpred_err_w[i] + subpred_err_ww[i] + subpred_err_nw[i] + subpred_err_ne[i];
-            if x + 1 == width as usize {
-                *sum += subpred_err_w[i];
-            }
+            *sum = subpred_err_nw_ww[i] + subpred_err_n_w[i] + subpred_err_ne[i];
         }
 
         let wp_wn = [
@@ -294,13 +271,13 @@ impl PredictorState {
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
             let shift = (err_sum + 2).next_power_of_two().trailing_zeros().saturating_sub(6);
-            *w = 4 + ((maxweight * ((1 << 24) / ((err_sum >> shift) + 1))) >> shift);
+            *w = 4 + ((maxweight * (Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1])) >> shift);
         }
 
         let sum_weights: u32 = weight.iter().copied().sum();
-        let log_weight = (sum_weights + 1).next_power_of_two().trailing_zeros();
+        let log_weight = (sum_weights + 1).next_power_of_two().trailing_zeros() - 5;
         for w in &mut weight {
-            *w >>= log_weight.saturating_sub(5);
+            *w >>= log_weight;
         }
         let sum_weights: u32 = weight.iter().copied().sum();
         let sum_weights = sum_weights as i32;
@@ -308,7 +285,7 @@ impl PredictorState {
         for (subpred, weight) in subpred.into_iter().zip(weight) {
             s += subpred * weight as i32;
         }
-        let mut prediction = ((s as i64 * ((1 << 24) / sum_weights) as i64) >> 24) as i32;
+        let mut prediction = ((s as i64 * Self::DIV_LOOKUP[sum_weights as usize] as i64) >> 24) as i32;
         if (true_err_n ^ true_err_w) | (true_err_n ^ true_err_nw) <= 0 {
             let min = n3.min(w3).min(ne3);
             let max = n3.max(w3).max(ne3);
@@ -370,6 +347,13 @@ struct SelfCorrectingPredictor {
     subpred_err_prev_row: Vec<[u32; 4]>,
     subpred_err_curr_row: Vec<[u32; 4]>,
     wp: WpHeader,
+    true_err_w: i32,
+    true_err_nw: i32,
+    true_err_n: i32,
+    true_err_ne: i32,
+    subpred_err_nw_ww: [u32; 4],
+    subpred_err_n_w: [u32; 4],
+    subpred_err_ne: [u32; 4],
 }
 
 impl SelfCorrectingPredictor {
@@ -381,6 +365,13 @@ impl SelfCorrectingPredictor {
             subpred_err_prev_row: Vec::with_capacity(width as usize),
             subpred_err_curr_row: Vec::with_capacity(width as usize),
             wp: wp_header,
+            true_err_w: 0,
+            true_err_nw: 0,
+            true_err_n: 0,
+            true_err_ne: 0,
+            subpred_err_nw_ww: [0; 4],
+            subpred_err_n_w: [0; 4],
+            subpred_err_ne: [0; 4],
         }
     }
 
@@ -390,13 +381,48 @@ impl SelfCorrectingPredictor {
         for (err, subpred) in subpred_err.iter_mut().zip(pred.subpred) {
             *err = (subpred.abs_diff(sample << 3) + 3) >> 3;
         }
+
         self.true_err_curr_row.push(true_err);
         self.subpred_err_curr_row.push(subpred_err);
+
         if self.true_err_curr_row.len() >= self.width as usize {
             std::mem::swap(&mut self.true_err_prev_row, &mut self.true_err_curr_row);
             std::mem::swap(&mut self.subpred_err_prev_row, &mut self.subpred_err_curr_row);
             self.true_err_curr_row.clear();
             self.subpred_err_curr_row.clear();
+
+            self.true_err_w = 0;
+            self.true_err_n = self.true_err_prev_row[0];
+            self.true_err_nw = self.true_err_n;
+            self.subpred_err_n_w = self.subpred_err_prev_row[0];
+            self.subpred_err_nw_ww = self.subpred_err_n_w;
+            if self.width <= 1 {
+                self.true_err_ne = self.true_err_n;
+                self.subpred_err_ne = self.subpred_err_n_w;
+            } else {
+                self.true_err_ne = self.true_err_prev_row[1];
+                self.subpred_err_ne = self.subpred_err_prev_row[1];
+            }
+        } else {
+            self.true_err_w = true_err;
+            self.subpred_err_nw_ww = self.subpred_err_n_w;
+            self.subpred_err_n_w = self.subpred_err_ne;
+            for (w0, w1) in self.subpred_err_n_w.iter_mut().zip(subpred_err) {
+                *w0 += w1;
+            }
+
+            if !self.true_err_prev_row.is_empty() {
+                let x = self.true_err_curr_row.len();
+                self.true_err_nw = self.true_err_n;
+                self.true_err_n = self.true_err_ne;
+                if x + 1 >= self.width as usize {
+                    self.true_err_ne = self.true_err_n;
+                    self.subpred_err_ne = self.subpred_err_n_w;
+                } else {
+                    self.true_err_ne = self.true_err_prev_row[x + 1];
+                    self.subpred_err_ne = self.subpred_err_prev_row[x + 1];
+                }
+            }
         }
     }
 }
@@ -515,7 +541,7 @@ impl Properties<'_, '_> {
                 pred.nw = sample;
                 pred.n = sample;
             } else {
-                pred.nw = pred.prev_row[x - 1];
+                pred.nw = pred.n;
                 pred.n = pred.prev_row[x];
             }
         }

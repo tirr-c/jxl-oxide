@@ -36,6 +36,7 @@ fn main() {
         let mut encoded_icc = vec![0u8; enc_size as usize];
         let mut b1 = 0u8;
         let mut b2 = 0u8;
+        decoder.begin(&mut bitstream).unwrap();
         for (idx, b) in encoded_icc.iter_mut().enumerate() {
             let sym = decoder.read_varint(&mut bitstream, get_icc_ctx(idx, b1, b2))
                 .expect("Failed to read encoded ICC stream");

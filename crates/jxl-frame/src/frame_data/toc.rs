@@ -162,6 +162,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
         let permutated_toc = bitstream.read_bool()?;
         let permutation = if permutated_toc {
             let mut decoder = jxl_coding::Decoder::parse(bitstream, 8)?;
+            decoder.begin(bitstream)?;
             let end = decoder.read_varint(bitstream, get_context(entry_count))?;
 
             let mut lehmer = vec![0u32; end as usize];

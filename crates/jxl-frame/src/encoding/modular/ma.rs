@@ -27,6 +27,8 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
         let mut ctx = 0u32;
         let mut nodes_left = 1usize;
         let mut nodes = Vec::new();
+
+        tree_decoder.begin(bitstream)?;
         while nodes_left > 0 {
             if nodes.len() >= (1 << 26) {
                 return Err(crate::Error::InvalidMaTree);
@@ -68,8 +70,9 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
             };
             nodes.push(node);
         }
+        tree_decoder.finalize()?;
 
-        let decoder = Decoder::parse(bitstream, ((nodes.len() + 1) / 2) as u32)?;
+        let decoder = Decoder::parse(bitstream, ctx)?;
         Ok(Self {
             tree: Arc::new(MaTree::new(nodes)),
             decoder,
@@ -93,6 +96,16 @@ impl From<MaConfig> for MaContext {
 }
 
 impl MaContext {
+    pub fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.decoder.begin(bitstream)?;
+        Ok(())
+    }
+
+    pub fn finalize(&self) -> Result<()> {
+        self.decoder.finalize()?;
+        Ok(())
+    }
+
     pub fn need_self_correcting(&self) -> bool {
         self.tree.need_self_correcting
     }

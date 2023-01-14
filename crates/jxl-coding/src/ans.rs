@@ -22,7 +22,7 @@ impl Histogram {
         let alphabet_size;
         let mut dist = vec![0u16; table_size as usize];
         if read_bits!(bitstream, Bool)? {
-            alphabet_size = table_size as usize;
+            alphabet_size = 1 << log_alphabet_size;
             if read_bits!(bitstream, Bool)? {
                 // binary
                 let v0 = Self::read_u8(bitstream)?;

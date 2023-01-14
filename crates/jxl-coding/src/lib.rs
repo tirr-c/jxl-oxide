@@ -102,6 +102,14 @@ impl Decoder {
             self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token as u32)?
         })
     }
+
+    pub fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.inner.code.begin(bitstream)
+    }
+
+    pub fn finalize(&self) -> Result<()> {
+        self.inner.code.finalize()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +212,7 @@ struct DecoderInner {
 
 impl DecoderInner {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
+        eprintln!("DecoderInner num_dist = {}", num_dist);
         let (num_clusters, clusters) = read_clusters(bitstream, num_dist)?;
         let use_prefix_code = read_bits!(bitstream, Bool)?;
         let log_alphabet_size = if use_prefix_code {
@@ -260,7 +269,9 @@ impl DecoderInner {
         let n = split_exponent - (msb_in_token + lsb_in_token) +
             ((token - split) >> (msb_in_token + lsb_in_token));
         let low_bits = token & ((1 << lsb_in_token) - 1);
-        let token = (token >> lsb_in_token) & ((1 << msb_in_token) - 1) | (1 << msb_in_token);
+        let token = token >> lsb_in_token;
+        let token = token & ((1 << msb_in_token) - 1);
+        let token = token | (1 << msb_in_token);
         Ok((((token << n) | bitstream.read_bits(n)?) << lsb_in_token) | low_bits)
     }
 
@@ -287,12 +298,33 @@ impl Coder {
                 dist.read_symbol(bitstream)
             },
             Self::Ans { dist, state, initial } => {
-                if *initial {
-                    *state = bitstream.read_bits(32)?;
-                    *initial = false;
-                }
+                debug_assert!(!*initial);
                 let dist = &dist[cluster as usize];
                 dist.read_symbol(bitstream, state)
+            },
+        }
+    }
+
+    fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        match self {
+            Self::PrefixCode(_) => Ok(()),
+            Self::Ans { state, initial, .. } => {
+                *state = bitstream.read_bits(32)?;
+                *initial = false;
+                Ok(())
+            },
+        }
+    }
+
+    fn finalize(&self) -> Result<()> {
+        match *self {
+            Self::PrefixCode(_) => Ok(()),
+            Self::Ans { state, .. } => {
+                if state == 0x130000 {
+                    Ok(())
+                } else {
+                    Err(Error::InvalidAnsStream)
+                }
             },
         }
     }
@@ -322,9 +354,11 @@ pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u
         } else {
             Decoder::parse(bitstream, 1)?
         };
+        decoder.begin(bitstream)?;
         let mut ret = (0..num_dist)
             .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
             .collect::<Result<Vec<_>>>()?;
+        decoder.finalize()?;
         if use_mtf {
             let mut mtfmap = [0u8; 256];
             for (idx, mtf) in mtfmap.iter_mut().enumerate() {

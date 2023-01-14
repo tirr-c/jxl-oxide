@@ -62,11 +62,16 @@ impl Image {
         wp_header: &WpHeader,
         ma_ctx: &mut MaContext,
     ) -> Result<()> {
+        ma_ctx.begin(bitstream)?;
+
         let dist_multiplier = self.channels.info.iter()
             .skip(self.channels.nb_meta_channels as usize)
             .map(|info| info.width)
             .max();
-        let Some(dist_multiplier) = dist_multiplier else { return Ok(()); };
+        let Some(dist_multiplier) = dist_multiplier else {
+            ma_ctx.finalize()?;
+            return Ok(());
+        };
 
         let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
 
@@ -110,6 +115,7 @@ impl Image {
             }
         }
 
+        ma_ctx.finalize()?;
         Ok(())
     }
 }

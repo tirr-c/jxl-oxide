@@ -257,10 +257,15 @@ impl<R: Read> Bitstream<R> {
         let Some(mut diff) = target.checked_sub(self.global_pos) else {
             return Err(Error::CannotSkip);
         };
-        while diff > 0 {
-            let bits = diff.min(4096 * 8);
-            self.read_bits(bits as u32)?;
-            diff -= bits;
+
+        let bits = self.bits_left % 8;
+        diff -= bits as u64;
+
+        let mut buf = vec![0u8; 4096];
+        while diff >= 8 {
+            let bytes = (diff / 8).min(4096);
+            self.read_bytes_aligned(&mut buf[..bytes as usize])?;
+            diff -= bytes * 8;
         }
         Ok(())
     }
