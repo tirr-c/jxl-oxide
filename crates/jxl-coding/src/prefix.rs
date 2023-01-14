@@ -285,7 +285,6 @@ impl Histogram {
                 return Ok(symbols[idx]);
             }
         }
-        dbg!(self);
         unreachable!()
     }
 }

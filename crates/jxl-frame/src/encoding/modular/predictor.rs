@@ -270,18 +270,17 @@ impl PredictorState {
         ];
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
-            let shift = (err_sum + 2).next_power_of_two().trailing_zeros().saturating_sub(6);
+            let shift = floor_log2(err_sum + 1).saturating_sub(5);
             *w = 4 + ((maxweight * (Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1])) >> shift);
         }
 
         let sum_weights: u32 = weight.iter().copied().sum();
-        let log_weight = (sum_weights + 1).next_power_of_two().trailing_zeros() - 5;
+        let log_weight = floor_log2(sum_weights) - 4;
         for w in &mut weight {
             *w >>= log_weight;
         }
         let sum_weights: u32 = weight.iter().copied().sum();
-        let sum_weights = sum_weights as i32;
-        let mut s = (sum_weights >> 1) - 1;
+        let mut s = (sum_weights as i32 >> 1) - 1;
         for (subpred, weight) in subpred.into_iter().zip(weight) {
             s += subpred * weight as i32;
         }
@@ -315,17 +314,19 @@ impl PredictorState {
 
     fn ne(&self) -> i32 {
         let x = self.curr_row.len();
-        match self.prev_row.get(x + 1) {
-            None => self.n,
-            Some(val) => *val,
+        if self.prev_row.is_empty() || x + 1 >= self.width as usize {
+            self.n
+        } else {
+            self.prev_row[x + 1]
         }
     }
 
     fn nee(&self) -> i32 {
         let x = self.curr_row.len();
-        match self.prev_row.get(x + 2) {
-            None => self.ne(),
-            Some(val) => *val,
+        if self.prev_row.is_empty() || x + 2 >= self.width as usize {
+            self.ne()
+        } else {
+            self.prev_row[x + 2]
         }
     }
 
@@ -385,7 +386,8 @@ impl SelfCorrectingPredictor {
         self.true_err_curr_row.push(true_err);
         self.subpred_err_curr_row.push(subpred_err);
 
-        if self.true_err_curr_row.len() >= self.width as usize {
+        let x = self.true_err_curr_row.len();
+        if x >= self.width as usize {
             std::mem::swap(&mut self.true_err_prev_row, &mut self.true_err_curr_row);
             std::mem::swap(&mut self.subpred_err_prev_row, &mut self.subpred_err_curr_row);
             self.true_err_curr_row.clear();
@@ -405,23 +407,20 @@ impl SelfCorrectingPredictor {
             }
         } else {
             self.true_err_w = true_err;
+            self.true_err_nw = self.true_err_n;
+            self.true_err_n = self.true_err_ne;
             self.subpred_err_nw_ww = self.subpred_err_n_w;
             self.subpred_err_n_w = self.subpred_err_ne;
             for (w0, w1) in self.subpred_err_n_w.iter_mut().zip(subpred_err) {
                 *w0 += w1;
             }
 
-            if !self.true_err_prev_row.is_empty() {
-                let x = self.true_err_curr_row.len();
-                self.true_err_nw = self.true_err_n;
-                self.true_err_n = self.true_err_ne;
-                if x + 1 >= self.width as usize {
-                    self.true_err_ne = self.true_err_n;
-                    self.subpred_err_ne = self.subpred_err_n_w;
-                } else {
-                    self.true_err_ne = self.true_err_prev_row[x + 1];
-                    self.subpred_err_ne = self.subpred_err_prev_row[x + 1];
-                }
+            if x + 1 >= self.width as usize {
+                self.true_err_ne = self.true_err_n;
+                self.subpred_err_ne = self.subpred_err_n_w;
+            } else if !self.true_err_prev_row.is_empty() {
+                self.true_err_ne = self.true_err_prev_row[x + 1];
+                self.subpred_err_ne = self.subpred_err_prev_row[x + 1];
             }
         }
     }
@@ -520,7 +519,8 @@ impl Properties<'_, '_> {
         }
 
         pred.curr_row.push(sample);
-        if pred.curr_row.len() >= pred.width as usize {
+        let x = pred.curr_row.len();
+        if x >= pred.width as usize {
             pred.y += 1;
 
             std::mem::swap(&mut pred.second_prev_row, &mut pred.prev_row);
@@ -535,7 +535,6 @@ impl Properties<'_, '_> {
         } else {
             pred.prev_grad = self.grad;
 
-            let x = pred.curr_row.len();
             pred.w = sample;
             if pred.prev_row.is_empty() {
                 pred.nw = sample;
@@ -550,4 +549,8 @@ impl Properties<'_, '_> {
             ch.record(*sample);
         }
     }
+}
+
+fn floor_log2(x: u32) -> u32 {
+    u32::BITS - 1 - x.leading_zeros()
 }
