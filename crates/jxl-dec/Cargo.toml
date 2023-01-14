@@ -1,5 +1,6 @@
 [package]
-name = "jxl-info"
+name = "jxl-dec"
+description = "JPEG XL decoder"
 version = "0.1.0"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
 license = "MIT OR Apache-2.0"

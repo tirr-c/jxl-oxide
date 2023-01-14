@@ -23,7 +23,6 @@ fn main() {
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
-    // dbg!(&headers);
 
     let bit_depth = headers.metadata.bit_depth.bits_per_sample();
     let has_alpha = headers.metadata.alpha().is_some();
@@ -49,7 +48,8 @@ fn main() {
             b1 = *b;
         }
 
-        std::fs::write("encoded_icc", &encoded_icc).unwrap();
+        eprintln!("Discarding encoded ICC profile");
+        drop(encoded_icc);
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -73,15 +73,25 @@ fn main() {
             bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
             let mut frame = read_bits!(bitstream, Bundle(Frame), &headers).expect("Failed to read frame header");
+            let header = frame.header();
+            let width = header.width;
+            let height = header.height;
+            eprintln!("Decoding {}x{} frame (upsampling={}, lf_level={})", header.width, header.height, header.upsampling, header.lf_level);
+
+            let decode_start = std::time::Instant::now();
             frame.load_all_par(&mut bitstream).expect("Failed to decode frame");
             frame.complete().expect("Failed to complete a frame");
-            // eprintln!("{:#?}", frame);
+            let elapsed = decode_start.elapsed();
+
+            let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+            let mpps = (width as f64 / 1000.0) * (height as f64 / 1000.0) / elapsed.as_secs_f64();
+            eprintln!("Took {:.2} ms ({:.2} MP/s)", elapsed_ms, mpps);
 
             if frame.header().is_last {
                 if let Some(output) = args.output {
                     eprintln!("Encoding samples to PNG");
                     let output = std::fs::File::create(output).expect("failed to open output file");
-                    let mut encoder = png::Encoder::new(output, frame.header().width, frame.header().height);
+                    let mut encoder = png::Encoder::new(output, width, height);
                     encoder.set_color(if has_alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
                     encoder.set_depth(if bit_depth == 8 { png::BitDepth::Eight } else { png::BitDepth::Sixteen });
                     // TODO: set colorspace

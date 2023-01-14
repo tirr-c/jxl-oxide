@@ -3,9 +3,9 @@ members = [
   "crates/jxl-bitstream",
   "crates/jxl-coding",
   "crates/jxl-frame",
-  "crates/jxl-info",
+  "crates/jxl-dec",
 ]
 
 [profile.release]
 debug = 1
-# lto = true
+lto = true

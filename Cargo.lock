@@ -207,17 +207,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "jxl-frame"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "jxl-bitstream",
- "jxl-coding",
- "rayon",
-]
-
-[[package]]
-name = "jxl-info"
+name = "jxl-dec"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -225,6 +215,16 @@ dependencies = [
  "jxl-coding",
  "jxl-frame",
  "png",
+ "rayon",
+]
+
+[[package]]
+name = "jxl-frame"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "jxl-bitstream",
+ "jxl-coding",
  "rayon",
 ]
 
