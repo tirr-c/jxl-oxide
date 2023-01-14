@@ -212,7 +212,6 @@ struct DecoderInner {
 
 impl DecoderInner {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
-        eprintln!("DecoderInner num_dist = {}", num_dist);
         let (num_clusters, clusters) = read_clusters(bitstream, num_dist)?;
         let use_prefix_code = read_bits!(bitstream, Bool)?;
         let log_alphabet_size = if use_prefix_code {
