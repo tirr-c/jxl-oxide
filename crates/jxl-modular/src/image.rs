@@ -142,13 +142,11 @@ impl Image {
         let (channel_info, channel_mapping) = self.channels.info
             .iter()
             .enumerate()
-            .filter_map(|(i, info)| {
-                if i < self.channels.nb_meta_channels as usize || (info.width <= group_dim && info.height <= group_dim) {
-                    Some((info.clone(), SubimageChannelInfo::new(i, 0, 0)))
-                } else {
-                    None
-                }
+            .take_while(|&(i, info)| {
+                i < self.channels.nb_meta_channels as usize ||
+                    (info.width <= group_dim && info.height <= group_dim)
             })
+            .map(|(i, info)| (info.clone(), SubimageChannelInfo::new(i, 0, 0)))
             .unzip();
         let channels = ModularChannels {
             info: channel_info,

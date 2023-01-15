@@ -288,6 +288,10 @@ impl Palette {
 
 impl Squeeze {
     fn or_default(&mut self, channels: &mut super::ModularChannels) {
+        if !self.sp.is_empty() {
+            return;
+        }
+
         let first = channels.nb_meta_channels;
 
         let first_ch = &channels.info[first as usize];
@@ -357,16 +361,18 @@ impl Squeeze {
                     return Err(Error::InvalidSqueezeParams);
                 }
 
-                let (target_len, target_shift, residu_len) = if horizontal {
-                    (w, hshift, &mut residu.width)
+                let (target_len, target_shift, residu_len, residu_shift) = if horizontal {
+                    (w, hshift, &mut residu.width, &mut residu.hshift)
                 } else {
-                    (h, vshift, &mut residu.height)
+                    (h, vshift, &mut residu.height, &mut residu.vshift)
                 };
-                *target_len = (*target_len + 1) / 2;
+                let len = *target_len;
+                *target_len = (len + 1) / 2;
+                *residu_len = len / 2;
                 if *target_shift >= 0 {
                     *target_shift += 1;
+                    *residu_shift += 1;
                 }
-                *residu_len = *target_len / 2;
 
                 residu_channels.push(residu);
             }

@@ -86,7 +86,7 @@ impl Modular {
             };
         };
 
-        let Some((width, height)) = image.channels.base_size else {
+        let Some((base_width, _)) = image.channels.base_size else {
             return ModularParams {
                 group_dim: 128,
                 bit_depth: 8,
@@ -100,40 +100,36 @@ impl Modular {
         let lf_dim = group_dim * 8;
         let bit_depth = image.image.bit_depth();
 
-        let lf_group_stride = (width + lf_dim - 1) / lf_dim;
+        let lf_group_stride = (base_width + lf_dim - 1) / lf_dim;
         let lf_group_row = lf_group_idx / lf_group_stride;
         let lf_group_col = lf_group_idx % lf_group_stride;
-        let x = lf_group_col * lf_dim;
-        let y = lf_group_row * lf_dim;
-        let width = lf_dim.min(width - x);
-        let height = lf_dim.min(height - y);
 
-        let (channel_shifts, channel_mapping) = image.channels.info
+        let (channels, channel_mapping) = image.channels.info
             .iter()
             .enumerate()
+            .skip_while(|&(i, &ModularChannelInfo { width, height, .. })| {
+                i < image.channels.nb_meta_channels as usize ||
+                    (width <= group_dim && height <= group_dim)
+            })
             .filter_map(|(i, &ModularChannelInfo { width, height, hshift, vshift, .. })| {
-                if i < image.channels.nb_meta_channels as usize ||
-                    (width <= group_dim && height <= group_dim) ||
-                    hshift < 3 || vshift < 3
-                {
+                if hshift < 3 || vshift < 3 {
                     None
                 } else {
+                    let gw = lf_dim >> hshift;
+                    let gh = lf_dim >> vshift;
+                    let x = lf_group_col * gw;
+                    let y = lf_group_row * gh;
+                    let width = (width - x).min(gw) << hshift;
+                    let height = (height - y).min(gh) << vshift;
                     Some((
-                        ChannelShift::Raw(hshift, vshift),
+                        ModularChannelParams::with_shift(width, height, group_dim, ChannelShift::Raw(hshift, vshift)),
                         SubimageChannelInfo::new(i, x, y),
                     ))
                 }
             })
             .unzip();
 
-        let mut params = ModularParams::new(
-            width,
-            height,
-            group_dim,
-            bit_depth,
-            channel_shifts,
-            global_ma_config,
-        );
+        let mut params = ModularParams::with_channels(group_dim, bit_depth, channels, global_ma_config);
         params.channel_mapping = Some(channel_mapping);
         params
     }
@@ -149,7 +145,7 @@ impl Modular {
             };
         };
 
-        let Some((width, height)) = image.channels.base_size else {
+        let Some((base_width, _)) = image.channels.base_size else {
             return ModularParams {
                 group_dim: 128,
                 bit_depth: 8,
@@ -162,42 +158,37 @@ impl Modular {
         let group_dim = image.group_dim;
         let bit_depth = image.image.bit_depth();
 
-        let group_stride = (width + group_dim - 1) / group_dim;
+        let group_stride = (base_width + group_dim - 1) / group_dim;
         let group_row = group_idx / group_stride;
         let group_col = group_idx % group_stride;
-        let x = group_col * group_dim;
-        let y = group_row * group_dim;
-        let width = group_dim.min(width - x);
-        let height = group_dim.min(height - y);
 
-        let (channel_shifts, channel_mapping) = image.channels.info
+        let (channels, channel_mapping) = image.channels.info
             .iter()
             .enumerate()
+            .skip_while(|&(i, &ModularChannelInfo { width, height, .. })| {
+                i < image.channels.nb_meta_channels as usize ||
+                    (width <= group_dim && height <= group_dim)
+            })
             .filter_map(|(i, &ModularChannelInfo { width, height, hshift, vshift, .. })| {
                 let shift = hshift.min(vshift);
-                if i < image.channels.nb_meta_channels as usize ||
-                    (width <= group_dim && height <= group_dim) ||
-                    (hshift >= 3 && vshift >= 3) ||
-                    shift < minshift || maxshift <= shift
-                {
+                if (hshift >= 3 && vshift >= 3) || shift < minshift || maxshift <= shift {
                     None
                 } else {
+                    let gw = group_dim >> hshift;
+                    let gh = group_dim >> vshift;
+                    let x = group_col * gw;
+                    let y = group_row * gh;
+                    let width = (width - x).min(gw) << hshift;
+                    let height = (height - y).min(gh) << vshift;
                     Some((
-                        ChannelShift::Raw(hshift, vshift),
+                        ModularChannelParams::with_shift(width, height, group_dim, ChannelShift::Raw(hshift, vshift)),
                         SubimageChannelInfo::new(i, x, y),
                     ))
                 }
             })
             .unzip();
 
-        let mut params = ModularParams::new(
-            width,
-            height,
-            group_dim,
-            bit_depth,
-            channel_shifts,
-            global_ma_config,
-        );
+        let mut params = ModularParams::with_channels(group_dim, bit_depth, channels, global_ma_config);
         params.channel_mapping = Some(channel_mapping);
         params
     }
