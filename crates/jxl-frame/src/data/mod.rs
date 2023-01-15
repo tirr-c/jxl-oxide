@@ -32,14 +32,15 @@ impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&Headers, &FrameHeader)) -> Result<Self> {
         let patches = header.flags.patches().then(|| {
-            todo!()
-        });
+            Patches::parse(bitstream, image_header)
+        }).transpose()?;
+        dbg!(&patches);
         let splines = header.flags.splines().then(|| {
-            todo!()
-        });
+            Splines::parse(bitstream, ())
+        }).transpose()?;
         let noise = header.flags.noise().then(|| {
-            todo!()
-        });
+            NoiseParameters::parse(bitstream, ())
+        }).transpose()?;
         let lf_dequant = read_bits!(bitstream, Bundle(LfChannelDequantization))?;
         let vardct = (header.encoding == crate::header::Encoding::VarDct).then(|| {
             read_bits!(bitstream, Bundle(LfGlobalVarDct))
