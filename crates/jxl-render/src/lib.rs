@@ -50,6 +50,16 @@ impl<'a> RenderContext<'a> {
 }
 
 impl RenderContext<'_> {
+    pub fn width(&self) -> u32 {
+        self.image_header.size.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.image_header.size.height
+    }
+}
+
+impl RenderContext<'_> {
     #[cfg(feature = "mt")]
     pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         let image_header = self.image_header;
@@ -97,6 +107,15 @@ impl RenderContext<'_> {
 
             bitstream.skip_to_bookmark(bookmark)?;
         }
+        Ok(())
+    }
+
+    pub fn tmp_rgba_be_interleaved<F>(&self, f: F) -> Result<()>
+    where
+        F: FnMut(&[u8]) -> jxl_frame::Result<()>,
+    {
+        let frame = self.frames.last().unwrap();
+        frame.rgba_be_interleaved(f)?;
         Ok(())
     }
 }

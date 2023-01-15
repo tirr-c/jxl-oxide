@@ -420,7 +420,8 @@ impl SqueezeParams {
         let height = i1.height() as i32;
         let width = i1.width() as i32;
         let w0 = i0.width() as i32;
-        let mut output = Grid::new(i0.width() + i1.width(), i1.height(), i0.group_size());
+        let (gw, gh) = i0.group_size();
+        let mut output = Grid::new(i0.width() + i1.width(), i1.height(), (gw << 1, gh));
         for y in 0..height {
             for x in 0..width {
                 let avg = i0[(x, y)];
@@ -449,7 +450,8 @@ impl SqueezeParams {
         let width = i1.width() as i32;
         let height = i1.height() as i32;
         let h0 = i0.height() as i32;
-        let mut output = Grid::new(i1.width(), i0.height() + i1.height(), i0.group_size());
+        let (gw, gh) = i0.group_size();
+        let mut output = Grid::new(i1.width(), i0.height() + i1.height(), (gw, gh << 1));
         for y in 0..height {
             for x in 0..width {
                 let avg = i0[(x, y)];

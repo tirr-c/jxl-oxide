@@ -399,7 +399,7 @@ enum GridBuffer<S> {
 
 impl<S: Default + Clone> GridBuffer<S> {
     fn new(width: u32, height: u32, (gw, gh): (u32, u32)) -> Self {
-        if width <= gw * 8 && height <= gh * 8 {
+        if width <= gw && height <= gh {
             Self::Single(GridGroup::new(width, height))
         } else {
             Self::Grouped {
