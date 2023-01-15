@@ -2,10 +2,13 @@
 members = [
   "crates/jxl-bitstream",
   "crates/jxl-coding",
+  "crates/jxl-grid",
   "crates/jxl-frame",
+  "crates/jxl-modular",
+  "crates/jxl-render",
   "crates/jxl-dec",
 ]
 
 [profile.release]
 debug = 1
-lto = true
+# lto = true

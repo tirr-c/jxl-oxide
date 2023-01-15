@@ -2,13 +2,13 @@ use std::io::Read;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
-use crate::Result;
-
+mod error;
 mod image;
 mod ma;
 mod param;
 mod predictor;
 mod transform;
+pub use error::{Error, Result};
 pub use image::Image;
 pub use ma::{MaConfig, MaContext};
 pub use param::*;

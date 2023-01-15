@@ -23,3 +23,7 @@ path = "../jxl-coding"
 [dependencies.jxl-frame]
 path = "../jxl-frame"
 features = ["mt"]
+
+[dependencies.jxl-render]
+path = "../jxl-render"
+features = ["mt"]

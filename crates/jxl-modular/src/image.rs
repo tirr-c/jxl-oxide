@@ -1,9 +1,15 @@
 use std::io::Read;
 
 use jxl_bitstream::Bitstream;
+use jxl_grid::Grid;
 
-use crate::{Grid, Result};
-use super::{ModularChannels, MaContext, predictor::{WpHeader, PredictorState}, SubimageChannelInfo};
+use crate::{
+    ModularChannels,
+    MaContext,
+    predictor::{WpHeader, PredictorState},
+    Result,
+    SubimageChannelInfo,
+};
 
 #[derive(Debug)]
 pub struct Image {

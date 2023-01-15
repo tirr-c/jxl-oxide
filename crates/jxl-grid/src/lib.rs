@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::{Result, Error};
-
 pub trait Sample: Default + Copy + Sized {
     type Signed: Sample;
     type Unsigned: Sample;
@@ -567,7 +565,7 @@ fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
 }
 
 #[cfg(not(feature = "mt"))]
-pub(crate) fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
+pub fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
     if grids.is_empty() {
         return;
     }
@@ -619,7 +617,7 @@ pub(crate) fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S
 }
 
 #[cfg(feature = "mt")]
-pub(crate) fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S]) + Send + Sync) {
+pub fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S]) + Send + Sync) {
     use rayon::prelude::*;
 
     if grids.is_empty() {
@@ -674,17 +672,17 @@ pub(crate) fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [
         });
 }
 
-pub(crate) fn rgba_be_interleaved<F>(
+pub fn rgba_be_interleaved<F, E>(
     rgb: [&Grid<i32>; 3],
     a: Option<&Grid<i32>>,
     bit_depth: u32,
     mut f: F,
-) -> Result<()>
+) -> Result<(), E>
 where
-    F: FnMut(&[u8]) -> Result<()>,
+    F: FnMut(&[u8]) -> Result<(), E>,
 {
     if bit_depth != 8 && bit_depth != 16 {
-        return Err(Error::InvalidInterleaveOption);
+        todo!("rgba_be_interleaved currently supports only 8-bit and 16-bit images");
     }
 
     let bytes_per_sample = (3 + (a.is_some() as usize)) * (bit_depth / 8) as usize;

@@ -1,6 +1,7 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_grid::Grid;
 
-use crate::{Error, Grid, Result};
+use crate::{Error, Result};
 use super::{ModularChannelInfo, Image, predictor::{Predictor, PredictorState, WpHeader}};
 
 #[derive(Debug)]
@@ -122,7 +123,7 @@ impl Rct {
             .take(3)
             .collect::<Vec<_>>();
 
-        crate::image::zip_iterate(&mut channels, |samples| {
+        jxl_grid::zip_iterate(&mut channels, |samples| {
             let [a, b, c] = samples else { unreachable!() };
             let a = **a;
             let b = **b;

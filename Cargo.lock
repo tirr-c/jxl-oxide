@@ -214,6 +214,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-frame",
+ "jxl-render",
  "png",
  "rayon",
 ]
@@ -225,7 +226,33 @@ dependencies = [
  "crossbeam-channel",
  "jxl-bitstream",
  "jxl-coding",
+ "jxl-grid",
+ "jxl-modular",
  "rayon",
+]
+
+[[package]]
+name = "jxl-grid"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "jxl-modular"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-coding",
+ "jxl-grid",
+]
+
+[[package]]
+name = "jxl-render"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-frame",
 ]
 
 [[package]]

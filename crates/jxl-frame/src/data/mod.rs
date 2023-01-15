@@ -1,10 +1,11 @@
 use jxl_bitstream::{define_bundle, read_bits, header::{Headers, ColourSpace}, Bitstream, Bundle};
+use jxl_grid::Grid;
+use jxl_modular::{ChannelShift, ModularChannelParams, Modular, ModularParams, MaConfig, MaContext};
 
 use crate::{
     FrameHeader,
     Result,
     header::Encoding,
-    encoding::{modular::{ChannelShift, ModularChannelParams}, Modular, ModularParams}, Grid,
 };
 
 mod noise;
@@ -151,12 +152,12 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
 
 #[derive(Debug)]
 pub struct GlobalModular {
-    pub ma_config: Option<crate::encoding::modular::MaConfig>,
+    pub ma_config: Option<MaConfig>,
     pub modular: Modular,
 }
 
 impl GlobalModular {
-    pub fn make_context(&self) -> Option<crate::encoding::modular::MaContext> {
+    pub fn make_context(&self) -> Option<MaContext> {
         Some(self.ma_config.as_ref()?.make_context())
     }
 }
@@ -166,7 +167,7 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&Headers, &FrameHeader)) -> Result<Self> {
         let ma_config = bitstream.read_bool()?
-            .then(|| read_bits!(bitstream, Bundle(crate::encoding::modular::MaConfig)))
+            .then(|| read_bits!(bitstream, Bundle(MaConfig)))
             .transpose()?;
         let mut shifts = Vec::new();
         if header.encoding == Encoding::Modular {
