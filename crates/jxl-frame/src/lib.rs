@@ -69,6 +69,94 @@ impl Frame<'_> {
 }
 
 impl Frame<'_> {
+    pub fn load_cropped<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<()> {
+        if self.toc.is_single_entry() {
+            let group = self.toc.lf_global();
+            self.read_group(bitstream, group)?;
+            return Ok(());
+        }
+
+        let mut region = if region.is_some() && self.header.have_crop {
+            region.map(|(left, top, width, height)| (
+                left.saturating_add_signed(-self.header.x0),
+                top.saturating_add_signed(-self.header.y0),
+                width,
+                height,
+            ))
+        } else {
+            region
+        };
+
+        let mut it = self.toc.iter_bitstream_order();
+        let mut pending = Vec::new();
+        for group in &mut it {
+            if matches!(group.kind, TocGroupKind::LfGlobal) {
+                self.read_group(bitstream, group)?;
+                break;
+            }
+            let mut buf = vec![0u8; group.size as usize];
+            bitstream.read_bytes_aligned(&mut buf)?;
+            pending.push((group, Some(buf)));
+        }
+
+        let lf_global = self.data.lf_global.as_ref().unwrap();
+        if lf_global.gmodular.modular.has_delta_palette() {
+            if region.take().is_some() {
+                eprintln!("GlobalModular has delta palette, forcing full decode");
+            }
+        } else if lf_global.gmodular.modular.has_squeeze() {
+            if let Some((left, top, width, height)) = &mut region {
+                *width += *left;
+                *height += *top;
+                *left = 0;
+                *top = 0;
+                eprintln!("GlobalModular has squeeze, decoding from top-left");
+            }
+        }
+        if let Some(region) = &region {
+            eprintln!("Cropped decoding: {:?}", region);
+        }
+
+        for (group, buf) in pending.into_iter().chain(it.map(|v| (v, None))) {
+            if let Some(region) = region {
+                match group.kind {
+                    TocGroupKind::LfGroup(lf_group_idx) => {
+                        let lf_group_dim = self.header.lf_group_dim();
+                        let lf_group_per_row = self.header.lf_groups_per_row();
+                        let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
+                        let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
+                        if !is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim)) {
+                            continue;
+                        }
+                    },
+                    TocGroupKind::GroupPass { group_idx, .. } => {
+                        let group_dim = self.header.group_dim();
+                        let group_per_row = self.header.groups_per_row();
+                        let group_left = (group_idx % group_per_row) * group_dim;
+                        let group_top = (group_idx / group_per_row) * group_dim;
+                        if !is_aabb_collides(region, (group_left, group_top, group_dim, group_dim)) {
+                            continue;
+                        }
+                    },
+                    _ => {},
+                }
+            }
+
+            if let Some(buf) = buf {
+                let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
+                self.read_group(&mut bitstream, group)?;
+            } else {
+                self.read_group(bitstream, group)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         if self.toc.is_single_entry() {
             let group = self.toc.lf_global();

@@ -447,7 +447,7 @@ impl SqueezeParams {
                 })();
                 let Some((avg, residu, next_avg)) = values else { continue; };
                 let left = if x > 0 {
-                    output.get_initialized((2 * x - 1, y)).copied().unwrap_or(0)
+                    output.get_initialized((2 * x - 1, y)).copied().unwrap_or(avg)
                 } else {
                     avg
                 };
@@ -487,7 +487,7 @@ impl SqueezeParams {
                 })();
                 let Some((avg, residu, next_avg)) = values else { continue; };
                 let top = if y > 0 {
-                    output.get_initialized((x, 2 * y - 1)).copied().unwrap_or(0)
+                    output.get_initialized((x, 2 * y - 1)).copied().unwrap_or(avg)
                 } else {
                     avg
                 };

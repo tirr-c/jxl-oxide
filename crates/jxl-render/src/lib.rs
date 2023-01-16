@@ -91,13 +91,8 @@ impl RenderContext<'_> {
         Ok(())
     }
 
-    #[cfg(feature = "mt")]
-    pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        self.load_cropped(bitstream, None)
-    }
-
     #[cfg(not(feature = "mt"))]
-    pub fn load_all_frames<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let image_header = self.image_header;
 
         loop {
@@ -105,11 +100,17 @@ impl RenderContext<'_> {
             let mut frame = Frame::parse(bitstream, image_header)?;
             let header = frame.header();
             let is_last = header.is_last;
-            eprintln!("Decoding {}x{} frame (upsampling={}, lf_level={})", header.width, header.height, header.upsampling, header.lf_level);
+            eprintln!("Decoding {}x{} frame (type={:?}, upsampling={}, lf_level={})", header.width, header.height, header.frame_type, header.upsampling, header.lf_level);
 
-            frame.load_all(bitstream)?;
+            if header.frame_type.is_normal_frame() {
+                frame.load_cropped(bitstream, region)?;
+            } else {
+                frame.load_all(bitstream)?;
+            }
             frame.complete()?;
 
+            let toc = frame.toc();
+            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
             self.preserve_frame(frame);
             if is_last {
                 break;
@@ -118,6 +119,16 @@ impl RenderContext<'_> {
             bitstream.skip_to_bookmark(bookmark)?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "mt")]
+    pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.load_cropped(bitstream, None)
+    }
+
+    #[cfg(not(feature = "mt"))]
+    pub fn load_all_frames<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.load_cropped(bitstream, None)
     }
 
     pub fn tmp_rgba_be_interleaved<F>(&self, f: F) -> Result<()>
