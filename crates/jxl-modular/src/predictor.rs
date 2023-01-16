@@ -1,6 +1,6 @@
 use jxl_bitstream::define_bundle;
 
-use crate::{Error, Result};
+use crate::Result;
 
 define_bundle! {
     #[derive(Debug, Clone)]
@@ -454,10 +454,7 @@ impl Properties<'_, '_> {
     pub fn get(&self, property: usize) -> Result<i32> {
         let property_count = 16 + self.prev_channel_samples.len() * 4;
         if property >= property_count {
-            return Err(Error::PropertyNotFound {
-                num_properties: property_count,
-                property_ref: property,
-            });
+            return Ok(0);
         }
 
         let val = if let Some(property) = property.checked_sub(16) {

@@ -5,10 +5,6 @@ pub enum Error {
     GlobalMaTreeNotAvailable,
     InvalidPaletteParams,
     InvalidSqueezeParams,
-    PropertyNotFound {
-        num_properties: usize,
-        property_ref: usize,
-    },
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
 }
@@ -34,9 +30,6 @@ impl std::fmt::Display for Error {
             Self::GlobalMaTreeNotAvailable => write!(f, "global meta-adaptive tree requested but unavailable"),
             Self::InvalidPaletteParams => write!(f, "invalid Palette transform parameters"),
             Self::InvalidSqueezeParams => write!(f, "invalid Squeeze transform parameters"),
-            Self::PropertyNotFound { num_properties, property_ref } => {
-                write!(f, "property {} not found ({} given)", property_ref, num_properties)
-            },
             Bitstream(err) => write!(f, "bitstream error: {}", err),
             Decoder(err) => write!(f, "entropy decoder error: {}", err),
         }
