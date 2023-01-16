@@ -22,8 +22,12 @@ path = "../jxl-coding"
 
 [dependencies.jxl-frame]
 path = "../jxl-frame"
-features = ["mt"]
+default_features = false
 
 [dependencies.jxl-render]
 path = "../jxl-render"
-features = ["mt"]
+default_features = false
+
+[features]
+mt = ["jxl-frame/mt", "jxl-render/mt"]
+default = ["mt"]

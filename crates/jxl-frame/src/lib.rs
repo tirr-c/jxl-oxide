@@ -94,10 +94,12 @@ impl Frame<'_> {
         let mut it = self.toc.iter_bitstream_order();
         let mut pending = Vec::new();
         for group in &mut it {
+            bitstream.skip_to_bookmark(group.offset)?;
             if matches!(group.kind, TocGroupKind::LfGlobal) {
                 self.read_group(bitstream, group)?;
                 break;
             }
+
             let mut buf = vec![0u8; group.size as usize];
             bitstream.read_bytes_aligned(&mut buf)?;
             pending.push((group, Some(buf)));
@@ -150,6 +152,7 @@ impl Frame<'_> {
                 let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
                 self.read_group(&mut bitstream, group)?;
             } else {
+                bitstream.skip_to_bookmark(group.offset)?;
                 self.read_group(bitstream, group)?;
             }
         }
@@ -160,11 +163,13 @@ impl Frame<'_> {
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         if self.toc.is_single_entry() {
             let group = self.toc.lf_global();
+            bitstream.skip_to_bookmark(group.offset)?;
             self.read_group(bitstream, group)?;
             return Ok(());
         }
 
         for group in self.toc.iter_bitstream_order() {
+            bitstream.skip_to_bookmark(group.offset)?;
             self.read_group(bitstream, group)?;
         }
 
@@ -181,6 +186,7 @@ impl Frame<'_> {
 
         if self.toc.is_single_entry() {
             let group = self.toc.lf_global();
+            bitstream.skip_to_bookmark(group.offset)?;
             self.read_group(bitstream, group)?;
             return Ok(());
         }
@@ -360,7 +366,6 @@ impl Frame<'_> {
     }
 
     pub fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
-        bitstream.skip_to_bookmark(group.offset)?;
         let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
         match group.kind {
             TocGroupKind::All => {

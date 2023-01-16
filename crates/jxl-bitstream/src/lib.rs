@@ -258,7 +258,8 @@ impl<R: Read> Bitstream<R> {
             return Err(Error::CannotSkip);
         };
 
-        let bits = self.bits_left % 8;
+        let bits = (self.bits_left as u64 % 8).min(diff) as u32;
+        self.read_bits(bits).unwrap();
         diff -= bits as u64;
 
         let mut buf = vec![0u8; 4096];
@@ -267,6 +268,9 @@ impl<R: Read> Bitstream<R> {
             self.read_bytes_aligned(&mut buf[..bytes as usize])?;
             diff -= bytes * 8;
         }
+
+        self.read_bits(diff as u32)?;
+        assert_eq!(self.global_pos, target);
         Ok(())
     }
 
