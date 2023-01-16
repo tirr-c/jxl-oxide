@@ -15,6 +15,63 @@ struct Args {
     output: Option<PathBuf>,
     /// Input file
     input: PathBuf,
+    #[arg(long, value_parser = str::parse::<CropInfo>)]
+    crop: Option<CropInfo>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct CropInfo {
+    width: u32,
+    height: u32,
+    left: u32,
+    top: u32,
+}
+
+impl std::str::FromStr for CropInfo {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let mut it = s.split_whitespace().map(|s| s.parse::<u32>());
+        let Some(w) = it.next().transpose()? else {
+            return Ok(Self {
+                width: 0,
+                height: 0,
+                left: 0,
+                top: 0,
+            });
+        };
+        let Some(h) = it.next().transpose()? else {
+            return Ok(Self {
+                width: w,
+                height: w,
+                left: 0,
+                top: 0,
+            });
+        };
+        let Some(x) = it.next().transpose()? else {
+            return Ok(Self {
+                width: w,
+                height: h,
+                left: 0,
+                top: 0,
+            });
+        };
+        let Some(y) = it.next().transpose()? else {
+            return Ok(Self {
+                width: w,
+                height: w,
+                left: h,
+                top: x,
+            });
+        };
+        Ok(Self {
+            width: w,
+            height: h,
+            left: x,
+            top: y,
+        })
+    }
 }
 
 fn main() {
@@ -23,6 +80,24 @@ fn main() {
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
+
+    let crop = args.crop.and_then(|crop| {
+        if crop.width == 0 && crop.height == 0 {
+            None
+        } else if crop.width == 0 {
+            Some(CropInfo {
+                width: headers.size.width,
+                ..crop
+            })
+        } else if crop.height == 0 {
+            Some(CropInfo {
+                height: headers.size.height,
+                ..crop
+            })
+        } else {
+            Some(crop)
+        }
+    });
 
     let bit_depth = headers.metadata.bit_depth.bits_per_sample();
     let has_alpha = headers.metadata.alpha().is_some();
@@ -71,7 +146,15 @@ fn main() {
         }
 
         let decode_start = std::time::Instant::now();
-        render.load_all_frames(&mut bitstream).expect("failed to load frames");
+        if let Some(crop) = &crop {
+            render
+                .load_cropped(&mut bitstream, Some((crop.left, crop.top, crop.width, crop.height)))
+                .expect("failed to load frames");
+        } else {
+            render
+                .load_all_frames(&mut bitstream)
+                .expect("failed to load frames");
+        }
         let elapsed = decode_start.elapsed();
 
         let elapsed_ms = elapsed.as_secs_f64() * 1000.0;

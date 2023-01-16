@@ -84,7 +84,11 @@ impl Frame<'_> {
     }
 
     #[cfg(feature = "mt")]
-    pub fn load_all_par<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn load_cropped_par<R: Read + Send>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<()> {
         use rayon::prelude::*;
 
         if self.toc.is_single_entry() {
@@ -92,6 +96,17 @@ impl Frame<'_> {
             self.read_group(bitstream, group)?;
             return Ok(());
         }
+
+        let mut region = if region.is_some() && self.header.have_crop {
+            region.map(|(left, top, width, height)| (
+                left.saturating_add_signed(-self.header.x0),
+                top.saturating_add_signed(-self.header.y0),
+                width,
+                height,
+            ))
+        } else {
+            region
+        };
 
         let mut lf_global = self.data.lf_global.take();
         let mut hf_global = self.data.hf_global.take();
@@ -133,6 +148,23 @@ impl Frame<'_> {
         let lf_global = self.data.lf_global.as_ref().unwrap();
         let hf_global = self.data.hf_global.as_ref().unwrap().as_ref();
 
+        if lf_global.gmodular.modular.has_delta_palette() {
+            if region.take().is_some() {
+                eprintln!("GlobalModular has delta palette, forcing full decode");
+            }
+        } else if lf_global.gmodular.modular.has_squeeze() {
+            if let Some((left, top, width, height)) = &mut region {
+                *width += *left;
+                *height += *top;
+                *left = 0;
+                *top = 0;
+                eprintln!("GlobalModular has squeeze, decoding from top-left");
+            }
+        }
+        if let Some(region) = &region {
+            eprintln!("Cropped decoding: {:?}", region);
+        }
+
         let mut lf_groups = Ok(BTreeMap::new());
         let mut pass_groups = Ok(BTreeMap::new());
         let io_result = rayon::scope(|scope| -> Result<()> {
@@ -143,6 +175,14 @@ impl Frame<'_> {
                 lf_groups = lf_group_rx
                     .into_iter()
                     .par_bridge()
+                    .filter(|(lf_group_idx, _)| {
+                        let Some(region) = region else { return true; };
+                        let lf_group_dim = self.header.lf_group_dim();
+                        let lf_group_per_row = self.header.lf_groups_per_row();
+                        let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
+                        let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
+                        is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim))
+                    })
                     .map(|(lf_group_idx, buf)| {
                         let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
                         let lf_group = self.read_lf_group(&mut bitstream, lf_global, lf_group_idx)?;
@@ -154,6 +194,14 @@ impl Frame<'_> {
                 pass_groups = pass_group_rx
                     .into_iter()
                     .par_bridge()
+                    .filter(|(_, group_idx, _)| {
+                        let Some(region) = region else { return true; };
+                        let group_dim = self.header.group_dim();
+                        let group_per_row = self.header.groups_per_row();
+                        let group_left = (group_idx % group_per_row) * group_dim;
+                        let group_top = (group_idx / group_per_row) * group_dim;
+                        is_aabb_collides(region, (group_left, group_top, group_dim, group_dim))
+                    })
                     .map(|(pass_idx, group_idx, buf)| {
                         let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
                         let pass_group = self.read_group_pass(&mut bitstream, lf_global, hf_global, pass_idx, group_idx)?;
@@ -184,6 +232,11 @@ impl Frame<'_> {
         self.data.group_pass = pass_groups?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "mt")]
+    pub fn load_all_par<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.load_cropped_par(bitstream, None)
     }
 
     pub fn read_lf_global<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<LfGlobal> {
@@ -351,4 +404,10 @@ impl FrameData {
 
         Ok(self)
     }
+}
+
+fn is_aabb_collides(rect0: (u32, u32, u32, u32), rect1: (u32, u32, u32, u32)) -> bool {
+    let (x0, y0, w0, h0) = rect0;
+    let (x1, y1, w1, h1) = rect1;
+    (x0 < x1 + w1) && (x0 + w0 > x1) && (y0 < y1 + h1) && (y0 + h0 > y1)
 }

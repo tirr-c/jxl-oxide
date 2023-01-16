@@ -51,6 +51,18 @@ impl Modular {
 }
 
 impl Modular {
+    pub fn has_delta_palette(&self) -> bool {
+        let Some(image) = &self.inner else { return false; };
+        image.header.transform.iter().any(|tr| tr.is_delta_palette())
+    }
+
+    pub fn has_squeeze(&self) -> bool {
+        let Some(image) = &self.inner else { return false; };
+        image.header.transform.iter().any(|tr| tr.is_squeeze())
+    }
+}
+
+impl Modular {
     pub fn decode_image_gmodular<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;

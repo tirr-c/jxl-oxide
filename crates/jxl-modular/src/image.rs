@@ -105,8 +105,8 @@ impl Image {
             let mut predictor = PredictorState::new(width, i as u32, stream_index, prev.len(), wp_header.clone());
             let mut prev_channel_samples = vec![0i32; prev.len()];
 
-            for y in 0..height as i32 {
-                for x in 0..width as i32 {
+            for y in 0..height {
+                for x in 0..width {
                     for ((_, (_, grid)), sample) in prev.iter().zip(&mut prev_channel_samples) {
                         *sample = grid[(x, y)];
                     }

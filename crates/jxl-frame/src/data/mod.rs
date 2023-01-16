@@ -34,7 +34,6 @@ impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
         let patches = header.flags.patches().then(|| {
             Patches::parse(bitstream, image_header)
         }).transpose()?;
-        dbg!(&patches);
         let splines = header.flags.splines().then(|| {
             Splines::parse(bitstream, ())
         }).transpose()?;
@@ -346,13 +345,13 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let sharpness = image_iter.next().unwrap();
 
         let block_info = Grid::<BlockInfo>::new(bw, bh, (bw, bh));
-        let mut x = 0i32;
-        let mut y = 0i32;
-        let mut data_idx = 0i32;
-        while y < bh as i32 {
-            x = 0i32;
+        let mut x = 0u32;
+        let mut y = 0u32;
+        let mut data_idx = 0u32;
+        while y < bh {
+            x = 0u32;
 
-            while x < bw as i32 {
+            while x < bw {
                 if !block_info[(x, y)].is_occupied() {
                     let dct_select = block_info_raw[(data_idx, 0)];
                     let hf_mul = block_info_raw[(data_idx, 1)];

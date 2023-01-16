@@ -3,6 +3,7 @@ use std::io::Read;
 use jxl_bitstream::{Bitstream, Bundle, header::Headers};
 use jxl_frame::{Frame, header::FrameType};
 
+mod color;
 mod error;
 pub use error::{Error, Result};
 
@@ -61,7 +62,7 @@ impl RenderContext<'_> {
 
 impl RenderContext<'_> {
     #[cfg(feature = "mt")]
-    pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn load_cropped<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let image_header = self.image_header;
 
         loop {
@@ -69,9 +70,13 @@ impl RenderContext<'_> {
             let mut frame = Frame::parse(bitstream, image_header)?;
             let header = frame.header();
             let is_last = header.is_last;
-            eprintln!("Decoding {}x{} frame (upsampling={}, lf_level={})", header.width, header.height, header.upsampling, header.lf_level);
+            eprintln!("Decoding {}x{} frame (type={:?}, upsampling={}, lf_level={})", header.width, header.height, header.frame_type, header.upsampling, header.lf_level);
 
-            frame.load_all_par(bitstream)?;
+            if header.frame_type.is_normal_frame() {
+                frame.load_cropped_par(bitstream, region)?;
+            } else {
+                frame.load_all_par(bitstream)?;
+            }
             frame.complete()?;
 
             let toc = frame.toc();
@@ -84,6 +89,11 @@ impl RenderContext<'_> {
             bitstream.skip_to_bookmark(bookmark)?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "mt")]
+    pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.load_cropped(bitstream, None)
     }
 
     #[cfg(not(feature = "mt"))]

@@ -492,21 +492,17 @@ define_bundle! {
     #[derive(Debug)]
     pub struct OpsinInverseMatrix {
         all_default: ty(Bool) default(true),
-        inv_mat00: ty(F16) cond(!all_default) default(11.031566901960783),
-        inv_mat01: ty(F16) cond(!all_default) default(-9.866943921568629),
-        inv_mat02: ty(F16) cond(!all_default) default(-0.16462299647058826),
-        inv_mat10: ty(F16) cond(!all_default) default(-3.254147380392157),
-        inv_mat11: ty(F16) cond(!all_default) default(4.418770392156863),
-        inv_mat12: ty(F16) cond(!all_default) default(-0.16462299647058826),
-        inv_mat20: ty(F16) cond(!all_default) default(-3.6588512862745097),
-        inv_mat21: ty(F16) cond(!all_default) default(2.7129230470588235),
-        inv_mat22: ty(F16) cond(!all_default) default(1.9459282392156863),
-        opsin_bias0: ty(F16) cond(!all_default) default(-0.0037930732552754493),
-        opsin_bias1: ty(F16) cond(!all_default) default(-0.0037930732552754493),
-        opsin_bias2: ty(F16) cond(!all_default) default(-0.0037930732552754493),
-        quant_bias0: ty(F16) cond(!all_default) default(1.0 - 0.05465007330715401),
-        quant_bias1: ty(F16) cond(!all_default) default(1.0 - 0.07005449891748593),
-        quant_bias2: ty(F16) cond(!all_default) default(1.0 - 0.049935103337343655),
-        quant_bias_numerator: ty(F16) cond(!all_default) default(0.145),
+        pub inv_mat: ty(Array[Array[F16]; 3]; 3) cond(!all_default) default([
+            [11.031566901960783, -9.866943921568629, -0.16462299647058826],
+            [-3.254147380392157, 4.418770392156863, -0.16462299647058826],
+            [-3.6588512862745097, 2.7129230470588235, 1.9459282392156863],
+        ]),
+        pub opsin_bias: ty(Array[F16]; 3) cond(!all_default) default([-0.0037930732552754493; 3]),
+        pub quant_bias: ty(Array[F16]; 3) cond(!all_default) default([
+            1.0 - 0.05465007330715401,
+            1.0 - 0.07005449891748593,
+            1.0 - 0.049935103337343655,
+        ]),
+        pub quant_bias_numerator: ty(F16) cond(!all_default) default(0.145),
     }
 }

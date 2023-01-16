@@ -110,6 +110,10 @@ impl<S> Grid<S> {
         mirror_2d(self.width, self.height, x, y)
     }
 
+    pub fn get_initialized(&self, coord: (u32, u32)) -> Option<&S> {
+        self.buffer.get_initialized(coord)
+    }
+
     pub fn subgrid(&self, left: i32, top: i32, width: u32, height: u32) -> Subgrid<'_, S> {
         Subgrid {
             grid: self,
@@ -301,19 +305,17 @@ impl<S: Sample> Grid<S> {
     }
 }
 
-impl<S> std::ops::Index<(i32, i32)> for Grid<S> {
+impl<S> std::ops::Index<(u32, u32)> for Grid<S> {
     type Output = S;
 
-    fn index(&self, (x, y): (i32, i32)) -> &Self::Output {
-        // let (x, y) = self.mirror(index.0, index.1);
-        &self.buffer[(x as u32, y as u32)]
+    fn index(&self, coord: (u32, u32)) -> &Self::Output {
+        &self.buffer[coord]
     }
 }
 
-impl<S: Default + Clone> std::ops::IndexMut<(i32, i32)> for Grid<S> {
-    fn index_mut(&mut self, (x, y): (i32, i32)) -> &mut Self::Output {
-        // let (x, y) = self.mirror(index.0, index.1);
-        &mut self.buffer[(x as u32, y as u32)]
+impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for Grid<S> {
+    fn index_mut(&mut self, coord: (u32, u32)) -> &mut Self::Output {
+        &mut self.buffer[coord]
     }
 }
 
@@ -340,8 +342,8 @@ impl<S> std::ops::Index<(u32, u32)> for Subgrid<'_, S> {
             panic!("index out of range")
         }
 
-        let x = x as i32 + self.left;
-        let y = y as i32 + self.top;
+        let x = x.saturating_add_signed(self.left);
+        let y = y.saturating_add_signed(self.top);
         &self.grid[(x, y)]
     }
 }
@@ -369,8 +371,8 @@ impl<S> std::ops::Index<(u32, u32)> for SubgridMut<'_, S> {
             panic!("index out of range")
         }
 
-        let x = x as i32 + self.left;
-        let y = y as i32 + self.top;
+        let x = x.saturating_add_signed(self.left);
+        let y = y.saturating_add_signed(self.top);
         &self.grid[(x, y)]
     }
 }
@@ -381,8 +383,8 @@ impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for SubgridMut<'_, S> {
             panic!("index out of range")
         }
 
-        let x = x as i32 + self.left;
-        let y = y as i32 + self.top;
+        let x = x.saturating_add_signed(self.left);
+        let y = y.saturating_add_signed(self.top);
         &mut self.grid[(x, y)]
     }
 }
@@ -394,6 +396,7 @@ enum GridBuffer<S> {
         group_size: (u32, u32),
         group_stride: u32,
         groups: BTreeMap<u32, GridGroup<S>>,
+        def: S,
     },
 }
 
@@ -406,6 +409,7 @@ impl<S: Default + Clone> GridBuffer<S> {
                 group_size: (gw, gh),
                 group_stride: (width + gw - 1) / gw,
                 groups: BTreeMap::new(),
+                def: S::default(),
             }
         }
     }
@@ -418,16 +422,12 @@ impl<S> GridBuffer<S> {
             Self::Grouped { groups, .. } => groups.get(&idx),
         }
     }
-}
 
-impl<S> std::ops::Index<(u32, u32)> for GridBuffer<S> {
-    type Output = S;
-
-    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
+    fn get_initialized(&self, (x, y): (u32, u32)) -> Option<&S> {
         match *self {
             Self::Single(ref group) => {
                 let idx = x as usize + y as usize * group.stride as usize;
-                &group.buf[idx]
+                group.buf.get(idx)
             },
             Self::Grouped { group_size: (gw, gh), group_stride, ref groups, .. } => {
                 let group_row = y / gh;
@@ -437,12 +437,20 @@ impl<S> std::ops::Index<(u32, u32)> for GridBuffer<S> {
                 let group_idx = group_row * group_stride + group_col;
                 if let Some(group) = groups.get(&group_idx) {
                     let idx = y * group.stride + x;
-                    &group.buf[idx as usize]
+                    group.buf.get(idx as usize)
                 } else {
-                    panic!()
+                    None
                 }
             },
         }
+    }
+}
+
+impl<S> std::ops::Index<(u32, u32)> for GridBuffer<S> {
+    type Output = S;
+
+    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
+        self.get_initialized((x, y)).unwrap()
     }
 }
 
@@ -453,7 +461,7 @@ impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
                 let idx = x as usize + y as usize * group.stride as usize;
                 &mut group.buf[idx]
             },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups } => {
+            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups, .. } => {
                 let group_row = y / gh;
                 let group_col = x / gw;
                 let y = y % gh;
@@ -692,6 +700,8 @@ where
     let (gw, gh) = rgb[0].group_size;
     let mut buf = vec![0u8; width as usize * gh as usize * bytes_per_sample];
 
+    let empty_grid = GridGroup::new(gw, gh);
+
     let group_stride = (width + gw - 1) / gw;
     let group_height = (height + gh - 1) / gh;
     for gy in 0..group_height {
@@ -700,10 +710,10 @@ where
             let idx = gy * group_stride + gx;
             let stride = (width - gx * gw).min(gw);
 
-            let r = rgb[0].buffer.get_group(idx).unwrap();
-            let g = rgb[1].buffer.get_group(idx).unwrap();
-            let b = rgb[2].buffer.get_group(idx).unwrap();
-            let a = a.as_ref().map(|g| g.buffer.get_group(idx).unwrap());
+            let r = rgb[0].buffer.get_group(idx).unwrap_or(&empty_grid);
+            let g = rgb[1].buffer.get_group(idx).unwrap_or(&empty_grid);
+            let b = rgb[2].buffer.get_group(idx).unwrap_or(&empty_grid);
+            let a = a.as_ref().map(|g| g.buffer.get_group(idx).unwrap_or(&empty_grid));
 
             for y in 0..scanlines {
                 for x in 0..stride {

@@ -35,6 +35,17 @@ impl TransformInfo {
             Self::Squeeze(sq) => sq.inverse(image),
         }
     }
+
+    pub fn is_delta_palette(&self) -> bool {
+        match self {
+            Self::Palette(pal) => pal.nb_deltas > 0,
+            _ => false,
+        }
+    }
+
+    pub fn is_squeeze(&self) -> bool {
+        matches!(self, Self::Squeeze(_))
+    }
 }
 
 impl Bundle<&WpHeader> for TransformInfo {
@@ -212,7 +223,7 @@ impl Palette {
         let nb_deltas = self.nb_deltas as i32;
         let nb_colors = self.nb_colours as i32;
         for (c, grid) in output_grids.into_iter().enumerate() {
-            let c = c as i32;
+            let c = c as u32;
             let mut need_delta = Vec::new();
             grid.iter_init_mut(|x, y, sample| {
                 let index = *sample;
@@ -220,7 +231,7 @@ impl Palette {
                     need_delta.push((x, y));
                 }
                 if (0..nb_colors).contains(&index) {
-                    *sample = palette_grid[(index, c)];
+                    *sample = palette_grid[(index as u32, c)];
                 } else if index >= nb_colors {
                     let index = index - nb_colors;
                     if index < 64 {
@@ -260,8 +271,8 @@ impl Palette {
             } else {
                 None
             };
-            let width = grid.width() as i32;
-            let height = grid.height() as i32;
+            let width = grid.width();
+            let height = grid.height();
             let mut predictor = PredictorState::new(grid.width(), 0, 0, 0, wp_header);
 
             let mut idx = 0;
@@ -270,7 +281,7 @@ impl Palette {
                     let properties = predictor.properties(&[]);
                     let diff = d_pred.predict(&properties);
                     let sample = &mut grid[(x, y)];
-                    if need_delta[idx] == (x as u32, y as u32) {
+                    if need_delta[idx] == (x, y) {
                         *sample += diff;
                         idx += 1;
                         if idx >= need_delta.len() {
@@ -417,18 +428,26 @@ impl SqueezeParams {
     fn inverse_h(&self, i0: &Grid<i32>, i1: &Grid<i32>) -> Grid<i32> {
         assert_eq!(i0.height(), i1.height());
 
-        let height = i1.height() as i32;
-        let width = i1.width() as i32;
-        let w0 = i0.width() as i32;
+        let height = i1.height();
+        let width = i1.width();
+        let w0 = i0.width();
         let (gw, gh) = i0.group_size();
         let mut output = Grid::new(i0.width() + i1.width(), i1.height(), (gw << 1, gh));
         for y in 0..height {
             for x in 0..width {
-                let avg = i0[(x, y)];
-                let residu = i1[(x, y)];
-                let next_avg = if x + 1 < w0 { i0[(x + 1, y)] } else { avg };
+                let values = (|| -> Option<_> {
+                    let avg = *i0.get_initialized((x, y))?;
+                    let residu = *i1.get_initialized((x, y))?;
+                    let next_avg = if x + 1 < w0 {
+                        *i0.get_initialized((x + 1, y))?
+                    } else {
+                        avg
+                    };
+                    Some((avg, residu, next_avg))
+                })();
+                let Some((avg, residu, next_avg)) = values else { continue; };
                 let left = if x > 0 {
-                    output[(2 * x - 1, y)]
+                    output.get_initialized((2 * x - 1, y)).copied().unwrap_or(0)
                 } else {
                     avg
                 };
@@ -438,7 +457,9 @@ impl SqueezeParams {
                 output[(2 * x + 1, y)] = first - diff;
             }
             if w0 > width {
-                output[(2 * width, y)] = i0[(width, y)];
+                if let Some(&val) = i0.get_initialized((width, y)) {
+                    output[(2 * width, y)] = val;
+                }
             }
         }
         output
@@ -447,18 +468,26 @@ impl SqueezeParams {
     fn inverse_v(&self, i0: &Grid<i32>, i1: &Grid<i32>) -> Grid<i32> {
         assert_eq!(i0.width(), i1.width());
 
-        let width = i1.width() as i32;
-        let height = i1.height() as i32;
-        let h0 = i0.height() as i32;
+        let width = i1.width();
+        let height = i1.height();
+        let h0 = i0.height();
         let (gw, gh) = i0.group_size();
         let mut output = Grid::new(i1.width(), i0.height() + i1.height(), (gw, gh << 1));
         for y in 0..height {
             for x in 0..width {
-                let avg = i0[(x, y)];
-                let residu = i1[(x, y)];
-                let next_avg = if y + 1 < h0 { i0[(x, y + 1)] } else { avg };
+                let values = (|| -> Option<_> {
+                    let avg = *i0.get_initialized((x, y))?;
+                    let residu = *i1.get_initialized((x, y))?;
+                    let next_avg = if y + 1 < h0 {
+                        *i0.get_initialized((x, y + 1))?
+                    } else {
+                        avg
+                    };
+                    Some((avg, residu, next_avg))
+                })();
+                let Some((avg, residu, next_avg)) = values else { continue; };
                 let top = if y > 0 {
-                    output[(x, 2 * y - 1)]
+                    output.get_initialized((x, 2 * y - 1)).copied().unwrap_or(0)
                 } else {
                     avg
                 };
@@ -470,7 +499,9 @@ impl SqueezeParams {
         }
         if h0 > height {
             for x in 0..width {
-                output[(x, 2 * height)] = i0[(x, height)];
+                if let Some(&val) = i0.get_initialized((x, height)) {
+                    output[(x, 2 * height)] = val;
+                }
             }
         }
         output

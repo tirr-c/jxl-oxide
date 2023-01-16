@@ -242,8 +242,18 @@ impl FrameHeader {
         128 << self.group_size_shift
     }
 
+    pub fn groups_per_row(&self) -> u32 {
+        let group_dim = self.group_dim();
+        (self.sample_width() + group_dim - 1) / group_dim
+    }
+
     pub fn lf_group_dim(&self) -> u32 {
         self.group_dim() * 8
+    }
+
+    pub fn lf_groups_per_row(&self) -> u32 {
+        let lf_group_dim = self.lf_group_dim();
+        (self.sample_width() + lf_group_dim - 1) / lf_group_dim
     }
 
     pub fn group_size_for(&self, group_idx: u32) -> (u32, u32) {

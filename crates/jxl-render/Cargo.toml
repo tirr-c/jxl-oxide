@@ -10,10 +10,14 @@ edition = "2021"
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
 
+[dependencies.jxl-grid]
+path = "../jxl-grid"
+default_features = false
+
 [dependencies.jxl-frame]
 path = "../jxl-frame"
 default_features = false
 
 [features]
-mt = ["jxl-frame/mt"]
+mt = ["jxl-grid/mt", "jxl-frame/mt"]
 default = ["mt"]
