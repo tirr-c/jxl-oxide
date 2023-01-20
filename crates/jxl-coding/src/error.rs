@@ -1,10 +1,12 @@
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Lz77NotAllowed,
     InvalidPrefixHistogram,
     InvalidAnsHistogram,
     InvalidAnsStream,
+    InvalidPermutation,
 }
 
 impl std::error::Error for Error {
@@ -24,6 +26,7 @@ impl std::fmt::Display for Error {
             Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
             Self::InvalidAnsHistogram => write!(f, "invalid ANS distribution"),
             Self::InvalidAnsStream => write!(f, "ANS stream verification failed"),
+            Self::InvalidPermutation => write!(f, "invalid permutation"),
         }
     }
 }

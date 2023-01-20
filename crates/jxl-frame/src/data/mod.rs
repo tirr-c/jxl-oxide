@@ -1,6 +1,7 @@
-use jxl_bitstream::{define_bundle, read_bits, header::{Headers, ColourSpace}, Bitstream, Bundle};
+use jxl_bitstream::{define_bundle, read_bits, header::{Headers, ColourSpace, ImageMetadata}, Bitstream, Bundle};
 use jxl_grid::Grid;
 use jxl_modular::{ChannelShift, ModularChannelParams, Modular, ModularParams, MaConfig, MaContext};
+use jxl_vardct::{TransformType, LfChannelDequantization, LfChannelCorrelation, HfBlockContext, Quantizer, HfPass};
 
 use crate::{
     FrameHeader,
@@ -65,90 +66,13 @@ impl LfGlobal {
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct LfChannelDequantization error(crate::Error) {
-        all_default: ty(Bool) default(true),
-        pub m_x_lf: ty(F16) cond(!all_default) default(1.0 / 32.0),
-        pub m_y_lf: ty(F16) cond(!all_default) default(1.0 / 4.0),
-        pub m_b_lf: ty(F16) cond(!all_default) default(1.0 / 2.0),
-    }
-}
-
-define_bundle! {
-    #[derive(Debug)]
     pub struct LfGlobalVarDct error(crate::Error) {
         pub quantizer: ty(Bundle(Quantizer)),
         pub hf_block_ctx: ty(Bundle(HfBlockContext)),
         pub lf_chan_corr: ty(Bundle(LfChannelCorrelation)),
     }
-
-    #[derive(Debug)]
-    pub struct Quantizer error(crate::Error) {
-        pub global_scale: ty(U32(1 + u(11), 2049 + u(11), 4097 + u(12), 8193 + u(16))),
-        pub quant_lf: ty(U32(16, 1 + u(5), 1 + u(8), 1 + u(16))),
-    }
-
-    #[derive(Debug)]
-    pub struct LfChannelCorrelation error(crate::Error) {
-        all_default: ty(Bool) default(true),
-        pub colour_factor: ty(U32(84,256, 2 + u(8), 258 + u(16))) cond(!all_default) default(84),
-        pub base_correlation_x: ty(F16) cond(!all_default) default(0.0),
-        pub base_correlation_b: ty(F16) cond(!all_default) default(1.0),
-        pub x_factor_lf: ty(u(8)) cond(!all_default) default(128),
-        pub b_factor_lf: ty(u(8)) cond(!all_default) default(128),
-    }
 }
 
-#[derive(Debug, Default)]
-pub struct HfBlockContext {
-    pub qf_thresholds: Vec<u32>,
-    pub lf_thresholds: [Vec<i32>; 3],
-    pub block_ctx_map: Vec<u8>,
-    pub num_block_clusters: u32,
-}
-
-impl<Ctx> Bundle<Ctx> for HfBlockContext {
-    type Error = crate::Error;
-
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> crate::Result<Self> {
-        let mut qf_thresholds = Vec::new();
-        let mut lf_thresholds = [Vec::new(), Vec::new(), Vec::new()];
-        let (num_block_clusters, block_ctx_map) = if bitstream.read_bool()? {
-            (15, vec![
-                0, 1, 2, 2, 3, 3, 4, 5, 6, 6, 6, 6, 6,
-                7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
-                7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
-            ])
-        } else {
-            let mut bsize = 1;
-            for thr in &mut lf_thresholds {
-                let num_lf_thresholds = bitstream.read_bits(4)?;
-                bsize *= num_lf_thresholds + 1;
-                for _ in 0..num_lf_thresholds {
-                    let t = read_bits!(
-                        bitstream,
-                        U32(u(4), 16 + u(8), 272 + u(16), 65808 + u(32)); UnpackSigned
-                    )?;
-                    thr.push(t);
-                }
-            }
-            let num_qf_thresholds = bitstream.read_bits(4)?;
-            bsize *= num_qf_thresholds + 1;
-            for _ in 0..num_qf_thresholds {
-                let t = read_bits!(bitstream, U32(u(2), 4 + u(3), 12 + u(5), 44 + u(8)))?;
-                qf_thresholds.push(1 + t);
-            }
-
-            jxl_coding::read_clusters(bitstream, bsize * 39)?
-        };
-
-        Ok(Self {
-            qf_thresholds,
-            lf_thresholds,
-            block_ctx_map,
-            num_block_clusters,
-        })
-    }
-}
 
 #[derive(Debug)]
 pub struct GlobalModular {
@@ -253,7 +177,7 @@ pub enum BlockInfo {
     Uninit,
     Occupied,
     Data {
-        dct_select: u8,
+        dct_select: TransformType,
         hf_mul: i32,
     },
 }
@@ -344,8 +268,8 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let block_info_raw = image_iter.next().unwrap();
         let sharpness = image_iter.next().unwrap();
 
-        let block_info = Grid::<BlockInfo>::new(bw, bh, (bw, bh));
-        let mut x = 0u32;
+        let mut block_info = Grid::<BlockInfo>::new(bw, bh, (bw, bh));
+        let mut x;
         let mut y = 0u32;
         let mut data_idx = 0u32;
         while y < bh {
@@ -354,12 +278,28 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
             while x < bw {
                 if !block_info[(x, y)].is_occupied() {
                     let dct_select = block_info_raw[(data_idx, 0)];
+                    let dct_select = TransformType::try_from(dct_select as u8)?;
                     let hf_mul = block_info_raw[(data_idx, 1)];
-                    // TODO: parse DctSelect
-                    data_idx += 1;
-                }
+                    let (dw, dh) = dct_select.dct_select_size();
 
-                x += 1;
+                    for dy in 0..dh {
+                        for dx in 0..dw {
+                            debug_assert!(!block_info[(x + dx, y + dy)].is_occupied());
+                            block_info[(x + dx, y + dy)] = if dx == 0 && dy == 0 {
+                                BlockInfo::Data {
+                                    dct_select,
+                                    hf_mul: hf_mul + 1,
+                                }
+                            } else {
+                                BlockInfo::Occupied
+                            };
+                        }
+                    }
+                    data_idx += 1;
+                    x += dw;
+                } else {
+                    x += 1;
+                }
             }
 
             y += 1;
@@ -380,8 +320,59 @@ impl BlockInfo {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct HfGlobalParams<'a> {
+    metadata: &'a ImageMetadata,
+    frame_header: &'a FrameHeader,
+    ma_config: Option<&'a MaConfig>,
+    hf_block_ctx: &'a HfBlockContext,
+}
+
+impl<'a> HfGlobalParams<'a> {
+    pub fn new(metadata: &'a ImageMetadata, frame_header: &'a FrameHeader, lf_global: &'a LfGlobal) -> Self {
+        let Some(lf_vardct) = &lf_global.vardct else { panic!("VarDCT not initialized") };
+        Self {
+            metadata,
+            frame_header,
+            ma_config: lf_global.gmodular.ma_config.as_ref(),
+            hf_block_ctx: &lf_vardct.hf_block_ctx,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HfGlobal {
+    dequant_matrices: jxl_vardct::DequantMatrixSet,
+    num_hf_presets: u32,
+    hf_passes: Vec<HfPass>,
+}
+
+impl Bundle<HfGlobalParams<'_>> for HfGlobal {
+    type Error = crate::Error;
+
+    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: HfGlobalParams<'_>) -> Result<Self> {
+        let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx } = params;
+        let dequant_matrix_params = jxl_vardct::DequantMatrixSetParams::new(
+            metadata.bit_depth.bits_per_sample(),
+            1 + frame_header.num_lf_groups() * 3,
+            ma_config,
+        );
+        let dequant_matrices = jxl_vardct::DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
+
+        let num_groups = frame_header.num_groups();
+        let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros())? + 1;
+
+        let hf_pass_params = jxl_vardct::HfPassParams::new(hf_block_ctx, num_hf_presets);
+        let hf_passes = std::iter::repeat_with(|| HfPass::parse(bitstream, hf_pass_params))
+            .take(frame_header.passes.num_passes as usize)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            dequant_matrices,
+            num_hf_presets,
+            hf_passes,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

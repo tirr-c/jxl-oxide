@@ -23,6 +23,9 @@ path = "../jxl-grid"
 [dependencies.jxl-modular]
 path = "../jxl-modular"
 
+[dependencies.jxl-vardct]
+path = "../jxl-vardct"
+
 [dependencies.rayon]
 version = "1.6.1"
 optional = true

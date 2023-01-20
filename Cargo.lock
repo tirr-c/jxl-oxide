@@ -228,6 +228,7 @@ dependencies = [
  "jxl-coding",
  "jxl-grid",
  "jxl-modular",
+ "jxl-vardct",
  "rayon",
 ]
 
@@ -254,6 +255,17 @@ dependencies = [
  "jxl-bitstream",
  "jxl-frame",
  "jxl-grid",
+ "jxl-vardct",
+]
+
+[[package]]
+name = "jxl-vardct"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-coding",
+ "jxl-grid",
+ "jxl-modular",
 ]
 
 [[package]]

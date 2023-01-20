@@ -204,6 +204,7 @@ impl Frame<'_> {
 
         let mut lf_global = self.data.lf_global.take();
         let mut hf_global = self.data.hf_global.take();
+        let mut hf_bitstream = None;
 
         let (lf_group_tx, lf_group_rx) = crossbeam_channel::unbounded();
         let (pass_group_tx, pass_group_rx) = crossbeam_channel::unbounded();
@@ -219,9 +220,22 @@ impl Frame<'_> {
                     bitstream.read_bytes_aligned(&mut buf)?;
                     let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
                     lf_global = Some(self.read_lf_global(&mut bitstream)?);
+
+                    if let Some(mut hf_bitstream) = hf_bitstream.take() {
+                        let lf_global = lf_global.as_ref().unwrap();
+                        hf_global = Some(self.read_hf_global(&mut hf_bitstream, lf_global)?);
+                    }
                 },
                 TocGroupKind::HfGlobal => {
-                    hf_global = Some(self.read_hf_global(bitstream)?);
+                    let mut buf = vec![0u8; group.size as usize];
+                    bitstream.read_bytes_aligned(&mut buf)?;
+                    let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
+
+                    if let Some(lf_global) = &lf_global {
+                        hf_global = Some(self.read_hf_global(&mut bitstream, lf_global)?);
+                    } else {
+                        hf_bitstream = Some(bitstream);
+                    }
                 },
                 TocGroupKind::LfGroup(lf_group_idx) => {
                     let mut buf = vec![0u8; group.size as usize];
@@ -342,10 +356,11 @@ impl Frame<'_> {
         read_bits!(bitstream, Bundle(LfGroup), lf_group_params)
     }
 
-    pub fn read_hf_global<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<Option<HfGlobal>> {
+    pub fn read_hf_global<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal) -> Result<Option<HfGlobal>> {
         let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
         let hf_global = if has_hf_global {
-            todo!()
+            let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global);
+            Some(HfGlobal::parse(bitstream, params)?)
         } else {
             None
         };
@@ -366,12 +381,11 @@ impl Frame<'_> {
     }
 
     pub fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
-        let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
         match group.kind {
             TocGroupKind::All => {
                 let lf_global = self.read_lf_global(bitstream)?;
                 let lf_group = self.read_lf_group(bitstream, &lf_global, 0)?;
-                let hf_global = self.read_hf_global(bitstream)?;
+                let hf_global = self.read_hf_global(bitstream, &lf_global)?;
                 let group_pass = self.read_group_pass(bitstream, &lf_global, hf_global.as_ref(), 0, 0)?;
 
                 self.data.lf_global = Some(lf_global);
@@ -399,7 +413,13 @@ impl Frame<'_> {
                 Ok(())
             },
             TocGroupKind::HfGlobal => {
-                let hf_global = self.read_hf_global(bitstream)?;
+                let Some(lf_global) = &self.data.lf_global else {
+                    let mut buf = vec![0u8; group.size as usize];
+                    bitstream.read_bytes_aligned(&mut buf)?;
+                    self.pending_groups.insert(group.kind, buf);
+                    return Ok(());
+                };
+                let hf_global = self.read_hf_global(bitstream, lf_global)?;
                 self.data.hf_global = Some(hf_global);
                 Ok(())
             },

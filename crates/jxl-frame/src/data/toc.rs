@@ -163,25 +163,8 @@ impl Bundle<&crate::FrameHeader> for Toc {
         let permutation = if permutated_toc {
             let mut decoder = jxl_coding::Decoder::parse(bitstream, 8)?;
             decoder.begin(bitstream)?;
-            let end = decoder.read_varint(bitstream, get_context(entry_count))?;
-
-            let mut lehmer = vec![0u32; end as usize];
-            let mut prev_val = 0u32;
-            for val in &mut lehmer {
-                *val = decoder.read_varint(bitstream, get_context(prev_val))?;
-                prev_val = *val;
-            }
-
-            let mut temp = (0..(entry_count as usize)).collect::<Vec<_>>();
-            let mut permutation = Vec::with_capacity(entry_count as usize);
-            for idx in lehmer {
-                let idx = idx as usize;
-                if idx >= temp.len() {
-                    return Err(crate::Error::InvalidTocPermutation);
-                }
-                permutation.push(temp.remove(idx));
-            }
-
+            let permutation = jxl_coding::read_permutation(bitstream, &mut decoder, entry_count, 0)?;
+            decoder.finalize()?;
             permutation
         } else {
             Vec::new()
@@ -243,12 +226,4 @@ impl Bundle<&crate::FrameHeader> for Toc {
             total_size,
         })
     }
-}
-
-fn get_context(x: u32) -> u32 {
-    add_log2_ceil(x).min(7)
-}
-
-fn add_log2_ceil(x: u32) -> u32 {
-    (x + 1).next_power_of_two().trailing_zeros()
 }

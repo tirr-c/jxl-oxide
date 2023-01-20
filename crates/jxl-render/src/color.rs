@@ -1,6 +1,6 @@
 use jxl_bitstream::header::ImageMetadata;
-use jxl_frame::data::LfChannelDequantization;
 use jxl_grid::Grid;
+use jxl_vardct::LfChannelDequantization;
 
 pub fn perform_inverse_xyb_modular(yxb: [&Grid<i32>; 3], lf_dequant: &LfChannelDequantization, metadata: &ImageMetadata) -> [Grid<f32>; 3] {
     let mut yxb_unscaled = yxb.map(|g| Grid::new(g.width(), g.height(), g.group_size()));

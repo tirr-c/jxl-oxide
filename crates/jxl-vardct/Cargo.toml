@@ -1,5 +1,5 @@
 [package]
-name = "jxl-render"
+name = "jxl-vardct"
 version = "0.1.0"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -10,17 +10,11 @@ edition = "2021"
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
 
+[dependencies.jxl-coding]
+path = "../jxl-coding"
+
 [dependencies.jxl-grid]
 path = "../jxl-grid"
-default_features = false
 
-[dependencies.jxl-vardct]
-path = "../jxl-vardct"
-
-[dependencies.jxl-frame]
-path = "../jxl-frame"
-default_features = false
-
-[features]
-mt = ["jxl-grid/mt", "jxl-frame/mt"]
-default = ["mt"]
+[dependencies.jxl-modular]
+path = "../jxl-modular"

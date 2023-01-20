@@ -5,10 +5,13 @@ use jxl_bitstream::{Bitstream, read_bits};
 
 mod ans;
 mod error;
+mod permutation;
 mod prefix;
 
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub use permutation::read_permutation;
 
 #[derive(Debug, Clone)]
 pub struct Decoder {
@@ -297,7 +300,10 @@ impl Coder {
                 dist.read_symbol(bitstream)
             },
             Self::Ans { dist, state, initial } => {
-                debug_assert!(!*initial);
+                if *initial {
+                    *state = bitstream.read_bits(32)?;
+                    *initial = false;
+                }
                 let dist = &dist[cluster as usize];
                 dist.read_symbol(bitstream, state)
             },

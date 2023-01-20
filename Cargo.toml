@@ -5,6 +5,7 @@ members = [
   "crates/jxl-grid",
   "crates/jxl-frame",
   "crates/jxl-modular",
+  "crates/jxl-vardct",
   "crates/jxl-render",
   "crates/jxl-dec",
 ]

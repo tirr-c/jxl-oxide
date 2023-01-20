@@ -1,13 +1,9 @@
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
     Modular(jxl_modular::Error),
-    VarDct(jxl_vardct::Error),
-    InvalidTocPermutation,
-    IncompleteFrameData {
-        field: &'static str,
-    },
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -28,31 +24,26 @@ impl From<jxl_modular::Error> for Error {
     }
 }
 
-impl From<jxl_vardct::Error> for Error {
-    fn from(err: jxl_vardct::Error) -> Self {
-        Self::VarDct(err)
-    }
-}
-
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
+
         match self {
-            Self::Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Self::Decoder(err) => write!(f, "entropy decoder error: {}", err),
-            Self::Modular(err) => write!(f, "modular stream error: {}", err),
-            Self::VarDct(err) => write!(f, "vardct error: {}", err),
-            Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
-            Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
+            Bitstream(err) => write!(f, "bitstream error: {}", err),
+            Decoder(err) => write!(f, "entropy decoder error: {}", err),
+            Modular(err) => write!(f, "modular stream error: {}", err),
         }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use Error::*;
+
         match self {
-            Self::Bitstream(err) => Some(err),
-            Self::Decoder(err) => Some(err),
-            Self::Modular(err) => Some(err),
+            Bitstream(err) => Some(err),
+            Decoder(err) => Some(err),
+            Modular(err) => Some(err),
             _ => None,
         }
     }
