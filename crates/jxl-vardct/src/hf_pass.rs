@@ -50,6 +50,10 @@ impl Bundle<HfPassParams<'_>> for HfPass {
             used_orders >>= 1;
         }
 
+        if let Some(decoder) = decoder {
+            decoder.finalize()?;
+        }
+
         let hf_dist = Decoder::parse(
             bitstream,
             495 * num_hf_presets * hf_block_ctx.num_block_clusters,
