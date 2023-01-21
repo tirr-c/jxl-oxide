@@ -272,7 +272,7 @@ impl FrameHeader {
         let full_cols = width / group_dim;
         let cols_remainder = width % group_dim;
 
-        let stride = full_rows + (rows_remainder > 0) as u32;
+        let stride = full_cols + (cols_remainder > 0) as u32;
         let row = group_idx / stride;
         let col = group_idx % stride;
 
