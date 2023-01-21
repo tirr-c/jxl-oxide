@@ -379,6 +379,7 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
 pub struct PassGroupParams<'a> {
     frame_header: &'a FrameHeader,
     gmodular: &'a GlobalModular,
+    lf_group: &'a LfGroup,
     hf_global: Option<&'a HfGlobal>,
     pass_idx: u32,
     group_idx: u32,
@@ -389,6 +390,7 @@ impl<'a> PassGroupParams<'a> {
     pub fn new(
         frame_header: &'a FrameHeader,
         lf_global: &'a LfGlobal,
+        lf_group: &'a LfGroup,
         hf_global: Option<&'a HfGlobal>,
         pass_idx: u32,
         group_idx: u32,
@@ -397,6 +399,7 @@ impl<'a> PassGroupParams<'a> {
         Self {
             frame_header,
             gmodular: &lf_global.gmodular,
+            lf_group,
             hf_global,
             pass_idx,
             group_idx,
@@ -419,7 +422,7 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
     type Error = crate::Error;
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: PassGroupParams<'_>) -> Result<Self> {
-        let PassGroupParams { frame_header, gmodular, hf_global, pass_idx, group_idx, shift } = params;
+        let PassGroupParams { frame_header, gmodular, lf_group, hf_global, pass_idx, group_idx, shift } = params;
 
         let hf_coeff = (frame_header.encoding == Encoding::VarDct)
             .then(|| -> Result<HfCoeff> { todo!() })

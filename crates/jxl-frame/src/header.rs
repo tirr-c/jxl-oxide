@@ -288,6 +288,13 @@ impl FrameHeader {
         };
         (group_width, group_height)
     }
+
+    pub fn lf_group_idx_from_group_idx(&self, group_idx: u32) -> u32 {
+        let groups_per_row = self.groups_per_row();
+        let lf_group_col = (group_idx % groups_per_row) / 8;
+        let lf_group_row = (group_idx / groups_per_row) / 8;
+        lf_group_col + lf_group_row * self.lf_groups_per_row()
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]

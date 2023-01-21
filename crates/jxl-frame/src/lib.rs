@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io::Cursor};
 use std::io::Read;
 
+use header::Encoding;
 use jxl_bitstream::{read_bits, Bitstream, Bundle, header::Headers};
 
 mod error;
@@ -21,7 +22,6 @@ pub struct Frame<'a> {
     toc: Toc,
     data: FrameData,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
-    pending_groups: BTreeMap<TocGroupKind, Vec<u8>>,
 }
 
 impl<'a> Bundle<&'a Headers> for Frame<'a> {
@@ -49,7 +49,6 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
             toc,
             data,
             pass_shifts,
-            pending_groups: Default::default(),
         })
     }
 }
@@ -75,8 +74,7 @@ impl Frame<'_> {
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<()> {
         if self.toc.is_single_entry() {
-            let group = self.toc.lf_global();
-            self.read_group(bitstream, group)?;
+            self.read_merged_group(bitstream)?;
             return Ok(());
         }
 
@@ -92,19 +90,39 @@ impl Frame<'_> {
         };
 
         let mut it = self.toc.iter_bitstream_order();
-        let mut pending = Vec::new();
+        let mut pending_lf_groups = Vec::new();
+        let mut pending_groups = Vec::new();
+        let mut hf_global_bitstream = None;
+        let mut lf_global = None;
+        let mut found_hf_global = self.header.encoding == Encoding::Modular;
         for group in &mut it {
             bitstream.skip_to_bookmark(group.offset)?;
-            if matches!(group.kind, TocGroupKind::LfGlobal) {
-                self.read_group(bitstream, group)?;
-                break;
-            }
-
             let mut buf = vec![0u8; group.size as usize];
             bitstream.read_bytes_aligned(&mut buf)?;
-            pending.push((group, Some(buf)));
+            let mut bitstream = Bitstream::new(Cursor::new(buf));
+            match group.kind {
+                TocGroupKind::LfGlobal => {
+                    lf_global = Some(self.read_lf_global(&mut bitstream)?);
+                },
+                TocGroupKind::LfGroup(lf_group_idx) => {
+                    pending_lf_groups.push((lf_group_idx, bitstream));
+                },
+                TocGroupKind::HfGlobal => {
+                    hf_global_bitstream = Some(bitstream);
+                    found_hf_global = true;
+                },
+                TocGroupKind::GroupPass { pass_idx, group_idx } => {
+                    pending_groups.push((pass_idx, group_idx, Some(bitstream), None));
+                },
+                _ => {},
+            }
+
+            if lf_global.is_some() && found_hf_global && pending_lf_groups.len() >= self.header.num_lf_groups() as usize {
+                break;
+            }
         }
 
+        self.data.lf_global = lf_global;
         let lf_global = self.data.lf_global.as_ref().unwrap();
         if lf_global.gmodular.modular.has_delta_palette() {
             if region.take().is_some() {
@@ -123,57 +141,57 @@ impl Frame<'_> {
             eprintln!("Cropped decoding: {:?}", region);
         }
 
-        for (group, buf) in pending.into_iter().chain(it.map(|v| (v, None))) {
+        for (lf_group_idx, mut bitstream) in pending_lf_groups {
             if let Some(region) = region {
-                match group.kind {
-                    TocGroupKind::LfGroup(lf_group_idx) => {
-                        let lf_group_dim = self.header.lf_group_dim();
-                        let lf_group_per_row = self.header.lf_groups_per_row();
-                        let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
-                        let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
-                        if !is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim)) {
-                            continue;
-                        }
-                    },
-                    TocGroupKind::GroupPass { group_idx, .. } => {
-                        let group_dim = self.header.group_dim();
-                        let group_per_row = self.header.groups_per_row();
-                        let group_left = (group_idx % group_per_row) * group_dim;
-                        let group_top = (group_idx / group_per_row) * group_dim;
-                        if !is_aabb_collides(region, (group_left, group_top, group_dim, group_dim)) {
-                            continue;
-                        }
-                    },
-                    _ => {},
+                let lf_group_dim = self.header.lf_group_dim();
+                let lf_group_per_row = self.header.lf_groups_per_row();
+                let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
+                let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
+                if !is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim)) {
+                    continue;
+                }
+            }
+            let lf_group = self.read_lf_group(&mut bitstream, lf_global, lf_group_idx)?;
+            self.data.lf_group.insert(lf_group_idx, lf_group);
+        }
+
+        if let Some(mut bitstream) = hf_global_bitstream {
+            self.data.hf_global = Some(self.read_hf_global(&mut bitstream, lf_global)?);
+        }
+        let hf_global = self.data.hf_global.as_ref().unwrap().as_ref();
+
+        let it = it.map(|v| {
+            let TocGroupKind::GroupPass { pass_idx, group_idx } = v.kind else { panic!() };
+            (pass_idx, group_idx, None, Some(v.offset))
+        });
+
+        for (pass_idx, group_idx, local_bitstream, offset) in pending_groups.into_iter().chain(it) {
+            if let Some(region) = region {
+                let group_dim = self.header.group_dim();
+                let group_per_row = self.header.groups_per_row();
+                let group_left = (group_idx % group_per_row) * group_dim;
+                let group_top = (group_idx / group_per_row) * group_dim;
+                if !is_aabb_collides(region, (group_left, group_top, group_dim, group_dim)) {
+                    continue;
                 }
             }
 
-            if let Some(buf) = buf {
-                let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
-                self.read_group(&mut bitstream, group)?;
+            let lf_group_idx = self.header.lf_group_idx_from_group_idx(group_idx);
+            let lf_group = self.data.lf_group.get(&lf_group_idx).unwrap();
+            let group_pass = if let Some(mut bitstream) = local_bitstream {
+                self.read_group_pass(&mut bitstream, lf_global, lf_group, hf_global, pass_idx, group_idx)?
             } else {
-                bitstream.skip_to_bookmark(group.offset)?;
-                self.read_group(bitstream, group)?;
-            }
+                bitstream.skip_to_bookmark(offset.unwrap())?;
+                self.read_group_pass(bitstream, lf_global, lf_group, hf_global, pass_idx, group_idx)?
+            };
+            self.data.group_pass.insert((pass_idx, group_idx), group_pass);
         }
 
         Ok(())
     }
 
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        if self.toc.is_single_entry() {
-            let group = self.toc.lf_global();
-            bitstream.skip_to_bookmark(group.offset)?;
-            self.read_group(bitstream, group)?;
-            return Ok(());
-        }
-
-        for group in self.toc.iter_bitstream_order() {
-            bitstream.skip_to_bookmark(group.offset)?;
-            self.read_group(bitstream, group)?;
-        }
-
-        Ok(())
+        self.load_cropped(bitstream, None)
     }
 
     #[cfg(feature = "mt")]
@@ -187,7 +205,7 @@ impl Frame<'_> {
         if self.toc.is_single_entry() {
             let group = self.toc.lf_global();
             bitstream.skip_to_bookmark(group.offset)?;
-            self.read_group(bitstream, group)?;
+            self.read_merged_group(bitstream)?;
             return Ok(());
         }
 
@@ -297,8 +315,8 @@ impl Frame<'_> {
                         Ok((lf_group_idx, lf_group))
                     })
                     .collect::<Result<BTreeMap<_, _>>>();
-            });
-            scope.spawn(|_| {
+                let Ok(lf_groups) = &lf_groups else { return; };
+
                 pass_groups = pass_group_rx
                     .into_iter()
                     .par_bridge()
@@ -312,7 +330,9 @@ impl Frame<'_> {
                     })
                     .map(|(pass_idx, group_idx, buf)| {
                         let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
-                        let pass_group = self.read_group_pass(&mut bitstream, lf_global, hf_global, pass_idx, group_idx)?;
+                        let lf_group_id = self.header.lf_group_idx_from_group_idx(group_idx);
+                        let lf_group = lf_groups.get(&lf_group_id).unwrap();
+                        let pass_group = self.read_group_pass(&mut bitstream, lf_global, lf_group, hf_global, pass_idx, group_idx)?;
                         Ok(((pass_idx, group_idx), pass_group))
                     })
                     .collect::<Result<BTreeMap<_, _>>>();
@@ -367,11 +387,20 @@ impl Frame<'_> {
         Ok(hf_global)
     }
 
-    pub fn read_group_pass<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal, hf_global: Option<&HfGlobal>, pass_idx: u32, group_idx: u32) -> Result<PassGroup> {
+    pub fn read_group_pass<R: Read>(
+        &self,
+        bitstream: &mut Bitstream<R>,
+        lf_global: &LfGlobal,
+        lf_group: &LfGroup,
+        hf_global: Option<&HfGlobal>,
+        pass_idx: u32,
+        group_idx: u32,
+    ) -> Result<PassGroup> {
         let shift = self.pass_shifts.get(&pass_idx).copied();
         let params = PassGroupParams::new(
             &self.header,
             lf_global,
+            lf_group,
             hf_global,
             pass_idx,
             group_idx,
@@ -380,66 +409,17 @@ impl Frame<'_> {
         read_bits!(bitstream, Bundle(PassGroup), params)
     }
 
-    pub fn read_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>, group: TocGroup) -> Result<()> {
-        match group.kind {
-            TocGroupKind::All => {
-                let lf_global = self.read_lf_global(bitstream)?;
-                let lf_group = self.read_lf_group(bitstream, &lf_global, 0)?;
-                let hf_global = self.read_hf_global(bitstream, &lf_global)?;
-                let group_pass = self.read_group_pass(bitstream, &lf_global, hf_global.as_ref(), 0, 0)?;
+    pub fn read_merged_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        let lf_global = self.read_lf_global(bitstream)?;
+        let lf_group = self.read_lf_group(bitstream, &lf_global, 0)?;
+        let hf_global = self.read_hf_global(bitstream, &lf_global)?;
+        let group_pass = self.read_group_pass(bitstream, &lf_global, &lf_group, hf_global.as_ref(), 0, 0)?;
 
-                self.data.lf_global = Some(lf_global);
-                self.data.lf_group.insert(0, lf_group);
-                self.data.hf_global = Some(hf_global);
-                self.data.group_pass.insert((0, 0), group_pass);
+        self.data.lf_global = Some(lf_global);
+        self.data.lf_group.insert(0, lf_group);
+        self.data.hf_global = Some(hf_global);
+        self.data.group_pass.insert((0, 0), group_pass);
 
-                Ok(())
-            },
-            TocGroupKind::LfGlobal => {
-                let lf_global = read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))?;
-                self.data.lf_global = Some(lf_global);
-                self.try_pending_blocks()?;
-                Ok(())
-            },
-            TocGroupKind::LfGroup(lf_group_idx) => {
-                let Some(lf_global) = &self.data.lf_global else {
-                    let mut buf = vec![0u8; group.size as usize];
-                    bitstream.read_bytes_aligned(&mut buf)?;
-                    self.pending_groups.insert(group.kind, buf);
-                    return Ok(());
-                };
-                let lf_group = self.read_lf_group(bitstream, lf_global, lf_group_idx)?;
-                self.data.lf_group.insert(lf_group_idx, lf_group);
-                Ok(())
-            },
-            TocGroupKind::HfGlobal => {
-                let Some(lf_global) = &self.data.lf_global else {
-                    let mut buf = vec![0u8; group.size as usize];
-                    bitstream.read_bytes_aligned(&mut buf)?;
-                    self.pending_groups.insert(group.kind, buf);
-                    return Ok(());
-                };
-                let hf_global = self.read_hf_global(bitstream, lf_global)?;
-                self.data.hf_global = Some(hf_global);
-                Ok(())
-            },
-            TocGroupKind::GroupPass { pass_idx, group_idx } => {
-                let (Some(lf_global), Some(hf_global)) = (&self.data.lf_global, &self.data.hf_global) else {
-                    let mut buf = vec![0u8; group.size as usize];
-                    bitstream.read_bytes_aligned(&mut buf)?;
-                    self.pending_groups.insert(group.kind, buf);
-                    return Ok(());
-                };
-
-                let group_pass = self.read_group_pass(bitstream, lf_global, hf_global.as_ref(), pass_idx, group_idx)?;
-                self.data.group_pass.insert((pass_idx, group_idx), group_pass);
-                Ok(())
-            },
-        }
-    }
-
-    fn try_pending_blocks(&mut self) -> Result<()> {
-        // TODO: parse pending blocks
         Ok(())
     }
 
