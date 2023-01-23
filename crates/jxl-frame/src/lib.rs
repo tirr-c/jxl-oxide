@@ -226,6 +226,7 @@ impl Frame<'_> {
 
         let (lf_group_tx, lf_group_rx) = crossbeam_channel::unbounded();
         let (pass_group_tx, pass_group_rx) = crossbeam_channel::unbounded();
+        let mut lf_group_count = 0;
 
         let mut it = self.toc.iter_bitstream_order();
         while lf_global.is_none() || hf_global.is_none() {
@@ -259,6 +260,7 @@ impl Frame<'_> {
                     let mut buf = vec![0u8; group.size as usize];
                     bitstream.read_bytes_aligned(&mut buf)?;
                     lf_group_tx.send((lf_group_idx, buf)).unwrap();
+                    lf_group_count += 1;
                 },
                 TocGroupKind::GroupPass { pass_idx, group_idx } => {
                     let mut buf = vec![0u8; group.size as usize];
@@ -294,7 +296,8 @@ impl Frame<'_> {
         let mut lf_groups = Ok(BTreeMap::new());
         let mut pass_groups = Ok(BTreeMap::new());
         let io_result = rayon::scope(|scope| -> Result<()> {
-            let lf_group_tx = lf_group_tx;
+            let num_lf_groups = self.header.num_lf_groups();
+            let mut lf_group_tx = (lf_group_count < num_lf_groups).then_some(lf_group_tx);
             let pass_group_tx = pass_group_tx;
 
             scope.spawn(|_| {
@@ -344,8 +347,15 @@ impl Frame<'_> {
                 bitstream.read_bytes_aligned(&mut buf)?;
 
                 match group.kind {
-                    TocGroupKind::LfGroup(lf_group_idx) =>
-                        lf_group_tx.send((lf_group_idx, buf)).unwrap(),
+                    TocGroupKind::LfGroup(lf_group_idx) => {
+                        if let Some(lf_group_tx) = &lf_group_tx {
+                            lf_group_tx.send((lf_group_idx, buf)).unwrap();
+                            lf_group_count += 1;
+                        }
+                        if lf_group_count >= num_lf_groups {
+                            lf_group_tx = None;
+                        }
+                    },
                     TocGroupKind::GroupPass { pass_idx, group_idx } =>
                         pass_group_tx.send((pass_idx, group_idx, buf)).unwrap(),
                     _ => { /* ignore */ },

@@ -90,4 +90,24 @@ impl TransformType {
             Dct256x128 | Dct128x256 => (256, 128),
         }
     }
+
+    pub fn order_id(self) -> u32 {
+        use TransformType::*;
+
+        match self {
+            Dct8 => 0,
+            Hornuss | Dct2 | Dct4 | Dct4x8 | Dct8x4 | Afv0 | Afv1 | Afv2 | Afv3 => 1,
+            Dct16 => 2,
+            Dct32 => 3,
+            Dct16x8 | Dct8x16 => 4,
+            Dct32x8 | Dct8x32 => 5,
+            Dct32x16 | Dct16x32 => 6,
+            Dct64 => 7,
+            Dct64x32 | Dct32x64 => 8,
+            Dct128 => 9,
+            Dct128x64 | Dct64x128 => 10,
+            Dct256 => 11,
+            Dct256x128 | Dct128x256 => 12,
+        }
+    }
 }

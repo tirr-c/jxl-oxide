@@ -73,11 +73,11 @@ impl ModularChannelParams {
         }
     }
 
-    pub fn jpeg(width: u32, height: u32, group_dim: u32, jpeg_upsampling: u32) -> Self {
+    pub fn jpeg(width: u32, height: u32, group_dim: u32, jpeg_upsampling: [u32; 3], idx: usize) -> Self {
         Self {
             width,
             height,
-            shift: ChannelShift::from_jpeg_upsampling(jpeg_upsampling),
+            shift: ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx),
         }
     }
 
@@ -105,7 +105,12 @@ impl SubimageChannelInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelShift {
-    JpegUpsampling(bool, bool),
+    JpegUpsampling {
+        has_h_subsample: bool,
+        h_subsample: bool,
+        has_v_subsample: bool,
+        v_subsample: bool,
+    },
     Shifts(u32),
     Raw(i32, i32),
 }
@@ -119,20 +124,28 @@ impl ChannelShift {
         Self::Shifts(upsampling.next_power_of_two().trailing_zeros() + dim_shift)
     }
 
-    pub fn from_jpeg_upsampling(jpeg_upsampling: u32) -> Self {
-        let (h, v) = match jpeg_upsampling {
-            0 => (false, false),
-            1 => (true, true),
-            2 => (true, false),
-            3 => (false, true),
-            _ => panic!("Invalid jpeg_upsampling value of {}", jpeg_upsampling),
+    pub fn from_jpeg_upsampling(jpeg_upsampling: [u32; 3], idx: usize) -> Self {
+        let upsampling = jpeg_upsampling[[1, 0, 2][idx]];
+        let hscale = jpeg_upsampling.into_iter().any(|v| v == 1 || v == 2);
+        let vscale = jpeg_upsampling.into_iter().any(|v| v == 1 || v == 3);
+        let (h, v) = match upsampling {
+            0 => (hscale, vscale),
+            1 => (false, false),
+            2 => (false, vscale),
+            3 => (hscale, false),
+            _ => panic!("Invalid jpeg_upsampling value of {}", upsampling),
         };
-        Self::JpegUpsampling(h, v)
+        Self::JpegUpsampling {
+            has_h_subsample: hscale,
+            h_subsample: h,
+            has_v_subsample: vscale,
+            v_subsample: v,
+        }
     }
 
     pub fn hshift(&self) -> i32 {
         match self {
-            Self::JpegUpsampling(h, _) => *h as i32,
+            Self::JpegUpsampling { h_subsample, .. } => *h_subsample as i32,
             Self::Shifts(s) => *s as i32,
             Self::Raw(h, _) => *h,
         }
@@ -140,9 +153,35 @@ impl ChannelShift {
 
     pub fn vshift(&self) -> i32 {
         match self {
-            Self::JpegUpsampling(_, v) => *v as i32,
+            Self::JpegUpsampling { v_subsample, .. } => *v_subsample as i32,
             Self::Shifts(s) => *s as i32,
             Self::Raw(_, v) => *v,
+        }
+    }
+
+    pub fn shift_size(&self, (width, height): (u32, u32)) -> (u32, u32) {
+        match *self {
+            Self::JpegUpsampling { has_h_subsample, has_v_subsample, h_subsample, v_subsample } => {
+                let width = if has_h_subsample {
+                    let size = (width + 1) / 2;
+                    if h_subsample { size } else { size * 2 }
+                } else {
+                    width
+                };
+                let height = if has_v_subsample {
+                    let size = (height + 1) / 2;
+                    if v_subsample { size } else { size * 2 }
+                } else {
+                    height
+                };
+                (width, height)
+            },
+            Self::Shifts(s) => {
+                (width >> s, height >> s)
+            },
+            Self::Raw(h, v) => {
+                (width >> h, height >> v)
+            },
         }
     }
 }

@@ -304,20 +304,13 @@ pub struct ModularChannelInfo {
 }
 
 impl ModularChannelInfo {
-    fn new(mut width: u32, mut height: u32, shift: ChannelShift) -> Self {
-        let hshift = shift.hshift();
-        let vshift = shift.vshift();
-        if hshift >= 0 {
-            width >>= hshift;
-        }
-        if vshift >= 0 {
-            height >>= vshift;
-        }
+    fn new(width: u32, height: u32, shift: ChannelShift) -> Self {
+        let (width, height) = shift.shift_size((width, height));
         Self {
             width,
             height,
-            hshift,
-            vshift,
+            hshift: shift.hshift(),
+            vshift: shift.vshift(),
         }
     }
 

@@ -58,6 +58,10 @@ impl Bundle<HfPassParams<'_>> for HfPass {
 }
 
 impl HfPass {
+    pub fn clone_decoder(&self) -> Decoder {
+        self.hf_dist.clone()
+    }
+
     pub fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
         struct OrderIter<'a> {
             permutation: &'a [usize],
@@ -80,7 +84,7 @@ impl HfPass {
             }
         }
 
-        let permutation = &self.permutation[channel][order_id];
+        let permutation = &self.permutation[order_id][channel];
         let natural_order = natural_order_lazy(order_id);
         OrderIter { permutation, natural_order, idx: 0 }
     }
@@ -187,7 +191,7 @@ const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -
         if y % y_scale != 0 {
             continue;
         }
-        ret[idx] = (x as u8, y as u8);
+        ret[idx] = (x as u8, (y / y_scale) as u8);
         idx += 1;
     }
 
@@ -223,7 +227,7 @@ fn fill_natural_order((bw, bh): (usize, usize), output: &mut [(u8, u8)]) {
             if y % y_scale != 0 {
                 continue;
             }
-            output[idx] = (x as u8, y as u8);
+            output[idx] = (x as u8, (y / y_scale) as u8);
             idx += 1;
         }
     }
