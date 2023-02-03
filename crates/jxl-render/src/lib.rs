@@ -4,6 +4,7 @@ use jxl_bitstream::{Bitstream, Bundle, header::Headers};
 use jxl_frame::{Frame, header::FrameType};
 
 mod color;
+mod dct;
 mod error;
 pub use error::{Error, Result};
 
