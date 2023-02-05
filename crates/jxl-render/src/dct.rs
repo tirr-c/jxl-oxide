@@ -1,4 +1,4 @@
-pub fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
+fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
     let n = input.len();
     assert!(n.is_power_of_two());
     assert!(output.len() == n);
@@ -98,6 +98,68 @@ fn reorder(input: &[f32], output: &mut [f32]) {
     for (idx, i) in input.iter().enumerate() {
         let target = idx.reverse_bits() >> shift_bits;
         output[target] = *i;
+    }
+}
+
+pub fn dct_2d_in_place(input: &mut [f32], width: usize, height: usize) {
+    let mut tmp = vec![0.0f32; width * height];
+    let mut buf = vec![0.0f32; width.max(height)];
+
+    // Performs row DCT instead of column DCT, it should be okay
+    // r x c => c x r
+    let row = &mut buf[..width];
+    for (y, input_row) in input.chunks_exact(width).enumerate() {
+        dct(input_row, row, false);
+        for (tmp_row, v) in tmp.chunks_exact_mut(height).zip(&*row) {
+            tmp_row[y] = *v;
+        }
+    }
+
+    // c x r => if c > r then r x c else c x r
+    if width <= height {
+        for (input_row, output_row) in tmp.chunks_exact(height).zip(input.chunks_exact_mut(height)) {
+            dct(input_row, output_row, false);
+        }
+    } else {
+        let col = &mut buf[..height];
+        for (x, input_col) in tmp.chunks_exact(height).enumerate() {
+            dct(input_col, col, false);
+            for (output_row, v) in input.chunks_exact_mut(width).zip(&*col) {
+                output_row[x] = *v;
+            }
+        }
+    }
+}
+
+pub fn idct_2d_in_place(coeffs: &mut [f32], target_width: usize, target_height: usize) {
+    let mut tmp = vec![0.0f32; target_width * target_height];
+    let width = target_width.max(target_height);
+    let height = target_width.min(target_height);
+    let mut buf = vec![0.0f32; width];
+
+    // Performs row DCT instead of column DCT, it should be okay
+    // r x c => c x r
+    let row = &mut buf[..width];
+    for (y, input_row) in coeffs.chunks_exact(width).enumerate() {
+        dct(input_row, row, true);
+        for (tmp_row, v) in tmp.chunks_exact_mut(height).zip(&*row) {
+            tmp_row[y] = *v;
+        }
+    }
+
+    // c x r => if c > r then r x c else c x r
+    if target_height >= target_width {
+        for (input_row, output_row) in tmp.chunks_exact(height).zip(coeffs.chunks_exact_mut(height)) {
+            dct(input_row, output_row, true);
+        }
+    } else {
+        let col = &mut buf[..height];
+        for (x, input_col) in tmp.chunks_exact(height).enumerate() {
+            dct(input_col, col, true);
+            for (output_row, v) in coeffs.chunks_exact_mut(width).zip(&*col) {
+                output_row[x] = *v;
+            }
+        }
     }
 }
 
