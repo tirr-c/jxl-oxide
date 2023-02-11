@@ -6,6 +6,7 @@ use jxl_frame::{Frame, header::FrameType};
 mod color;
 mod dct;
 mod error;
+mod vardct;
 pub use error::{Error, Result};
 
 #[derive(Debug)]

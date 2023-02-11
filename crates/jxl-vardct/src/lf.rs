@@ -26,6 +26,23 @@ define_bundle! {
     }
 }
 
+impl LfChannelDequantization {
+    #[inline]
+    pub fn m_x_lf_unscaled(&self) -> f32 {
+        self.m_x_lf / 128.0
+    }
+
+    #[inline]
+    pub fn m_y_lf_unscaled(&self) -> f32 {
+        self.m_y_lf / 128.0
+    }
+
+    #[inline]
+    pub fn m_b_lf_unscaled(&self) -> f32 {
+        self.m_b_lf / 128.0
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct HfBlockContext {
     pub qf_thresholds: Vec<u32>,

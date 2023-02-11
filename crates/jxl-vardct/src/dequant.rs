@@ -1,7 +1,7 @@
 use jxl_bitstream::{Bitstream, Bundle, BundleDefault};
 use jxl_modular::{Modular, ModularParams};
 
-use crate::{Result, TransformType};
+use crate::{Result, TransformType, dct_select};
 
 #[derive(Debug)]
 struct DequantMatrixParams {
@@ -487,5 +487,32 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
             .map(|params| params.into_matrix())
             .collect();
         Ok(Self { matrices })
+    }
+}
+
+impl DequantMatrixSet {
+    pub fn get(&self, channel: usize, dct_select: TransformType) -> &[Vec<f32>] {
+        use TransformType::*;
+
+        let idx = match dct_select {
+            Dct8 => 0,
+            Hornuss => 1,
+            Dct2 => 2,
+            Dct4 => 3,
+            Dct16 => 4,
+            Dct32 => 5,
+            Dct8x16 | Dct16x8 => 6,
+            Dct8x32 | Dct32x8 => 7,
+            Dct16x32 | Dct32x16 => 8,
+            Dct4x8 | Dct8x4 => 9,
+            Afv0 | Afv1 | Afv2 | Afv3 => 10,
+            Dct64 => 11,
+            Dct32x64 | Dct64x32 => 12,
+            Dct128 => 13,
+            Dct64x128 | Dct128x64 => 14,
+            Dct256 => 15,
+            Dct128x256 | Dct256x128 => 16,
+        };
+        &self.matrices[idx][channel]
     }
 }

@@ -75,7 +75,6 @@ define_bundle! {
     }
 }
 
-
 #[derive(Debug)]
 pub struct GlobalModular {
     pub ma_config: Option<MaConfig>,
@@ -512,9 +511,10 @@ pub struct HfCoeff {
 }
 
 #[derive(Debug)]
-struct CoeffData {
-    dct_select: TransformType,
-    coeff: [Grid<i32>; 3],
+pub struct CoeffData {
+    pub dct_select: TransformType,
+    pub hf_mul: i32,
+    pub coeff: [Grid<i32>; 3],
 }
 
 impl Bundle<HfCoeffParams<'_>> for HfCoeff {
@@ -692,6 +692,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
 
                 data.insert((x, y), CoeffData {
                     dct_select,
+                    hf_mul: qf,
                     coeff,
                 });
             }
