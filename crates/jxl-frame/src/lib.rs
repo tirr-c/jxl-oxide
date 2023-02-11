@@ -434,7 +434,7 @@ impl Frame<'_> {
     }
 
     pub fn complete(&mut self) -> Result<()> {
-        self.data.complete(&self.header)?;
+        self.data.complete()?;
         Ok(())
     }
 
@@ -483,28 +483,26 @@ impl FrameData {
         }
     }
 
-    fn complete(&mut self, frame_header: &FrameHeader) -> Result<&mut Self> {
+    fn complete(&mut self) -> Result<&mut Self> {
         let Self {
             lf_global,
             lf_group,
-            hf_global,
             group_pass,
+            ..
         } = self;
 
         let Some(lf_global) = lf_global else {
             return Err(Error::IncompleteFrameData { field: "lf_global" });
         };
-        for lf_group in std::mem::take(lf_group).into_values() {
-            lf_global.gmodular.modular.copy_from_modular(lf_group.mlf_group);
+        for lf_group in lf_group.values_mut() {
+            let mlf_group = std::mem::take(&mut lf_group.mlf_group);
+            lf_global.gmodular.modular.copy_from_modular(mlf_group);
         }
-        for group in std::mem::take(group_pass).into_values() {
-            lf_global.gmodular.modular.copy_from_modular(group.modular);
+        for group in group_pass.values_mut() {
+            let modular = std::mem::take(&mut group.modular);
+            lf_global.gmodular.modular.copy_from_modular(modular);
         }
-
         lf_global.apply_modular_inverse_transform();
-
-        // TODO: perform vardct
-
         Ok(self)
     }
 }

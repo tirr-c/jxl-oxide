@@ -252,8 +252,8 @@ impl<'f> RenderContext<'f> {
 
                         let (bw, bh) = coeff_data.dct_select.dct_select_size();
                         for (coeff, lf_dequant) in yxb.iter_mut().zip(lf_dequant.iter()) {
-                            let lf_subgrid = lf_dequant.subgrid((lf_left / 8) as i32, (lf_top / 8) as i32, bw / 8, bh / 8);
-                            let llf = todo!("LLF from LF");
+                            let lf_subgrid = lf_dequant.subgrid((lf_left / 8) as i32, (lf_top / 8) as i32, bw, bh);
+                            let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
                             coeff.insert_subgrid(llf, 0, 0);
                         }
                         ((group_col * group_dim + by, group_row * group_dim + bx), (dct_select, yxb))

@@ -3,13 +3,15 @@ use jxl_frame::{
     data::{LfCoeff, CoeffData},
     FrameHeader,
 };
-use jxl_grid::Grid;
+use jxl_grid::{Grid, Subgrid};
 use jxl_vardct::{
     LfChannelDequantization,
     Quantizer,
     DequantMatrixSet,
-    LfChannelCorrelation,
+    LfChannelCorrelation, TransformType,
 };
+
+use crate::dct::dct_2d_in_place;
 
 pub fn dequant_lf(
     frame_header: &FrameHeader,
@@ -201,9 +203,57 @@ pub fn chroma_from_luma_hf(
             let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
             let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-            let coeff_y = coeff_y[(x, y)];
-            coeff_x[(x, y)] += kx * coeff_y;
-            coeff_b[(x, y)] += kb * coeff_y;
+            let coeff_y = coeff_y[(cx, cy)];
+            coeff_x[(cx, cy)] += kx * coeff_y;
+            coeff_b[(cx, cy)] += kb * coeff_y;
         }
     }
+}
+
+pub fn llf_from_lf(
+    lf: Subgrid<'_, f32>,
+    dct_select: TransformType,
+) -> Grid<f32> {
+    use TransformType::*;
+
+    fn scale_f(c: u32, b: u32) -> f32 {
+        let cb = c as f32 / b as f32;
+        let recip = (cb * std::f32::consts::FRAC_PI_2).cos() *
+            (cb * std::f32::consts::PI).cos() *
+            (cb * 2.0 * std::f32::consts::PI).cos();
+        recip.recip()
+    }
+
+    let (bw, bh) = dct_select.dct_select_size();
+    debug_assert_eq!(bw, lf.width());
+    debug_assert_eq!(bh, lf.height());
+
+    let mut out = Grid::new(lf.width(), lf.height(), (lf.width(), lf.height()));
+
+    if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Afv0 | Afv1 | Afv2 | Afv3) {
+        debug_assert_eq!(bw, bh);
+        for y in 0..bh {
+            for x in 0..bw {
+                out[(x, y)] = lf[(x, y)];
+            }
+        }
+    } else {
+        let mut llf = vec![0.0f32; bw as usize * bh as usize];
+        for y in 0..bh {
+            for x in 0..bw {
+                llf[(y * bw + x) as usize] = lf[(x, y)];
+            }
+        }
+        dct_2d_in_place(&mut llf, bw as usize, bh as usize);
+
+        let cx = bw.max(bh);
+        let cy = bw.min(bh);
+        for y in 0..cy {
+            for x in 0..cx {
+                out[(x, y)] = llf[(y * cx + y) as usize] * scale_f(cy, bh * 8) * scale_f(cx, bw * 8);
+            }
+        }
+    }
+
+    out
 }

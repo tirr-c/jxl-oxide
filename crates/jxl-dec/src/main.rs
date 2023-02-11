@@ -200,6 +200,7 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
             .load_all_frames(bitstream)
             .expect("failed to load frames");
     }
+    let fb = render.render().expect("failed to render");
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
