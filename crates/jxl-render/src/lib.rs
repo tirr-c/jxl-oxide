@@ -220,7 +220,7 @@ impl<'f> RenderContext<'f> {
         let groups_per_row = frame_header.groups_per_row();
 
         // key is (y, x) to match raster order
-        let dequantized_coeff = group_coeffs
+        let varblocks = group_coeffs
             .into_iter()
             .flat_map(|(group_idx, hf_coeff)| {
                 let lf_group_id = frame_header.lf_group_idx_from_group_idx(group_idx);
@@ -256,11 +256,31 @@ impl<'f> RenderContext<'f> {
                             let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
                             coeff.insert_subgrid(llf, 0, 0);
                         }
-                        ((group_col * group_dim + by, group_row * group_dim + bx), (dct_select, yxb))
+                        ((group_row * group_dim + by, group_col * group_dim + bx), (dct_select, yxb))
                     })
-            })
-            .collect::<BTreeMap<_, _>>();
+            });
 
-        todo!("coeffs to samples")
+        let stride = self.width();
+        let mut fb_yxb = FrameBuffer::new(self.width(), self.height(), stride, 3);
+        let stride = stride as usize;
+        for ((y, x), (dct_select, mut yxb)) in varblocks {
+            let (w8, h8) = dct_select.dct_select_size();
+            let w = w8 * 8;
+            let h = h8 * 8;
+
+            for (idx, coeff) in yxb.iter_mut().enumerate() {
+                let fb = fb_yxb.channel_buf_mut(idx as u32);
+                vardct::transform(coeff, dct_select);
+                for iy in 0..h {
+                    let y = (y + iy) as usize;
+                    for ix in 0..w {
+                        let x = (x + ix) as usize;
+                        fb[y * stride + x] = coeff[(ix, iy)];
+                    }
+                }
+            }
+        }
+
+        Ok(fb_yxb)
     }
 }

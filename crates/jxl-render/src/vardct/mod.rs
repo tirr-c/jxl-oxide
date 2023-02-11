@@ -13,6 +13,9 @@ use jxl_vardct::{
 
 use crate::dct::dct_2d_in_place;
 
+mod transform;
+pub use transform::transform;
+
 pub fn dequant_lf(
     frame_header: &FrameHeader,
     lf_dequant: &LfChannelDequantization,
