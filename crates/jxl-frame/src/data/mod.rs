@@ -342,7 +342,7 @@ impl<'a> HfGlobalParams<'a> {
 
 #[derive(Debug)]
 pub struct HfGlobal {
-    dequant_matrices: jxl_vardct::DequantMatrixSet,
+    pub dequant_matrices: jxl_vardct::DequantMatrixSet,
     num_hf_presets: u32,
     hf_passes: Vec<HfPass>,
 }
@@ -505,16 +505,37 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HfCoeff {
-    data: HashMap<(u32, u32), CoeffData>,
+    pub data: HashMap<(u32, u32), CoeffData>,
 }
 
-#[derive(Debug)]
+impl HfCoeff {
+    pub fn merge(&mut self, other: &HfCoeff) {
+        for (&coord, data) in &other.data {
+            self.data
+                .entry(coord)
+                .and_modify(|target_data| {
+                    for (target, v) in target_data.coeff.iter_mut().zip(data.coeff.iter()) {
+                        let width = target.width();
+                        let height = target.height();
+                        for y in 0..height {
+                            for x in 0..width {
+                                target[(x, y)] += v[(x, y)];
+                            }
+                        }
+                    }
+                })
+                .or_insert_with(|| data.clone());
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CoeffData {
     pub dct_select: TransformType,
     pub hf_mul: i32,
-    pub coeff: [Grid<i32>; 3],
+    pub coeff: [Grid<i32>; 3], // x, y, b
 }
 
 impl Bundle<HfCoeffParams<'_>> for HfCoeff {

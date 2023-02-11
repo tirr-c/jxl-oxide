@@ -3,6 +3,7 @@
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Frame(jxl_frame::Error),
+    IncompleteFrame,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -24,6 +25,7 @@ impl std::fmt::Display for Error {
         match self {
             Bitstream(err) => write!(f, "bitstream error: {}", err),
             Frame(err) => write!(f, "frame error: {}", err),
+            IncompleteFrame => write!(f, "frame data is incomplete"),
         }
     }
 }

@@ -1,7 +1,15 @@
 use jxl_bitstream::header::OpsinInverseMatrix;
-use jxl_frame::{data::{LfCoeff, CoeffData}, FrameHeader};
+use jxl_frame::{
+    data::{LfCoeff, CoeffData},
+    FrameHeader,
+};
 use jxl_grid::Grid;
-use jxl_vardct::{LfChannelDequantization, Quantizer, TransformType, DequantMatrixSet, LfChannelCorrelation};
+use jxl_vardct::{
+    LfChannelDequantization,
+    Quantizer,
+    DequantMatrixSet,
+    LfChannelCorrelation,
+};
 
 pub fn dequant_lf(
     frame_header: &FrameHeader,
@@ -128,4 +136,74 @@ pub fn dequant_hf_varblock(
     }
 
     out
+}
+
+pub fn chroma_from_luma_lf(
+    coeff_yxb: &mut [Grid<f32>; 3],
+    lf_chan_corr: &LfChannelCorrelation,
+) {
+    let LfChannelCorrelation {
+        colour_factor,
+        base_correlation_x,
+        base_correlation_b,
+        x_factor_lf,
+        b_factor_lf,
+        ..
+    } = *lf_chan_corr;
+
+    let x_factor = x_factor_lf as i32 - 128;
+    let b_factor = b_factor_lf as i32 - 128;
+    let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
+    let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
+
+    let mut it = coeff_yxb.iter_mut();
+    let mut arr = [
+        it.next().unwrap(),
+        it.next().unwrap(),
+        it.next().unwrap(),
+    ];
+    jxl_grid::zip_iterate(&mut arr, |samples| {
+        let [y, x, b] = samples else { unreachable!() };
+        let y = **y;
+        **x += kx * y;
+        **b += kb * y;
+    });
+}
+
+pub fn chroma_from_luma_hf(
+    coeff_yxb: &mut [Grid<f32>; 3],
+    lf_left: u32,
+    lf_top: u32,
+    x_from_y: &Grid<i32>,
+    b_from_y: &Grid<i32>,
+    lf_chan_corr: &LfChannelCorrelation,
+) {
+    let LfChannelCorrelation {
+        colour_factor,
+        base_correlation_x,
+        base_correlation_b,
+        ..
+    } = *lf_chan_corr;
+
+    let [coeff_y, coeff_x, coeff_b] = coeff_yxb;
+    let width = coeff_y.width();
+    let height = coeff_y.height();
+
+    for cy in 0..height {
+        let y = lf_top + cy;
+        let cfactor_y = y / 64;
+        for cx in 0..width {
+            let x = lf_left + cx;
+            let cfactor_x = x / 64;
+
+            let x_factor = x_from_y[(cfactor_x, cfactor_y)];
+            let b_factor = b_from_y[(cfactor_x, cfactor_y)];
+            let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
+            let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
+
+            let coeff_y = coeff_y[(x, y)];
+            coeff_x[(x, y)] += kx * coeff_y;
+            coeff_b[(x, y)] += kb * coeff_y;
+        }
+    }
 }
