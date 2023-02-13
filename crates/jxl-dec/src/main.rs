@@ -2,7 +2,7 @@ use std::{path::PathBuf, fs::File};
 
 use clap::Parser;
 use jxl_bitstream::{header::Headers, read_bits};
-use jxl_render::RenderContext;
+use jxl_render::{RenderContext, FrameBuffer};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -129,6 +129,7 @@ fn main() {
     }
 
     let mut render = RenderContext::new(&headers);
+    let mut fb;
 
     #[cfg(feature = "mt")]
     {
@@ -138,24 +139,29 @@ fn main() {
             .expect("failed to build thread pool");
         eprintln!("Decoding with {} threads", pool.current_num_threads());
 
-        pool.install(|| {
-            run(&mut bitstream, &mut render, &headers, crop);
+        fb = pool.install(|| {
+            run(&mut bitstream, &mut render, &headers, crop)
         });
     }
 
     #[cfg(not(feature = "mt"))]
     {
-        run(&mut bitstream, &mut render, &headers, crop);
+        fb = run(&mut bitstream, &mut render, &headers, crop);
+    }
+
+    dbg!(&headers.metadata.tone_mapping);
+    if headers.metadata.xyb_encoded {
+        fb.yxb_to_rgb(&headers.metadata);
     }
 
     if let Some(output) = args.output {
         eprintln!("Encoding samples to PNG");
-        let width = render.width();
-        let height = render.height();
+        let width = fb.width();
+        let height = fb.height();
         let output = std::fs::File::create(output).expect("failed to open output file");
         let mut encoder = png::Encoder::new(output, width, height);
-        encoder.set_color(if has_alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
-        encoder.set_depth(if bit_depth == 8 { png::BitDepth::Eight } else { png::BitDepth::Sixteen });
+        encoder.set_color(if fb.channels() == 4 { png::ColorType::Rgba } else { png::ColorType::Rgb });
+        encoder.set_depth(png::BitDepth::Eight);
         // TODO: set colorspace
         encoder.set_srgb(match headers.metadata.colour_encoding.rendering_intent {
             jxl_bitstream::header::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
@@ -169,9 +175,8 @@ fn main() {
             .into_stream_writer()
             .unwrap();
 
-        render.tmp_rgba_be_interleaved(|buf| {
-            std::io::Write::write_all(&mut writer, buf).expect("failed to write image data");
-            Ok(())
+        fb.rgba_be_interleaved(|buf| {
+            std::io::Write::write_all(&mut writer, buf)
         }).expect("failed to write image data");
         writer.finish().expect("failed to finish writing png");
     } else {
@@ -179,7 +184,7 @@ fn main() {
     }
 }
 
-fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContext, headers: &Headers, crop: Option<CropInfo>) {
+fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContext, headers: &Headers, crop: Option<CropInfo>) -> FrameBuffer {
     if headers.metadata.have_preview {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
@@ -205,6 +210,8 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     eprintln!("Took {:.2} ms", elapsed_ms);
+
+    fb
 }
 
 fn get_icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {
