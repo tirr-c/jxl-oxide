@@ -149,7 +149,6 @@ fn main() {
         fb = run(&mut bitstream, &mut render, &headers, crop);
     }
 
-    dbg!(&headers.metadata.tone_mapping);
     if headers.metadata.xyb_encoded {
         fb.yxb_to_rgb(&headers.metadata);
     }

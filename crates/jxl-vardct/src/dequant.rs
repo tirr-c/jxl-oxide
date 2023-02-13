@@ -183,7 +183,7 @@ impl DequantMatrixParams {
                     let dx = x as f32 / (width - 1) as f32;
                     let dy = y as f32 / (height - 1) as f32;
                     let distance = (dx * dx + dy * dy).sqrt();
-                    let weight = interpolate(distance, 2.0f32.sqrt() + 1e-6, &bands);
+                    let weight = interpolate(distance, std::f32::consts::SQRT_2 + 1e-6, &bands);
                     row.push(weight);
                 }
                 ret.push(row);

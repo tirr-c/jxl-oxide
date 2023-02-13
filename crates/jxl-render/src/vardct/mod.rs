@@ -48,7 +48,7 @@ pub fn dequant_lf(
         });
 
     // [y, x, b]
-    let mut dq_channels = [
+    let dq_channels = [
         it.next().unwrap(),
         it.next().unwrap(),
         it.next().unwrap(),
@@ -66,38 +66,39 @@ pub fn dequant_lf(
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
-    let width = dq_channels[0].width();
-    let height = dq_channels[0].height();
+    let mut out = dq_channels.clone();
+    let width = out[0].width();
+    let height = out[0].height();
 
     for y in 1..(height - 1) {
         for x in 1..(width - 1) {
-            let mut s_self = [&mut 0.0f32, &mut 0.0f32, &mut 0.0f32];
+            let mut s_self = [0.0f32; 3];
             let mut s_side = [0.0f32; 3];
             let mut s_diag = [0.0f32; 3];
-            for (idx, g) in dq_channels.iter_mut().enumerate() {
+            for (idx, g) in dq_channels.iter().enumerate() {
+                s_self[idx] = g[(x, y)];
                 s_side[idx] = g[(x - 1, y)] + g[(x, y - 1)] + g[(x + 1, y)] + g[(x, y + 1)];
                 s_diag[idx] = g[(x - 1, y - 1)] + g[(x - 1, y + 1)] + g[(x + 1, y - 1)] + g[(x + 1, y + 1)];
-                s_self[idx] = &mut g[(x, y)];
             }
             let wa = [
-                *s_self[0] * SCALE_SELF + s_side[0] * SCALE_SIDE + s_diag[0] * SCALE_DIAG,
-                *s_self[1] * SCALE_SELF + s_side[1] * SCALE_SIDE + s_diag[1] * SCALE_DIAG,
-                *s_self[2] * SCALE_SELF + s_side[2] * SCALE_SIDE + s_diag[2] * SCALE_DIAG,
+                s_self[0] * SCALE_SELF + s_side[0] * SCALE_SIDE + s_diag[0] * SCALE_DIAG,
+                s_self[1] * SCALE_SELF + s_side[1] * SCALE_SIDE + s_diag[1] * SCALE_DIAG,
+                s_self[2] * SCALE_SELF + s_side[2] * SCALE_SIDE + s_diag[2] * SCALE_DIAG,
             ];
             let gap_t = [
-                (wa[0] - *s_self[0]).abs() / lf_y,
-                (wa[1] - *s_self[1]).abs() / lf_y,
-                (wa[2] - *s_self[2]).abs() / lf_y,
+                (wa[0] - s_self[0]).abs() / lf_y,
+                (wa[1] - s_self[1]).abs() / lf_x,
+                (wa[2] - s_self[2]).abs() / lf_b,
             ];
             let gap = gap_t.into_iter().fold(0.5f32, |acc, v| acc.max(v));
             let gap_scale = (3.0 - 4.0 * gap).max(0.0);
-            for (s, wa) in s_self.into_iter().zip(wa) {
-                *s = (wa - *s) * gap_scale + *s;
+            for ((g, wa), s) in out.iter_mut().zip(wa).zip(s_self) {
+                g[(x, y)] = (wa - s) * gap_scale + s;
             }
         }
     }
 
-    dq_channels
+    out
 }
 
 pub fn dequant_hf_varblock(
@@ -128,7 +129,7 @@ pub fn dequant_hf_varblock(
                 q - (quant_bias_numerator / q)
             };
 
-            let mul = 65536.0 * quantizer.global_scale as f32 / hf_mul as f32;
+            let mul = 65536.0 / quantizer.global_scale as f32 / hf_mul as f32;
             let mut quant = quant * mul;
 
             if let Some(qm_scale) = qm_scale {
@@ -182,6 +183,7 @@ pub fn chroma_from_luma_hf(
     x_from_y: &Grid<i32>,
     b_from_y: &Grid<i32>,
     lf_chan_corr: &LfChannelCorrelation,
+    transposed: bool,
 ) {
     let LfChannelCorrelation {
         colour_factor,
@@ -195,11 +197,14 @@ pub fn chroma_from_luma_hf(
     let height = coeff_y.height();
 
     for cy in 0..height {
-        let y = lf_top + cy;
-        let cfactor_y = y / 64;
         for cx in 0..width {
-            let x = lf_left + cx;
+            let (x, y) = if transposed {
+                (lf_left + cy, lf_top + cx)
+            } else {
+                (lf_left + cx, lf_top + cy)
+            };
             let cfactor_x = x / 64;
+            let cfactor_y = y / 64;
 
             let x_factor = x_from_y[(cfactor_x, cfactor_y)];
             let b_factor = b_from_y[(cfactor_x, cfactor_y)];
@@ -231,15 +236,11 @@ pub fn llf_from_lf(
     debug_assert_eq!(bw, lf.width());
     debug_assert_eq!(bh, lf.height());
 
-    let mut out = Grid::new(lf.width(), lf.height(), (lf.width(), lf.height()));
-
     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Afv0 | Afv1 | Afv2 | Afv3) {
-        debug_assert_eq!(bw, bh);
-        for y in 0..bh {
-            for x in 0..bw {
-                out[(x, y)] = lf[(x, y)];
-            }
-        }
+        debug_assert_eq!(bw * bh, 1);
+        let mut out = Grid::new(1, 1, (1, 1));
+        out[(0, 0)] = lf[(0, 0)];
+        out
     } else {
         let mut llf = vec![0.0f32; bw as usize * bh as usize];
         for y in 0..bh {
@@ -251,12 +252,13 @@ pub fn llf_from_lf(
 
         let cx = bw.max(bh);
         let cy = bw.min(bh);
+        let mut out = Grid::new(cx, cy, (cx, cy));
         for y in 0..cy {
             for x in 0..cx {
-                out[(x, y)] = llf[(y * cx + y) as usize] * scale_f(cy, bh * 8) * scale_f(cx, bw * 8);
+                out[(x, y)] = llf[(y * cx + x) as usize] * scale_f(y, cy * 8) * scale_f(x, cx * 8);
             }
         }
-    }
 
-    out
+        out
+    }
 }

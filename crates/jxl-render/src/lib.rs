@@ -242,31 +242,38 @@ impl<'f> RenderContext<'f> {
                         let b = vardct::dequant_hf_varblock(&coeff_data, 2, oim, quantizer, dequant_matrices, Some(frame_header.b_qm_scale));
                         let mut yxb = [y, x, b];
 
+                        let (bw, bh) = coeff_data.dct_select.dct_select_size();
                         let bx = bx * 8;
                         let by = by * 8;
                         let lf_left = base_lf_left + bx;
                         let lf_top = base_lf_top + by;
                         if !subsampled {
-                            vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr);
+                            let transposed = bw < bh;
+                            vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr, transposed);
                         }
 
-                        let (bw, bh) = coeff_data.dct_select.dct_select_size();
                         for (coeff, lf_dequant) in yxb.iter_mut().zip(lf_dequant.iter()) {
                             let lf_subgrid = lf_dequant.subgrid((lf_left / 8) as i32, (lf_top / 8) as i32, bw, bh);
                             let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
-                            coeff.insert_subgrid(llf, 0, 0);
+                            for y in 0..llf.height() {
+                                for x in 0..llf.width() {
+                                    coeff[(x, y)] = llf[(x, y)];
+                                }
+                            }
                         }
                         ((group_row * group_dim + by, group_col * group_dim + bx), (dct_select, yxb))
                     })
             });
 
-        let stride = self.width();
-        let mut fb_yxb = FrameBuffer::new(self.width(), self.height(), stride, 3);
+        let width = self.width();
+        let height = self.height();
+        let stride = width;
+        let mut fb_yxb = FrameBuffer::new(width, height, stride, 3);
         let stride = stride as usize;
         for ((y, x), (dct_select, mut yxb)) in varblocks {
             let (w8, h8) = dct_select.dct_select_size();
-            let w = w8 * 8;
-            let h = h8 * 8;
+            let w = (w8 * 8).min(width - x);
+            let h = (h8 * 8).min(height - y);
 
             for (idx, coeff) in yxb.iter_mut().enumerate() {
                 let fb = fb_yxb.channel_buf_mut(idx as u32);

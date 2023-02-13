@@ -166,33 +166,28 @@ const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -
         idx += 1;
     }
 
-    let mut dist = 0usize;
-    let mut order = 0usize;
-    while idx < bw * bh {
-        let (x, y) = if dist % 2 == 0 {
-            (order, dist - order)
-        } else {
-            (dist - order, order)
-        };
-
-        order += 1;
-        if order > dist || order >= bw {
-            dist += 1;
-            order = if dist < bw {
-                0
+    let mut dist = 1usize;
+    while dist < 2 * bw {
+        let margin = dist.saturating_sub(bw);
+        let mut order = margin;
+        while order < dist - margin {
+            let (x, y) = if dist % 2 == 1 {
+                (order, dist - 1 - order)
             } else {
-                dist - bw + 1
+                (dist - 1 - order, order)
             };
-        }
+            order += 1;
 
-        if x < lbw && y < lbw {
-            continue;
+            if x < lbw && y < lbw {
+                continue;
+            }
+            if y % y_scale != 0 {
+                continue;
+            }
+            ret[idx] = (x as u8, (y / y_scale) as u8);
+            idx += 1;
         }
-        if y % y_scale != 0 {
-            continue;
-        }
-        ret[idx] = (x as u8, (y / y_scale) as u8);
-        idx += 1;
+        dist += 1;
     }
 
     ret

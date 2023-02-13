@@ -54,10 +54,10 @@ fn transform_dct4(coeff: &mut Grid<f32>) {
 
     for y in 0..2 {
         for x in 0..2 {
-            let scratch = &mut scratch[(y * 2 + x) as usize * 16..][..16];
+            let scratch = &scratch[(y * 2 + x) as usize * 16..][..16];
             for iy in 0..4 {
                 for ix in 0..4 {
-                    coeff[(x + ix * 2, y + iy * 2)] = scratch[(iy * 4 + ix) as usize];
+                    coeff[(x * 4 + ix, y * 4 + iy)] = scratch[(iy * 4 + ix) as usize];
                 }
             }
         }
@@ -94,7 +94,7 @@ fn transform_hornuss(coeff: &mut Grid<f32>) {
             let scratch = &mut scratch[(y * 2 + x) as usize * 16..][..16];
             for iy in 0..4 {
                 for ix in 0..4 {
-                    coeff[(x + ix * 2, y + iy * 2)] = scratch[(iy * 4 + ix) as usize];
+                    coeff[(x * 4 + ix, y * 4 + iy)] = scratch[(iy * 4 + ix) as usize];
                 }
             }
         }
@@ -118,7 +118,7 @@ fn transform_dct4x8(coeff: &mut Grid<f32>, transpose: bool) {
         let scratch = &mut scratch[(idx * 32)..][..32];
         for iy in 0..4 {
             for ix in 0..8 {
-                scratch[iy * 8 + ix] = coeff[(ix as u32, iy as u32)];
+                scratch[iy * 8 + ix] = coeff[(ix as u32, (iy * 2 + idx) as u32)];
             }
         }
         idct_2d_in_place(scratch, w, h);
@@ -438,7 +438,7 @@ fn transform_afv<const N: usize>(coeff: &mut Grid<f32>) {
     let flip_y = N / 2;
 
     let mut coeff_afv = [0.0f32; 16];
-    coeff_afv[0] = (coeff[(0, 0)] + coeff[(0, 1)] + coeff[(1, 0)]) * 4.0;
+    coeff_afv[0] = (coeff[(0, 0)] + coeff[(1, 0)] + coeff[(0, 1)]) * 4.0;
     for (idx, v) in coeff_afv.iter_mut().enumerate().skip(1) {
         let iy = idx / 4;
         let ix = idx % 4;
@@ -446,21 +446,21 @@ fn transform_afv<const N: usize>(coeff: &mut Grid<f32>) {
     }
 
     let mut samples_afv = [0.0f32; 16];
-    for (idx, sample) in samples_afv.iter_mut().enumerate() {
+    for (sample, basis) in samples_afv.iter_mut().zip(AFV_BASIS) {
         *sample = coeff_afv
             .into_iter()
-            .zip(AFV_BASIS[idx])
+            .zip(basis)
             .map(|(coeff, basis)| coeff * basis)
             .sum();
     }
 
-    let mut scratch_4x4 = coeff_afv;
+    let mut scratch_4x4 = [0.0f32; 16];
     let mut scratch_4x8 = [0.0f32; 32];
 
-    scratch_4x4[0] = coeff[(0, 0)] - coeff[(0, 1)] + coeff[(1, 0)];
+    scratch_4x4[0] = coeff[(0, 0)] - coeff[(1, 0)] + coeff[(0, 1)];
     for iy in 0..4 {
         for ix in 0..4 {
-            if ix + iy == 0 {
+            if ix | iy == 0 {
                 continue;
             }
             scratch_4x4[iy * 4 + ix] = coeff[(2 * ix as u32 + 1, 2 * iy as u32)];
@@ -468,10 +468,10 @@ fn transform_afv<const N: usize>(coeff: &mut Grid<f32>) {
     }
     idct_2d_in_place(&mut scratch_4x4, 4, 4);
 
-    scratch_4x8[0] = coeff[(0, 0)] - coeff[(0, 1)] + coeff[(1, 0)];
+    scratch_4x8[0] = coeff[(0, 0)] - coeff[(0, 1)];
     for iy in 0..4 {
         for ix in 0..8 {
-            if ix + iy == 0 {
+            if ix | iy == 0 {
                 continue;
             }
             scratch_4x8[iy * 8 + ix] = coeff[(ix as u32, 2 * iy as u32 + 1)];
@@ -498,7 +498,7 @@ fn transform_afv<const N: usize>(coeff: &mut Grid<f32>) {
     for iy in 0..4 {
         let y = (1 - flip_y) * 4 + iy;
         for ix in 0..8 {
-            coeff[(ix as u32, y as u32)] = scratch_4x8[iy * 4 + ix];
+            coeff[(ix as u32, y as u32)] = scratch_4x8[iy * 8 + ix];
         }
     }
 }
