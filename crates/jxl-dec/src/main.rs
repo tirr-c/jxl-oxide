@@ -150,7 +150,7 @@ fn main() {
     }
 
     if headers.metadata.xyb_encoded {
-        fb.yxb_to_rgb(&headers.metadata);
+        fb.yxb_to_srgb_linear(&headers.metadata);
     }
 
     if let Some(output) = args.output {

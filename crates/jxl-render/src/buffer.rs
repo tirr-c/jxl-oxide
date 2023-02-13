@@ -73,7 +73,7 @@ impl FrameBuffer {
 }
 
 impl FrameBuffer {
-    pub fn yxb_to_rgb(&mut self, metadata: &ImageMetadata) {
+    pub fn yxb_to_srgb_linear(&mut self, metadata: &ImageMetadata) {
         crate::color::perform_inverse_xyb(self, metadata)
     }
 
@@ -88,6 +88,11 @@ impl FrameBuffer {
             for x in 0..self.width as usize {
                 for c in 0..channels {
                     let s = self.buf[c][y * self.stride as usize + x].clamp(0.0, 1.0);
+                    let s = if s <= 0.0031308f32 {
+                        12.92 * s
+                    } else {
+                        1.055 * s.powf(1.0 / 2.4) - 0.055
+                    };
                     buf[x * channels + c] = (s * 255.0) as u8;
                 }
             }
