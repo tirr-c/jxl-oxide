@@ -2,7 +2,6 @@ use std::{io::Read, collections::BTreeMap};
 
 use jxl_bitstream::{Bitstream, Bundle, header::Headers};
 use jxl_frame::{Frame, header::{FrameType, Encoding}};
-use jxl_grid::Grid;
 
 mod buffer;
 mod color;
@@ -147,7 +146,7 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    pub fn render(&self) -> Result<FrameBuffer> {
+    pub fn render_cropped(&self, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
         let Some(target_frame) = self.frames
             .iter()
             .find(|f| f.header().frame_type.is_normal_frame())
@@ -155,23 +154,23 @@ impl RenderContext<'_> {
                 panic!("No regular frame found");
             };
 
-        self.render_frame(target_frame)
+        self.render_frame(target_frame, region)
     }
 }
 
 impl<'f> RenderContext<'f> {
-    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>) -> Result<FrameBuffer> {
+    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
         match frame.header().encoding {
             Encoding::Modular => {
                 todo!()
             },
             Encoding::VarDct => {
-                self.render_vardct(frame)
+                self.render_vardct(frame, region)
             },
         }
     }
 
-    fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>) -> Result<FrameBuffer> {
+    fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
         let header = self.image_header;
         let frame_header = frame.header();
         let frame_data = frame.data();
@@ -185,6 +184,12 @@ impl<'f> RenderContext<'f> {
         // so it's okay to drop PassGroup modular
         let mut group_coeffs: BTreeMap<_, jxl_frame::data::HfCoeff> = BTreeMap::new();
         for (&(_, group_idx), group_pass) in &frame_data.group_pass {
+            if let Some(region) = region {
+                if !frame_header.is_group_collides_region(group_idx, region) {
+                    continue;
+                }
+            }
+
             let hf_coeff = group_pass.hf_coeff.as_ref().unwrap();
             group_coeffs
                 .entry(group_idx)
@@ -205,6 +210,10 @@ impl<'f> RenderContext<'f> {
 
         let dequantized_lf = frame_data.lf_group
             .iter()
+            .filter(|(&lf_group_idx, _)| {
+                let Some(region) = region else { return true; };
+                frame_header.is_lf_group_collides_region(lf_group_idx, region)
+            })
             .map(|(&lf_group_idx, data)| {
                 let lf_coeff = data.lf_coeff.as_ref().unwrap();
                 let hf_meta = data.hf_meta.as_ref().unwrap();

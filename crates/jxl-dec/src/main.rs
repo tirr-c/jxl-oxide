@@ -193,18 +193,13 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
         let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
         bitstream.skip_to_bookmark(bookmark).expect("Failed to skip");
     }
+    let region = crop.as_ref().map(|crop| (crop.left, crop.top, crop.width, crop.height));
 
     let decode_start = std::time::Instant::now();
-    if let Some(crop) = &crop {
-        render
-            .load_cropped(bitstream, Some((crop.left, crop.top, crop.width, crop.height)))
-            .expect("failed to load frames");
-    } else {
-        render
-            .load_all_frames(bitstream)
-            .expect("failed to load frames");
-    }
-    let fb = render.render().expect("failed to render");
+    render
+        .load_cropped(bitstream, region)
+        .expect("failed to load frames");
+    let fb = render.render_cropped(region).expect("failed to render");
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;

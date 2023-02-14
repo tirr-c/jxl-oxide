@@ -143,11 +143,7 @@ impl Frame<'_> {
 
         for (lf_group_idx, mut bitstream) in pending_lf_groups {
             if let Some(region) = region {
-                let lf_group_dim = self.header.lf_group_dim();
-                let lf_group_per_row = self.header.lf_groups_per_row();
-                let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
-                let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
-                if !is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim)) {
+                if !self.header.is_lf_group_collides_region(lf_group_idx, region) {
                     continue;
                 }
             }
@@ -167,11 +163,7 @@ impl Frame<'_> {
 
         for (pass_idx, group_idx, local_bitstream, offset) in pending_groups.into_iter().chain(it) {
             if let Some(region) = region {
-                let group_dim = self.header.group_dim();
-                let group_per_row = self.header.groups_per_row();
-                let group_left = (group_idx % group_per_row) * group_dim;
-                let group_top = (group_idx / group_per_row) * group_dim;
-                if !is_aabb_collides(region, (group_left, group_top, group_dim, group_dim)) {
+                if !self.header.is_group_collides_region(group_idx, region) {
                     continue;
                 }
             }
@@ -306,11 +298,7 @@ impl Frame<'_> {
                     .par_bridge()
                     .filter(|(lf_group_idx, _)| {
                         let Some(region) = region else { return true; };
-                        let lf_group_dim = self.header.lf_group_dim();
-                        let lf_group_per_row = self.header.lf_groups_per_row();
-                        let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
-                        let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
-                        is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim))
+                        self.header.is_lf_group_collides_region(*lf_group_idx, region)
                     })
                     .map(|(lf_group_idx, buf)| {
                         let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
@@ -325,11 +313,7 @@ impl Frame<'_> {
                     .par_bridge()
                     .filter(|(_, group_idx, _)| {
                         let Some(region) = region else { return true; };
-                        let group_dim = self.header.group_dim();
-                        let group_per_row = self.header.groups_per_row();
-                        let group_left = (group_idx % group_per_row) * group_dim;
-                        let group_top = (group_idx / group_per_row) * group_dim;
-                        is_aabb_collides(region, (group_left, group_top, group_dim, group_dim))
+                        self.header.is_group_collides_region(*group_idx, region)
                     })
                     .map(|(pass_idx, group_idx, buf)| {
                         let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
@@ -505,10 +489,4 @@ impl FrameData {
         lf_global.apply_modular_inverse_transform();
         Ok(self)
     }
-}
-
-fn is_aabb_collides(rect0: (u32, u32, u32, u32), rect1: (u32, u32, u32, u32)) -> bool {
-    let (x0, y0, w0, h0) = rect0;
-    let (x1, y1, w1, h1) = rect1;
-    (x0 < x1 + w1) && (x0 + w0 > x1) && (y0 < y1 + h1) && (y0 + h0 > y1)
 }

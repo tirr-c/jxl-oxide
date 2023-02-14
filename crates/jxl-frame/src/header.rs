@@ -295,6 +295,22 @@ impl FrameHeader {
         let lf_group_row = (group_idx / groups_per_row) / 8;
         lf_group_col + lf_group_row * self.lf_groups_per_row()
     }
+
+    pub fn is_group_collides_region(&self, group_idx: u32, region: (u32, u32, u32, u32)) -> bool {
+        let group_dim = self.group_dim();
+        let group_per_row = self.groups_per_row();
+        let group_left = (group_idx % group_per_row) * group_dim;
+        let group_top = (group_idx / group_per_row) * group_dim;
+        is_aabb_collides(region, (group_left, group_top, group_dim, group_dim))
+    }
+
+    pub fn is_lf_group_collides_region(&self, lf_group_idx: u32, region: (u32, u32, u32, u32)) -> bool {
+        let lf_group_dim = self.lf_group_dim();
+        let lf_group_per_row = self.lf_groups_per_row();
+        let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
+        let group_top = (lf_group_idx / lf_group_per_row) * lf_group_dim;
+        is_aabb_collides(region, (group_left, group_top, lf_group_dim, lf_group_dim))
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
@@ -410,4 +426,10 @@ impl<Ctx> Bundle<Ctx> for BlendMode {
             value => return Err(jxl_bitstream::Error::InvalidEnum { name: "BlendMode", value }.into()),
         })
     }
+}
+
+fn is_aabb_collides(rect0: (u32, u32, u32, u32), rect1: (u32, u32, u32, u32)) -> bool {
+    let (x0, y0, w0, h0) = rect0;
+    let (x1, y1, w1, h1) = rect1;
+    (x0 < x1 + w1) && (x0 + w0 > x1) && (y0 < y1 + h1) && (y0 + h0 > y1)
 }
