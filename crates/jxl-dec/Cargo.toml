@@ -28,6 +28,15 @@ default_features = false
 path = "../jxl-render"
 default_features = false
 
+[dependencies.tracing]
+version = "0.1.37"
+default_features = false
+features = ["std"]
+
+[dependencies.tracing-subscriber]
+version = "0.3.16"
+features = ["env-filter"]
+
 [features]
 mt = ["jxl-frame/mt", "jxl-render/mt"]
 default = ["mt"]

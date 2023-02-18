@@ -73,7 +73,11 @@ impl Frame<'_> {
         bitstream: &mut Bitstream<R>,
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<()> {
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
+        let _guard = span.enter();
+
         if self.toc.is_single_entry() {
+            tracing::debug!("Frame has single TOC entry");
             self.read_merged_group(bitstream)?;
             return Ok(());
         }
@@ -126,7 +130,7 @@ impl Frame<'_> {
         let lf_global = self.data.lf_global.as_ref().unwrap();
         if lf_global.gmodular.modular.has_delta_palette() {
             if region.take().is_some() {
-                eprintln!("GlobalModular has delta palette, forcing full decode");
+                tracing::debug!("GlobalModular has delta palette, forcing full decode");
             }
         } else if lf_global.gmodular.modular.has_squeeze() {
             if let Some((left, top, width, height)) = &mut region {
@@ -134,11 +138,11 @@ impl Frame<'_> {
                 *height += *top;
                 *left = 0;
                 *top = 0;
-                eprintln!("GlobalModular has squeeze, decoding from top-left");
+                tracing::debug!("GlobalModular has squeeze, decoding from top-left");
             }
         }
         if let Some(region) = &region {
-            eprintln!("Cropped decoding: {:?}", region);
+            tracing::debug!("Cropped decoding: {:?}", region);
         }
 
         for (lf_group_idx, mut bitstream) in pending_lf_groups {
@@ -194,7 +198,11 @@ impl Frame<'_> {
     ) -> Result<()> {
         use rayon::prelude::*;
 
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped_par");
+        let _guard = span.enter();
+
         if self.toc.is_single_entry() {
+            tracing::debug!("Frame has single TOC entry");
             let group = self.toc.lf_global();
             bitstream.skip_to_bookmark(group.offset)?;
             self.read_merged_group(bitstream)?;
@@ -270,7 +278,7 @@ impl Frame<'_> {
 
         if lf_global.gmodular.modular.has_delta_palette() {
             if region.take().is_some() {
-                eprintln!("GlobalModular has delta palette, forcing full decode");
+                tracing::debug!("GlobalModular has delta palette, forcing full decode");
             }
         } else if lf_global.gmodular.modular.has_squeeze() {
             if let Some((left, top, width, height)) = &mut region {
@@ -278,11 +286,11 @@ impl Frame<'_> {
                 *height += *top;
                 *left = 0;
                 *top = 0;
-                eprintln!("GlobalModular has squeeze, decoding from top-left");
+                tracing::debug!("GlobalModular has squeeze, decoding from top-left");
             }
         }
         if let Some(region) = &region {
-            eprintln!("Cropped decoding: {:?}", region);
+            tracing::debug!("Cropped decoding: {:?}", region);
         }
 
         let mut lf_groups = Ok(BTreeMap::new());

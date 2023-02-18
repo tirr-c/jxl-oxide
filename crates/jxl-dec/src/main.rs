@@ -76,6 +76,13 @@ impl std::str::FromStr for CropInfo {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    let span = tracing::span!(tracing::Level::TRACE, "jxl_dec (main)");
+    let _guard = span.enter();
+
     let args = Args::parse();
 
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
@@ -99,11 +106,14 @@ fn main() {
             Some(crop)
         }
     });
+    tracing::debug!(crop = format_args!("{:?}", crop), "Cropped area: {:?}", crop);
 
     let bit_depth = headers.metadata.bit_depth.bits_per_sample();
     let has_alpha = headers.metadata.alpha().is_some();
 
     if headers.metadata.colour_encoding.want_icc {
+        tracing::info!("Image has ICC profile");
+
         let enc_size = read_bits!(bitstream, U64).unwrap();
         let mut decoder = jxl_coding::Decoder::parse(&mut bitstream, 41)
             .expect("failed to decode ICC entropy coding distribution");
@@ -124,7 +134,7 @@ fn main() {
             b1 = *b;
         }
 
-        eprintln!("Discarding encoded ICC profile");
+        tracing::warn!("Discarding encoded ICC profile");
         drop(encoded_icc);
     }
 
@@ -137,7 +147,7 @@ fn main() {
             .num_threads(args.threads)
             .build()
             .expect("failed to build thread pool");
-        eprintln!("Decoding with {} threads", pool.current_num_threads());
+        tracing::info!(num_threads = pool.current_num_threads(), "Decoding with {} threads", pool.current_num_threads());
 
         fb = pool.install(|| {
             run(&mut bitstream, &mut render, &headers, crop)
@@ -154,7 +164,7 @@ fn main() {
     }
 
     if let Some(output) = args.output {
-        eprintln!("Encoding samples to PNG");
+        tracing::info!("Encoding samples to PNG");
         let width = fb.width();
         let height = fb.height();
         let output = std::fs::File::create(output).expect("failed to open output file");
@@ -179,7 +189,7 @@ fn main() {
         }).expect("failed to write image data");
         writer.finish().expect("failed to finish writing png");
     } else {
-        eprintln!("No output path specified, skipping PNG encoding");
+        tracing::info!("No output path specified, skipping PNG encoding");
     }
 }
 
@@ -203,7 +213,7 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    eprintln!("Took {:.2} ms", elapsed_ms);
+    tracing::info!(elapsed_ms, "Took {:.2} ms", elapsed_ms);
 
     fb
 }

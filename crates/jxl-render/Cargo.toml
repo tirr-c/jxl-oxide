@@ -21,6 +21,11 @@ path = "../jxl-vardct"
 path = "../jxl-frame"
 default_features = false
 
+[dependencies.tracing]
+version = "0.1.37"
+default_features = false
+features = ["std"]
+
 [features]
 mt = ["jxl-grid/mt", "jxl-frame/mt"]
 default = ["mt"]

@@ -182,7 +182,6 @@ mod tests {
             if k != 0 {
                 exp_value *= std::f32::consts::SQRT_2;
             }
-            eprintln!("output={output}, exp_value={exp_value}");
 
             let q_expected = (exp_value * 65536.0) as i32;
             let q_actual = (*output * 65536.0) as i32;
@@ -203,7 +202,6 @@ mod tests {
                 let cos = ((n * (2 * k + 1)) as f32 / s as f32 * std::f32::consts::FRAC_PI_2).cos();
                 exp_value += *input * cos * std::f32::consts::SQRT_2;
             }
-            eprintln!("output={output}, exp_value={exp_value}");
 
             let q_expected = (exp_value * 65536.0) as i32;
             let q_actual = (*output * 65536.0) as i32;

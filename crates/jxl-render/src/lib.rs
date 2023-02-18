@@ -67,6 +67,9 @@ impl RenderContext<'_> {
 impl RenderContext<'_> {
     #[cfg(feature = "mt")]
     pub fn load_cropped<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+        let span = tracing::span!(tracing::Level::TRACE, "RenderContext::load_cropped");
+        let _guard = span.enter();
+
         let image_header = self.image_header;
 
         loop {
@@ -74,7 +77,14 @@ impl RenderContext<'_> {
             let mut frame = Frame::parse(bitstream, image_header)?;
             let header = frame.header();
             let is_last = header.is_last;
-            eprintln!("Decoding {}x{} frame (type={:?}, upsampling={}, lf_level={})", header.width, header.height, header.frame_type, header.upsampling, header.lf_level);
+            tracing::info!(
+                width = header.width,
+                height = header.height,
+                frame_type = format_args!("{:?}", header.frame_type),
+                upsampling = header.upsampling,
+                lf_level = header.lf_level,
+                "Decoding {}x{} frame", header.width, header.height
+            );
 
             if header.frame_type.is_normal_frame() {
                 frame.load_cropped_par(bitstream, region)?;
@@ -104,7 +114,14 @@ impl RenderContext<'_> {
             let mut frame = Frame::parse(bitstream, image_header)?;
             let header = frame.header();
             let is_last = header.is_last;
-            eprintln!("Decoding {}x{} frame (type={:?}, upsampling={}, lf_level={})", header.width, header.height, header.frame_type, header.upsampling, header.lf_level);
+            tracing::info!(
+                width = header.width,
+                height = header.height,
+                frame_type = format_args!("{:?}", header.frame_type),
+                upsampling = header.upsampling,
+                lf_level = header.lf_level,
+                "Decoding {}x{} frame", header.width, header.height
+            );
 
             if header.frame_type.is_normal_frame() {
                 frame.load_cropped(bitstream, region)?;
