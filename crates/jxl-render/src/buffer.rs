@@ -81,6 +81,81 @@ impl FrameBuffer {
         crate::color::perform_inverse_ycbcr(self)
     }
 
+    pub fn ycbcr_upsample(&mut self, jpeg_upsampling: [u32; 3]) {
+        fn interpolate(left: f32, center: f32, right: f32) -> (f32, f32) {
+            (0.25 * left + 0.75 * center, 0.75 * center + 0.25 * right)
+        }
+
+        let shifts_ycbcr = [1, 0, 2].map(|idx| {
+            jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
+        });
+
+        let width = self.width;
+        let height = self.height;
+        let stride = self.stride;
+        for (buf, shift) in self.buf[..3].iter_mut().zip(shifts_ycbcr) {
+            let h_upsampled = shift.hshift() == 0;
+            let v_upsampled = shift.vshift() == 0;
+
+            if !h_upsampled {
+                let orig_width = width;
+                let width = (width + 1) / 2;
+                let height = if v_upsampled { height } else { (height + 1) / 2 };
+
+                for y in 0..height {
+                    let y = if v_upsampled { y } else { y * 2 };
+                    let idx_base = (y * stride) as usize;
+                    let mut prev_sample = buf[idx_base];
+                    for x in 0..width {
+                        let x = x as usize;
+                        let curr_sample = buf[idx_base + x * 2];
+                        let right_x = if x == width as usize - 1 { x } else { x + 1 };
+
+                        let (me, next) = interpolate(
+                            prev_sample,
+                            curr_sample,
+                            buf[idx_base + right_x * 2],
+                        );
+                        buf[idx_base + x * 2] = me;
+                        if x * 2 + 1 < orig_width as usize {
+                            buf[idx_base + x * 2 + 1] = next;
+                        }
+
+                        prev_sample = curr_sample;
+                    }
+                }
+            }
+
+            // image is horizontally upsampled here
+            if !v_upsampled {
+                let orig_height = height;
+                let height = (height + 1) / 2;
+
+                let mut prev_row = buf[..width as usize].to_vec();
+                for y in 0..height {
+                    let idx_base = (y * 2 * stride) as usize;
+                    let bottom_base = if y == height - 1 { idx_base } else { idx_base + stride as usize * 2 };
+                    for x in 0..width {
+                        let x = x as usize;
+                        let curr_sample = buf[idx_base + x];
+
+                        let (me, next) = interpolate(
+                            prev_row[x],
+                            curr_sample,
+                            buf[bottom_base + x],
+                        );
+                        buf[idx_base + x] = me;
+                        if y * 2 + 1 < orig_height {
+                            buf[idx_base + stride as usize + x] = next;
+                        }
+
+                        prev_row[x] = curr_sample;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn srgb_linear_to_standard(&mut self) {
         for buf in &mut self.buf {
             for s in buf {

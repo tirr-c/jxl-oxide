@@ -186,7 +186,9 @@ impl<'f> RenderContext<'f> {
                 self.render_vardct(frame, region)
             },
         }?;
+
         if frame.header().do_ycbcr {
+            fb.ycbcr_upsample(frame.header().jpeg_upsampling);
             fb.ycbcr_to_rgb();
         }
         Ok(fb)
