@@ -10,6 +10,7 @@ mod error;
 mod vardct;
 pub use buffer::FrameBuffer;
 pub use error::{Error, Result};
+use jxl_modular::ChannelShift;
 
 #[derive(Debug)]
 pub struct RenderContext<'a> {
@@ -177,14 +178,18 @@ impl RenderContext<'_> {
 
 impl<'f> RenderContext<'f> {
     fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
-        match frame.header().encoding {
+        let mut fb = match frame.header().encoding {
             Encoding::Modular => {
                 todo!()
             },
             Encoding::VarDct => {
                 self.render_vardct(frame, region)
             },
+        }?;
+        if frame.header().do_ycbcr {
+            fb.ycbcr_to_rgb();
         }
+        Ok(fb)
     }
 
     fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
@@ -195,7 +200,11 @@ impl<'f> RenderContext<'f> {
         let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
         let hf_global = frame_data.hf_global.as_ref().ok_or(Error::IncompleteFrame)?;
         let hf_global = hf_global.as_ref().expect("HfGlobal not found for VarDCT frame");
-        let subsampled = frame_header.jpeg_upsampling.into_iter().any(|x| x != 0);
+        let jpeg_upsampling = frame_header.jpeg_upsampling;
+        let shifts_ycbcr = [1, 0, 2].map(|idx| {
+            ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
+        });
+        let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
 
         // Modular extra channels are already merged into GlobalModular,
         // so it's okay to drop PassGroup modular
@@ -278,8 +287,16 @@ impl<'f> RenderContext<'f> {
                             vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr, transposed);
                         }
 
-                        for (coeff, lf_dequant) in yxb.iter_mut().zip(lf_dequant.iter()) {
-                            let lf_subgrid = lf_dequant.subgrid((lf_left / 8) as i32, (lf_top / 8) as i32, bw, bh);
+                        for ((coeff, lf_dequant), shift) in yxb.iter_mut().zip(lf_dequant.iter()).zip(shifts_ycbcr) {
+                            let lf_left = lf_left / 8;
+                            let lf_top = lf_top / 8;
+                            let s_lf_left = lf_left >> shift.hshift();
+                            let s_lf_top = lf_top >> shift.vshift();
+                            if s_lf_left << shift.hshift() != lf_left || s_lf_top << shift.vshift() != lf_top {
+                                continue;
+                            }
+
+                            let lf_subgrid = lf_dequant.subgrid(s_lf_left as i32, s_lf_top as i32, bw, bh);
                             let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
                             for y in 0..llf.height() {
                                 for x in 0..llf.width() {
@@ -301,13 +318,19 @@ impl<'f> RenderContext<'f> {
             let w = (w8 * 8).min(width - x);
             let h = (h8 * 8).min(height - y);
 
-            for (idx, coeff) in yxb.iter_mut().enumerate() {
+            for (idx, (coeff, shift)) in yxb.iter_mut().zip(shifts_ycbcr).enumerate() {
+                let sx = x >> shift.hshift();
+                let sy = y >> shift.vshift();
+                if sx << shift.hshift() != x || sy << shift.vshift() != y {
+                    continue;
+                }
+
                 let fb = fb_yxb.channel_buf_mut(idx as u32);
                 vardct::transform(coeff, dct_select);
                 for iy in 0..h {
-                    let y = (y + iy) as usize;
+                    let y = ((sy + iy) as usize) << shift.vshift();
                     for ix in 0..w {
-                        let x = (x + ix) as usize;
+                        let x = ((sx + ix) as usize) << shift.hshift();
                         fb[y * stride + x] = coeff[(ix, iy)];
                     }
                 }

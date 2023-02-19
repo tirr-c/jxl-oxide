@@ -77,6 +77,22 @@ impl FrameBuffer {
         crate::color::perform_inverse_xyb(self, metadata)
     }
 
+    pub fn ycbcr_to_rgb(&mut self) {
+        crate::color::perform_inverse_ycbcr(self)
+    }
+
+    pub fn srgb_linear_to_standard(&mut self) {
+        for buf in &mut self.buf {
+            for s in buf {
+                *s = if *s <= 0.0031308f32 {
+                    12.92 * *s
+                } else {
+                    1.055 * s.powf(1.0 / 2.4) - 0.055
+                };
+            }
+        }
+    }
+
     pub fn rgba_be_interleaved<F, E>(&self, mut f: F) -> std::result::Result<(), E>
     where
         F: FnMut(&[u8]) -> std::result::Result<(), E>,
@@ -88,11 +104,6 @@ impl FrameBuffer {
             for x in 0..self.width as usize {
                 for c in 0..channels {
                     let s = self.buf[c][y * self.stride as usize + x].clamp(0.0, 1.0);
-                    let s = if s <= 0.0031308f32 {
-                        12.92 * s
-                    } else {
-                        1.055 * s.powf(1.0 / 2.4) - 0.055
-                    };
                     buf[x * channels + c] = (s * 255.0) as u8;
                 }
             }

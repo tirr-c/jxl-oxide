@@ -1,7 +1,7 @@
 use jxl_bitstream::{Bitstream, Bundle, BundleDefault};
 use jxl_modular::{Modular, ModularParams};
 
-use crate::{Result, TransformType, dct_select};
+use crate::{Result, TransformType};
 
 #[derive(Debug)]
 struct DequantMatrixParams {
@@ -193,6 +193,7 @@ impl DequantMatrixParams {
         }
 
         let dct_select = self.dct_select;
+        let need_recip = !matches!(self.encoding, Raw { .. });
         let mut weights = match self.encoding {
             Dct(dct_params) => {
                 let (width, height) = dct_select.dequant_matrix_size();
@@ -326,8 +327,10 @@ impl DequantMatrixParams {
             },
         };
 
-        for w in weights.iter_mut().flatten().flatten() {
-            *w = 1.0 / *w;
+        if need_recip {
+            for w in weights.iter_mut().flatten().flatten() {
+                *w = 1.0 / *w;
+            }
         }
 
         weights
@@ -363,6 +366,13 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: DequantMatrixSetParams) -> Result<Self> {
         use DequantMatrixParamsEncoding::*;
 
+        let span = tracing::span!(
+            tracing::Level::DEBUG,
+            "DequantMatrixParams::parse",
+            dct_select = format_args!("{:?}", params.dct_select),
+        );
+        let _guard = span.enter();
+
         fn read_fixed<const N: usize, R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<[[f32; N]; 3]> {
             let mut out = [[0.0f32; N]; 3];
             for val in out.iter_mut().flatten() {
@@ -395,6 +405,15 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
         } = params;
 
         let encoding_mode = bitstream.read_bits(3)?;
+        if encoding_mode != 0 {
+            tracing::debug!(
+                dct_select = format_args!("{:?}", dct_select),
+                bit_depth,
+                stream_index,
+                encoding_mode,
+                "Reading dequant matrix params"
+            );
+        }
         let encoding = match encoding_mode {
             0 => DequantMatrixParamsEncoding::default_with(dct_select),
             1 => Hornuss(read_fixed(bitstream)?),

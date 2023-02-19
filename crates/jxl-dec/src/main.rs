@@ -1,7 +1,7 @@
 use std::{path::PathBuf, fs::File};
 
 use clap::Parser;
-use jxl_bitstream::{header::Headers, read_bits};
+use jxl_bitstream::{header::{Headers, TransferFunction}, read_bits};
 use jxl_render::{RenderContext, FrameBuffer};
 
 #[derive(Debug, Parser)]
@@ -108,6 +108,7 @@ fn main() {
     });
     tracing::debug!(crop = format_args!("{:?}", crop), "Cropped area: {:?}", crop);
 
+    tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
     let bit_depth = headers.metadata.bit_depth.bits_per_sample();
     let has_alpha = headers.metadata.alpha().is_some();
 
@@ -183,6 +184,10 @@ fn main() {
             .expect("failed to write header")
             .into_stream_writer()
             .unwrap();
+
+        if headers.metadata.xyb_encoded || headers.metadata.colour_encoding.tf == TransferFunction::Linear {
+            fb.srgb_linear_to_standard();
+        }
 
         fb.rgba_be_interleaved(|buf| {
             std::io::Write::write_all(&mut writer, buf)

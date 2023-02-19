@@ -125,7 +125,7 @@ impl ChannelShift {
     }
 
     pub fn from_jpeg_upsampling(jpeg_upsampling: [u32; 3], idx: usize) -> Self {
-        let upsampling = jpeg_upsampling[[1, 0, 2][idx]];
+        let upsampling = jpeg_upsampling[idx];
         let hscale = jpeg_upsampling.into_iter().any(|v| v == 1 || v == 2);
         let vscale = jpeg_upsampling.into_iter().any(|v| v == 1 || v == 3);
         let (h, v) = match upsampling {

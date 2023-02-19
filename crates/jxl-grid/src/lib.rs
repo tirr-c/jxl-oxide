@@ -426,6 +426,7 @@ impl<S> GridBuffer<S> {
     fn get_initialized(&self, (x, y): (u32, u32)) -> Option<&S> {
         match *self {
             Self::Single(ref group) => {
+                assert!(x < group.stride);
                 let idx = x as usize + y as usize * group.stride as usize;
                 group.buf.get(idx)
             },
@@ -458,6 +459,7 @@ impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
     fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
         match *self {
             Self::Single(ref mut group) => {
+                assert!(x < group.stride);
                 let idx = x as usize + y as usize * group.stride as usize;
                 &mut group.buf[idx]
             },

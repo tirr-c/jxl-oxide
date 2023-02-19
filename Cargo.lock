@@ -258,6 +258,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-frame",
  "jxl-grid",
+ "jxl-modular",
  "jxl-vardct",
  "tracing",
 ]
@@ -270,6 +271,7 @@ dependencies = [
  "jxl-coding",
  "jxl-grid",
  "jxl-modular",
+ "tracing",
 ]
 
 [[package]]

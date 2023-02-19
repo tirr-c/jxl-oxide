@@ -217,7 +217,8 @@ impl Bundle<LfGroupParams<'_>> for LfCoeff {
         let (width, height) = group_params.frame_header.lf_group_size_for(lf_group_idx);
         let width = (width + 7) / 8;
         let height = (height + 7) / 8;
-        let channel_shifts = (0..3)
+        let channel_shifts = [1, 0, 2]
+            .into_iter()
             .map(|idx| ChannelShift::from_jpeg_upsampling(group_params.frame_header.jpeg_upsampling, idx))
             .collect();
         let lf_quant_params = ModularParams::new(
@@ -465,13 +466,12 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
                 let block_info = block_info.subgrid(block_left as i32, block_top as i32, block_width, block_height);
                 let lf_quant: Option<[_; 3]> = (!frame_header.flags.use_lf_frame()).then(|| {
                     std::array::from_fn(|idx| {
-                        let lf_quant = &lf_quant_channels[idx];
+                        let lf_quant = &lf_quant_channels[[1, 0, 2][idx]];
                         let shift = ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx);
 
                         let block_left = block_left >> shift.hshift();
                         let block_top = block_top >> shift.vshift();
-                        let block_width = block_width >> shift.hshift();
-                        let block_height = block_height >> shift.vshift();
+                        let (block_width, block_height) = shift.shift_size((block_width, block_height));
                         lf_quant.subgrid(block_left as i32, block_top as i32, block_width, block_height)
                     })
                 });
@@ -584,11 +584,10 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
 
         let width = block_info.width();
         let height = block_info.height();
-        let mut non_zeros_grid = [
-            Grid::new(width, height, (width, height)),
-            Grid::new(width, height, (width, height)),
-            Grid::new(width, height, (width, height)),
-        ];
+        let mut non_zeros_grid = upsampling_shifts.map(|shift| {
+            let (width, height) = shift.shift_size((width, height));
+            Grid::new(width, height, (width, height))
+        });
         let predict_non_zeros = |grid: &Grid<u32>, x: u32, y: u32| {
             if x == 0 && y == 0 {
                 32u32
@@ -664,7 +663,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                     let idx = (ch_idx * (qf_thresholds.len() + 1) + hf_idx) * lf_idx_mul + lf_idx;
                     let block_ctx = block_ctx_map[idx] as u32;
                     let non_zeros_ctx = {
-                        let predicted = predict_non_zeros(&non_zeros_grid[c], x, y).min(64);
+                        let predicted = predict_non_zeros(&non_zeros_grid[c], sx, sy).min(64);
                         let idx = if predicted >= 8 {
                             4 + predicted / 2
                         } else {
@@ -678,7 +677,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                     let non_zeros_grid = &mut non_zeros_grid[c];
                     for dy in 0..h8 {
                         for dx in 0..w8 {
-                            non_zeros_grid[(x + dx, y + dy)] = non_zeros_val;
+                            non_zeros_grid[(sx + dx, sy + dy)] = non_zeros_val;
                         }
                     }
 

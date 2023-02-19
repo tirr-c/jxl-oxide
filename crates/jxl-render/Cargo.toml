@@ -10,16 +10,19 @@ edition = "2021"
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
 
+[dependencies.jxl-frame]
+path = "../jxl-frame"
+default_features = false
+
 [dependencies.jxl-grid]
 path = "../jxl-grid"
 default_features = false
 
+[dependencies.jxl-modular]
+path = "../jxl-modular"
+
 [dependencies.jxl-vardct]
 path = "../jxl-vardct"
-
-[dependencies.jxl-frame]
-path = "../jxl-frame"
-default_features = false
 
 [dependencies.tracing]
 version = "0.1.37"
