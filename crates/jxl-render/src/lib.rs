@@ -316,14 +316,16 @@ impl<'f> RenderContext<'f> {
         let mut fb_yxb = FrameBuffer::new(width, height, stride, 3);
         let stride = stride as usize;
         for ((y, x), (dct_select, mut yxb)) in varblocks {
+            let y8 = y / 8;
+            let x8 = x / 8;
             let (w8, h8) = dct_select.dct_select_size();
             let w = w8 * 8;
             let h = h8 * 8;
 
             for (idx, (coeff, shift)) in yxb.iter_mut().zip(shifts_ycbcr).enumerate() {
-                let sx = x >> shift.hshift();
-                let sy = y >> shift.vshift();
-                if sx << shift.hshift() != x || sy << shift.vshift() != y {
+                let sx8 = x8 >> shift.hshift();
+                let sy8 = y8 >> shift.vshift();
+                if sx8 << shift.hshift() != x8 || sy8 << shift.vshift() != y8 {
                     continue;
                 }
 
@@ -334,9 +336,9 @@ impl<'f> RenderContext<'f> {
                 let fb = fb_yxb.channel_buf_mut(idx as u32);
                 vardct::transform(coeff, dct_select);
                 for iy in 0..h {
-                    let y = ((sy + iy) as usize) << shift.vshift();
+                    let y = (y + (iy << shift.vshift())) as usize;
                     for ix in 0..w {
-                        let x = ((sx + ix) as usize) << shift.hshift();
+                        let x = (x + (ix << shift.hshift())) as usize;
                         fb[y * stride + x] = coeff[(ix, iy)];
                     }
                 }
