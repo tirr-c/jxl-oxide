@@ -315,8 +315,8 @@ impl<'f> RenderContext<'f> {
         let stride = stride as usize;
         for ((y, x), (dct_select, mut yxb)) in varblocks {
             let (w8, h8) = dct_select.dct_select_size();
-            let w = (w8 * 8).min(width - x);
-            let h = (h8 * 8).min(height - y);
+            let w = w8 * 8;
+            let h = h8 * 8;
 
             for (idx, (coeff, shift)) in yxb.iter_mut().zip(shifts_ycbcr).enumerate() {
                 let sx = x >> shift.hshift();
@@ -324,6 +324,10 @@ impl<'f> RenderContext<'f> {
                 if sx << shift.hshift() != x || sy << shift.vshift() != y {
                     continue;
                 }
+
+                let (limit_w, limit_h) = shift.shift_size((width - x, height - y));
+                let w = w.min(limit_w);
+                let h = h.min(limit_h);
 
                 let fb = fb_yxb.channel_buf_mut(idx as u32);
                 vardct::transform(coeff, dct_select);
