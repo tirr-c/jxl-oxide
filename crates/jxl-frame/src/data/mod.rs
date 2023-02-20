@@ -242,15 +242,15 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, group_params: LfGroupParams<'_>) -> Result<Self> {
         let lf_group_idx = group_params.lf_group_idx;
         let (width, height) = group_params.frame_header.lf_group_size_for(lf_group_idx);
-        let bw = (width + 7) / 8;
-        let bh = (height + 7) / 8;
+        let bw = ((width + 7) / 8) as usize;
+        let bh = ((height + 7) / 8) as usize;
         let nb_blocks = 1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros())?;
 
         let channels = vec![
             ModularChannelParams::new((width + 63) / 64, (height + 63) / 64, 128),
             ModularChannelParams::new((width + 63) / 64, (height + 63) / 64, 128),
             ModularChannelParams::new(nb_blocks, 2, 128),
-            ModularChannelParams::new(bw, bh, 128),
+            ModularChannelParams::new(bw as u32, bh as u32, 128),
         ];
         let params = ModularParams::with_channels(
             128,
@@ -269,35 +269,35 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let block_info_raw = image_iter.next().unwrap();
         let sharpness = image_iter.next().unwrap();
 
-        let mut block_info = Grid::<BlockInfo>::new(bw, bh, (bw, bh));
+        let mut block_info = Grid::<BlockInfo>::new_usize(bw, bh, bw, bh);
         let mut x;
-        let mut y = 0u32;
-        let mut data_idx = 0u32;
+        let mut y = 0usize;
+        let mut data_idx = 0usize;
         while y < bh {
-            x = 0u32;
+            x = 0usize;
 
             while x < bw {
-                if !block_info[(x, y)].is_occupied() {
-                    let dct_select = block_info_raw[(data_idx, 0)];
+                if !block_info.get(x, y).unwrap().is_occupied() {
+                    let dct_select = *block_info_raw.get(data_idx, 0).unwrap();
                     let dct_select = TransformType::try_from(dct_select as u8)?;
-                    let hf_mul = block_info_raw[(data_idx, 1)];
+                    let hf_mul = *block_info_raw.get(data_idx, 1).unwrap();
                     let (dw, dh) = dct_select.dct_select_size();
 
-                    for dy in 0..dh {
-                        for dx in 0..dw {
-                            debug_assert!(!block_info[(x + dx, y + dy)].is_occupied());
-                            block_info[(x + dx, y + dy)] = if dx == 0 && dy == 0 {
+                    for dy in 0..dh as usize {
+                        for dx in 0..dw as usize {
+                            debug_assert!(!block_info.get(x + dx, y + dy).unwrap().is_occupied());
+                            block_info.set(x + dx, y + dy, if dx == 0 && dy == 0 {
                                 BlockInfo::Data {
                                     dct_select,
                                     hf_mul: hf_mul + 1,
                                 }
                             } else {
                                 BlockInfo::Occupied
-                            };
+                            });
                         }
                     }
                     data_idx += 1;
-                    x += dw;
+                    x += dw as usize;
                 } else {
                     x += 1;
                 }
@@ -450,9 +450,9 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
 
                 let group_col = group_idx % frame_header.groups_per_row();
                 let group_row = group_idx / frame_header.groups_per_row();
-                let lf_col = group_col % 8;
-                let lf_row = group_row % 8;
-                let group_dim_blocks = frame_header.group_dim() / 8;
+                let lf_col = (group_col % 8) as usize;
+                let lf_row = (group_row % 8) as usize;
+                let group_dim_blocks = (frame_header.group_dim() / 8) as usize;
 
                 let lf_quant_channels = lf_coeff.lf_quant.image().channel_data();
                 let block_info = &hf_meta.block_info;
@@ -463,7 +463,7 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
                 let block_height = (block_info.height() - block_top).min(group_dim_blocks);
 
                 let jpeg_upsampling = frame_header.jpeg_upsampling;
-                let block_info = block_info.subgrid(block_left as i32, block_top as i32, block_width, block_height);
+                let block_info = block_info.subgrid(block_left, block_top, block_width, block_height);
                 let lf_quant: Option<[_; 3]> = (!frame_header.flags.use_lf_frame()).then(|| {
                     std::array::from_fn(|idx| {
                         let lf_quant = &lf_quant_channels[[1, 0, 2][idx]];
@@ -471,8 +471,8 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
 
                         let block_left = block_left >> shift.hshift();
                         let block_top = block_top >> shift.vshift();
-                        let (block_width, block_height) = shift.shift_size((block_width, block_height));
-                        lf_quant.subgrid(block_left as i32, block_top as i32, block_width, block_height)
+                        let (block_width, block_height) = shift.shift_size((block_width as u32, block_height as u32));
+                        lf_quant.subgrid(block_left, block_top, block_width as usize, block_height as usize)
                     })
                 });
 
@@ -507,7 +507,7 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
 
 #[derive(Debug, Clone)]
 pub struct HfCoeff {
-    pub data: HashMap<(u32, u32), CoeffData>,
+    pub data: HashMap<(usize, usize), CoeffData>,
 }
 
 impl HfCoeff {
@@ -521,7 +521,7 @@ impl HfCoeff {
                         let height = target.height();
                         for y in 0..height {
                             for x in 0..width {
-                                target[(x, y)] += v[(x, y)];
+                                target.set(x, y, *v.get(x, y).unwrap());
                             }
                         }
                     }
@@ -585,24 +585,28 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
         let width = block_info.width();
         let height = block_info.height();
         let mut non_zeros_grid = upsampling_shifts.map(|shift| {
-            let (width, height) = shift.shift_size((width, height));
-            Grid::new(width, height, (width, height))
+            let (width, height) = shift.shift_size((width as u32, height as u32));
+            Grid::new(width, height, width, height)
         });
-        let predict_non_zeros = |grid: &Grid<u32>, x: u32, y: u32| {
+        let predict_non_zeros = |grid: &Grid<u32>, x: usize, y: usize| {
             if x == 0 && y == 0 {
                 32u32
             } else if x == 0 {
-                grid[(x, y - 1)]
+                *grid.get(x, y - 1).unwrap()
             } else if y == 0 {
-                grid[(x - 1, y)]
+                *grid.get(x - 1, y).unwrap()
             } else {
-                (grid[(x - 1, y)] + grid[(x, y - 1)] + 1) >> 1
+                (
+                    *grid.get(x, y - 1).unwrap() +
+                    *grid.get(x - 1, y).unwrap() +
+                    1
+                ) >> 1
             }
         };
 
         for y in 0..height {
             for x in 0..width {
-                let BlockInfo::Data { dct_select, hf_mul: qf } = block_info[(x, y)] else {
+                let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y).unwrap() else {
                     continue;
                 };
                 let (w8, h8) = dct_select.dct_select_size();
@@ -614,7 +618,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                         let shift = upsampling_shifts[idx];
                         let x = x >> shift.hshift();
                         let y = y >> shift.vshift();
-                        lf_quant[idx][(x, y)]
+                        *lf_quant[idx].get(x, y).unwrap()
                     })
                 });
 
@@ -647,9 +651,9 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                 let lf_idx_mul = (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
 
                 let mut coeff = [
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size),
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size),
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size),
+                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
+                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
+                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
                 ];
                 for c in [1, 0, 2] { // y, x, b
                     let shift = upsampling_shifts[c];
@@ -675,9 +679,9 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                     let mut non_zeros = dist.read_varint(bitstream, ctx_offset + non_zeros_ctx)?;
                     let non_zeros_val = (non_zeros + num_blocks - 1) / num_blocks;
                     let non_zeros_grid = &mut non_zeros_grid[c];
-                    for dy in 0..h8 {
-                        for dx in 0..w8 {
-                            non_zeros_grid[(sx + dx, sy + dy)] = non_zeros_val;
+                    for dy in 0..h8 as usize {
+                        for dx in 0..w8 as usize {
+                            non_zeros_grid.set(sx + dx, sy + dy, non_zeros_val);
                         }
                     }
 
@@ -701,7 +705,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                         let ucoeff = dist.read_varint(bitstream, ctx_offset + coeff_ctx)?;
                         let coeff = jxl_bitstream::unpack_signed(ucoeff);
                         let (x, y) = coeff_coord;
-                        coeff_grid[(x as u32, y as u32)] = coeff;
+                        coeff_grid.set(x as usize, y as usize, coeff);
                         prev_coeff = coeff;
 
                         if coeff != 0 {

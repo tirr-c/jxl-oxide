@@ -429,25 +429,6 @@ impl Frame<'_> {
         self.data.complete()?;
         Ok(())
     }
-
-    pub fn rgba_be_interleaved<F>(&self, f: F) -> Result<()>
-    where
-        F: FnMut(&[u8]) -> Result<()>,
-    {
-        let bit_depth = self.image_header.metadata.bit_depth.bits_per_sample();
-        let modular_channels = self.data.lf_global.as_ref().unwrap().gmodular.modular.image().channel_data();
-        let alpha = self.image_header.metadata.alpha();
-
-        let (rgb, a) = if self.header.encoding == crate::header::Encoding::VarDct {
-            todo!()
-        } else {
-            let rgb = [&modular_channels[0], &modular_channels[1], &modular_channels[2]];
-            let a = alpha.map(|idx| &modular_channels[3 + idx]);
-            (rgb, a)
-        };
-
-        jxl_grid::rgba_be_interleaved(rgb, a, bit_depth, f)
-    }
 }
 
 #[derive(Debug)]

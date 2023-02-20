@@ -317,9 +317,9 @@ impl DequantMatrixParams {
                 [0usize, 1, 2].map(|c| {
                     let channel = &channel_data[c];
                     let mut ret = vec![vec![0.0f32; width as usize]; height as usize];
-                    for y in 0..height {
-                        for x in 0..width {
-                            ret[y as usize][x as usize] = channel[(x, y)] as f32 * denominator;
+                    for (y, ret) in ret.iter_mut().enumerate() {
+                        for (x, ret) in ret.iter_mut().enumerate() {
+                            *ret = *channel.get(x, y).unwrap() as f32 * denominator;
                         }
                     }
                     ret

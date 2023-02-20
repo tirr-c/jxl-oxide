@@ -37,11 +37,11 @@ pub fn dequant_lf(
         .map(|(g, lf)| {
             let width = g.width();
             let height = g.height();
-            let mut out = Grid::new(width, height, g.group_size());
+            let mut out = Grid::new_similar(g);
             for y in 0..height {
                 for x in 0..width {
-                    let s = g[(x, y)] as f32;
-                    out[(x, y)] = s * lf * precision_scale;
+                    let s = *g.get(x, y).unwrap() as f32;
+                    out.set(x, y, s * lf * precision_scale);
                 }
             }
             out
@@ -76,9 +76,13 @@ pub fn dequant_lf(
             let mut s_side = [0.0f32; 3];
             let mut s_diag = [0.0f32; 3];
             for (idx, g) in dq_channels.iter().enumerate() {
-                s_self[idx] = g[(x, y)];
-                s_side[idx] = g[(x - 1, y)] + g[(x, y - 1)] + g[(x + 1, y)] + g[(x, y + 1)];
-                s_diag[idx] = g[(x - 1, y - 1)] + g[(x - 1, y + 1)] + g[(x + 1, y - 1)] + g[(x + 1, y + 1)];
+                let g = g.as_simple().unwrap();
+                let stride = g.width();
+                let g = g.buf();
+                let base_idx = y * stride + x;
+                s_self[idx] = g[base_idx];
+                s_side[idx] = g[base_idx - 1] + g[base_idx - stride] + g[base_idx + 1] + g[base_idx + stride];
+                s_diag[idx] = g[base_idx - stride - 1] + g[base_idx - stride + 1] + g[base_idx + stride - 1] + g[base_idx + stride + 1];
             }
             let wa = [
                 s_self[0] * SCALE_SELF + s_side[0] * SCALE_SIDE + s_diag[0] * SCALE_DIAG,
@@ -93,7 +97,7 @@ pub fn dequant_lf(
             let gap = gap_t.into_iter().fold(0.5f32, |acc, v| acc.max(v));
             let gap_scale = (3.0 - 4.0 * gap).max(0.0);
             for ((g, wa), s) in out.iter_mut().zip(wa).zip(s_self) {
-                g[(x, y)] = (wa - s) * gap_scale + s;
+                g.set(x, y, (wa - s) * gap_scale + s);
             }
         }
     }
@@ -114,14 +118,14 @@ pub fn dequant_hf_varblock(
 
     let width = coeff.width();
     let height = coeff.height();
-    let mut out = Grid::new(width, height, coeff.group_size());
+    let mut out = Grid::new_similar(coeff);
 
     let quant_bias = oim.quant_bias[channel];
     let quant_bias_numerator = oim.quant_bias_numerator;
     let matrix = dequant_matrices.get(channel, dct_select);
     for y in 0..height {
         for x in 0..width {
-            let quant = coeff[(x, y)];
+            let quant = *coeff.get(x, y).unwrap();
             let quant = if (-1..=1).contains(&quant) {
                 quant as f32 * quant_bias
             } else {
@@ -137,7 +141,7 @@ pub fn dequant_hf_varblock(
                 quant *= scale;
             }
 
-            out[(x, y)] = quant * matrix[y as usize][x as usize];
+            out.set(x, y, quant * matrix[y][x]);
         }
     }
 
@@ -163,23 +167,20 @@ pub fn chroma_from_luma_lf(
     let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
     let mut it = coeff_yxb.iter_mut();
-    let mut arr = [
-        it.next().unwrap(),
-        it.next().unwrap(),
-        it.next().unwrap(),
-    ];
-    jxl_grid::zip_iterate(&mut arr, |samples| {
-        let [y, x, b] = samples else { unreachable!() };
-        let y = **y;
-        **x += kx * y;
-        **b += kb * y;
+    let y = it.next().unwrap();
+    let x = it.next().unwrap();
+    let b = it.next().unwrap();
+    y.zip3_mut(x, b, |y, x, b| {
+        let y = *y;
+        *x += kx * y;
+        *b += kb * y;
     });
 }
 
 pub fn chroma_from_luma_hf(
     coeff_yxb: &mut [Grid<f32>; 3],
-    lf_left: u32,
-    lf_top: u32,
+    lf_left: usize,
+    lf_top: usize,
     x_from_y: &Grid<i32>,
     b_from_y: &Grid<i32>,
     lf_chan_corr: &LfChannelCorrelation,
@@ -206,14 +207,14 @@ pub fn chroma_from_luma_hf(
             let cfactor_x = x / 64;
             let cfactor_y = y / 64;
 
-            let x_factor = x_from_y[(cfactor_x, cfactor_y)];
-            let b_factor = b_from_y[(cfactor_x, cfactor_y)];
+            let x_factor = *x_from_y.get(cfactor_x, cfactor_y).unwrap();
+            let b_factor = *b_from_y.get(cfactor_x, cfactor_y).unwrap();
             let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
             let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-            let coeff_y = coeff_y[(cx, cy)];
-            coeff_x[(cx, cy)] += kx * coeff_y;
-            coeff_b[(cx, cy)] += kb * coeff_y;
+            let coeff_y = *coeff_y.get(cx, cy).unwrap();
+            *coeff_x.get_mut(cx, cy).unwrap() += kx * coeff_y;
+            *coeff_b.get_mut(cx, cy).unwrap() += kb * coeff_y;
         }
     }
 }
@@ -224,7 +225,7 @@ pub fn llf_from_lf(
 ) -> Grid<f32> {
     use TransformType::*;
 
-    fn scale_f(c: u32, b: u32) -> f32 {
+    fn scale_f(c: usize, b: usize) -> f32 {
         let cb = c as f32 / b as f32;
         let recip = (cb * std::f32::consts::FRAC_PI_2).cos() *
             (cb * std::f32::consts::PI).cos() *
@@ -233,29 +234,29 @@ pub fn llf_from_lf(
     }
 
     let (bw, bh) = dct_select.dct_select_size();
-    debug_assert_eq!(bw, lf.width());
-    debug_assert_eq!(bh, lf.height());
+    debug_assert_eq!(bw as usize, lf.width());
+    debug_assert_eq!(bh as usize, lf.height());
 
     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Afv0 | Afv1 | Afv2 | Afv3) {
         debug_assert_eq!(bw * bh, 1);
-        let mut out = Grid::new(1, 1, (1, 1));
-        out[(0, 0)] = lf[(0, 0)];
+        let mut out = Grid::new_usize(1, 1, 1, 1);
+        out.set(0, 0, *lf.get(0, 0).unwrap());
         out
     } else {
         let mut llf = vec![0.0f32; bw as usize * bh as usize];
-        for y in 0..bh {
-            for x in 0..bw {
-                llf[(y * bw + x) as usize] = lf[(x, y)];
+        for y in 0..bh as usize {
+            for x in 0..bw as usize {
+                llf[y * bw as usize + x] = *lf.get(x, y).unwrap();
             }
         }
         dct_2d_in_place(&mut llf, bw as usize, bh as usize);
 
-        let cx = bw.max(bh);
-        let cy = bw.min(bh);
-        let mut out = Grid::new(cx, cy, (cx, cy));
+        let cx = bw.max(bh) as usize;
+        let cy = bw.min(bh) as usize;
+        let mut out = Grid::new_usize(cx, cy, cx, cy);
         for y in 0..cy {
             for x in 0..cx {
-                out[(x, y)] = llf[(y * cx + x) as usize] * scale_f(y, cy * 8) * scale_f(x, cx * 8);
+                out.set(x, y, llf[(y * cx + x) as usize] * scale_f(y, cy * 8) * scale_f(x, cx * 8));
             }
         }
 

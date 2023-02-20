@@ -130,15 +130,16 @@ impl Rct {
         let begin_c = self.begin_c as usize;
         let mut channels = channel_data
             .iter_mut()
-            .skip(begin_c)
-            .take(3)
-            .collect::<Vec<_>>();
+            .skip(begin_c);
+        let a = channels.next().unwrap();
+        let b = channels.next().unwrap();
+        let c = channels.next().unwrap();
 
-        jxl_grid::zip_iterate(&mut channels, |samples| {
-            let [a, b, c] = samples else { unreachable!() };
-            let a = **a;
-            let b = **b;
-            let c = **c;
+        a.zip3_mut(b, c, |a, b, c| {
+            let samples = [a, b, c];
+            let a = *samples[0];
+            let b = *samples[1];
+            let c = *samples[2];
             let d;
             let e;
             let f;
@@ -231,7 +232,7 @@ impl Palette {
                     need_delta.push((x, y));
                 }
                 if (0..nb_colors).contains(&index) {
-                    *sample = palette_grid[(index as u32, c)];
+                    *sample = *palette_grid.get(index as usize, c as usize).unwrap();
                 } else if index >= nb_colors {
                     let index = index - nb_colors;
                     if index < 64 {
@@ -273,14 +274,14 @@ impl Palette {
             };
             let width = grid.width();
             let height = grid.height();
-            let mut predictor = PredictorState::new(grid.width(), 0, 0, 0, wp_header);
+            let mut predictor = PredictorState::new(width as u32, 0, 0, 0, wp_header);
 
             let mut idx = 0;
             'outer: for y in 0..height {
                 for x in 0..width {
                     let properties = predictor.properties(&[]);
                     let diff = d_pred.predict(&properties);
-                    let sample = &mut grid[(x, y)];
+                    let sample = grid.get_mut(x, y).unwrap();
                     if need_delta[idx] == (x, y) {
                         *sample += diff;
                         idx += 1;
@@ -431,15 +432,15 @@ impl SqueezeParams {
         let height = i1.height();
         let width = i1.width();
         let w0 = i0.width();
-        let (gw, gh) = i0.group_size();
-        let mut output = Grid::new(i0.width() + i1.width(), i1.height(), (gw << 1, gh));
+        let (gw, gh) = i0.group_dim();
+        let mut output = Grid::new_usize(i0.width() + i1.width(), i1.height(), gw << 1, gh);
         for y in 0..height {
             for x in 0..width {
                 let values = (|| -> Option<_> {
-                    let avg = *i0.get_initialized((x, y))?;
-                    let residu = *i1.get_initialized((x, y))?;
+                    let avg = *i0.get(x, y)?;
+                    let residu = *i1.get(x, y)?;
                     let next_avg = if x + 1 < w0 {
-                        *i0.get_initialized((x + 1, y))?
+                        *i0.get(x + 1, y)?
                     } else {
                         avg
                     };
@@ -447,18 +448,18 @@ impl SqueezeParams {
                 })();
                 let Some((avg, residu, next_avg)) = values else { continue; };
                 let left = if x > 0 {
-                    output.get_initialized((2 * x - 1, y)).copied().unwrap_or(avg)
+                    output.get(2 * x - 1, y).copied().unwrap_or(avg)
                 } else {
                     avg
                 };
                 let diff = residu + tendency(left, avg, next_avg);
                 let first = avg + diff / 2;
-                output[(2 * x, y)] = first;
-                output[(2 * x + 1, y)] = first - diff;
+                output.set(2 * x, y, first);
+                output.set(2 * x + 1, y, first - diff);
             }
             if w0 > width {
-                if let Some(&val) = i0.get_initialized((width, y)) {
-                    output[(2 * width, y)] = val;
+                if let Some(&val) = i0.get(width, y) {
+                    output.set(2 * width, y, val);
                 }
             }
         }
@@ -471,15 +472,15 @@ impl SqueezeParams {
         let width = i1.width();
         let height = i1.height();
         let h0 = i0.height();
-        let (gw, gh) = i0.group_size();
-        let mut output = Grid::new(i1.width(), i0.height() + i1.height(), (gw, gh << 1));
+        let (gw, gh) = i0.group_dim();
+        let mut output = Grid::new_usize(i1.width(), i0.height() + i1.height(), gw, gh << 1);
         for y in 0..height {
             for x in 0..width {
                 let values = (|| -> Option<_> {
-                    let avg = *i0.get_initialized((x, y))?;
-                    let residu = *i1.get_initialized((x, y))?;
+                    let avg = *i0.get(x, y)?;
+                    let residu = *i1.get(x, y)?;
                     let next_avg = if y + 1 < h0 {
-                        *i0.get_initialized((x, y + 1))?
+                        *i0.get(x, y + 1)?
                     } else {
                         avg
                     };
@@ -487,20 +488,20 @@ impl SqueezeParams {
                 })();
                 let Some((avg, residu, next_avg)) = values else { continue; };
                 let top = if y > 0 {
-                    output.get_initialized((x, 2 * y - 1)).copied().unwrap_or(avg)
+                    output.get(x, 2 * y - 1).copied().unwrap_or(avg)
                 } else {
                     avg
                 };
                 let diff = residu + tendency(top, avg, next_avg);
                 let first = avg + diff / 2;
-                output[(x, 2 * y)] = first;
-                output[(x, 2 * y + 1)] = first - diff;
+                output.set(x, 2 * y, first);
+                output.set(x, 2 * y + 1, first - diff);
             }
         }
         if h0 > height {
             for x in 0..width {
-                if let Some(&val) = i0.get_initialized((x, height)) {
-                    output[(x, 2 * height)] = val;
+                if let Some(&val) = i0.get(x, height) {
+                    output.set(x, 2 * height, val);
                 }
             }
         }

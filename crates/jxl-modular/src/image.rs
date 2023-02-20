@@ -40,7 +40,7 @@ impl Image {
             .iter()
             .map(|info| {
                 if info.hshift < 0 || info.vshift < 0 {
-                    return Grid::new(info.width, info.height, (info.width, info.height));
+                    return Grid::new(info.width, info.height, info.width, info.height);
                 }
 
                 let group_dim = if info.hshift >= 3 && info.vshift >= 3 {
@@ -50,7 +50,7 @@ impl Image {
                 };
                 let gw = group_dim >> info.hshift;
                 let gh = group_dim >> info.vshift;
-                Grid::new(info.width, info.height, (gw, gh))
+                Grid::new(info.width, info.height, gw, gh)
             })
             .collect::<Vec<_>>();
         Self {
@@ -102,20 +102,20 @@ impl Image {
 
             let width = grid.width();
             let height = grid.height();
-            let mut predictor = PredictorState::new(width, i as u32, stream_index, prev.len(), wp_header.clone());
+            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev.len(), wp_header.clone());
             let mut prev_channel_samples = vec![0i32; prev.len()];
 
             for y in 0..height {
                 for x in 0..width {
                     for ((_, (_, grid)), sample) in prev.iter().zip(&mut prev_channel_samples) {
-                        *sample = grid[(x, y)];
+                        *sample = *grid.get(x, y).unwrap();
                     }
 
                     let properties = predictor.properties(&prev_channel_samples);
                     let (diff, predictor) = ma_ctx.decode_sample(bitstream, &properties, dist_multiplier)?;
                     let sample_prediction = predictor.predict(&properties);
                     let true_value = diff + sample_prediction;
-                    grid[(x, y)] = true_value;
+                    grid.set(x, y, true_value);
                     properties.record(true_value);
                 }
             }
@@ -156,9 +156,9 @@ impl Image {
     }
 
     pub(super) fn copy_from_image(&mut self, subimage: Image, mapping: &[super::SubimageChannelInfo]) -> &mut Self {
-        for (grid, mapping) in subimage.data.into_iter().zip(mapping) {
+        for (mut grid, mapping) in subimage.data.into_iter().zip(mapping) {
             let SubimageChannelInfo { channel_id, base_x, base_y } = *mapping;
-            self.data[channel_id].insert_subgrid(grid, base_x as i32, base_y as i32);
+            self.data[channel_id].insert_subgrid(&mut grid, base_x as isize, base_y as isize);
         }
         self
     }

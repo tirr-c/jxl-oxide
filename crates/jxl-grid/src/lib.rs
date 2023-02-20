@@ -1,120 +1,227 @@
-use std::collections::BTreeMap;
-
-pub trait Sample: Default + Copy + Sized {
-    type Signed: Sample;
-    type Unsigned: Sample;
-
-    fn bits() -> u32;
-}
-
-impl Sample for i16 {
-    type Signed = i16;
-    type Unsigned = u16;
-
-    fn bits() -> u32 {
-        Self::BITS
-    }
-}
-
-impl Sample for u16 {
-    type Signed = i16;
-    type Unsigned = u16;
-
-    fn bits() -> u32 {
-        Self::BITS
-    }
-}
-
-impl Sample for i32 {
-    type Signed = i32;
-    type Unsigned = u32;
-
-    fn bits() -> u32 {
-        Self::BITS
-    }
-}
-
-impl Sample for u32 {
-    type Signed = i32;
-    type Unsigned = u32;
-
-    fn bits() -> u32 {
-        Self::BITS
-    }
-}
-
-impl Sample for f32 {
-    type Signed = f32;
-    type Unsigned = f32;
-
-    fn bits() -> u32 {
-        32
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct Grid<S> {
-    width: u32,
-    height: u32,
-    group_size: (u32, u32),
-    buffer: GridBuffer<S>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Subgrid<'g, S> {
-    grid: &'g Grid<S>,
-    left: i32,
-    top: i32,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Debug)]
-pub struct SubgridMut<'g, S> {
-    grid: &'g mut Grid<S>,
-    left: i32,
-    top: i32,
-    width: u32,
-    height: u32,
+pub enum Grid<S> {
+    Simple(Option<SimpleGrid<S>>),
+    Grouped {
+        width: usize,
+        height: usize,
+        group_width: usize,
+        group_height: usize,
+        groups: Vec<Option<SimpleGrid<S>>>,
+    },
 }
 
 impl<S: Default + Clone> Grid<S> {
-    pub fn new(width: u32, height: u32, group_size: (u32, u32)) -> Self {
-        Self {
-            width,
-            height,
-            group_size,
-            buffer: GridBuffer::new(width, height, group_size),
+    pub fn new(width: u32, height: u32, group_width: u32, group_height: u32) -> Self {
+        let width = width as usize;
+        let height = height as usize;
+        let group_width = group_width as usize;
+        let group_height = group_height as usize;
+        Self::new_usize(width, height, group_width, group_height)
+    }
+
+    pub fn new_usize(width: usize, height: usize, group_width: usize, group_height: usize) -> Self {
+        let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
+        if num_groups == 1 {
+            Self::Simple(Some(SimpleGrid::new(width, height)))
+        } else {
+            let mut groups = Vec::with_capacity(num_groups);
+            groups.resize_with(num_groups, || None);
+            Self::Grouped {
+                width,
+                height,
+                group_width,
+                group_height,
+                groups,
+            }
+        }
+    }
+
+    pub fn new_similar<S2>(grid: &Grid<S2>) -> Self {
+        match *grid {
+            Grid::Simple(Some(ref g)) => Self::Simple(Some(SimpleGrid::new(g.width, g.height))),
+            Grid::Grouped { width, height, group_width, group_height, .. } => {
+                let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
+                let mut groups = Vec::with_capacity(num_groups);
+                groups.resize_with(num_groups, || None);
+                Self::Grouped {
+                    width,
+                    height,
+                    group_width,
+                    group_height,
+                    groups,
+                }
+            },
+            _ => unreachable!(),
         }
     }
 }
 
 impl<S> Grid<S> {
     #[inline]
-    pub fn width(&self) -> u32 {
-        self.width
+    pub fn width(&self) -> usize {
+        match *self {
+            Self::Simple(Some(SimpleGrid { width, .. })) => width,
+            Self::Grouped { width, .. } => width,
+            _ => unreachable!(),
+        }
     }
 
     #[inline]
-    pub fn height(&self) -> u32 {
-        self.height
+    pub fn height(&self) -> usize {
+        match *self {
+            Self::Simple(Some(SimpleGrid { height, .. })) => height,
+            Self::Grouped { height, .. } => height,
+            _ => unreachable!(),
+        }
     }
 
     #[inline]
-    pub fn group_size(&self) -> (u32, u32) {
-        self.group_size
+    pub fn group_dim(&self) -> (usize, usize) {
+        match *self {
+            Self::Simple(Some(SimpleGrid { width, height, .. })) => (width, height),
+            Self::Grouped { group_width, group_height, .. } => (group_width, group_height),
+            _ => unreachable!(),
+        }
     }
 
     #[inline]
-    pub fn mirror(&self, x: i32, y: i32) -> (u32, u32) {
-        mirror_2d(self.width, self.height, x, y)
+    pub fn groups_per_row(&self) -> usize {
+        match *self {
+            Self::Simple(_) => 1,
+            Self::Grouped { width, group_width, .. } => (width + group_width - 1) / group_width,
+        }
     }
 
-    pub fn get_initialized(&self, coord: (u32, u32)) -> Option<&S> {
-        self.buffer.get_initialized(coord)
+    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+        let groups_per_row = self.groups_per_row();
+        match *self {
+            Self::Simple(Some(ref g)) => g.get(x, y),
+            Self::Grouped { width, height, group_width, group_height, ref groups } => {
+                if x >= width || y >= height {
+                    return None;
+                }
+
+                let group_col = x / group_width;
+                let x = x % group_width;
+                let group_row = y / group_height;
+                let y = y % group_height;
+                let group_idx = group_row * groups_per_row + group_col;
+                groups[group_idx].as_ref().and_then(|g| g.get(x, y))
+            },
+            _ => unreachable!(),
+        }
     }
 
-    pub fn subgrid(&self, left: i32, top: i32, width: u32, height: u32) -> Subgrid<'_, S> {
+    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
+        let groups_per_row = self.groups_per_row();
+        match *self {
+            Self::Simple(Some(ref mut g)) => g.get_mut(x, y),
+            Self::Grouped { width, height, group_width, group_height, ref mut groups } => {
+                if x >= width || y >= height {
+                    return None;
+                }
+
+                let group_col = x / group_width;
+                let x = x % group_width;
+                let group_row = y / group_height;
+                let y = y % group_height;
+                let group_idx = group_row * groups_per_row + group_col;
+                groups[group_idx].as_mut().and_then(|g| g.get_mut(x, y))
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    pub fn as_simple(&self) -> Option<&SimpleGrid<S>> {
+        if let Self::Simple(Some(g)) = self {
+            Some(g)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_simple_mut(&mut self) -> Option<&mut SimpleGrid<S>> {
+        if let Self::Simple(Some(g)) = self {
+            Some(g)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn into_simple(self) -> Result<SimpleGrid<S>, Self> {
+        if let Self::Simple(Some(g)) = self {
+            Ok(g)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl<S: Default + Clone> Grid<S> {
+    pub fn set(&mut self, x: usize, y: usize, sample: S) -> Option<S> {
+        let groups_per_row = self.groups_per_row();
+        match *self {
+            Self::Simple(Some(ref mut g)) => {
+                let v = g.get_mut(x, y)?;
+                let out = std::mem::replace(v, sample);
+                Some(out)
+            },
+            Self::Grouped { width, height, group_width, group_height, ref mut groups } => {
+                if x >= width || y >= height {
+                    return None;
+                }
+
+                let group_col = x / group_width;
+                let x = x % group_width;
+                let group_row = y / group_height;
+                let y = y % group_height;
+                let group_idx = group_row * groups_per_row + group_col;
+
+                let g = groups[group_idx]
+                    .get_or_insert_with(|| SimpleGrid::new(group_width, group_height));
+                let v = g.get_mut(x, y)?;
+                let out = std::mem::replace(v, sample);
+                Some(out)
+            },
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<S> Grid<S> {
+    #[inline]
+    pub fn groups(&self) -> impl Iterator<Item = (usize, &SimpleGrid<S>)> + '_ {
+        let groups = self.all_groups();
+        groups.iter().enumerate().filter_map(|(idx, g)| g.as_ref().map(|g| (idx, g)))
+    }
+
+    #[inline]
+    pub fn groups_mut(&mut self) -> impl Iterator<Item = (usize, &mut SimpleGrid<S>)> + '_ {
+        let groups = self.all_groups_mut();
+        groups.iter_mut().enumerate().filter_map(|(idx, g)| g.as_mut().map(|g| (idx, g)))
+    }
+
+    #[inline]
+    pub fn all_groups(&self) -> &[Option<SimpleGrid<S>>] {
+        match self {
+            Self::Simple(g) => std::slice::from_ref(g),
+            Self::Grouped { groups, .. } => groups,
+        }
+    }
+
+    #[inline]
+    pub fn all_groups_mut(&mut self) -> &mut [Option<SimpleGrid<S>>] {
+        match self {
+            Self::Simple(g) => std::slice::from_mut(g),
+            Self::Grouped { groups, .. } => groups,
+        }
+    }
+
+    #[inline]
+    pub fn subgrid(&self, left: usize, top: usize, width: usize, height: usize) -> Subgrid<'_, S> {
         Subgrid {
             grid: self,
             left,
@@ -124,156 +231,148 @@ impl<S> Grid<S> {
         }
     }
 
-    pub fn subgrid_mut(&mut self, left: i32, top: i32, width: u32, height: u32) -> SubgridMut<'_, S> {
-        SubgridMut {
+    #[inline]
+    pub fn as_subgrid(&self) -> Subgrid<'_, S> {
+        Subgrid {
             grid: self,
-            left,
-            top,
-            width,
-            height,
+            left: 0,
+            top: 0,
+            width: self.width(),
+            height: self.height(),
+        }
+    }
+}
+
+impl<S> Grid<S> {
+    pub fn iter_init_mut(&mut self, mut f: impl FnMut(usize, usize, &mut S)) {
+        let groups_per_row = self.groups_per_row();
+        match *self {
+            Self::Simple(Some(ref mut g)) => {
+                for y in 0..g.height {
+                    for x in 0..g.width {
+                        f(x, y, &mut g.buf[y * g.width + x]);
+                    }
+                }
+            },
+            Self::Grouped { group_width: gw, group_height: gh, ref mut groups, .. } => {
+                let it = groups.iter_mut().enumerate().filter_map(|(idx, g)| g.as_mut().map(|g| (idx, g)));
+                for (group_idx, g) in it {
+                    let group_row = group_idx / groups_per_row;
+                    let group_col = group_idx % groups_per_row;
+                    let base_x = group_col * gw;
+                    let base_y = group_row * gh;
+                    for y in 0..g.height {
+                        for x in 0..g.width {
+                            f(base_x + x, base_y + y, &mut g.buf[y * g.width + x]);
+                        }
+                    }
+                }
+            },
+            _ => unreachable!(),
         }
     }
 
-    pub fn iter_init_mut(&mut self, mut f: impl FnMut(u32, u32, &mut S)) {
-        let (gw, gh) = self.group_size;
-        let groups = match &mut self.buffer {
-            GridBuffer::Single(buf) => vec![(0u32, 0u32, buf)],
-            GridBuffer::Grouped { group_stride, groups, .. } => {
-                groups.iter_mut().map(|(&idx, v)| {
-                    let group_left = idx % *group_stride;
-                    let group_top = idx / *group_stride;
-                    let x = group_left * gw;
-                    let y = group_top * gh;
-                    (x, y, v)
-                }).collect()
-            },
-        };
+    pub fn zip3_mut(&mut self, b: &mut Grid<S>, c: &mut Grid<S>, mut f: impl FnMut(&mut S, &mut S, &mut S)) {
+        assert!(self.width() == b.width() && b.width() == c.width());
+        assert!(self.height() == b.height() && b.height() == c.height());
+        assert!(self.group_dim() == b.group_dim() && b.group_dim() == c.group_dim());
 
-        for (base_x, base_y, group) in groups {
-            let stride = group.stride;
-            for (idx, sample) in group.buf.iter_mut().enumerate() {
-                let y = idx as u32 / stride;
-                let x = idx as u32 % stride;
-                f(base_x + x, base_y + y, sample);
+        let a = self.all_groups_mut();
+        let b = b.all_groups_mut();
+        let c = c.all_groups_mut();
+        let it = a.iter_mut().zip(b).zip(c).filter_map(|((a, b), c)| -> Option<_> {
+            Some((a.as_mut()?, b.as_mut()?, c.as_mut()?))
+        });
+
+        for (a, b, c) in it {
+            let width = a.width;
+            let height = a.height;
+            for y in 0..height {
+                for x in 0..width {
+                    let a = a.get_mut(x, y).unwrap();
+                    let b = b.get_mut(x, y).unwrap();
+                    let c = c.get_mut(x, y).unwrap();
+                    f(a, b, c);
+                }
             }
         }
     }
 }
 
-impl<S: Sample> Grid<S> {
-    pub fn insert_subgrid(&mut self, mut subgrid: Grid<S>, left: i32, top: i32) {
-        if left == 0 && top == 0 && self.width == subgrid.width && self.height == subgrid.height {
-            *self = subgrid;
+impl<S: Default + Clone> Grid<S> {
+    pub fn insert_subgrid(&mut self, subgrid: &mut Grid<S>, left: isize, top: isize) {
+        let width = self.width();
+        let height = self.height();
+        let subgrid_width = subgrid.width();
+        let subgrid_height = subgrid.height();
+
+        // Return if subgrid doesn't overlap with canvas
+        if left >= width as isize || top >= height as isize {
+            return;
+        }
+        if subgrid_width.saturating_add_signed(left) == 0 || subgrid_height.saturating_add_signed(top) == 0 {
             return;
         }
 
-        if left + subgrid.width as i32 > self.width as i32 || top + subgrid.height as i32 > self.height as i32 {
-            self.insert_subgrid_slow(subgrid, left, top);
-            return;
+        // Slow path if groups are not aligned
+        if self.group_dim() != subgrid.group_dim() {
+            return self.insert_subgrid_slow(subgrid.as_subgrid(), left, top);
+        }
+        let (gw, gh) = self.group_dim();
+        if left % gw as isize != 0 || top % gh as isize != 0 {
+            return self.insert_subgrid_slow(subgrid.as_subgrid(), left, top);
         }
 
-        if self.group_size != subgrid.group_size {
-            // group size mismatch
-            self.insert_subgrid_slow(subgrid, left, top);
-            return;
+        // Fast path
+        let group_stride = self.groups_per_row();
+        let group_max_height = (height + gh - 1) / gh;
+        let subgrid_group_stride = subgrid.groups_per_row();
+        let subgrid_group_max_height = (subgrid_height + gh - 1) / gh;
+
+        let group_left;
+        let group_top;
+        let group_width;
+        let group_height;
+        let subgrid_group_left;
+        let subgrid_group_top;
+        if left < 0 {
+            group_left = 0usize;
+            subgrid_group_left = left.unsigned_abs() / gw;
+            group_width = (subgrid_group_stride - subgrid_group_left).min(group_stride);
+        } else {
+            group_left = left as usize / gw;
+            subgrid_group_left = 0usize;
+            group_width = (group_stride - group_left).min(subgrid_group_stride);
+        }
+        if top < 0 {
+            group_top = 0usize;
+            subgrid_group_top = top.unsigned_abs() / gh;
+            group_height = (subgrid_group_max_height - subgrid_group_top).min(group_max_height);
+        } else {
+            group_top = top as usize / gh;
+            subgrid_group_top = 0usize;
+            group_height = (group_max_height - group_top).min(subgrid_group_max_height);
         }
 
-        let (gw, gh) = self.group_size;
-        if left % gw as i32 != 0 || top % gh as i32 != 0 {
-            // not aligned
-            self.insert_subgrid_slow(subgrid, left, top);
-            return;
-        }
+        let target_groups = self.all_groups_mut();
+        let subgrid_groups = subgrid.all_groups_mut();
+        for y in 0..group_height {
+            for x in 0..group_width {
+                let group_idx = (group_top + y) * group_stride + (group_left + x);
+                let subgrid_group_idx = (subgrid_group_top + y) * subgrid_group_stride + (subgrid_group_left + x);
+                let target_group = &mut target_groups[group_idx];
+                let subgrid_group = &mut subgrid_groups[subgrid_group_idx];
 
-        let (group_stride, subgrid_group_stride, groups, subgrid_groups) = match (&mut self.buffer, &mut subgrid.buffer) {
-            (GridBuffer::Single(_), _) => {
-                self.insert_subgrid_slow(subgrid, left, top);
-                return;
-            },
-            (GridBuffer::Grouped { group_stride, groups, .. }, GridBuffer::Single(subgrid_group)) => {
-                if left < 0 || top < 0 {
-                    return;
-                }
-                let group_left = left as u32 / gw;
-                let group_top = top as u32 / gh;
-                let group_idx = group_top * *group_stride + group_left;
-                if let Some(group) = groups.get_mut(&group_idx) {
-                    if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
-                        std::mem::swap(group, subgrid_group);
+                if let Some(subgrid_group) = subgrid_group.take() {
+                    if gw == subgrid_group.width && gh == subgrid_group.height {
+                        *target_group = Some(subgrid_group);
                     } else {
-                        let group_stride = group.stride as usize;
-                        let subgrid_group_stride = subgrid_group.stride as usize;
-                        let width = group_stride.min(subgrid_group_stride);
-                        let height = group.scanlines.min(subgrid_group.scanlines) as usize;
-                        for y in 0..height {
-                            for x in 0..width {
-                                group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
-                            }
-                        }
-                    }
-                } else {
-                    let stride = (self.width - left as u32).min(gw);
-                    let scanlines = (self.height - top as u32).min(gh);
-                    let subgrid_group = if stride == subgrid_group.stride && scanlines == subgrid_group.scanlines {
-                        std::mem::replace(subgrid_group, GridGroup::new(0, 0))
-                    } else {
-                        let group_stride = stride as usize;
-                        let subgrid_group_stride = subgrid_group.stride as usize;
-                        let width = group_stride.min(subgrid_group_stride);
-                        let height = scanlines.min(subgrid_group.scanlines) as usize;
-
-                        let mut group = GridGroup::new(stride, scanlines);
-                        for y in 0..height {
-                            for x in 0..width {
-                                group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
-                            }
-                        }
-                        group
-                    };
-                    groups.insert(group_idx, subgrid_group);
-                }
-                return;
-            },
-            (GridBuffer::Grouped { group_stride, groups, .. }, GridBuffer::Grouped { group_stride: subgrid_group_stride, groups: subgrid_groups, .. }) => {
-                (*group_stride, *subgrid_group_stride, groups, subgrid_groups)
-            },
-        };
-
-        let group_left = left / gw as i32;
-        let group_top = top / gh as i32;
-        let subgrid_group_left = group_left.min(0).unsigned_abs();
-        let subgrid_group_top = group_top.min(0).unsigned_abs();
-        let group_left = group_left.max(0) as u32;
-        let group_top = group_top.max(0) as u32;
-        if group_left >= group_stride || subgrid_group_left >= subgrid_group_stride {
-            return;
-        }
-
-        let group_lines = (self.height + gh - 1) / gh;
-        let subgrid_group_lines = (subgrid.height + gh - 1) / gh;
-        if group_top >= group_lines || subgrid_group_top >= subgrid_group_lines {
-            return;
-        }
-
-        let group_per_line = (group_stride - group_left).min(subgrid_group_stride - subgrid_group_left);
-        let actual_group_lines = (group_lines - group_top).min(subgrid_group_lines - subgrid_group_top);
-
-        for r in 0..actual_group_lines {
-            for c in 0..group_per_line {
-                let group_idx = (r + group_top) * group_stride + c + group_left;
-                let subgrid_group_idx = (r + subgrid_group_top) * subgrid_group_stride + c + subgrid_group_left;
-                let group = groups.get_mut(&group_idx).expect("group out of bounds");
-                let subgrid_group = subgrid_groups.remove(&subgrid_group_idx).expect("subgrid group out of bounds");
-                if group.stride == subgrid_group.stride && group.scanlines == subgrid_group.scanlines {
-                    *group = subgrid_group;
-                } else {
-                    let group_stride = group.stride as usize;
-                    let subgrid_group_stride = subgrid_group.stride as usize;
-                    let width = group_stride.min(subgrid_group_stride);
-                    let height = group.scanlines.min(subgrid_group.scanlines) as usize;
-                    for y in 0..height {
-                        for x in 0..width {
-                            group.buf[group_stride * y + x] = subgrid_group.buf[subgrid_group_stride * y + x];
+                        let target_group = target_group
+                            .get_or_insert_with(|| SimpleGrid::new(gw, gh));
+                        for (idx, sample) in subgrid_group.buf.into_iter().enumerate() {
+                            let y = idx / subgrid_group.width;
+                            let x = idx % subgrid_group.width;
+                            *target_group.get_mut(x, y).unwrap() = sample;
                         }
                     }
                 }
@@ -281,470 +380,113 @@ impl<S: Sample> Grid<S> {
         }
     }
 
-    fn insert_subgrid_slow(&mut self, subgrid: Grid<S>, left: i32, top: i32) {
-        let actual_left = left.max(0);
-        let actual_top = top.max(0);
-        let actual_subgrid_left = left.min(0).abs();
-        let actual_subgrid_top = top.min(0).abs();
+    fn insert_subgrid_slow(&mut self, subgrid: Subgrid<'_, S>, left: isize, top: isize) {
+        let target_left = left.max(0) as usize;
+        let target_top = top.max(0) as usize;
+        let subgrid_left = left.min(0).unsigned_abs();
+        let subgrid_top = top.min(0).unsigned_abs();
+        let width = (self.width() - target_left).min(subgrid.width - subgrid_left);
+        let height = (self.height() - target_top).min(subgrid.height - subgrid_top);
 
-        let actual_width = (subgrid.width as i32 - actual_subgrid_left).min(self.width as i32 - actual_left);
-        let actual_height = (subgrid.height as i32 - actual_subgrid_top).min(self.height as i32 - actual_top);
-        if actual_width <= 0 || actual_height <= 0 {
-            return;
-        }
-        let actual_width = actual_width as u32;
-        let actual_height = actual_height as u32;
-
-        let mut this = self.subgrid_mut(actual_left, actual_top, actual_width, actual_height);
-        let subgrid = subgrid.subgrid(actual_subgrid_left, actual_subgrid_top, actual_width, actual_height);
-        for y in 0..actual_height {
-            for x in 0..actual_width {
-                this[(x, y)] = subgrid[(x, y)];
+        for y in 0..height {
+            for x in 0..width {
+                if let Some(s) = subgrid.get(subgrid_left + x, subgrid_top + y) {
+                    self.set(target_left + x, target_top + y, s.clone());
+                }
             }
         }
     }
 }
 
-impl<S> std::ops::Index<(u32, u32)> for Grid<S> {
-    type Output = S;
-
-    fn index(&self, coord: (u32, u32)) -> &Self::Output {
-        &self.buffer[coord]
-    }
-}
-
-impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for Grid<S> {
-    fn index_mut(&mut self, coord: (u32, u32)) -> &mut Self::Output {
-        &mut self.buffer[coord]
-    }
+#[derive(Debug, Clone)]
+pub struct Subgrid<'g, S> {
+    grid: &'g Grid<S>,
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
 }
 
 impl<S> Subgrid<'_, S> {
-    pub fn width(&self) -> u32 {
+    #[inline]
+    pub fn width(&self) -> usize {
         self.width
     }
 
-    pub fn height(&self) -> u32 {
+    #[inline]
+    pub fn height(&self) -> usize {
         self.height
     }
 
     #[inline]
-    fn in_bounds(&self, x: u32, y: u32) -> bool {
-        x < self.width && y < self.height
-    }
-}
-
-impl<S> std::ops::Index<(u32, u32)> for Subgrid<'_, S> {
-    type Output = S;
-
-    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
-        if !self.in_bounds(x, y) {
-            panic!("index out of range")
+    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+        if x >= self.width || y >= self.height {
+            return None;
         }
-
-        let x = x.saturating_add_signed(self.left);
-        let y = y.saturating_add_signed(self.top);
-        &self.grid[(x, y)]
+        self.grid.get(self.left + x, self.top + y)
     }
 }
 
-impl<S> SubgridMut<'_, S> {
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
-    #[inline]
-    fn in_bounds(&self, x: u32, y: u32) -> bool {
-        x < self.width && y < self.height
-    }
-}
-
-impl<S> std::ops::Index<(u32, u32)> for SubgridMut<'_, S> {
-    type Output = S;
-
-    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
-        if !self.in_bounds(x, y) {
-            panic!("index out of range")
-        }
-
-        let x = x.saturating_add_signed(self.left);
-        let y = y.saturating_add_signed(self.top);
-        &self.grid[(x, y)]
-    }
-}
-
-impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for SubgridMut<'_, S> {
-    fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
-        if !self.in_bounds(x, y) {
-            panic!("index out of range")
-        }
-
-        let x = x.saturating_add_signed(self.left);
-        let y = y.saturating_add_signed(self.top);
-        &mut self.grid[(x, y)]
-    }
-}
-
-#[derive(Clone)]
-enum GridBuffer<S> {
-    Single(GridGroup<S>),
-    Grouped {
-        group_size: (u32, u32),
-        group_stride: u32,
-        groups: BTreeMap<u32, GridGroup<S>>,
-        def: S,
-    },
-}
-
-impl<S: Default + Clone> GridBuffer<S> {
-    fn new(width: u32, height: u32, (gw, gh): (u32, u32)) -> Self {
-        if width <= gw && height <= gh {
-            Self::Single(GridGroup::new(width, height))
-        } else {
-            Self::Grouped {
-                group_size: (gw, gh),
-                group_stride: (width + gw - 1) / gw,
-                groups: BTreeMap::new(),
-                def: S::default(),
-            }
-        }
-    }
-}
-
-impl<S> GridBuffer<S> {
-    fn get_group(&self, idx: u32) -> Option<&GridGroup<S>> {
-        match self {
-            Self::Single(buf) => (idx == 0).then_some(buf),
-            Self::Grouped { groups, .. } => groups.get(&idx),
-        }
-    }
-
-    fn get_initialized(&self, (x, y): (u32, u32)) -> Option<&S> {
-        match *self {
-            Self::Single(ref group) => {
-                assert!(x < group.stride);
-                let idx = x as usize + y as usize * group.stride as usize;
-                group.buf.get(idx)
-            },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref groups, .. } => {
-                let group_row = y / gh;
-                let group_col = x / gw;
-                let y = y % gh;
-                let x = x % gw;
-                let group_idx = group_row * group_stride + group_col;
-                if let Some(group) = groups.get(&group_idx) {
-                    let idx = y * group.stride + x;
-                    group.buf.get(idx as usize)
-                } else {
-                    None
-                }
-            },
-        }
-    }
-}
-
-impl<S> std::ops::Index<(u32, u32)> for GridBuffer<S> {
-    type Output = S;
-
-    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
-        self.get_initialized((x, y)).unwrap()
-    }
-}
-
-impl<S: Default + Clone> std::ops::IndexMut<(u32, u32)> for GridBuffer<S> {
-    fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
-        match *self {
-            Self::Single(ref mut group) => {
-                assert!(x < group.stride);
-                let idx = x as usize + y as usize * group.stride as usize;
-                &mut group.buf[idx]
-            },
-            Self::Grouped { group_size: (gw, gh), group_stride, ref mut groups, .. } => {
-                let group_row = y / gh;
-                let group_col = x / gw;
-                let y = y % gh;
-                let x = x % gw;
-                let group_idx = group_row * group_stride + group_col;
-                let group = groups.entry(group_idx)
-                    .or_insert_with(|| GridGroup::new(gw, gh));
-                let idx = y * group.stride + x;
-                &mut group.buf[idx as usize]
-            },
-        }
-    }
-}
-
-impl<S> std::fmt::Debug for GridBuffer<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Single(_) => f.debug_tuple("Single").field(&format_args!("_")).finish(),
-            Self::Grouped { group_size, group_stride, .. } => {
-                f
-                    .debug_struct("Grouped")
-                    .field("group_size", group_size)
-                    .field("group_stride", group_stride)
-                    .finish_non_exhaustive()
-            },
-        }
-    }
-}
-
-#[derive(Clone)]
-struct GridGroup<S> {
-    stride: u32,
-    scanlines: u32,
+#[derive(Debug, Clone)]
+pub struct SimpleGrid<S> {
+    width: usize,
+    height: usize,
     buf: Vec<S>,
 }
 
-impl<S: Default + Clone> GridGroup<S> {
-    fn new(stride: u32, scanlines: u32) -> Self {
-        let size = stride as usize * scanlines as usize;
+impl<S: Default + Clone> SimpleGrid<S> {
+    pub fn new(width: usize, height: usize) -> Self {
+        let len = width * height;
+        let buf = vec![S::default(); len];
         Self {
-            stride,
-            scanlines,
-            buf: vec![S::default(); size],
+            width,
+            height,
+            buf,
         }
     }
 }
 
-impl<S> GridGroup<S> {
-    fn idx(&self, x: u32, y: u32) -> usize {
-        (y * self.stride + x) as usize
+impl<S> SimpleGrid<S> {
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.width
     }
 
-    fn get(&self, x: u32, y: u32) -> Option<&S> {
-        self.buf.get(self.idx(x, y))
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.height
     }
 
-    fn get_mut(&mut self, x: u32, y: u32) -> Option<&mut S> {
-        let idx = self.idx(x, y);
-        self.buf.get_mut(idx)
-    }
-}
-
-impl<S> std::ops::Index<(u32, u32)> for GridGroup<S> {
-    type Output = S;
-
-    fn index(&self, (x, y): (u32, u32)) -> &Self::Output {
-        &self.buf[self.idx(x, y)]
-    }
-}
-
-impl<S> std::ops::IndexMut<(u32, u32)> for GridGroup<S> {
-    fn index_mut(&mut self, (x, y): (u32, u32)) -> &mut Self::Output {
-        let idx = self.idx(x, y);
-        &mut self.buf[idx]
-    }
-}
-
-impl<S> std::fmt::Debug for GridGroup<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GridGroup")
-            .field("stride", &self.stride)
-            .field("scanlines", &self.scanlines)
-            .finish_non_exhaustive()
-    }
-}
-
-#[inline(always)]
-fn mirror_1d(len: u32, offset: i32) -> u32 {
-    let offset = if offset < 0 {
-        offset.abs_diff(-1)
-    } else {
-        offset as u32
-    };
-    if offset < len {
-        return offset;
-    }
-
-    let offset = offset % (2 * len);
-    if offset >= len {
-        2 * len - offset - 1
-    } else {
-        offset
-    }
-}
-
-#[inline(always)]
-fn mirror_2d(width: u32, height: u32, col: i32, row: i32) -> (u32, u32) {
-    (mirror_1d(width, col), mirror_1d(height, row))
-}
-
-#[cfg(not(feature = "mt"))]
-pub fn zip_iterate<S>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S])) {
-    if grids.is_empty() {
-        return;
-    }
-
-    let mut groups = grids
-        .iter_mut()
-        .map(|g| match &mut g.buffer {
-            GridBuffer::Single(buf) => vec![(0, buf)],
-            GridBuffer::Grouped { groups, .. } => {
-                groups.iter_mut().map(|(k, v)| (*k, v)).collect()
-            },
-        })
-        .map(|v| v.into_iter().peekable())
-        .collect::<Vec<_>>();
-
-    let mut target_group_list = Vec::new();
-    'main_loop: loop {
-        let mut target_group_idx = 0;
-        for it in groups.iter_mut() {
-            let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
-            target_group_idx = target_group_idx.max(idx);
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+        if x >= self.width || y >= self.height {
+            return None;
         }
 
-        let mut target_groups = Vec::with_capacity(groups.len());
-        for it in groups.iter_mut() {
-            loop {
-                let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
-                match idx.cmp(&target_group_idx) {
-                    std::cmp::Ordering::Greater => continue 'main_loop,
-                    std::cmp::Ordering::Equal => break,
-                    std::cmp::Ordering::Less => { it.next(); },
-                }
-            }
-        }
-        for it in groups.iter_mut() {
-            target_groups.push(&mut it.next().unwrap().1.buf);
-        }
-
-        target_group_list.push(target_groups);
+        Some(&self.buf[y * self.width + x])
     }
 
-    for mut target_groups in target_group_list {
-        let len = target_groups.iter().map(|buf| buf.len()).min().unwrap();
-        for i in 0..len {
-            let mut samples = target_groups.iter_mut().map(|buf| &mut buf[i]).collect::<Vec<_>>();
-            f(&mut samples);
-        }
-    }
-}
-
-#[cfg(feature = "mt")]
-pub fn zip_iterate<S: Send>(grids: &mut [&mut Grid<S>], f: impl Fn(&mut [&mut S]) + Send + Sync) {
-    use rayon::prelude::*;
-
-    if grids.is_empty() {
-        return;
-    }
-
-    let mut groups = grids
-        .iter_mut()
-        .map(|g| match &mut g.buffer {
-            GridBuffer::Single(buf) => vec![(0, buf)],
-            GridBuffer::Grouped { groups, .. } => {
-                groups.iter_mut().map(|(k, v)| (*k, v)).collect()
-            },
-        })
-        .map(|v| v.into_iter().peekable())
-        .collect::<Vec<_>>();
-
-    let mut target_group_list = Vec::new();
-    'main_loop: loop {
-        let mut target_group_idx = 0;
-        for it in groups.iter_mut() {
-            let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
-            target_group_idx = target_group_idx.max(idx);
+    #[inline]
+    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
+        if x >= self.width || y >= self.height {
+            return None;
         }
 
-        let mut target_groups = Vec::with_capacity(groups.len());
-        for it in groups.iter_mut() {
-            loop {
-                let Some(&(idx, _)) = it.peek() else { break 'main_loop; };
-                match idx.cmp(&target_group_idx) {
-                    std::cmp::Ordering::Greater => continue 'main_loop,
-                    std::cmp::Ordering::Equal => break,
-                    std::cmp::Ordering::Less => { it.next(); },
-                }
-            }
-        }
-        for it in groups.iter_mut() {
-            target_groups.push(&mut it.next().unwrap().1.buf);
-        }
-
-        target_group_list.push(target_groups);
+        Some(&mut self.buf[y * self.width + x])
     }
 
-    target_group_list
-        .into_par_iter()
-        .for_each(|mut target_groups| {
-            let len = target_groups.iter().map(|buf| buf.len()).min().unwrap();
-            for i in 0..len {
-                let mut samples = target_groups.iter_mut().map(|buf| &mut buf[i]).collect::<Vec<_>>();
-                f(&mut samples);
-            }
-        });
-}
-
-pub fn rgba_be_interleaved<F, E>(
-    rgb: [&Grid<i32>; 3],
-    a: Option<&Grid<i32>>,
-    bit_depth: u32,
-    mut f: F,
-) -> Result<(), E>
-where
-    F: FnMut(&[u8]) -> Result<(), E>,
-{
-    if bit_depth != 8 && bit_depth != 16 {
-        todo!("rgba_be_interleaved currently supports only 8-bit and 16-bit images");
+    #[inline]
+    pub fn buf(&self) -> &[S] {
+        &self.buf
     }
 
-    let bytes_per_sample = (3 + (a.is_some() as usize)) * (bit_depth / 8) as usize;
-
-    let width = rgb[0].width;
-    let height = rgb[0].height;
-    let (gw, gh) = rgb[0].group_size;
-    let mut buf = vec![0u8; width as usize * gh as usize * bytes_per_sample];
-
-    let empty_grid = GridGroup::new(gw, gh);
-
-    let group_stride = (width + gw - 1) / gw;
-    let group_height = (height + gh - 1) / gh;
-    for gy in 0..group_height {
-        let scanlines = (height - gy * gh).min(gh);
-        for gx in 0..group_stride {
-            let idx = gy * group_stride + gx;
-            let stride = (width - gx * gw).min(gw);
-
-            let r = rgb[0].buffer.get_group(idx).unwrap_or(&empty_grid);
-            let g = rgb[1].buffer.get_group(idx).unwrap_or(&empty_grid);
-            let b = rgb[2].buffer.get_group(idx).unwrap_or(&empty_grid);
-            let a = a.as_ref().map(|g| g.buffer.get_group(idx).unwrap_or(&empty_grid));
-
-            for y in 0..scanlines {
-                for x in 0..stride {
-                    let buf_idx = (y as usize * width as usize + (gx * gw + x) as usize) * bytes_per_sample;
-                    let r = r.buf[(y * r.stride + x) as usize];
-                    let g = g.buf[(y * g.stride + x) as usize];
-                    let b = b.buf[(y * b.stride + x) as usize];
-                    let a = a.map(|g| g.buf[(y * g.stride + x) as usize]);
-                    if bit_depth == 8 {
-                        let buf = &mut buf[buf_idx..];
-                        buf[0] = r.clamp(0, 255) as u8;
-                        buf[1] = g.clamp(0, 255) as u8;
-                        buf[2] = b.clamp(0, 255) as u8;
-                        if let Some(a) = a {
-                            buf[3] = a.clamp(0, 255) as u8;
-                        }
-                    } else {
-                        let buf = &mut buf[buf_idx..];
-                        buf[0..2].copy_from_slice(&(r.clamp(0, 65535) as u16).to_be_bytes());
-                        buf[2..4].copy_from_slice(&(g.clamp(0, 65535) as u16).to_be_bytes());
-                        buf[4..6].copy_from_slice(&(b.clamp(0, 65535) as u16).to_be_bytes());
-                        if let Some(a) = a {
-                            buf[6..8].copy_from_slice(&(a as u16).to_be_bytes());
-                        }
-                    }
-                }
-            }
-        }
-        f(&buf[..((scanlines * width) as usize * bytes_per_sample)])?;
+    #[inline]
+    pub fn buf_mut(&mut self) -> &mut [S] {
+        &mut self.buf
     }
-    Ok(())
+
+    #[inline]
+    pub fn reinterpret_transposed(&mut self) {
+        std::mem::swap(&mut self.width, &mut self.height);
+    }
 }
