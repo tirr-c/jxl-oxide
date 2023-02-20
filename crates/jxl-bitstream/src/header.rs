@@ -170,10 +170,42 @@ impl Default for BitDepth {
 }
 
 impl BitDepth {
-    pub fn bits_per_sample(&self) -> u32 {
-        match *self {
+    #[inline]
+    pub fn bits_per_sample(self) -> u32 {
+        match self {
             Self::IntegerSample { bits_per_sample } => bits_per_sample,
             Self::FloatSample { bits_per_sample, .. } => bits_per_sample,
+        }
+    }
+
+    #[inline]
+    pub fn parse_integer_sample(self, sample: i32) -> f32 {
+        match self {
+            Self::IntegerSample { bits_per_sample } => {
+                let div = (1i32 << bits_per_sample) - 1;
+                (sample as f64 / div as f64) as f32
+            },
+            Self::FloatSample { bits_per_sample, exp_bits } => {
+                let mantissa_bits = bits_per_sample - exp_bits - 1;
+                let mantissa_mask = (1i32 << mantissa_bits) - 1;
+                let exp_mask = ((1i32 << (bits_per_sample - 1)) - 1) ^ mantissa_mask;
+
+                let is_signed = (sample & (1i32 << (bits_per_sample - 1))) != 0;
+                let mantissa = sample & mantissa_mask;
+                let exp = (sample & exp_mask) >> mantissa_bits;
+                let exp = exp - (1 << (exp_bits - 1)) + 1;
+
+                let mantissa = match mantissa_bits.cmp(&f32::MANTISSA_DIGITS) {
+                    std::cmp::Ordering::Less => mantissa << (f32::MANTISSA_DIGITS - mantissa_bits),
+                    std::cmp::Ordering::Greater => mantissa >> (mantissa_bits - f32::MANTISSA_DIGITS),
+                    _ => mantissa,
+                } as u32;
+                let exp = exp as u32 + 127;
+                let sign = is_signed as u32;
+
+                let bits = (sign << 31) | (exp << f32::MANTISSA_DIGITS) | mantissa;
+                f32::from_bits(bits)
+            },
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::{io::Read, collections::BTreeMap};
 
-use jxl_bitstream::{Bitstream, Bundle, header::Headers};
+use jxl_bitstream::{Bitstream, Bundle, header::{Headers, ColourSpace}};
 use jxl_frame::{Frame, header::{FrameType, Encoding}};
 
 mod buffer;
@@ -171,7 +171,7 @@ impl<'f> RenderContext<'f> {
     fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
         let mut fb = match frame.header().encoding {
             Encoding::Modular => {
-                todo!()
+                self.render_modular(frame, region)
             },
             Encoding::VarDct => {
                 self.render_vardct(frame, region)
@@ -183,6 +183,79 @@ impl<'f> RenderContext<'f> {
             fb.ycbcr_to_rgb();
         }
         Ok(fb)
+    }
+
+    fn render_modular<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+        let header = self.image_header;
+        let frame_header = frame.header();
+        let frame_data = frame.data();
+        let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
+        let gmodular = &lf_global.gmodular.modular;
+        let jpeg_upsampling = frame_header.jpeg_upsampling;
+        let shifts_cbycr = [0, 1, 2].map(|idx| {
+            ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
+        });
+        let is_single_channel = !header.metadata.xyb_encoded && header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
+
+        let channel_data = gmodular.image().channel_data();
+        if is_single_channel {
+            tracing::error!("Single-channel modular image is not supported");
+            return Err(Error::NotSupported("Single-channel modular image is not supported"));
+        }
+
+        let width = self.width();
+        let height = self.height();
+        let bit_depth = header.metadata.bit_depth;
+        let mut fb_yxb = FrameBuffer::new(width, height, width, 3);
+        let width = width as usize;
+        let height = height as usize;
+        let mut buffers = fb_yxb.channel_buffers_mut();
+        if frame_header.do_ycbcr {
+            // make CbYCr into YCbCr
+            buffers.swap(0, 1);
+        }
+
+        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(buffers.iter_mut()) {
+            let (gw, gh) = g.group_dim();
+            let group_stride = g.groups_per_row();
+            for (group_idx, g) in g.groups() {
+                let base_x = (group_idx % group_stride) * gw;
+                let base_y = (group_idx / group_stride) * gh;
+                for (idx, &s) in g.buf().iter().enumerate() {
+                    let y = base_y + idx / g.width();
+                    let y = y << shift.vshift();
+                    if y >= height {
+                        break;
+                    }
+                    let x = base_x + idx % g.width();
+                    let x = x << shift.hshift();
+                    if x >= width {
+                        continue;
+                    }
+
+                    buffer[y * width + x] = if header.metadata.xyb_encoded {
+                        s as f32
+                    } else {
+                        bit_depth.parse_integer_sample(s)
+                    };
+                }
+            }
+        }
+
+        if header.metadata.xyb_encoded {
+            let mut it = buffers.into_iter();
+            let y = it.next().unwrap();
+            let x = it.next().unwrap();
+            let b = it.next().unwrap();
+            for ((y, x), b) in y.iter_mut().zip(x).zip(b) {
+                *b += *y;
+                *y *= lf_global.lf_dequant.m_y_lf_unscaled();
+                *x *= lf_global.lf_dequant.m_x_lf_unscaled();
+                *b *= lf_global.lf_dequant.m_b_lf_unscaled();
+            }
+        }
+
+        Ok(fb_yxb)
     }
 
     fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {

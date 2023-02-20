@@ -4,6 +4,7 @@ pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Frame(jxl_frame::Error),
     IncompleteFrame,
+    NotSupported(&'static str),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -26,6 +27,7 @@ impl std::fmt::Display for Error {
             Bitstream(err) => write!(f, "bitstream error: {}", err),
             Frame(err) => write!(f, "frame error: {}", err),
             IncompleteFrame => write!(f, "frame data is incomplete"),
+            NotSupported(msg) => write!(f, "not supported: {}", msg),
         }
     }
 }
