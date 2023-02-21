@@ -124,6 +124,35 @@ fn small_dct<const N: usize, const N4: usize, const INV: bool>(input: &[f32], ou
     }
 }
 
+const COS_SIN: [f32; 24] = [
+    1.0,
+    0.98078525,
+    0.9238795,
+    0.8314696,
+    std::f32::consts::FRAC_1_SQRT_2,
+    0.55557024,
+    0.38268343,
+    0.19509032,
+
+    0.0,
+    -0.19509032,
+    -0.38268343,
+    -0.55557024,
+    -std::f32::consts::FRAC_1_SQRT_2,
+    -0.8314696,
+    -0.9238795,
+    -0.98078525,
+
+    -1.0,
+    -0.98078525,
+    -0.9238795,
+    -0.8314696,
+    -std::f32::consts::FRAC_1_SQRT_2,
+    -0.55557024,
+    -0.38268343,
+    -0.19509032,
+];
+
 /// Assumes that inputs are reordered.
 fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
     let n = real.len();
@@ -133,20 +162,29 @@ fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
     let mut m;
     let mut k_iter;
     let mut theta;
+    let mut skip;
     m = 1;
     k_iter = n;
     theta = std::f32::consts::PI * (-2.0);
+    skip = 32usize;
 
     for _ in 0..n.trailing_zeros() {
         m <<= 1;
         k_iter >>= 1;
         theta /= 2.0;
+        skip >>= 1;
 
         for k in 0..k_iter {
             let k = k * m;
             for j in 0..(m / 2) {
-                let theta = theta * (j as f32);
-                let (sin, cos) = theta.sin_cos();
+                let (sin, cos) = if skip == 0 {
+                    let theta = theta * (j as f32);
+                    theta.sin_cos()
+                } else {
+                    let cos = COS_SIN[j * skip];
+                    let sin = COS_SIN[j * skip + 8];
+                    (sin, cos)
+                };
 
                 let r = real[k + m / 2 + j];
                 let i = imag[k + m / 2 + j];
@@ -167,35 +205,6 @@ fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
 
 /// Assumes that inputs are reordered.
 fn small_fft_in_place<const N: usize>(real: &mut [f32], imag: &mut [f32]) {
-    const COS_SIN: [f32; 24] = [
-        1.0,
-        0.98078525,
-        0.9238795,
-        0.8314696,
-        std::f32::consts::FRAC_1_SQRT_2,
-        0.55557024,
-        0.38268343,
-        0.19509032,
-
-        0.0,
-        -0.19509032,
-        -0.38268343,
-        -0.55557024,
-        -std::f32::consts::FRAC_1_SQRT_2,
-        -0.8314696,
-        -0.9238795,
-        -0.98078525,
-
-        -1.0,
-        -0.98078525,
-        -0.9238795,
-        -0.8314696,
-        -std::f32::consts::FRAC_1_SQRT_2,
-        -0.55557024,
-        -0.38268343,
-        -0.19509032,
-    ];
-
     assert!(N.is_power_of_two());
     let iters = N.trailing_zeros();
     assert!(iters <= 5);
