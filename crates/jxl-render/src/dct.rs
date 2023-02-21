@@ -32,7 +32,13 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
         }
     }
 
-    fft_in_place(&mut real, &mut imag);
+    match n {
+        1 => small_fft_in_place::<4>(&mut real, &mut imag),
+        2 => small_fft_in_place::<8>(&mut real, &mut imag),
+        4 => small_fft_in_place::<16>(&mut real, &mut imag),
+        8 => small_fft_in_place::<32>(&mut real, &mut imag),
+        _ => fft_in_place(&mut real, &mut imag),
+    }
 
     if inverse {
         for (i, o) in imag[..2 * n].chunks_exact(2).zip(output) {
@@ -70,6 +76,71 @@ fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
             for j in 0..(m / 2) {
                 let theta = theta * (j as f32);
                 let (sin, cos) = theta.sin_cos();
+
+                let r = real[k + m / 2 + j];
+                let i = imag[k + m / 2 + j];
+                // (a + ib) (cos + isin) = (a cos - b sin) + i(b cos + a sin)
+                let tr = r * cos - i * sin;
+                let ti = i * cos + r * sin;
+                let ur = real[k + j];
+                let ui = imag[k + j];
+
+                real[k + j] = ur + tr;
+                imag[k + j] = ui + ti;
+                real[k + m / 2 + j] = ur - tr;
+                imag[k + m / 2 + j] = ui - ti;
+            }
+        }
+    }
+}
+
+/// Assumes that inputs are reordered.
+fn small_fft_in_place<const N: usize>(real: &mut [f32], imag: &mut [f32]) {
+    const COS_SIN: [f32; 24] = [
+        1.0,
+        0.98078525,
+        0.9238795,
+        0.8314696,
+        std::f32::consts::FRAC_1_SQRT_2,
+        0.55557024,
+        0.38268343,
+        0.19509032,
+
+        0.0,
+        -0.19509032,
+        -0.38268343,
+        -0.55557024,
+        -std::f32::consts::FRAC_1_SQRT_2,
+        -0.8314696,
+        -0.9238795,
+        -0.98078525,
+
+        -1.0,
+        -0.98078525,
+        -0.9238795,
+        -0.8314696,
+        -std::f32::consts::FRAC_1_SQRT_2,
+        -0.55557024,
+        -0.38268343,
+        -0.19509032,
+    ];
+
+    assert!(N.is_power_of_two());
+    let iters = N.trailing_zeros();
+    assert!(iters <= 5);
+    assert!(real.len() >= N);
+    assert!(imag.len() >= N);
+
+    for it in 0..iters {
+        let m = 1usize << (it + 1);
+        let k_iter = N >> (it + 1);
+        let skip = 16usize >> it;
+
+        for k in 0..k_iter {
+            let k = k * m;
+            for j in 0..(m / 2) {
+                let cos = COS_SIN[j * skip];
+                let sin = COS_SIN[j * skip + 8];
 
                 let r = real[k + m / 2 + j];
                 let i = imag[k + m / 2 + j];
