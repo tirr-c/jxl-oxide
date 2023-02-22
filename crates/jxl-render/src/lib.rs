@@ -1,12 +1,13 @@
 use std::{io::Read, collections::BTreeMap};
 
 use jxl_bitstream::{Bitstream, Bundle, header::{Headers, ColourSpace}};
-use jxl_frame::{Frame, header::{FrameType, Encoding}};
+use jxl_frame::{Frame, header::{FrameType, Encoding}, filter::Gabor};
 
 mod buffer;
 mod color;
 mod dct;
 mod error;
+mod filter;
 mod vardct;
 pub use buffer::FrameBuffer;
 pub use error::{Error, Result};
@@ -182,6 +183,10 @@ impl<'f> RenderContext<'f> {
             fb.ycbcr_upsample(frame.header().jpeg_upsampling);
             fb.ycbcr_to_rgb();
         }
+        if let Gabor::Enabled(weights) = frame.header().restoration_filter.gab {
+            filter::apply_gabor_like(&mut fb, weights);
+        }
+
         Ok(fb)
     }
 
