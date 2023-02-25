@@ -242,8 +242,15 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, group_params: LfGroupParams<'_>) -> Result<Self> {
         let lf_group_idx = group_params.lf_group_idx;
         let (width, height) = group_params.frame_header.lf_group_size_for(lf_group_idx);
-        let bw = ((width + 7) / 8) as usize;
-        let bh = ((height + 7) / 8) as usize;
+        let mut bw = ((width + 7) / 8) as usize;
+        let mut bh = ((height + 7) / 8) as usize;
+        let upsample = group_params.frame_header.need_jpeg_upscale();
+        if upsample.0 {
+            bw = (bw + 1) / 2 * 2;
+        }
+        if upsample.1 {
+            bh = (bh + 1) / 2 * 2;
+        }
         let nb_blocks = 1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros())?;
 
         let channels = vec![
@@ -567,6 +574,8 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
             hf_pass,
         } = params;
         let mut dist = hf_pass.clone_decoder();
+        let span = tracing::span!(tracing::Level::TRACE, "HfCoeff::parse");
+        let _guard = span.enter();
 
         let HfBlockContext {
             qf_thresholds,

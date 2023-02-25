@@ -367,7 +367,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
         use DequantMatrixParamsEncoding::*;
 
         let span = tracing::span!(
-            tracing::Level::DEBUG,
+            tracing::Level::TRACE,
             "DequantMatrixParams::parse",
             dct_select = format_args!("{:?}", params.dct_select),
         );

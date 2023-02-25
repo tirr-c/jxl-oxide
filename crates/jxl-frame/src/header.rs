@@ -188,6 +188,13 @@ impl FrameHeader {
         }
     }
 
+    // (h, v)
+    pub fn need_jpeg_upscale(&self) -> (bool, bool) {
+        let h_upscale = self.jpeg_upsampling.into_iter().any(|j| j == 1 || j == 2);
+        let v_upscale = self.jpeg_upsampling.into_iter().any(|j| j == 1 || j == 3);
+        (h_upscale, v_upscale)
+    }
+
     pub fn sample_width(&self) -> u32 {
         let &Self { mut width, upsampling, lf_level, .. } = self;
 

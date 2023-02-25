@@ -83,7 +83,16 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
                 qf_thresholds.push(1 + t);
             }
 
-            jxl_coding::read_clusters(bitstream, bsize * 39)?
+            if bsize > 64 {
+                tracing::warn!(bsize, "bsize > 64");
+            }
+
+            let (num_clusters, ctx_map) = jxl_coding::read_clusters(bitstream, bsize * 39)?;
+            if num_clusters > 16 {
+                tracing::warn!(num_clusters, "num_clusters > 16");
+            }
+
+            (num_clusters, ctx_map)
         };
 
         Ok(Self {
