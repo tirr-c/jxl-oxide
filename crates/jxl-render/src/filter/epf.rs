@@ -21,6 +21,74 @@ fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
     (1.0 - scaled_distance * inv_sigma).max(0.0)
 }
 
+fn epf_step(
+    input: &FrameBuffer,
+    output: &mut FrameBuffer,
+    sigma_grid: &SimpleGrid<f32>,
+    channel_scale: [f32; 3],
+    border_sad_mul: f32,
+    step_multiplier: f32,
+    kernel_coords: &'static [(isize, isize)],
+    dist_coords: &'static [(isize, isize)],
+) {
+    let width = input.width() as usize;
+    let height = input.height() as usize;
+    let channels = &input.channel_buffers()[..3];
+    let mut out_channels = output.channel_buffers_mut();
+    for y in 0..height {
+        let y8 = y / 8;
+        let is_y_border = (y % 8) == 0 || (y % 8) == 7;
+
+        for x in 0..width {
+            let x8 = x / 8;
+            let sigma_val = *sigma_grid.get(x8, y8).unwrap();
+            if sigma_val < 0.3 {
+                continue;
+            }
+            let is_border = is_y_border || (x % 8) == 0 || (x % 8) == 7;
+
+            let mut sum_weights = weight(0.0f32, sigma_val, step_multiplier);
+            let mut sum_channels = [0.0f32; 3];
+            for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
+                *sum = ch[y * width + x] * sum_weights;
+            }
+
+            for &(dx, dy) in kernel_coords {
+                let tx = x as isize + dx;
+                let ty = y as isize + dy;
+                let mut dist = 0.0f32;
+                for (&ch, scale) in channels.iter().zip(channel_scale) {
+                    for &(dx, dy) in dist_coords {
+                        let x = x as isize + dx;
+                        let y = y as isize + dy;
+                        let tx = tx + dx;
+                        let ty = ty + dy;
+                        let x = mirror(x, width);
+                        let y = mirror(y, height);
+                        let tx = mirror(tx, width);
+                        let ty = mirror(ty, height);
+                        dist += (ch[y * width + x] - ch[ty * width + tx]).abs() * scale;
+                    }
+                }
+
+                let weight = weight(
+                    dist * if is_border { border_sad_mul } else { 1.0 },
+                    sigma_val,
+                    step_multiplier,
+                );
+                sum_weights += weight;
+                for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
+                    *sum += ch[y * width + x] * weight;
+                }
+            }
+
+            for (sum, ch) in sum_channels.into_iter().zip(&mut out_channels) {
+                ch[y * width + x] = sum / sum_weights;
+            }
+        }
+    }
+}
+
 pub fn apply_epf(
     fb: &mut FrameBuffer,
     lf_groups: &BTreeMap<u32, LfGroup>,
@@ -37,15 +105,14 @@ pub fn apply_epf(
     let span = tracing::span!(tracing::Level::TRACE, "apply_epf");
     let _guard = span.enter();
 
-    tracing::debug!("Preparing bitmap");
+    tracing::debug!("Preparing sigma grid");
     let mut out_fb = fb.clone();
     let width = fb.width() as usize;
     let height = fb.height() as usize;
     let w8 = (width + 7) / 8;
     let h8 = (height + 7) / 8;
-    let mut bitmap = SimpleGrid::new(w8, h8);
     let mut sigma_grid = SimpleGrid::new(w8, h8);
-    let mut need_bitmap_init = true;
+    let mut need_sigma_init = true;
 
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let lf_group_dim8 = frame_header.group_dim();
@@ -53,21 +120,17 @@ pub fn apply_epf(
         let base_x = ((lf_group_idx % lf_groups_per_row) * lf_group_dim8) as usize;
         let base_y = ((lf_group_idx / lf_groups_per_row) * lf_group_dim8) as usize;
         if let Some(hf_meta) = &lf_group.hf_meta {
-            need_bitmap_init = false;
+            need_sigma_init = false;
             let epf_sigma = &hf_meta.epf_sigma;
             for y8 in 0..epf_sigma.height() {
                 for x8 in 0..epf_sigma.width() {
                     let sigma = *epf_sigma.get(x8, y8).unwrap();
                     *sigma_grid.get_mut(base_x + x8, base_y + y8).unwrap() = sigma;
-                    *bitmap.get_mut(base_x + x8, base_y + y8).unwrap() = sigma >= 0.3;
                 }
             }
         }
     }
-    if need_bitmap_init {
-        for bitmap in bitmap.buf_mut() {
-            *bitmap = true;
-        }
+    if need_sigma_init {
         for sigma in sigma_grid.buf_mut() {
             *sigma = sigma_for_modular;
         }
@@ -76,68 +139,34 @@ pub fn apply_epf(
     // Step 0
     if iters == 3 {
         tracing::debug!("Running step 0");
-        todo!();
+        epf_step(
+            fb,
+            &mut out_fb,
+            &sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            sigma.pass0_sigma_scale,
+            &[
+                (0, -1), (-1, 0), (1, 0), (0, 1),
+                (0, -2), (-1, -1), (1, -1), (-2, 0), (2, 0), (-1, 1), (1, 1), (0, 2),
+            ],
+            &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
+        );
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
-        let step_multiplier = 1f32;
-
-        let channels = &fb.channel_buffers()[..3];
-        let mut out_channels = out_fb.channel_buffers_mut();
-        for y in 0..height {
-            let y8 = y / 8;
-            let is_y_border = (y % 8) == 0 || (y % 8) == 7;
-
-            for x in 0..width {
-                let x8 = x / 8;
-                if !*bitmap.get(x8, y8).unwrap() {
-                    continue;
-                }
-                let is_border = is_y_border || (x % 8) == 0 || (x % 8) == 7;
-                let sigma_val = *sigma_grid.get(x8, y8).unwrap();
-
-                let mut sum_weights = weight(0.0f32, sigma_val, step_multiplier);
-                let mut sum_channels = [0.0f32; 3];
-                for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
-                    *sum = ch[y * width + x] * sum_weights;
-                }
-
-                for (dx, dy) in [(0isize, -1isize), (-1, 0), (1, 0), (0, 1)] {
-                    let tx = x as isize + dx;
-                    let ty = y as isize + dy;
-                    let mut dist = 0.0f32;
-                    for (&ch, scale) in channels.iter().zip(channel_scale) {
-                        for (dx, dy) in [(0isize, 0isize), (0, -1), (-1, 0), (1, 0), (0, 1)] {
-                            let x = x as isize + dx;
-                            let y = y as isize + dy;
-                            let tx = tx + dx;
-                            let ty = ty + dy;
-                            let x = mirror(x, width);
-                            let y = mirror(y, height);
-                            let tx = mirror(tx, width);
-                            let ty = mirror(ty, height);
-                            dist += (ch[y * width + x] - ch[ty * width + tx]).abs() * scale;
-                        }
-                    }
-
-                    let weight = weight(
-                        dist * if is_border { sigma.border_sad_mul } else { 1.0 },
-                        sigma_val,
-                        step_multiplier,
-                    );
-                    sum_weights += weight;
-                    for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
-                        *sum += ch[y * width + x] * weight;
-                    }
-                }
-
-                for (sum, ch) in sum_channels.into_iter().zip(&mut out_channels) {
-                    ch[y * width + x] = sum / sum_weights;
-                }
-            }
-        }
+        epf_step(
+            fb,
+            &mut out_fb,
+            &sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            1.0,
+            &[(0, -1), (-1, 0), (1, 0), (0, 1)],
+            &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
+        );
 
         std::mem::swap(fb, &mut out_fb);
     }
@@ -145,6 +174,15 @@ pub fn apply_epf(
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
-        todo!();
+        epf_step(
+            fb,
+            &mut out_fb,
+            &sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            sigma.pass2_sigma_scale,
+            &[(0, -1), (-1, 0), (1, 0), (0, 1)],
+            &[(0, 0)],
+        );
     }
 }
