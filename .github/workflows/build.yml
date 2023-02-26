@@ -2,19 +2,33 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
-name: Compile and build
+name: Build
 
 jobs:
   build:
-    name: Build
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+      - uses: actions/upload-artifact@v3
+        with:
+          name: jxl-dec-x86_64-unknown-linux-gnu
+          path: |
+            target/release/jxl-dec
+  cross:
+    name: Cross-compile
     runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
     steps:
@@ -33,4 +47,4 @@ jobs:
         with:
           name: jxl-dec-${{ matrix.target }}
           path: |
-            target/release/jxl-dec
+            target/${{ matrix.target }}/release/jxl-dec
