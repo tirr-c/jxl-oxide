@@ -19,8 +19,9 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}
             ${{ runner.os }}-dot-cargo-
       - run: cargo build --release
       - uses: actions/upload-artifact@v3
@@ -49,10 +50,12 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-cross-0.2.5
           restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}
             ${{ runner.os }}-dot-cargo-
-      - run: cargo install cross --git https://github.com/cross-rs/cross
+      - run: cargo install cross --version 0.2.5
       - run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v3
         with:
