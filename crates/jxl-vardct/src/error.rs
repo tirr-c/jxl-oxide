@@ -44,7 +44,6 @@ impl std::error::Error for Error {
             Bitstream(err) => Some(err),
             Decoder(err) => Some(err),
             Modular(err) => Some(err),
-            _ => None,
         }
     }
 }

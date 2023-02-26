@@ -182,8 +182,9 @@ impl<'f> RenderContext<'f> {
         Ok(fb)
     }
 
-    fn render_modular<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
-        let header = self.image_header;
+    fn render_modular<'a>(&'a self, frame: &'a Frame<'f>, _region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+        let metadata = self.metadata();
+        let xyb_encoded = self.xyb_encoded();
         let frame_header = frame.header();
         let frame_data = frame.data();
         let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
@@ -192,7 +193,7 @@ impl<'f> RenderContext<'f> {
         let shifts_cbycr = [0, 1, 2].map(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
-        let is_single_channel = !header.metadata.xyb_encoded && header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
+        let is_single_channel = !xyb_encoded && metadata.colour_encoding.colour_space == ColourSpace::Grey;
 
         let channel_data = gmodular.image().channel_data();
         if is_single_channel {
@@ -202,7 +203,7 @@ impl<'f> RenderContext<'f> {
 
         let width = self.width();
         let height = self.height();
-        let bit_depth = header.metadata.bit_depth;
+        let bit_depth = metadata.bit_depth;
         let mut fb_yxb = FrameBuffer::new(width, height, width, 3);
         let width = width as usize;
         let height = height as usize;
@@ -230,7 +231,7 @@ impl<'f> RenderContext<'f> {
                         continue;
                     }
 
-                    buffer[y * width + x] = if header.metadata.xyb_encoded {
+                    buffer[y * width + x] = if xyb_encoded {
                         s as f32
                     } else {
                         bit_depth.parse_integer_sample(s)
@@ -239,7 +240,7 @@ impl<'f> RenderContext<'f> {
             }
         }
 
-        if header.metadata.xyb_encoded {
+        if xyb_encoded {
             let mut it = buffers.into_iter();
             let y = it.next().unwrap();
             let x = it.next().unwrap();
@@ -256,7 +257,7 @@ impl<'f> RenderContext<'f> {
     }
 
     fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
-        let header = self.image_header;
+        let metadata = self.metadata();
         let frame_header = frame.header();
         let frame_data = frame.data();
         let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
@@ -289,7 +290,7 @@ impl<'f> RenderContext<'f> {
         }
 
         let quantizer = &lf_global_vardct.quantizer;
-        let oim = &header.metadata.opsin_inverse_matrix;
+        let oim = &metadata.opsin_inverse_matrix;
         let dequant_matrices = &hf_global.dequant_matrices;
         let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 

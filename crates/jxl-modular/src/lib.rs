@@ -134,7 +134,7 @@ impl Modular {
                     let width = (width - x).min(gw) << hshift;
                     let height = (height - y).min(gh) << vshift;
                     Some((
-                        ModularChannelParams::with_shift(width, height, group_dim, ChannelShift::Raw(hshift, vshift)),
+                        ModularChannelParams::with_shift(width, height, ChannelShift::Raw(hshift, vshift)),
                         SubimageChannelInfo::new(i, x, y),
                     ))
                 }
@@ -193,7 +193,7 @@ impl Modular {
                     let width = (width - x).min(gw) << hshift;
                     let height = (height - y).min(gh) << vshift;
                     Some((
-                        ModularChannelParams::with_shift(width, height, group_dim, ChannelShift::Raw(hshift, vshift)),
+                        ModularChannelParams::with_shift(width, height, ChannelShift::Raw(hshift, vshift)),
                         SubimageChannelInfo::new(i, x, y),
                     ))
                 }

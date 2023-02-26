@@ -1,3 +1,5 @@
+#![allow(unused_variables, unused_mut, dead_code)]
+
 use std::io::Read;
 
 use jxl_bitstream::{Bitstream, Bundle, header::{Headers, ExtraChannelType}};
