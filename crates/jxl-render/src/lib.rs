@@ -360,7 +360,8 @@ impl<'f> RenderContext<'f> {
         let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 
         if frame_header.flags.use_lf_frame() {
-            todo!();
+            tracing::error!("LF frame is not supported");
+            return Err(Error::NotSupported("LF frame is not supported"));
         }
 
         let dequantized_lf = frame_data.lf_group
