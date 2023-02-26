@@ -426,7 +426,20 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                 params: read_fixed(bitstream)?,
                 dct_params: read_dct_params(bitstream)?,
             },
-            5 => todo!(),
+            5 => {
+                let mut params = read_fixed::<9, _>(bitstream)?;
+                for params in &mut params {
+                    for param in &mut params[..6] {
+                        *param *= 64.0;
+                    }
+                }
+
+                Afv {
+                    params,
+                    dct_params: read_dct_params(bitstream)?,
+                    dct4x4_params: read_dct_params(bitstream)?,
+                }
+            },
             6 => Dct(read_dct_params(bitstream)?),
             7 => {
                 let (width, height) = dct_select.dequant_matrix_size();
