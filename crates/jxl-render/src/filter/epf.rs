@@ -21,6 +21,7 @@ fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
     (1.0 - scaled_distance * inv_sigma).max(0.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn epf_step(
     input: &FrameBuffer,
     output: &mut FrameBuffer,

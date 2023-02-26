@@ -65,7 +65,7 @@ pub struct ModularChannelParams {
 }
 
 impl ModularChannelParams {
-    pub fn new(width: u32, height: u32, group_dim: u32) -> Self {
+    pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
             height,
@@ -73,7 +73,7 @@ impl ModularChannelParams {
         }
     }
 
-    pub fn jpeg(width: u32, height: u32, group_dim: u32, jpeg_upsampling: [u32; 3], idx: usize) -> Self {
+    pub fn jpeg(width: u32, height: u32, jpeg_upsampling: [u32; 3], idx: usize) -> Self {
         Self {
             width,
             height,
@@ -81,7 +81,7 @@ impl ModularChannelParams {
         }
     }
 
-    pub fn with_shift(width: u32, height: u32, group_dim: u32, shift: ChannelShift) -> Self {
+    pub fn with_shift(width: u32, height: u32, shift: ChannelShift) -> Self {
         Self {
             width,
             height,

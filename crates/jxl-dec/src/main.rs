@@ -103,11 +103,12 @@ fn main() {
             Some(crop)
         }
     });
-    tracing::debug!(crop = format_args!("{:?}", crop), "Cropped area: {:?}", crop);
+
+    if let Some(crop) = &crop {
+        tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
+    }
 
     tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
-    let bit_depth = headers.metadata.bit_depth.bits_per_sample();
-    let has_alpha = headers.metadata.alpha().is_some();
 
     if headers.metadata.colour_encoding.want_icc {
         tracing::info!("Image has ICC profile");

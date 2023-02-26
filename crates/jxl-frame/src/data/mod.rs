@@ -254,10 +254,10 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let nb_blocks = 1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros())?;
 
         let channels = vec![
-            ModularChannelParams::new((width + 63) / 64, (height + 63) / 64, 128),
-            ModularChannelParams::new((width + 63) / 64, (height + 63) / 64, 128),
-            ModularChannelParams::new(nb_blocks, 2, 128),
-            ModularChannelParams::new(bw as u32, bh as u32, 128),
+            ModularChannelParams::new((width + 63) / 64, (height + 63) / 64),
+            ModularChannelParams::new((width + 63) / 64, (height + 63) / 64),
+            ModularChannelParams::new(nb_blocks, 2),
+            ModularChannelParams::new(bw as u32, bh as u32),
         ];
         let params = ModularParams::with_channels(
             128,

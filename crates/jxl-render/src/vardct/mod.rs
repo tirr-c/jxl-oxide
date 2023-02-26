@@ -115,16 +115,13 @@ pub fn dequant_hf_varblock(
 ) -> Grid<f32> {
     let CoeffData { dct_select, hf_mul, ref coeff } = *coeff_data;
     let coeff = &coeff[channel];
-
-    let width = coeff.width();
-    let height = coeff.height();
     let mut out = Grid::new_similar(coeff);
 
     let quant_bias = oim.quant_bias[channel];
     let quant_bias_numerator = oim.quant_bias_numerator;
     let matrix = dequant_matrices.get(channel, dct_select);
-    for y in 0..height {
-        for x in 0..width {
+    for (y, mat_row) in matrix.iter().enumerate() {
+        for (x, &mat) in mat_row.iter().enumerate() {
             let quant = *coeff.get(x, y).unwrap();
             let quant = if (-1..=1).contains(&quant) {
                 quant as f32 * quant_bias
@@ -141,7 +138,7 @@ pub fn dequant_hf_varblock(
                 quant *= scale;
             }
 
-            out.set(x, y, quant * matrix[y][x]);
+            out.set(x, y, quant * mat);
         }
     }
 
@@ -256,7 +253,7 @@ pub fn llf_from_lf(
         let mut out = Grid::new_usize(cx, cy, cx, cy);
         for y in 0..cy {
             for x in 0..cx {
-                out.set(x, y, llf[(y * cx + x) as usize] * scale_f(y, cy * 8) * scale_f(x, cx * 8));
+                out.set(x, y, llf[y * cx + x] * scale_f(y, cy * 8) * scale_f(x, cx * 8));
             }
         }
 
