@@ -68,7 +68,7 @@ impl RenderContext<'_> {
 
 impl RenderContext<'_> {
     #[cfg(feature = "mt")]
-    pub fn load_cropped<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+    pub fn load_cropped<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::load_cropped");
         let _guard = span.enter();
 
@@ -87,6 +87,25 @@ impl RenderContext<'_> {
                 lf_level = header.lf_level,
                 "Decoding {}x{} frame", header.width, header.height
             );
+
+            if let Some(region) = &mut region {
+                let mut padding = 0u32;
+                if header.restoration_filter.gab.enabled() {
+                    tracing::debug!("Gabor-like filter requires padding of 1 pixel");
+                    padding = 1;
+                }
+                if header.restoration_filter.epf.enabled() {
+                    tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
+                    padding = 3;
+                }
+
+                let delta_w = region.0.min(padding);
+                let delta_h = region.1.min(padding);
+                region.0 -= delta_w;
+                region.1 -= delta_h;
+                region.2 += delta_w + padding;
+                region.3 += delta_h + padding;
+            }
 
             if header.frame_type.is_normal_frame() {
                 frame.load_cropped_par(bitstream, region)?;
@@ -108,7 +127,7 @@ impl RenderContext<'_> {
     }
 
     #[cfg(not(feature = "mt"))]
-    pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+    pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let image_header = self.image_header;
 
         loop {
@@ -124,6 +143,25 @@ impl RenderContext<'_> {
                 lf_level = header.lf_level,
                 "Decoding {}x{} frame", header.width, header.height
             );
+
+            if let Some(region) = &mut region {
+                let mut padding = 0u32;
+                if header.restoration_filter.gab.enabled() {
+                    tracing::debug!("Gabor-like filter requires padding of 1 pixel");
+                    padding = 1;
+                }
+                if header.restoration_filter.epf.enabled() {
+                    tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
+                    padding = 3;
+                }
+
+                let delta_w = region.0.min(padding);
+                let delta_h = region.1.min(padding);
+                region.0 -= delta_w;
+                region.1 -= delta_h;
+                region.2 += delta_w + padding;
+                region.3 += delta_h + padding;
+            }
 
             if header.frame_type.is_normal_frame() {
                 frame.load_cropped(bitstream, region)?;
@@ -169,7 +207,26 @@ impl RenderContext<'_> {
 }
 
 impl<'f> RenderContext<'f> {
-    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, mut region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+        if let Some(region) = &mut region {
+            let mut padding = 0u32;
+            if frame.header().restoration_filter.gab.enabled() {
+                tracing::debug!("Gabor-like filter requires padding of 1 pixel");
+                padding = 1;
+            }
+            if frame.header().restoration_filter.epf.enabled() {
+                tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
+                padding = 3;
+            }
+
+            let delta_w = region.0.min(padding);
+            let delta_h = region.1.min(padding);
+            region.0 -= delta_w;
+            region.1 -= delta_h;
+            region.2 += delta_w + padding;
+            region.3 += delta_h + padding;
+        }
+
         let mut fb = match frame.header().encoding {
             Encoding::Modular => {
                 self.render_modular(frame, region)
@@ -186,6 +243,7 @@ impl<'f> RenderContext<'f> {
         if let Gabor::Enabled(weights) = frame.header().restoration_filter.gab {
             filter::apply_gabor_like(&mut fb, weights);
         }
+        filter::apply_epf(&mut fb, &frame.data().lf_group, frame.header());
 
         Ok(fb)
     }

@@ -8,7 +8,7 @@ use jxl_vardct::{TransformType, LfChannelDequantization, LfChannelCorrelation, H
 use crate::{
     FrameHeader,
     Result,
-    header::Encoding,
+    header::Encoding, filter::EdgePreservingFilter,
 };
 
 mod noise;
@@ -169,7 +169,7 @@ pub struct HfMetadata {
     pub x_from_y: Grid<i32>,
     pub b_from_y: Grid<i32>,
     pub block_info: Grid<BlockInfo>,
-    pub sharpness: Grid<i32>,
+    pub epf_sigma: Grid<f32>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -275,6 +275,12 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let b_from_y = image_iter.next().unwrap();
         let block_info_raw = image_iter.next().unwrap();
         let sharpness = image_iter.next().unwrap();
+        let mut epf_sigma = Grid::new_similar(&sharpness);
+        let epf = if let EdgePreservingFilter::Enabled { sigma, sharp_lut, .. } = &group_params.frame_header.restoration_filter.epf {
+            Some((sigma.quant_mul, sharp_lut))
+        } else {
+            None
+        };
 
         let mut block_info = Grid::<BlockInfo>::new_usize(bw, bh, bw, bh);
         let mut x;
@@ -290,6 +296,7 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
                     let hf_mul = *block_info_raw.get(data_idx, 1).unwrap();
                     let (dw, dh) = dct_select.dct_select_size();
 
+                    let epf = epf.map(|(quant_mul, sharp_lut)| ((hf_mul + 1) as f32 * quant_mul, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
                             debug_assert!(!block_info.get(x + dx, y + dy).unwrap().is_occupied());
@@ -301,6 +308,12 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
                             } else {
                                 BlockInfo::Occupied
                             });
+
+                            if let Some((sigma, sharp_lut)) = epf {
+                                let sharpness = sharpness.get(x + dx, y + dy).unwrap();
+                                let sigma = sigma * sharp_lut[*sharpness as usize];
+                                epf_sigma.set(x + dx, y + dy, sigma);
+                            }
                         }
                     }
                     data_idx += 1;
@@ -317,7 +330,7 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
             x_from_y,
             b_from_y,
             block_info,
-            sharpness,
+            epf_sigma,
         })
     }
 }

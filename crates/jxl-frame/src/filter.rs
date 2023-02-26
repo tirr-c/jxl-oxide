@@ -33,6 +33,12 @@ impl<Ctx> Bundle<Ctx> for Gabor {
     }
 }
 
+impl Gabor {
+    pub fn enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+}
+
 #[derive(Debug)]
 pub enum EdgePreservingFilter {
     Disabled,
@@ -48,6 +54,10 @@ pub enum EdgePreservingFilter {
 impl EdgePreservingFilter {
     const SHARP_LUT_DEFAULT: [f32; 8] = [0.0, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0];
     const CHANNEL_SCALE_DEFAULT: [f32; 3] = [40.0, 5.0, 3.5];
+
+    pub fn enabled(&self) -> bool {
+        matches!(self, Self::Enabled { .. })
+    }
 }
 
 impl Default for EdgePreservingFilter {
