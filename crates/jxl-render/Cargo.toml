@@ -12,11 +12,9 @@ path = "../jxl-bitstream"
 
 [dependencies.jxl-frame]
 path = "../jxl-frame"
-default_features = false
 
 [dependencies.jxl-grid]
 path = "../jxl-grid"
-default_features = false
 
 [dependencies.jxl-modular]
 path = "../jxl-modular"
@@ -28,7 +26,3 @@ path = "../jxl-vardct"
 version = "0.1.37"
 default_features = false
 features = ["std"]
-
-[features]
-mt = ["jxl-grid/mt", "jxl-frame/mt"]
-default = ["mt"]

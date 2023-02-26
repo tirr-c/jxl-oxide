@@ -67,66 +67,6 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    #[cfg(feature = "mt")]
-    pub fn load_cropped<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
-        let span = tracing::span!(tracing::Level::TRACE, "RenderContext::load_cropped");
-        let _guard = span.enter();
-
-        let image_header = self.image_header;
-
-        loop {
-            bitstream.zero_pad_to_byte()?;
-            let mut frame = Frame::parse(bitstream, image_header)?;
-            let header = frame.header();
-            let is_last = header.is_last;
-            tracing::info!(
-                width = header.width,
-                height = header.height,
-                frame_type = format_args!("{:?}", header.frame_type),
-                upsampling = header.upsampling,
-                lf_level = header.lf_level,
-                "Decoding {}x{} frame", header.width, header.height
-            );
-
-            if let Some(region) = &mut region {
-                let mut padding = 0u32;
-                if header.restoration_filter.gab.enabled() {
-                    tracing::debug!("Gabor-like filter requires padding of 1 pixel");
-                    padding = 1;
-                }
-                if header.restoration_filter.epf.enabled() {
-                    tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
-                    padding = 3;
-                }
-
-                let delta_w = region.0.min(padding);
-                let delta_h = region.1.min(padding);
-                region.0 -= delta_w;
-                region.1 -= delta_h;
-                region.2 += delta_w + padding;
-                region.3 += delta_h + padding;
-            }
-
-            if header.frame_type.is_normal_frame() {
-                frame.load_cropped_par(bitstream, region)?;
-            } else {
-                frame.load_all_par(bitstream)?;
-            }
-            frame.complete()?;
-
-            let toc = frame.toc();
-            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-            self.preserve_frame(frame);
-            if is_last {
-                break;
-            }
-
-            bitstream.skip_to_bookmark(bookmark)?;
-        }
-        Ok(())
-    }
-
-    #[cfg(not(feature = "mt"))]
     pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let image_header = self.image_header;
 
@@ -182,12 +122,6 @@ impl RenderContext<'_> {
         Ok(())
     }
 
-    #[cfg(feature = "mt")]
-    pub fn load_all_frames<R: Read + Send>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        self.load_cropped(bitstream, None)
-    }
-
-    #[cfg(not(feature = "mt"))]
     pub fn load_all_frames<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         self.load_cropped(bitstream, None)
     }

@@ -7,10 +7,6 @@ use jxl_render::{RenderContext, FrameBuffer};
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Args {
-    /// Number of threads to use, 0 to choose the value automatically
-    #[cfg(feature = "mt")]
-    #[arg(short, long, default_value_t)]
-    threads: usize,
     /// Output file
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -141,25 +137,7 @@ fn main() {
     }
 
     let mut render = RenderContext::new(&headers);
-    let mut fb;
-
-    #[cfg(feature = "mt")]
-    {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(args.threads)
-            .build()
-            .expect("failed to build thread pool");
-        tracing::info!(num_threads = pool.current_num_threads(), "Decoding with {} threads", pool.current_num_threads());
-
-        fb = pool.install(|| {
-            run(&mut bitstream, &mut render, &headers, crop)
-        });
-    }
-
-    #[cfg(not(feature = "mt"))]
-    {
-        fb = run(&mut bitstream, &mut render, &headers, crop);
-    }
+    let mut fb = run(&mut bitstream, &mut render, &headers, crop);
 
     if headers.metadata.xyb_encoded {
         fb.yxb_to_srgb_linear(&headers.metadata);
