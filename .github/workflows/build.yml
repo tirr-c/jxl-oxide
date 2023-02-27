@@ -2,12 +2,18 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
 name: Build
 
 jobs:
   build:
     name: Compile
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
@@ -22,12 +28,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
+      - name: Detect host triple
+        id: detect-host
+        shell: bash
+        run: |
+          rustc -vV | sed -ne 's/^host: /host=/p' >> "$GITHUB_OUTPUT"
       - run: cargo build --release
       - uses: actions/upload-artifact@v3
         with:
-          name: jxl-dec-x86_64-unknown-linux-gnu
+          name: jxl-dec-${{ steps.detect-host.outputs.host }}
           path: |
             target/release/jxl-dec
+            target/release/jxl-dec.exe
   cross:
     name: Cross-compile
     runs-on: ubuntu-latest
