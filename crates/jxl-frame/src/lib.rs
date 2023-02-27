@@ -160,9 +160,13 @@ impl Frame<'_> {
         }
         let hf_global = self.data.hf_global.as_ref().unwrap().as_ref();
 
-        let it = it.map(|v| {
-            let TocGroupKind::GroupPass { pass_idx, group_idx } = v.kind else { panic!() };
-            (pass_idx, group_idx, None, Some(v.offset))
+        let it = it.filter_map(|v| {
+            let (pass_idx, group_idx) = match v.kind {
+                TocGroupKind::GroupPass { pass_idx, group_idx } => (pass_idx, group_idx),
+                TocGroupKind::HfGlobal => return None,
+                _ => unreachable!(),
+            };
+            Some((pass_idx, group_idx, None, Some(v.offset)))
         });
 
         for (pass_idx, group_idx, local_bitstream, offset) in pending_groups.into_iter().chain(it) {
