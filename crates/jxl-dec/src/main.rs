@@ -108,36 +108,10 @@ fn main() {
         tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
     }
 
-    tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
-
-    if headers.metadata.colour_encoding.want_icc {
-        tracing::info!("Image has ICC profile");
-
-        let enc_size = read_bits!(bitstream, U64).unwrap();
-        let mut decoder = jxl_coding::Decoder::parse(&mut bitstream, 41)
-            .expect("failed to decode ICC entropy coding distribution");
-
-        let mut encoded_icc = vec![0u8; enc_size as usize];
-        let mut b1 = 0u8;
-        let mut b2 = 0u8;
-        decoder.begin(&mut bitstream).unwrap();
-        for (idx, b) in encoded_icc.iter_mut().enumerate() {
-            let sym = decoder.read_varint(&mut bitstream, get_icc_ctx(idx, b1, b2))
-                .expect("Failed to read encoded ICC stream");
-            if sym >= 256 {
-                panic!("Decoded symbol out of range");
-            }
-            *b = sym as u8;
-
-            b2 = b1;
-            b1 = *b;
-        }
-
-        tracing::warn!("Discarding encoded ICC profile");
-        drop(encoded_icc);
-    }
-
     let mut render = RenderContext::new(&headers);
+    tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
+    render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
+
     let mut fb = run(&mut bitstream, &mut render, &headers, crop);
 
     if headers.metadata.xyb_encoded {
@@ -201,35 +175,4 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
     tracing::info!(elapsed_ms, "Took {:.2} ms", elapsed_ms);
 
     fb
-}
-
-fn get_icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {
-    if idx <= 128 {
-        return 0;
-    }
-
-    let p1 = match b1 {
-        | b'a'..=b'z'
-        | b'A'..=b'Z' => 0,
-        | b'0'..=b'9'
-        | b'.'
-        | b',' => 1,
-        | 0..=1 => 2 + b1 as u32,
-        | 2..=15 => 4,
-        | 241..=254 => 5,
-        | 255 => 6,
-        | _ => 7,
-    };
-    let p2 = match b2 {
-        | b'a'..=b'z'
-        | b'A'..=b'Z' => 0,
-        | b'0'..=b'9'
-        | b'.'
-        | b',' => 1,
-        | 0..=15 => 2,
-        | 241..=255 => 3,
-        | _ => 4,
-    };
-
-    1 + p1 + 8 * p2
 }

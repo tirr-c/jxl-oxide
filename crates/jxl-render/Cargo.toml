@@ -10,6 +10,9 @@ edition = "2021"
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
 
+[dependencies.jxl-coding]
+path = "../jxl-coding"
+
 [dependencies.jxl-frame]
 path = "../jxl-frame"
 
@@ -26,3 +29,7 @@ path = "../jxl-vardct"
 version = "0.1.37"
 default_features = false
 features = ["std"]
+
+[dev-dependencies.reqwest]
+version = "0.11.14"
+features = ["blocking"]

@@ -67,6 +67,18 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
+    pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        if self.metadata().colour_encoding.want_icc {
+            tracing::info!("Image has ICC profile");
+            let icc = color::read_icc(bitstream)?;
+
+            tracing::warn!("Discarding encoded ICC profile");
+            drop(icc);
+        }
+
+        Ok(())
+    }
+
     pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let image_header = self.image_header;
 

@@ -2,6 +2,7 @@
 #[non_exhaustive]
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
+    Decoder(jxl_coding::Error),
     Frame(jxl_frame::Error),
     IncompleteFrame,
     NotSupported(&'static str),
@@ -10,6 +11,12 @@ pub enum Error {
 impl From<jxl_bitstream::Error> for Error {
     fn from(err: jxl_bitstream::Error) -> Self {
         Self::Bitstream(err)
+    }
+}
+
+impl From<jxl_coding::Error> for Error {
+    fn from(err: jxl_coding::Error) -> Self {
+        Self::Decoder(err)
     }
 }
 
@@ -25,6 +32,7 @@ impl std::fmt::Display for Error {
 
         match self {
             Bitstream(err) => write!(f, "bitstream error: {}", err),
+            Decoder(err) => write!(f, "entropy decoder error: {}", err),
             Frame(err) => write!(f, "frame error: {}", err),
             IncompleteFrame => write!(f, "frame data is incomplete"),
             NotSupported(msg) => write!(f, "not supported: {}", msg),
@@ -38,6 +46,7 @@ impl std::error::Error for Error {
 
         match self {
             Bitstream(err) => Some(err),
+            Decoder(err) => Some(err),
             Frame(err) => Some(err),
             _ => None,
         }
