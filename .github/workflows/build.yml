@@ -13,7 +13,6 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
-          - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -41,6 +40,42 @@ jobs:
           path: |
             target/release/jxl-dec
             target/release/jxl-dec.exe
+  macos:
+    name: Compile (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
+            ${{ runner.os }}-dot-cargo-
+      - run: |
+          export SDKROOT=$(xcrun -sdk macosx --show-sdk-path)
+          export MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+      - name: Make universal binary
+        # https://developer.apple.com/documentation/apple-silicon/building-a-universal-macos-binary#Update-the-Architecture-List-of-Custom-Makefiles
+        run: |
+          lipo -create \
+            -output target/jxl-dec-universal-apple-darwin \
+            target/aarch64-apple-darwin/release/jxl-dec \
+            target/x86_64-apple-darwin/release/jxl-dec
+      - uses: actions/upload-artifact@v3
+        with:
+          name: jxl-dec-universal-apple-darwin
+          path: |
+            target/jxl-dec-universal-apple-darwin
   cross:
     name: Cross-compile
     runs-on: ubuntu-latest
