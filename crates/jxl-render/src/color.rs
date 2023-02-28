@@ -56,13 +56,13 @@ pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> crate::Result
 }
 
 pub fn perform_inverse_xyb(fb_yxb: &mut FrameBuffer, metadata: &ImageMetadata) {
-    let itscale = 255.0 / metadata.tone_mapping.intensity_target;
+    let itscale = 255.0 / metadata.tone_mapping.intensity_target as f64;
     let oim = &metadata.opsin_inverse_matrix;
 
-    let ob = oim.opsin_bias;
+    let ob = oim.opsin_bias.map(|v| v as f64);
     let cbrt_ob = ob.map(|v| v.cbrt());
 
-    let inv_mat = oim.inv_mat;
+    let inv_mat = oim.inv_mat.map(|r| r.map(|v| v as f64));
 
     let width = fb_yxb.width() as usize;
     let height = fb_yxb.height() as usize;
@@ -78,17 +78,17 @@ pub fn perform_inverse_xyb(fb_yxb: &mut FrameBuffer, metadata: &ImageMetadata) {
             let y = &mut y[idx];
             let x = &mut x[idx];
             let b = &mut b[idx];
-            let g_l = *y + *x;
-            let g_m = *y - *x;
-            let g_s = *b;
+            let g_l = (*y + *x) as f64;
+            let g_m = (*y - *x) as f64;
+            let g_s = *b as f64;
 
             let mix_l = ((g_l - cbrt_ob[0]).powi(3) + ob[0]) * itscale;
             let mix_m = ((g_m - cbrt_ob[1]).powi(3) + ob[1]) * itscale;
             let mix_s = ((g_s - cbrt_ob[2]).powi(3) + ob[2]) * itscale;
 
-            *y = inv_mat[0][0] * mix_l + inv_mat[0][1] * mix_m + inv_mat[0][2] * mix_s;
-            *x = inv_mat[1][0] * mix_l + inv_mat[1][1] * mix_m + inv_mat[1][2] * mix_s;
-            *b = inv_mat[2][0] * mix_l + inv_mat[2][1] * mix_m + inv_mat[2][2] * mix_s;
+            *y = (inv_mat[0][0] * mix_l + inv_mat[0][1] * mix_m + inv_mat[0][2] * mix_s) as f32;
+            *x = (inv_mat[1][0] * mix_l + inv_mat[1][1] * mix_m + inv_mat[1][2] * mix_s) as f32;
+            *b = (inv_mat[2][0] * mix_l + inv_mat[2][1] * mix_m + inv_mat[2][2] * mix_s) as f32;
         }
     }
 }

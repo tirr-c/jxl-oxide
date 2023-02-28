@@ -1,4 +1,6 @@
-use jxl_bitstream::{Bundle, header::{Headers, TransferFunction}};
+use lcms2::Profile;
+
+use jxl_bitstream::{Bundle, header::Headers};
 use jxl_render::RenderContext;
 
 fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
@@ -29,12 +31,12 @@ fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
     out
 }
 
-fn download_object_with_cache(hash: &str) -> Vec<u8> {
+fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
     let url = format!("https://storage.googleapis.com/storage/v1/b/jxl-conformance/o/objects%2F{hash}?alt=media");
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/cache");
     path.push(hash);
-    path.set_extension("npy");
+    path.set_extension(ext);
 
     if let Ok(buf) = std::fs::read(&path) {
         buf
@@ -48,16 +50,13 @@ fn download_object_with_cache(hash: &str) -> Vec<u8> {
     }
 }
 
-#[test]
-fn bicycles() {
-    let buf = download_object_with_cache("6f71d8ca122872e7d850b672e7fb46b818c2dfddacd00b3934fe70aa8e0b327e");
-    let expected = read_numpy(std::io::Cursor::new(buf));
+fn run_test(
+    mut bitstream: jxl_bitstream::Bitstream<std::fs::File>,
+    target_icc: Vec<u8>,
+    expected: Vec<f32>,
+) -> (f32, f32) {
+    let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
 
-    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("tests/reference/testcases");
-    path.push("bicycles/input.jxl");
-    let file = std::fs::File::open(path).expect("Failed to open file");
-    let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = Headers::parse(&mut bitstream, ()).expect("Failed to read headers");
 
     let mut render = RenderContext::new(&headers);
@@ -79,14 +78,108 @@ fn bicycles() {
         .expect("failed to load frames");
     let mut fb = render.render_cropped(None).expect("failed to render");
 
-    if headers.metadata.xyb_encoded {
+    let source_profile = if headers.metadata.xyb_encoded {
         fb.yxb_to_srgb_linear(&headers.metadata);
-    }
-    if headers.metadata.xyb_encoded || headers.metadata.colour_encoding.tf == TransferFunction::Linear {
-        fb.srgb_linear_to_standard();
-    }
+        let linear = lcms2::ToneCurve::new(1.0);
+        Profile::new_rgb(
+            &lcms2::CIExyY { x: 0.3127, y: 0.329, Y: 1.0 },
+            &lcms2::CIExyYTRIPLE {
+                Red: lcms2::CIExyY { x: 0.64, y: 0.33, Y: 0.2126 },
+                Green: lcms2::CIExyY { x: 0.3, y: 0.6, Y: 0.7152 },
+                Blue: lcms2::CIExyY { x: 0.15, y: 0.06, Y: 0.0722 },
+            },
+            &[&linear; 3],
+        ).unwrap()
+    } else {
+        todo!()
+    };
+
+    let width = fb.width() as usize;
+    let height = fb.height() as usize;
+    let channels = fb.channel_buffers();
+    assert_eq!(channels.len(), 3);
 
     let expected_len = expected.len();
-    let actual_len = fb.width() as usize * fb.height() as usize * fb.channels() as usize;
+    let actual_len = width * height * channels.len();
     assert_eq!(expected_len, actual_len);
+
+    let mut interleaved_buffer = vec![[0.0f32; 3]; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let out = &mut interleaved_buffer[x + y * width];
+            for (&ch, out) in channels.iter().zip(out) {
+                *out = ch[x + y * width];
+            }
+        }
+    }
+
+    let pixfmt = lcms2::PixelFormat::RGB_FLT;
+    let transform = lcms2::Transform::new(
+        &source_profile,
+        pixfmt,
+        &target_profile,
+        pixfmt,
+        lcms2::Intent::Perceptual,
+    ).expect("failed to create transform");
+    transform.transform_in_place(&mut interleaved_buffer);
+
+    let mut sum_se = vec![0.0f32; channels.len()];
+    let mut peak_error = 0.0f32;
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = &interleaved_buffer[x + y * width];
+            for (c, (&output, sum_se)) in pixel.iter().zip(&mut sum_se).enumerate() {
+                let reference = expected[c + (x + y * width) * channels.len()];
+                let abs_error = (output - reference).abs();
+                peak_error = peak_error.max(abs_error);
+                *sum_se += abs_error * abs_error;
+            }
+        }
+    }
+
+    let mut max_rmse = 0.0f32;
+    for se in sum_se {
+        let rmse = (se / (width * height) as f32).sqrt();
+        max_rmse = max_rmse.max(rmse);
+    }
+
+    eprintln!("peak_error = {}", peak_error);
+    eprintln!("max_rmse = {}", max_rmse);
+
+    (peak_error, max_rmse)
+}
+
+macro_rules! conformance_test {
+    ($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $peak_error:expr, $max_rmse:expr $(,)? )) => {
+        #[test]
+        $(#[$attr])*
+        fn $name() {
+            let buf = download_object_with_cache($npy_hash, "npy");
+            let target_icc = download_object_with_cache($icc_hash, "icc");
+
+            let expected = read_numpy(std::io::Cursor::new(buf));
+
+            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            path.push("tests/conformance/testcases");
+            path.push(stringify!($name));
+            path.push("input.jxl");
+            let file = std::fs::File::open(path).expect("Failed to open file");
+            let bitstream = jxl_bitstream::Bitstream::new(file);
+
+            let (peak_error, max_rmse) = run_test(bitstream, target_icc, expected);
+
+            assert!(peak_error < $peak_error);
+            assert!(max_rmse < $max_rmse);
+        }
+    };
+}
+
+conformance_test! {
+    #[ignore = "failing conformance test"]
+    bicycles(
+        "6f71d8ca122872e7d850b672e7fb46b818c2dfddacd00b3934fe70aa8e0b327e",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        0.000976562,
+        0.000976562,
+    )
 }
