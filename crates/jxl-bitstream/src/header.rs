@@ -325,6 +325,12 @@ define_bundle! {
     }
 }
 
+impl ColourEncoding {
+    pub fn is_srgb(&self) -> bool {
+        self.colour_space == ColourSpace::Rgb && self.white_point == WhitePoint::D65 && self.primaries == Primaries::Srgb && self.tf == TransferFunction::Srgb
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ColourSpace {

@@ -83,6 +83,8 @@ fn run_test(
         fb.yxb_to_srgb_linear(&headers.metadata);
         fb.srgb_linear_to_standard();
         Profile::new_srgb()
+    } else if headers.metadata.colour_encoding.is_srgb() {
+        Profile::new_srgb()
     } else {
         todo!()
     };
@@ -173,6 +175,15 @@ macro_rules! conformance_test {
 conformance_test! {
     bicycles(
         "6f71d8ca122872e7d850b672e7fb46b818c2dfddacd00b3934fe70aa8e0b327e",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        0.000976562,
+        0.000976562,
+    )
+}
+
+conformance_test! {
+    delta_palette(
+        "952b9e16aa0ae23df38c6b358cb4835b5f9479838f6855b96845ea54b0528c1f",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
         0.000976562,
         0.000976562,
