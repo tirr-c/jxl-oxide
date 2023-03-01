@@ -61,9 +61,8 @@ impl Decoder {
 
     pub fn read_varint_with_multiplier<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32, dist_multiplier: u32) -> Result<u32> {
         let cluster = self.inner.clusters[ctx as usize];
-        Ok(if let Lz77::Enabled { state, min_symbol, min_length } = &mut self.lz77 {
-            let min_symbol = *min_symbol as u16;
-            let min_length = *min_length;
+        Ok(if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
+            let min_symbol = min_symbol as u16;
             let r;
             if state.num_to_copy > 0 {
                 r = state.window[(state.copy_pos & 0xfffff) as usize];
@@ -82,7 +81,7 @@ impl Decoder {
                     } else if distance < 120 {
                         let [offset, dist] = Self::SPECIAL_DISTANCES[distance as usize];
                         let dist = offset as i32 + dist_multiplier as i32 * dist as i32;
-                        dist.min(1) as u32
+                        dist.max(1) as u32
                     } else {
                         distance - 119
                     };
