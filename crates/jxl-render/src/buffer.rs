@@ -159,11 +159,12 @@ impl FrameBuffer {
     pub fn srgb_linear_to_standard(&mut self) {
         for buf in &mut self.buf {
             for s in buf {
-                *s = if *s <= 0.0031308f32 {
-                    12.92 * *s
+                let a = s.abs();
+                *s = if a <= 0.0031308f32 {
+                    12.92 * a
                 } else {
-                    1.055 * s.powf(1.0 / 2.4) - 0.055
-                };
+                    1.055 * a.powf(1.0 / 2.4) - 0.055
+                }.copysign(*s);
             }
         }
     }

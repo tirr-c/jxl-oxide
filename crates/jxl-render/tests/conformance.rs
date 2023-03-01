@@ -54,6 +54,7 @@ fn run_test(
     mut bitstream: jxl_bitstream::Bitstream<std::fs::File>,
     target_icc: Vec<u8>,
     expected: Vec<f32>,
+    expected_peak_error: f32,
 ) -> (f32, f32) {
     let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
 
@@ -80,16 +81,8 @@ fn run_test(
 
     let source_profile = if headers.metadata.xyb_encoded {
         fb.yxb_to_srgb_linear(&headers.metadata);
-        let linear = lcms2::ToneCurve::new(1.0);
-        Profile::new_rgb(
-            &lcms2::CIExyY { x: 0.3127, y: 0.329, Y: 1.0 },
-            &lcms2::CIExyYTRIPLE {
-                Red: lcms2::CIExyY { x: 0.64, y: 0.33, Y: 0.2126 },
-                Green: lcms2::CIExyY { x: 0.3, y: 0.6, Y: 0.7152 },
-                Blue: lcms2::CIExyY { x: 0.15, y: 0.06, Y: 0.0722 },
-            },
-            &[&linear; 3],
-        ).unwrap()
+        fb.srgb_linear_to_standard();
+        Profile::new_srgb()
     } else {
         todo!()
     };
@@ -131,6 +124,9 @@ fn run_test(
             for (c, (&output, sum_se)) in pixel.iter().zip(&mut sum_se).enumerate() {
                 let reference = expected[c + (x + y * width) * channels.len()];
                 let abs_error = (output - reference).abs();
+                if abs_error >= expected_peak_error {
+                    eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}");
+                }
                 peak_error = peak_error.max(abs_error);
                 *sum_se += abs_error * abs_error;
             }
@@ -166,7 +162,7 @@ macro_rules! conformance_test {
             let file = std::fs::File::open(path).expect("Failed to open file");
             let bitstream = jxl_bitstream::Bitstream::new(file);
 
-            let (peak_error, max_rmse) = run_test(bitstream, target_icc, expected);
+            let (peak_error, max_rmse) = run_test(bitstream, target_icc, expected, $peak_error);
 
             assert!(peak_error < $peak_error);
             assert!(max_rmse < $max_rmse);
@@ -175,7 +171,6 @@ macro_rules! conformance_test {
 }
 
 conformance_test! {
-    #[ignore = "failing conformance test"]
     bicycles(
         "6f71d8ca122872e7d850b672e7fb46b818c2dfddacd00b3934fe70aa8e0b327e",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
