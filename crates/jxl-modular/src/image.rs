@@ -36,9 +36,13 @@ impl Image {
     }
 
     pub(super) fn new(channels: ModularChannels, group_dim: u32, bit_depth: u32) -> Self {
+        let span = tracing::span!(tracing::Level::TRACE, "Image::new", group_dim, bit_depth);
+        let _guard = span.enter();
+
         let data = channels.info
             .iter()
             .map(|info| {
+                tracing::trace!(info = format_args!("{:?}", info), "Creating modular channel");
                 if info.hshift < 0 || info.vshift < 0 {
                     return Grid::new(info.width, info.height, info.width, info.height);
                 }

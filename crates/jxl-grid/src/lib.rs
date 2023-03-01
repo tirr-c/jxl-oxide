@@ -20,6 +20,8 @@ impl<S: Default + Clone> Grid<S> {
     }
 
     pub fn new_usize(width: usize, height: usize, group_width: usize, group_height: usize) -> Self {
+        let group_width = group_width.max(1);
+        let group_height = group_height.max(1);
         let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
         if num_groups == 1 {
             Self::Simple(Some(SimpleGrid::new(width, height)))
