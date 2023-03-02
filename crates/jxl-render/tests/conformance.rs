@@ -1,6 +1,6 @@
-use lcms2::Profile;
+use lcms2::{Profile, CIEXYZ, CIEXYZExt};
 
-use jxl_bitstream::{Bundle, header::Headers};
+use jxl_bitstream::{Bundle, header::{Headers, TransferFunction}};
 use jxl_render::RenderContext;
 
 fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
@@ -85,6 +85,32 @@ fn run_test(
         Profile::new_srgb()
     } else if headers.metadata.colour_encoding.is_srgb() {
         Profile::new_srgb()
+    } else if headers.metadata.colour_encoding.is_srgb_gamut() {
+        let curve = match headers.metadata.colour_encoding.tf {
+            TransferFunction::Linear => lcms2::ToneCurve::new(1.0),
+            TransferFunction::Gamma(g) => lcms2::ToneCurve::new(1e7 / g as f64),
+            _ => todo!(),
+        };
+
+        let d65 = lcms2::CIExyY { x: 0.3127, y: 0.329, Y: 1.0 };
+        let d50_xyz = CIEXYZ::d50();
+        let d65_xyz = CIEXYZ::from(d65);
+
+        let r_d50 = CIEXYZ { X: 0.4360198974609375, Y: 0.2224884033203125, Z: 0.013916015625 };
+        let g_d50 = CIEXYZ { X: 0.385101318359375, Y: 0.7169036865234375, Z: 0.0970916748046875 };
+        let b_d50 = CIEXYZ { X: 0.143096923828125, Y: 0.0606231689453125, Z: 0.714202880859375 };
+        let r_d65 = r_d50.adapt_to_illuminant(d50_xyz, &d65_xyz).unwrap();
+        let g_d65 = g_d50.adapt_to_illuminant(d50_xyz, &d65_xyz).unwrap();
+        let b_d65 = b_d50.adapt_to_illuminant(d50_xyz, &d65_xyz).unwrap();
+        Profile::new_rgb(
+            &d65,
+            &lcms2::CIExyYTRIPLE {
+                Red: r_d65.into(),
+                Green: g_d65.into(),
+                Blue: b_d65.into(),
+            },
+            &[&curve; 3],
+        ).unwrap()
     } else {
         todo!()
     };
@@ -114,7 +140,7 @@ fn run_test(
         pixfmt,
         &target_profile,
         pixfmt,
-        lcms2::Intent::Perceptual,
+        lcms2::Intent::RelativeColorimetric,
     ).expect("failed to create transform");
     transform.transform_in_place(&mut interleaved_buffer);
 
@@ -185,6 +211,15 @@ conformance_test! {
     delta_palette(
         "952b9e16aa0ae23df38c6b358cb4835b5f9479838f6855b96845ea54b0528c1f",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        0.000976562,
+        0.000976562,
+    )
+}
+
+conformance_test! {
+    lz77_flower(
+        "953d3ada476e3218653834c9addc9c16bb6f9f03b18be1be8a85c07a596ea32d",
+        "793cb9df4e4ce93ce8fe827fde34e7fb925b7079fcb68fba1e56fc4b35508ccb",
         0.000976562,
         0.000976562,
     )

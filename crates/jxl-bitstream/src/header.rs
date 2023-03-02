@@ -326,8 +326,16 @@ define_bundle! {
 }
 
 impl ColourEncoding {
+    #[inline]
     pub fn is_srgb(&self) -> bool {
-        self.colour_space == ColourSpace::Rgb && self.white_point == WhitePoint::D65 && self.primaries == Primaries::Srgb && self.tf == TransferFunction::Srgb
+        self.is_srgb_gamut() && self.tf == TransferFunction::Srgb
+    }
+
+    #[inline]
+    pub fn is_srgb_gamut(&self) -> bool {
+        self.colour_space == ColourSpace::Rgb &&
+            self.white_point == WhitePoint::D65 &&
+            self.primaries == Primaries::Srgb
     }
 }
 
