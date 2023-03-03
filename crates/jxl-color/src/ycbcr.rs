@@ -41,7 +41,7 @@ pub fn ycbcr_upsample(grids: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3
 
             for y in 0..height {
                 let y = if v_upsampled { y } else { y * 2 };
-                let idx_base = y * width;
+                let idx_base = y * orig_width;
                 let mut prev_sample = buf[idx_base];
                 for x in 0..width {
                     let curr_sample = buf[idx_base + x * 2];
