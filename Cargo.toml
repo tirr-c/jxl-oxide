@@ -2,12 +2,14 @@
 members = [
   "crates/jxl-bitstream",
   "crates/jxl-coding",
+  "crates/jxl-color",
+  "crates/jxl-dec",
   "crates/jxl-grid",
   "crates/jxl-frame",
+  "crates/jxl-image",
   "crates/jxl-modular",
-  "crates/jxl-vardct",
   "crates/jxl-render",
-  "crates/jxl-dec",
+  "crates/jxl-vardct",
 ]
 
 [profile.release]

@@ -7,7 +7,6 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
-lcms2 = "5.5.0"
 png = "0.17.7"
 
 [dependencies.clap]
@@ -20,8 +19,14 @@ path = "../jxl-bitstream"
 [dependencies.jxl-coding]
 path = "../jxl-coding"
 
+[dependencies.jxl-color]
+path = "../jxl-color"
+
 [dependencies.jxl-frame]
 path = "../jxl-frame"
+
+[dependencies.jxl-image]
+path = "../jxl-image"
 
 [dependencies.jxl-render]
 path = "../jxl-render"

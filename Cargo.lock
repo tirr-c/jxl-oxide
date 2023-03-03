@@ -479,15 +479,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-color"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-coding",
+ "jxl-grid",
+ "jxl-image",
+ "jxl-modular",
+ "lcms2",
+]
+
+[[package]]
 name = "jxl-dec"
 version = "0.1.0"
 dependencies = [
  "clap",
  "jxl-bitstream",
  "jxl-coding",
+ "jxl-color",
  "jxl-frame",
+ "jxl-image",
  "jxl-render",
- "lcms2",
  "png",
  "tracing",
  "tracing-subscriber",
@@ -500,6 +513,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
+ "jxl-image",
  "jxl-modular",
  "jxl-vardct",
  "tracing",
@@ -508,6 +522,14 @@ dependencies = [
 [[package]]
 name = "jxl-grid"
 version = "0.1.0"
+
+[[package]]
+name = "jxl-image"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-grid",
+]
 
 [[package]]
 name = "jxl-modular"
@@ -525,8 +547,10 @@ version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
+ "jxl-color",
  "jxl-frame",
  "jxl-grid",
+ "jxl-image",
  "jxl-modular",
  "jxl-vardct",
  "lcms2",

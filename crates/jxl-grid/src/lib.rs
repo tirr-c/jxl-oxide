@@ -10,6 +10,12 @@ pub enum Grid<S> {
     },
 }
 
+impl<S> From<SimpleGrid<S>> for Grid<S> {
+    fn from(value: SimpleGrid<S>) -> Self {
+        Self::Simple(Some(value))
+    }
+}
+
 impl<S: Default + Clone> Grid<S> {
     pub fn new(width: u32, height: u32, group_width: u32, group_height: u32) -> Self {
         let width = width as usize;

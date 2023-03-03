@@ -3,8 +3,6 @@ use std::collections::BTreeMap;
 use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
 
-use crate::FrameBuffer;
-
 fn mirror(x: isize, size: usize) -> usize {
     let mut x = if x < 0 { (x + 1).unsigned_abs() } else { x as usize };
     if x >= size {
@@ -23,8 +21,8 @@ fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
 
 #[allow(clippy::too_many_arguments)]
 fn epf_step(
-    input: &FrameBuffer,
-    output: &mut FrameBuffer,
+    input: [&SimpleGrid<f32>; 3],
+    mut output: [&mut SimpleGrid<f32>; 3],
     sigma_grid: &SimpleGrid<f32>,
     channel_scale: [f32; 3],
     border_sad_mul: f32,
@@ -32,10 +30,8 @@ fn epf_step(
     kernel_coords: &'static [(isize, isize)],
     dist_coords: &'static [(isize, isize)],
 ) {
-    let width = input.width() as usize;
-    let height = input.height() as usize;
-    let channels = &input.channel_buffers()[..3];
-    let mut out_channels = output.channel_buffers_mut();
+    let width = input[0].width();
+    let height = input[0].height();
     for y in 0..height {
         let y8 = y / 8;
         let is_y_border = (y % 8) == 0 || (y % 8) == 7;
@@ -50,7 +46,8 @@ fn epf_step(
 
             let mut sum_weights = weight(0.0f32, sigma_val, step_multiplier);
             let mut sum_channels = [0.0f32; 3];
-            for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
+            for (sum, ch) in sum_channels.iter_mut().zip(input) {
+                let ch = ch.buf();
                 *sum = ch[y * width + x] * sum_weights;
             }
 
@@ -58,7 +55,8 @@ fn epf_step(
                 let tx = x as isize + dx;
                 let ty = y as isize + dy;
                 let mut dist = 0.0f32;
-                for (&ch, scale) in channels.iter().zip(channel_scale) {
+                for (ch, scale) in input.iter().zip(channel_scale) {
+                    let ch = ch.buf();
                     for &(dx, dy) in dist_coords {
                         let x = x as isize + dx;
                         let y = y as isize + dy;
@@ -78,12 +76,14 @@ fn epf_step(
                     step_multiplier,
                 );
                 sum_weights += weight;
-                for (sum, &ch) in sum_channels.iter_mut().zip(channels) {
+                for (sum, ch) in sum_channels.iter_mut().zip(input) {
+                    let ch = ch.buf();
                     *sum += ch[y * width + x] * weight;
                 }
             }
 
-            for (sum, ch) in sum_channels.into_iter().zip(&mut out_channels) {
+            for (sum, ch) in sum_channels.into_iter().zip(&mut output) {
+                let ch = ch.buf_mut();
                 ch[y * width + x] = sum / sum_weights;
             }
         }
@@ -91,7 +91,7 @@ fn epf_step(
 }
 
 pub fn apply_epf(
-    fb: &mut FrameBuffer,
+    mut fb: [&mut SimpleGrid<f32>; 3],
     lf_groups: &BTreeMap<u32, LfGroup>,
     frame_header: &FrameHeader,
 ) {
@@ -107,9 +107,13 @@ pub fn apply_epf(
     let _guard = span.enter();
 
     tracing::debug!("Preparing sigma grid");
-    let mut out_fb = fb.clone();
-    let width = fb.width() as usize;
-    let height = fb.height() as usize;
+    let mut out_fb = [
+        fb[0].clone(),
+        fb[1].clone(),
+        fb[2].clone(),
+    ];
+    let width = fb[0].width();
+    let height = fb[0].height();
     let w8 = (width + 7) / 8;
     let h8 = (height + 7) / 8;
     let mut sigma_grid = SimpleGrid::new(w8, h8);
@@ -140,9 +144,18 @@ pub fn apply_epf(
     // Step 0
     if iters == 3 {
         tracing::debug!("Running step 0");
+        let old = [
+            &*fb[0],
+            &*fb[1],
+            &*fb[2],
+        ];
+        let new = {
+            let [a, b, c] = &mut out_fb;
+            [a, b, c]
+        };
         epf_step(
-            fb,
-            &mut out_fb,
+            old,
+            new,
             &sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
@@ -153,14 +166,27 @@ pub fn apply_epf(
             ],
             &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
         );
+
+        for (old, new) in fb.iter_mut().zip(&mut out_fb) {
+            std::mem::swap(*old, new);
+        }
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
+        let old = [
+            &*fb[0],
+            &*fb[1],
+            &*fb[2],
+        ];
+        let new = {
+            let [a, b, c] = &mut out_fb;
+            [a, b, c]
+        };
         epf_step(
-            fb,
-            &mut out_fb,
+            old,
+            new,
             &sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
@@ -169,15 +195,26 @@ pub fn apply_epf(
             &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
         );
 
-        std::mem::swap(fb, &mut out_fb);
+        for (old, new) in fb.iter_mut().zip(&mut out_fb) {
+            std::mem::swap(*old, new);
+        }
     }
 
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
+        let old = [
+            &*fb[0],
+            &*fb[1],
+            &*fb[2],
+        ];
+        let new = {
+            let [a, b, c] = &mut out_fb;
+            [a, b, c]
+        };
         epf_step(
-            fb,
-            &mut out_fb,
+            old,
+            new,
             &sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
@@ -185,5 +222,9 @@ pub fn apply_epf(
             &[(0, -1), (-1, 0), (1, 0), (0, 1)],
             &[(0, 0)],
         );
+
+        for (old, new) in fb.iter_mut().zip(&mut out_fb) {
+            std::mem::swap(*old, new);
+        }
     }
 }

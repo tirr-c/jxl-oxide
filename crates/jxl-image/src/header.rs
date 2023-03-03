@@ -1,6 +1,6 @@
 #![allow(dead_code, clippy::excessive_precision)]
 use std::io::Read;
-use crate::{define_bundle, read_bits, Bitstream, Bundle, Result};
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result};
 
 define_bundle! {
     #[derive(Debug)]
@@ -211,7 +211,7 @@ impl BitDepth {
 }
 
 impl<Ctx> Bundle<Ctx> for BitDepth {
-    type Error = crate::Error;
+    type Error = jxl_bitstream::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         if bitstream.read_bool()? { // float_sample
@@ -395,7 +395,7 @@ pub enum WhitePoint {
 }
 
 impl<Ctx> Bundle<Ctx> for WhitePoint {
-    type Error = crate::Error;
+    type Error = jxl_bitstream::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
@@ -448,7 +448,7 @@ pub enum Primaries {
 }
 
 impl<Ctx> Bundle<Ctx> for Primaries {
-    type Error = crate::Error;
+    type Error = jxl_bitstream::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
@@ -497,7 +497,7 @@ impl TryFrom<u32> for TransferFunction {
 }
 
 impl<Ctx> Bundle<Ctx> for TransferFunction {
-    type Error = crate::Error;
+    type Error = jxl_bitstream::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
         let has_gamma = bitstream.read_bool()?;

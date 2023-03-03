@@ -3,8 +3,6 @@ use std::io::prelude::*;
 mod error;
 mod macros;
 
-pub mod header;
-
 pub use error::{Error, Result};
 pub use macros::{unpack_signed, unpack_signed_u64};
 

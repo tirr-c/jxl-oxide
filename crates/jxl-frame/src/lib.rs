@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, io::Cursor};
 use std::io::Read;
 
 use header::Encoding;
-use jxl_bitstream::{read_bits, Bitstream, Bundle, header::Headers};
+use jxl_bitstream::{read_bits, Bitstream, Bundle};
+use jxl_image::Headers;
 
 mod error;
 pub mod filter;

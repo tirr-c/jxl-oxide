@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use jxl_bitstream::{define_bundle, read_bits, header::{Headers, ColourSpace, ImageMetadata}, Bitstream, Bundle};
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::{Grid, Subgrid};
+use jxl_image::{Headers, ColourSpace, ImageMetadata};
 use jxl_modular::{ChannelShift, ModularChannelParams, Modular, ModularParams, MaConfig, MaContext};
 use jxl_vardct::{TransformType, LfChannelDequantization, LfChannelCorrelation, HfBlockContext, Quantizer, HfPass};
 

@@ -1,8 +1,9 @@
 use std::{path::PathBuf, fs::File};
 
 use clap::Parser;
-use jxl_bitstream::{header::{Headers, TransferFunction}, read_bits};
-use jxl_render::{RenderContext, FrameBuffer};
+use jxl_bitstream::read_bits;
+use jxl_image::{FrameBuffer, Headers, TransferFunction};
+use jxl_render::RenderContext;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -114,24 +115,20 @@ fn main() {
 
     let mut fb = run(&mut bitstream, &mut render, &headers, crop);
 
-    if headers.metadata.xyb_encoded {
-        fb.yxb_to_srgb_linear(&headers.metadata);
-    }
-
     if let Some(output) = args.output {
         tracing::info!("Encoding samples to PNG");
         let width = fb.width();
         let height = fb.height();
         let output = std::fs::File::create(output).expect("failed to open output file");
-        let mut encoder = png::Encoder::new(output, width, height);
+        let mut encoder = png::Encoder::new(output, width as u32, height as u32);
         encoder.set_color(if fb.channels() == 4 { png::ColorType::Rgba } else { png::ColorType::Rgb });
         encoder.set_depth(png::BitDepth::Eight);
         // TODO: set colorspace
         encoder.set_srgb(match headers.metadata.colour_encoding.rendering_intent {
-            jxl_bitstream::header::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
-            jxl_bitstream::header::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
-            jxl_bitstream::header::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
-            jxl_bitstream::header::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+            jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+            jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+            jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+            jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
         });
         let mut writer = encoder
             .write_header()
@@ -140,12 +137,16 @@ fn main() {
             .unwrap();
 
         if headers.metadata.xyb_encoded || headers.metadata.colour_encoding.tf == TransferFunction::Linear {
-            fb.srgb_linear_to_standard();
+            jxl_color::tf::linear_to_srgb(fb.buf_mut());
         }
 
-        fb.rgba_be_interleaved(|buf| {
-            std::io::Write::write_all(&mut writer, buf)
-        }).expect("failed to write image data");
+        let mut buf = vec![0u8; fb.width() * fb.channels()];
+        for row in fb.buf().chunks(fb.width() * fb.channels()) {
+            for (s, b) in row.iter().zip(&mut buf) {
+                *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
+            }
+            std::io::Write::write_all(&mut writer, &buf[..row.len()]).expect("failed to write image data");
+        }
         writer.finish().expect("failed to finish writing png");
     } else {
         tracing::info!("No output path specified, skipping PNG encoding");
@@ -168,11 +169,26 @@ fn run(bitstream: &mut jxl_bitstream::Bitstream<File>, render: &mut RenderContex
     render
         .load_cropped(bitstream, region)
         .expect("failed to load frames");
-    let fb = render.render_cropped(region).expect("failed to render");
+    let mut fb = render.render_cropped(region).expect("failed to render");
+
+    if headers.metadata.xyb_encoded {
+        let fb_yxb = {
+            let mut it = fb.iter_mut();
+            [
+                it.next().unwrap(),
+                it.next().unwrap(),
+                it.next().unwrap(),
+            ]
+        };
+        jxl_color::xyb::perform_inverse_xyb(fb_yxb, &headers.metadata);
+    }
+
+    let grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    let image = FrameBuffer::from_grids(&grids).unwrap();
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     tracing::info!(elapsed_ms, "Took {:.2} ms", elapsed_ms);
 
-    fb
+    image
 }

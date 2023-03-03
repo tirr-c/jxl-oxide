@@ -2,7 +2,8 @@
 
 use std::io::Read;
 
-use jxl_bitstream::{Bitstream, Bundle, header::{Headers, ExtraChannelType}};
+use jxl_bitstream::{Bitstream, Bundle};
+use jxl_image::{Headers, ExtraChannelType};
 
 use crate::Result;
 

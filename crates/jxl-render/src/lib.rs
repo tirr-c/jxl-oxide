@@ -1,15 +1,15 @@
 use std::{io::Read, collections::BTreeMap};
 
-use jxl_bitstream::{Bitstream, Bundle, header::{Headers, ColourSpace}};
+use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{Frame, header::{FrameType, Encoding}, filter::Gabor};
+use jxl_grid::SimpleGrid;
+use jxl_image::{Headers, ImageMetadata, ColourSpace};
 
-mod buffer;
 mod color;
 mod dct;
 mod error;
 mod filter;
 mod vardct;
-pub use buffer::FrameBuffer;
 pub use error::{Error, Result};
 use jxl_modular::ChannelShift;
 
@@ -31,7 +31,7 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    fn metadata(&self) -> &'a jxl_bitstream::header::ImageMetadata {
+    fn metadata(&self) -> &'a ImageMetadata {
         &self.image_header.metadata
     }
 
@@ -140,7 +140,7 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    pub fn render_cropped(&self, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+    pub fn render_cropped(&self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
         let Some(target_frame) = self.frames
             .iter()
             .find(|f| f.header().frame_type.is_normal_frame())
@@ -153,7 +153,7 @@ impl RenderContext<'_> {
 }
 
 impl<'f> RenderContext<'f> {
-    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, mut region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+    fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, mut region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
         if let Some(region) = &mut region {
             let mut padding = 0u32;
             if frame.header().restoration_filter.gab.enabled() {
@@ -182,19 +182,21 @@ impl<'f> RenderContext<'f> {
             },
         }?;
 
+        let [a, b, c] = &mut fb;
         if frame.header().do_ycbcr {
-            fb.ycbcr_upsample(frame.header().jpeg_upsampling);
-            fb.ycbcr_to_rgb();
+            jxl_color::ycbcr::ycbcr_upsample([a, b, c], frame.header().jpeg_upsampling);
+            jxl_color::ycbcr::perform_inverse_ycbcr([a, b, c]);
         }
         if let Gabor::Enabled(weights) = frame.header().restoration_filter.gab {
-            filter::apply_gabor_like(&mut fb, weights);
+            filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf(&mut fb, &frame.data().lf_group, frame.header());
+        filter::apply_epf([a, b, c], &frame.data().lf_group, frame.header());
 
-        Ok(fb)
+        let [a, b, c] = fb;
+        Ok(vec![a, b, c])
     }
 
-    fn render_modular<'a>(&'a self, frame: &'a Frame<'f>, _region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+    fn render_modular<'a>(&'a self, frame: &'a Frame<'f>, _region: Option<(u32, u32, u32, u32)>) -> Result<[SimpleGrid<f32>; 3]> {
         let metadata = self.metadata();
         let xyb_encoded = self.xyb_encoded();
         let frame_header = frame.header();
@@ -213,19 +215,27 @@ impl<'f> RenderContext<'f> {
             return Err(Error::NotSupported("Single-channel modular image is not supported"));
         }
 
-        let width = self.width();
-        let height = self.height();
+        let width = self.width() as usize;
+        let height = self.height() as usize;
         let bit_depth = metadata.bit_depth;
-        let mut fb_yxb = FrameBuffer::new(width, height, width, 3);
+        let mut fb_yxb = [
+            SimpleGrid::new(width, height),
+            SimpleGrid::new(width, height),
+            SimpleGrid::new(width, height),
+        ];
         let width = width as usize;
         let height = height as usize;
-        let mut buffers = fb_yxb.channel_buffers_mut();
+        let mut buffers = {
+            let [a, b, c] = &mut fb_yxb;
+            [a, b, c]
+        };
         if frame_header.do_ycbcr {
             // make CbYCr into YCbCr
             buffers.swap(0, 1);
         }
 
         for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(buffers.iter_mut()) {
+            let buffer = buffer.buf_mut();
             let (gw, gh) = g.group_dim();
             let group_stride = g.groups_per_row();
             for (group_idx, g) in g.groups() {
@@ -253,10 +263,10 @@ impl<'f> RenderContext<'f> {
         }
 
         if xyb_encoded {
-            let mut it = buffers.into_iter();
-            let y = it.next().unwrap();
-            let x = it.next().unwrap();
-            let b = it.next().unwrap();
+            let [y, x, b] = buffers;
+            let y = y.buf_mut();
+            let x = x.buf_mut();
+            let b = b.buf_mut();
             for ((y, x), b) in y.iter_mut().zip(x).zip(b) {
                 *b += *y;
                 *y *= lf_global.lf_dequant.m_y_lf_unscaled();
@@ -268,7 +278,7 @@ impl<'f> RenderContext<'f> {
         Ok(fb_yxb)
     }
 
-    fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<FrameBuffer> {
+    fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<[SimpleGrid<f32>; 3]> {
         let metadata = self.metadata();
         let frame_header = frame.header();
         let frame_data = frame.data();
@@ -387,14 +397,14 @@ impl<'f> RenderContext<'f> {
                     })
             });
 
-        let width = self.width();
-        let height = self.height();
-        let stride = width;
-        let mut fb_yxb = FrameBuffer::new(width, height, stride, 3);
-        let stride = stride as usize;
+        let width = self.width() as usize;
+        let height = self.height() as usize;
+        let mut fb_yxb = [
+            SimpleGrid::new(width, height),
+            SimpleGrid::new(width, height),
+            SimpleGrid::new(width, height),
+        ];
         for ((y, x), (dct_select, mut yxb)) in varblocks {
-            let x = x as u32;
-            let y = y as u32;
             let y8 = y / 8;
             let x8 = x / 8;
             let (w8, h8) = dct_select.dct_select_size();
@@ -408,11 +418,13 @@ impl<'f> RenderContext<'f> {
                     continue;
                 }
 
-                let (limit_w, limit_h) = shift.shift_size((width - x, height - y));
+                let hsize = width - x;
+                let vsize = height - y;
+                let (limit_w, limit_h) = shift.shift_size((hsize as u32, vsize as u32));
                 let w = tw.min(limit_w) as usize;
                 let h = th.min(limit_h) as usize;
 
-                let fb = fb_yxb.channel_buf_mut(idx as u32);
+                let fb = fb_yxb[idx].buf_mut();
                 let coeff = coeff.as_simple_mut().unwrap();
                 vardct::transform(coeff, dct_select);
 
@@ -427,7 +439,7 @@ impl<'f> RenderContext<'f> {
                         continue;
                     }
                     let x = x as usize + (ix << shift.hshift());
-                    fb[y * stride + x] = s;
+                    fb[y * width + x] = s;
                 }
             }
         }

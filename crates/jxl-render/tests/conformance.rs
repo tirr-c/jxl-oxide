@@ -1,7 +1,8 @@
 use lcms2::{Profile, CIEXYZ, CIEXYZExt};
 
-use jxl_bitstream::{Bundle, header::{Headers, TransferFunction}};
+use jxl_bitstream::Bundle;
 use jxl_render::RenderContext;
+use jxl_image::{Headers, TransferFunction};
 
 fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
     let mut magic = [0u8; 6];
@@ -80,8 +81,18 @@ fn run_test(
     let mut fb = render.render_cropped(None).expect("failed to render");
 
     let source_profile = if headers.metadata.xyb_encoded {
-        fb.yxb_to_srgb_linear(&headers.metadata);
-        fb.srgb_linear_to_standard();
+        let fb_yxb = {
+            let mut it = fb.iter_mut();
+            [
+                it.next().unwrap(),
+                it.next().unwrap(),
+                it.next().unwrap(),
+            ]
+        };
+        jxl_color::xyb::perform_inverse_xyb(fb_yxb, &headers.metadata);
+        jxl_color::tf::linear_to_srgb(fb[0].buf_mut());
+        jxl_color::tf::linear_to_srgb(fb[1].buf_mut());
+        jxl_color::tf::linear_to_srgb(fb[2].buf_mut());
         Profile::new_srgb()
     } else if headers.metadata.colour_encoding.is_srgb() {
         Profile::new_srgb()
@@ -115,24 +126,12 @@ fn run_test(
         todo!()
     };
 
-    let width = fb.width() as usize;
-    let height = fb.height() as usize;
-    let channels = fb.channel_buffers();
-    assert_eq!(channels.len(), 3);
-
-    let expected_len = expected.len();
-    let actual_len = width * height * channels.len();
-    assert_eq!(expected_len, actual_len);
-
-    let mut interleaved_buffer = vec![[0.0f32; 3]; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let out = &mut interleaved_buffer[x + y * width];
-            for (&ch, out) in channels.iter().zip(out) {
-                *out = ch[x + y * width];
-            }
-        }
-    }
+    let grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    let mut fb = jxl_image::FrameBuffer::from_grids(&grids).unwrap();
+    let width = fb.width();
+    let height = fb.height();
+    let channels = fb.channels();
+    assert_eq!(channels, 3);
 
     let pixfmt = lcms2::PixelFormat::RGB_FLT;
     let transform = lcms2::Transform::new(
@@ -142,15 +141,20 @@ fn run_test(
         pixfmt,
         lcms2::Intent::RelativeColorimetric,
     ).expect("failed to create transform");
-    transform.transform_in_place(&mut interleaved_buffer);
+    transform.transform_in_place(fb.buf_grouped_mut::<3>());
 
-    let mut sum_se = vec![0.0f32; channels.len()];
+    let interleaved_buffer = fb.buf_mut();
+    assert_eq!(expected.len(), interleaved_buffer.len());
+
+    let mut sum_se = vec![0.0f32; channels];
     let mut peak_error = 0.0f32;
     for y in 0..height {
         for x in 0..width {
-            let pixel = &interleaved_buffer[x + y * width];
-            for (c, (&output, sum_se)) in pixel.iter().zip(&mut sum_se).enumerate() {
-                let reference = expected[c + (x + y * width) * channels.len()];
+            for c in 0..channels {
+                let reference = expected[c + (x + y * width) * channels];
+                let output = interleaved_buffer[c + (x + y * width) * channels];
+                let sum_se = &mut sum_se[c];
+
                 let abs_error = (output - reference).abs();
                 if abs_error >= expected_peak_error {
                     eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}");

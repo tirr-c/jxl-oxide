@@ -1,11 +1,11 @@
 use std::io::Read;
 use jxl_bitstream::{
     define_bundle,
-    header::*,
     read_bits,
     Bitstream,
     Bundle,
 };
+use jxl_image::*;
 use crate::Result;
 
 define_bundle! {

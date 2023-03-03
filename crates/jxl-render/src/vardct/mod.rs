@@ -1,9 +1,9 @@
-use jxl_bitstream::header::OpsinInverseMatrix;
 use jxl_frame::{
     data::{LfCoeff, CoeffData},
     FrameHeader,
 };
 use jxl_grid::{Grid, Subgrid};
+use jxl_image::OpsinInverseMatrix;
 use jxl_vardct::{
     LfChannelDequantization,
     Quantizer,
