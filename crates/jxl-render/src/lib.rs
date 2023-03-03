@@ -223,8 +223,6 @@ impl<'f> RenderContext<'f> {
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
         ];
-        let width = width as usize;
-        let height = height as usize;
         let mut buffers = {
             let [a, b, c] = &mut fb_yxb;
             [a, b, c]
@@ -433,12 +431,12 @@ impl<'f> RenderContext<'f> {
                     if iy >= h {
                         break;
                     }
-                    let y = y as usize + (iy << shift.vshift());
+                    let y = y + (iy << shift.vshift());
                     let ix = idx % tw as usize;
                     if ix >= w {
                         continue;
                     }
-                    let x = x as usize + (ix << shift.hshift());
+                    let x = x + (ix << shift.hshift());
                     fb[y * width + x] = s;
                 }
             }
