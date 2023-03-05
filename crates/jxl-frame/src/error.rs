@@ -58,4 +58,25 @@ impl std::error::Error for Error {
     }
 }
 
+impl Error {
+    pub fn unexpected_eof(&self) -> bool {
+        let bitstream_err = match self {
+            | Self::Bitstream(b)
+            | Self::Decoder(jxl_coding::Error::Bitstream(b))
+            | Self::Modular(jxl_modular::Error::Decoder(jxl_coding::Error::Bitstream(b)))
+            | Self::Modular(jxl_modular::Error::Bitstream(b))
+            | Self::VarDct(jxl_vardct::Error::Bitstream(b))
+            | Self::VarDct(jxl_vardct::Error::Decoder(jxl_coding::Error::Bitstream(b)))
+            | Self::VarDct(jxl_vardct::Error::Modular(jxl_modular::Error::Bitstream(b)))
+            | Self::VarDct(jxl_vardct::Error::Modular(jxl_modular::Error::Decoder(jxl_coding::Error::Bitstream(b)))) => b,
+            | _ => return false,
+        };
+        if let jxl_bitstream::Error::Io(e) = bitstream_err {
+            e.kind() == std::io::ErrorKind::UnexpectedEof
+        } else {
+            false
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

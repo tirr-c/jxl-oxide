@@ -5,7 +5,6 @@ use jxl_frame::{Frame, header::{FrameType, Encoding}, filter::Gabor};
 use jxl_grid::SimpleGrid;
 use jxl_image::{Headers, ImageMetadata, ColourSpace};
 
-mod color;
 mod dct;
 mod error;
 mod filter;
@@ -70,7 +69,7 @@ impl RenderContext<'_> {
     pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         if self.metadata().colour_encoding.want_icc {
             tracing::info!("Image has ICC profile");
-            let icc = color::read_icc(bitstream)?;
+            let icc = jxl_color::icc::read_icc(bitstream)?;
 
             tracing::warn!("Discarding encoded ICC profile");
             drop(icc);

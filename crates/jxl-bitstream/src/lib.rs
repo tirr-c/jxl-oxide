@@ -90,6 +90,22 @@ impl<R> Bitstream<R> {
     pub fn bookmark(&self) -> Bookmark {
         Bookmark(self.global_pos)
     }
+
+    pub fn rewindable(&mut self) -> Bitstream<RewindMarker<'_, R>> {
+        let buf = self.buf.clone();
+        Bitstream {
+            global_pos: self.global_pos,
+            buf,
+            buf_valid_len: self.buf_valid_len,
+            buf_offset: self.buf_offset,
+            current: self.current,
+            bits_left: self.bits_left,
+            reader: RewindMarker {
+                read_data: Vec::new(),
+                original: self,
+            },
+        }
+    }
 }
 
 impl<R: Read> Bitstream<R> {
@@ -315,5 +331,61 @@ impl<R: Read + Seek> Bitstream<R> {
         self.read_bits(bit_offset as u32)?;
 
         Ok(())
+    }
+}
+
+pub struct RewindMarker<'b, R> {
+    read_data: Vec<u8>,
+    original: &'b mut Bitstream<R>,
+}
+
+impl<R: Read> Read for RewindMarker<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.original.reader.read(buf) {
+            Ok(0) => Ok(0),
+            Ok(n) => {
+                self.read_data.extend_from_slice(&buf[..n]);
+                Ok(n)
+            },
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<R> Drop for RewindMarker<'_, R> {
+    fn drop(&mut self) {
+        let read_data = &self.read_data;
+        if read_data.is_empty() {
+            return;
+        }
+
+        let empty_area = &mut self.original.buf[self.original.buf_offset + self.original.buf_valid_len..];
+        if empty_area.len() > read_data.len() {
+            let mut buf = vec![0u8; self.original.buf_valid_len + read_data.len()];
+            let (l, r) = buf.split_at_mut(self.original.buf_valid_len);
+            l.copy_from_slice(self.original.left_in_buffer());
+            r.copy_from_slice(read_data);
+            self.original.buf_offset = 0;
+            self.original.buf_valid_len += read_data.len();
+            self.original.buf = buf;
+        } else {
+            empty_area[..read_data.len()].copy_from_slice(read_data);
+        }
+    }
+}
+
+impl<R> Bitstream<RewindMarker<'_, R>> {
+    pub fn commit(self) {
+        let mut marker = self.reader;
+        marker.read_data.clear();
+        let orig_bitstream = &mut *marker.original;
+
+        orig_bitstream.global_pos = self.global_pos;
+        orig_bitstream.buf = self.buf;
+        orig_bitstream.buf_valid_len = self.buf_valid_len;
+        orig_bitstream.buf_offset = self.buf_offset;
+        orig_bitstream.current = self.current;
+        orig_bitstream.bits_left = self.bits_left;
+        drop(marker);
     }
 }

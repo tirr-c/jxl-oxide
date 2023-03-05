@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, io::Cursor};
+use std::collections::{HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::io::Read;
 
 use header::Encoding;
@@ -16,11 +17,20 @@ pub use data::Toc;
 
 use crate::data::*;
 
+#[derive(Debug, Copy, Clone)]
+enum GroupInstr {
+    Read(usize, TocGroup),
+    Decode(usize),
+}
+
 #[derive(Debug)]
 pub struct Frame<'a> {
     image_header: &'a Headers,
     header: FrameHeader,
     toc: Toc,
+    plan: Vec<GroupInstr>,
+    next_instr: usize,
+    buf_slot: HashMap<usize, (TocGroupKind, Vec<u8>)>,
     data: FrameData,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
 }
@@ -44,10 +54,108 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
         }
         pass_shifts.insert(header.passes.num_passes - 1, (0i32, maxshift));
 
+        let mut plan = Vec::new();
+        if toc.is_single_entry() {
+            let group = toc.lf_global();
+            plan.push(GroupInstr::Read(0, group));
+            plan.push(GroupInstr::Decode(0));
+        } else {
+            let groups = toc.iter_bitstream_order();
+            let mut read_slot = HashMap::new();
+            let mut decoded_slots = HashSet::new();
+            let mut need_lf_global = true;
+            let mut need_hf_global = header.encoding == Encoding::VarDct;
+            let mut next_slot_idx = 0usize;
+            for group in groups {
+                if !need_hf_global && group.kind == TocGroupKind::HfGlobal {
+                    continue;
+                }
+
+                let current_slot_idx = next_slot_idx;
+                plan.push(GroupInstr::Read(current_slot_idx, group));
+                next_slot_idx += 1;
+
+                let mut update_lf_groups = false;
+                let mut update_pass_groups = false;
+                match group.kind {
+                    TocGroupKind::All => panic!("unexpected TocGroupKind::All"),
+                    TocGroupKind::LfGlobal => {
+                        plan.push(GroupInstr::Decode(current_slot_idx));
+                        decoded_slots.insert(group.kind);
+                        update_lf_groups = true;
+                        need_lf_global = false;
+                    },
+                    TocGroupKind::HfGlobal => {
+                        if need_lf_global {
+                            read_slot.insert(group.kind, current_slot_idx);
+                        } else {
+                            plan.push(GroupInstr::Decode(current_slot_idx));
+                            decoded_slots.insert(group.kind);
+                            update_pass_groups = true;
+                            need_hf_global = false;
+                        }
+                    },
+                    TocGroupKind::LfGroup(_) => {
+                        if need_lf_global {
+                            read_slot.insert(group.kind, current_slot_idx);
+                        } else {
+                            plan.push(GroupInstr::Decode(current_slot_idx));
+                            decoded_slots.insert(group.kind);
+                            update_pass_groups = true;
+                        }
+                    },
+                    TocGroupKind::GroupPass { group_idx, .. } => {
+                        let lf_group_idx = header.lf_group_idx_from_group_idx(group_idx);
+                        if need_lf_global || need_hf_global || !decoded_slots.contains(&TocGroupKind::LfGroup(lf_group_idx)) {
+                            read_slot.insert(group.kind, current_slot_idx);
+                        } else {
+                            plan.push(GroupInstr::Decode(current_slot_idx));
+                            decoded_slots.insert(group.kind);
+                        }
+                    },
+                }
+
+                if update_lf_groups {
+                    let mut decoded = Vec::new();
+                    for (&kind, &slot_idx) in &read_slot {
+                        if let TocGroupKind::LfGroup(_) = kind {
+                            plan.push(GroupInstr::Decode(slot_idx));
+                            decoded.push(kind);
+                        }
+                    }
+                    for kind in decoded {
+                        read_slot.remove(&kind);
+                        decoded_slots.insert(kind);
+                    }
+                    update_pass_groups = true;
+                }
+
+                if update_pass_groups && !need_hf_global {
+                    let mut decoded = Vec::new();
+                    for (&kind, &slot_idx) in &read_slot {
+                        if let TocGroupKind::GroupPass { group_idx, .. } = kind {
+                            let lf_group_idx = header.lf_group_idx_from_group_idx(group_idx);
+                            if decoded_slots.contains(&TocGroupKind::LfGroup(lf_group_idx)) {
+                                plan.push(GroupInstr::Decode(slot_idx));
+                                decoded.push(kind);
+                            }
+                        }
+                    }
+                    for kind in decoded {
+                        read_slot.remove(&kind);
+                        decoded_slots.insert(kind);
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             image_header,
             header,
             toc,
+            plan,
+            next_instr: 0,
+            buf_slot: HashMap::new(),
             data,
             pass_shifts,
         })
@@ -69,6 +177,121 @@ impl Frame<'_> {
 }
 
 impl Frame<'_> {
+    pub fn load_progressive<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
+    ) -> Result<bool> {
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_progressive");
+        let _guard = span.enter();
+
+        let result = self.load_with_filter(bitstream, filter_fn);
+        match result {
+            Err(e) if e.unexpected_eof() => Ok(false),
+            Err(e) => Err(e),
+            Ok(()) => Ok(true),
+        }
+    }
+
+    pub fn load_with_filter<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        mut filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
+    ) -> Result<()> {
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_with_filter");
+        let _guard = span.enter();
+
+        while let Some(&instr) = self.plan.get(self.next_instr) {
+            self.process_instr(bitstream, instr, &mut filter_fn)?;
+            self.next_instr += 1;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn load<R: Read> (
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+    ) -> Result<()> {
+        self.load_with_filter(bitstream, |_, _, _| true)
+    }
+
+    fn process_instr<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        instr: GroupInstr,
+        mut filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
+    ) -> Result<()> {
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::process_instr", instr = format_args!("{:?}", instr));
+        let _guard = span.enter();
+
+        match instr {
+            GroupInstr::Read(slot_idx, group) => {
+                tracing::trace!(group_kind = format_args!("{:?}", group.kind), "Reading group into memory");
+                bitstream.skip_to_bookmark(group.offset)?;
+
+                let mut b = bitstream.rewindable();
+                let mut buf = vec![0u8; group.size as usize];
+                b.read_bytes_aligned(&mut buf)?;
+                b.commit();
+
+                self.buf_slot.insert(slot_idx, (group.kind, buf));
+            },
+            GroupInstr::Decode(slot_idx) => {
+                let (kind, buf) = self.buf_slot.remove(&slot_idx).expect("specified slot is not present");
+                tracing::trace!(group_kind = format_args!("{:?}", kind), "Decoding group");
+                if !filter_fn(&self.header, &self.data, kind) {
+                    return Ok(());
+                }
+
+                let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
+                self.load_single(&mut bitstream, kind)?;
+            },
+        }
+        Ok(())
+    }
+
+    fn load_single<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        kind: TocGroupKind,
+    ) -> Result<()> {
+        match kind {
+            TocGroupKind::All => {
+                self.read_merged_group(bitstream)?;
+            },
+            TocGroupKind::LfGlobal => {
+                self.data.lf_global = Some(self.read_lf_global(bitstream)?);
+            },
+            TocGroupKind::LfGroup(lf_group_idx) => {
+                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                self.data.lf_group.insert(lf_group_idx, self.read_lf_group(bitstream, lf_global, lf_group_idx)?);
+            },
+            TocGroupKind::HfGlobal => {
+                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                self.data.hf_global = Some(self.read_hf_global(bitstream, lf_global)?);
+            },
+            TocGroupKind::GroupPass { pass_idx, group_idx } => {
+                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                let lf_group_idx = self.header.lf_group_idx_from_group_idx(group_idx);
+                let lf_group = self.data.lf_group.get(&lf_group_idx).expect("invalid decode plan: LfGroup not decoded");
+                let hf_global = self.data.hf_global.as_ref().expect("invalid decode plan: HfGlobal not decoded");
+
+                let group = self.read_group_pass(
+                    bitstream,
+                    lf_global,
+                    lf_group,
+                    hf_global.as_ref(),
+                    pass_idx,
+                    group_idx,
+                )?;
+                self.data.group_pass.insert((pass_idx, group_idx), group);
+            },
+        }
+        Ok(())
+    }
+
     pub fn load_cropped<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -76,12 +299,6 @@ impl Frame<'_> {
     ) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
         let _guard = span.enter();
-
-        if self.toc.is_single_entry() {
-            tracing::debug!("Frame has single TOC entry");
-            self.read_merged_group(bitstream)?;
-            return Ok(());
-        }
 
         let mut region = if region.is_some() && self.header.have_crop {
             region.map(|(left, top, width, height)| (
@@ -93,102 +310,46 @@ impl Frame<'_> {
         } else {
             region
         };
+        let mut region_adjust_done = false;
 
-        let mut it = self.toc.iter_bitstream_order();
-        let mut pending_lf_groups = Vec::new();
-        let mut pending_groups = Vec::new();
-        let mut hf_global_bitstream = None;
-        let mut lf_global = None;
-        let mut found_hf_global = self.header.encoding == Encoding::Modular;
-        for group in &mut it {
-            bitstream.skip_to_bookmark(group.offset)?;
-            let mut buf = vec![0u8; group.size as usize];
-            bitstream.read_bytes_aligned(&mut buf)?;
-            let mut bitstream = Bitstream::new(Cursor::new(buf));
-            match group.kind {
-                TocGroupKind::LfGlobal => {
-                    lf_global = Some(self.read_lf_global(&mut bitstream)?);
-                },
+        let crop_filter_fn = |frame_header: &FrameHeader, frame_data: &FrameData, kind| {
+            if !region_adjust_done {
+                let Some(lf_global) = frame_data.lf_global.as_ref() else {
+                    return true;
+                };
+                if lf_global.gmodular.modular.has_delta_palette() {
+                    if region.take().is_some() {
+                        tracing::debug!("GlobalModular has delta palette, forcing full decode");
+                    }
+                } else if lf_global.gmodular.modular.has_squeeze() {
+                    if let Some((left, top, width, height)) = &mut region {
+                        *width += *left;
+                        *height += *top;
+                        *left = 0;
+                        *top = 0;
+                        tracing::debug!("GlobalModular has squeeze, decoding from top-left");
+                    }
+                }
+                if let Some(region) = &region {
+                    tracing::debug!("Cropped decoding: {:?}", region);
+                }
+                region_adjust_done = true;
+            }
+
+            let Some(region) = region else { return true; };
+
+            match kind {
                 TocGroupKind::LfGroup(lf_group_idx) => {
-                    pending_lf_groups.push((lf_group_idx, bitstream));
+                    frame_header.is_lf_group_collides_region(lf_group_idx, region)
                 },
-                TocGroupKind::HfGlobal => {
-                    hf_global_bitstream = Some(bitstream);
-                    found_hf_global = true;
+                TocGroupKind::GroupPass { group_idx, .. } => {
+                    frame_header.is_group_collides_region(group_idx, region)
                 },
-                TocGroupKind::GroupPass { pass_idx, group_idx } => {
-                    pending_groups.push((pass_idx, group_idx, Some(bitstream), None));
-                },
-                _ => {},
+                _ => true,
             }
+        };
 
-            if lf_global.is_some() && found_hf_global && pending_lf_groups.len() >= self.header.num_lf_groups() as usize {
-                break;
-            }
-        }
-
-        self.data.lf_global = lf_global;
-        let lf_global = self.data.lf_global.as_ref().unwrap();
-        if lf_global.gmodular.modular.has_delta_palette() {
-            if region.take().is_some() {
-                tracing::debug!("GlobalModular has delta palette, forcing full decode");
-            }
-        } else if lf_global.gmodular.modular.has_squeeze() {
-            if let Some((left, top, width, height)) = &mut region {
-                *width += *left;
-                *height += *top;
-                *left = 0;
-                *top = 0;
-                tracing::debug!("GlobalModular has squeeze, decoding from top-left");
-            }
-        }
-        if let Some(region) = &region {
-            tracing::debug!("Cropped decoding: {:?}", region);
-        }
-
-        for (lf_group_idx, mut bitstream) in pending_lf_groups {
-            if let Some(region) = region {
-                if !self.header.is_lf_group_collides_region(lf_group_idx, region) {
-                    continue;
-                }
-            }
-            let lf_group = self.read_lf_group(&mut bitstream, lf_global, lf_group_idx)?;
-            self.data.lf_group.insert(lf_group_idx, lf_group);
-        }
-
-        if let Some(mut bitstream) = hf_global_bitstream {
-            self.data.hf_global = Some(self.read_hf_global(&mut bitstream, lf_global)?);
-        }
-        let hf_global = self.data.hf_global.as_ref().unwrap().as_ref();
-
-        let it = it.filter_map(|v| {
-            let (pass_idx, group_idx) = match v.kind {
-                TocGroupKind::GroupPass { pass_idx, group_idx } => (pass_idx, group_idx),
-                TocGroupKind::HfGlobal => return None,
-                _ => unreachable!(),
-            };
-            Some((pass_idx, group_idx, None, Some(v.offset)))
-        });
-
-        for (pass_idx, group_idx, local_bitstream, offset) in pending_groups.into_iter().chain(it) {
-            if let Some(region) = region {
-                if !self.header.is_group_collides_region(group_idx, region) {
-                    continue;
-                }
-            }
-
-            let lf_group_idx = self.header.lf_group_idx_from_group_idx(group_idx);
-            let lf_group = self.data.lf_group.get(&lf_group_idx).unwrap();
-            let group_pass = if let Some(mut bitstream) = local_bitstream {
-                self.read_group_pass(&mut bitstream, lf_global, lf_group, hf_global, pass_idx, group_idx)?
-            } else {
-                bitstream.skip_to_bookmark(offset.unwrap())?;
-                self.read_group_pass(bitstream, lf_global, lf_group, hf_global, pass_idx, group_idx)?
-            };
-            self.data.group_pass.insert((pass_idx, group_idx), group_pass);
-        }
-
-        Ok(())
+        self.load_with_filter(bitstream, crop_filter_fn)
     }
 
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
