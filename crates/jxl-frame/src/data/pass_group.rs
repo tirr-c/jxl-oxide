@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
-use jxl_grid::{Grid, Subgrid};
+use jxl_grid::{Grid, Subgrid, SimpleGrid};
 use jxl_modular::{ChannelShift, Modular};
 use jxl_vardct::{HfBlockContext, HfPass, TransformType};
 
@@ -64,6 +64,7 @@ struct HfCoeffParams<'a> {
     jpeg_upsampling: [u32; 3],
     lf_quant: Option<[Subgrid<'a, i32>; 3]>,
     hf_pass: &'a HfPass,
+    coeff_shift: u32,
 }
 
 impl Bundle<PassGroupParams<'_>> for PassGroup {
@@ -86,6 +87,9 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
             .zip(hf_global)
             .map(|((lf_vardct, (lf_coeff, hf_meta)), hf_global)| -> Result<HfCoeff> {
                 let hf_pass = &hf_global.hf_passes[pass_idx as usize];
+                let coeff_shift = frame_header.passes.shift.get(pass_idx as usize)
+                    .copied()
+                    .unwrap_or(0);
 
                 let group_col = group_idx % frame_header.groups_per_row();
                 let group_row = group_idx / frame_header.groups_per_row();
@@ -122,6 +126,7 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
                     jpeg_upsampling,
                     lf_quant,
                     hf_pass,
+                    coeff_shift,
                 };
                 HfCoeff::parse(bitstream, params)
             })
@@ -150,22 +155,26 @@ pub struct HfCoeff {
 }
 
 impl HfCoeff {
+    pub fn empty() -> Self {
+        Self {
+            data: HashMap::new(),
+        }
+    }
+
     pub fn merge(&mut self, other: &HfCoeff) {
-        for (&coord, data) in &other.data {
-            self.data
-                .entry(coord)
-                .and_modify(|target_data| {
-                    for (target, v) in target_data.coeff.iter_mut().zip(data.coeff.iter()) {
-                        let width = target.width();
-                        let height = target.height();
-                        for y in 0..height {
-                            for x in 0..width {
-                                target.set(x, y, *v.get(x, y).unwrap());
-                            }
-                        }
+        for (coord, other_data) in &other.data {
+            if let Some(target_data) = self.data.get_mut(coord) {
+                assert_eq!(target_data.dct_select, other_data.dct_select);
+                for (target, v) in target_data.coeff.iter_mut().zip(other_data.coeff.iter()) {
+                    assert_eq!(target.width(), v.width());
+                    assert_eq!(target.height(), v.height());
+                    for (target, v) in target.buf_mut().iter_mut().zip(v.buf()) {
+                        *target += *v;
                     }
-                })
-                .or_insert_with(|| data.clone());
+                }
+            } else {
+                self.data.insert(*coord, other_data.clone());
+            }
         }
     }
 }
@@ -174,7 +183,7 @@ impl HfCoeff {
 pub struct CoeffData {
     pub dct_select: TransformType,
     pub hf_mul: i32,
-    pub coeff: [Grid<i32>; 3], // x, y, b
+    pub coeff: [SimpleGrid<i32>; 3], // x, y, b
 }
 
 impl Bundle<HfCoeffParams<'_>> for HfCoeff {
@@ -204,6 +213,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
             jpeg_upsampling,
             lf_quant,
             hf_pass,
+            coeff_shift,
         } = params;
         let mut dist = hf_pass.clone_decoder();
         let span = tracing::span!(tracing::Level::TRACE, "HfCoeff::parse");
@@ -292,9 +302,9 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                 let lf_idx_mul = (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
 
                 let mut coeff = [
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
-                    Grid::new(coeff_size.0, coeff_size.1, coeff_size.0, coeff_size.1),
+                    SimpleGrid::new(coeff_size.0 as usize, coeff_size.1 as usize),
+                    SimpleGrid::new(coeff_size.0 as usize, coeff_size.1 as usize),
+                    SimpleGrid::new(coeff_size.0 as usize, coeff_size.1 as usize),
                 ];
                 for c in [1, 0, 2] { // y, x, b
                     let shift = upsampling_shifts[c];
@@ -344,9 +354,9 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                                 prev + block_ctx * 458 + 37 * num_block_clusters
                         };
                         let ucoeff = dist.read_varint(bitstream, ctx_offset + coeff_ctx)?;
-                        let coeff = jxl_bitstream::unpack_signed(ucoeff);
+                        let coeff = jxl_bitstream::unpack_signed(ucoeff) << coeff_shift;
                         let (x, y) = coeff_coord;
-                        coeff_grid.set(x as usize, y as usize, coeff);
+                        *coeff_grid.get_mut(x as usize, y as usize).unwrap() = coeff;
                         prev_coeff = coeff;
 
                         if coeff != 0 {

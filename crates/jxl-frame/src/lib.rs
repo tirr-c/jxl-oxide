@@ -421,9 +421,9 @@ impl Frame<'_> {
 #[derive(Debug)]
 pub struct FrameData {
     pub lf_global: Option<LfGlobal>,
-    pub lf_group: BTreeMap<u32, LfGroup>,
+    pub lf_group: HashMap<u32, LfGroup>,
     pub hf_global: Option<Option<HfGlobal>>,
-    pub group_pass: BTreeMap<(u32, u32), PassGroup>,
+    pub group_pass: HashMap<(u32, u32), PassGroup>,
 }
 
 impl FrameData {

@@ -302,10 +302,8 @@ impl<'f> RenderContext<'f> {
             let hf_coeff = group_pass.hf_coeff.as_ref().unwrap();
             group_coeffs
                 .entry(group_idx as usize)
-                .and_modify(|data| {
-                    data.merge(hf_coeff);
-                })
-                .or_insert_with(|| hf_coeff.clone());
+                .or_insert_with(jxl_frame::data::HfCoeff::empty)
+                .merge(hf_coeff);
         }
 
         let quantizer = &lf_global_vardct.quantizer;
@@ -386,7 +384,7 @@ impl<'f> RenderContext<'f> {
                             let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
                             for y in 0..llf.height() {
                                 for x in 0..llf.width() {
-                                    coeff.set(x, y, *llf.get(x, y).unwrap());
+                                    *coeff.get_mut(x, y).unwrap() = *llf.get(x, y).unwrap();
                                 }
                             }
                         }
@@ -422,7 +420,6 @@ impl<'f> RenderContext<'f> {
                 let h = th.min(limit_h) as usize;
 
                 let fb = fb_yxb[idx].buf_mut();
-                let coeff = coeff.as_simple_mut().unwrap();
                 vardct::transform(coeff, dct_select);
 
                 for (idx, &s) in coeff.buf().iter().enumerate() {

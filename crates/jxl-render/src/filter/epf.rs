@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
@@ -92,7 +92,7 @@ fn epf_step(
 
 pub fn apply_epf(
     mut fb: [&mut SimpleGrid<f32>; 3],
-    lf_groups: &BTreeMap<u32, LfGroup>,
+    lf_groups: &HashMap<u32, LfGroup>,
     frame_header: &FrameHeader,
 ) {
     let EdgePreservingFilter::Enabled {

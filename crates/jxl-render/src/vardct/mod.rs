@@ -2,7 +2,7 @@ use jxl_frame::{
     data::{LfCoeff, CoeffData},
     FrameHeader,
 };
-use jxl_grid::{Grid, Subgrid};
+use jxl_grid::{Grid, Subgrid, SimpleGrid};
 use jxl_image::OpsinInverseMatrix;
 use jxl_vardct::{
     LfChannelDequantization,
@@ -112,34 +112,31 @@ pub fn dequant_hf_varblock(
     quantizer: &Quantizer,
     dequant_matrices: &DequantMatrixSet,
     qm_scale: Option<u32>,
-) -> Grid<f32> {
+) -> SimpleGrid<f32> {
     let CoeffData { dct_select, hf_mul, ref coeff } = *coeff_data;
     let coeff = &coeff[channel];
-    let mut out = Grid::new_similar(coeff);
+    let mut out = SimpleGrid::new(coeff.width(), coeff.height());
 
     let quant_bias = oim.quant_bias[channel];
     let quant_bias_numerator = oim.quant_bias_numerator;
     let matrix = dequant_matrices.get(channel, dct_select);
-    for (y, mat_row) in matrix.iter().enumerate() {
-        for (x, &mat) in mat_row.iter().enumerate() {
-            let quant = *coeff.get(x, y).unwrap();
-            let quant = if (-1..=1).contains(&quant) {
-                quant as f32 * quant_bias
-            } else {
-                let q = quant as f32;
-                q - (quant_bias_numerator / q)
-            };
+    for ((&mat, &quant), out) in matrix.iter().flatten().zip(coeff.buf()).zip(out.buf_mut()) {
+        let quant = if (-1..=1).contains(&quant) {
+            quant as f32 * quant_bias
+        } else {
+            let q = quant as f32;
+            q - (quant_bias_numerator / q)
+        };
 
-            let mul = 65536.0 / quantizer.global_scale as f32 / hf_mul as f32;
-            let mut quant = quant * mul;
+        let mul = 65536.0 / quantizer.global_scale as f32 / hf_mul as f32;
+        let mut quant = quant * mul;
 
-            if let Some(qm_scale) = qm_scale {
-                let scale = 0.8f32.powi(qm_scale as i32 - 2);
-                quant *= scale;
-            }
-
-            out.set(x, y, quant * mat);
+        if let Some(qm_scale) = qm_scale {
+            let scale = 0.8f32.powi(qm_scale as i32 - 2);
+            quant *= scale;
         }
+
+        *out = quant * mat;
     }
 
     out
@@ -175,7 +172,7 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_yxb: &mut [Grid<f32>; 3],
+    coeff_yxb: &mut [SimpleGrid<f32>; 3],
     lf_left: usize,
     lf_top: usize,
     x_from_y: &Grid<i32>,
@@ -219,7 +216,7 @@ pub fn chroma_from_luma_hf(
 pub fn llf_from_lf(
     lf: Subgrid<'_, f32>,
     dct_select: TransformType,
-) -> Grid<f32> {
+) -> SimpleGrid<f32> {
     use TransformType::*;
 
     fn scale_f(c: usize, b: usize) -> f32 {
@@ -236,8 +233,8 @@ pub fn llf_from_lf(
 
     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Afv0 | Afv1 | Afv2 | Afv3) {
         debug_assert_eq!(bw * bh, 1);
-        let mut out = Grid::new_usize(1, 1, 1, 1);
-        out.set(0, 0, *lf.get(0, 0).unwrap());
+        let mut out = SimpleGrid::new(1, 1);
+        out.buf_mut()[0] = *lf.get(0, 0).unwrap();
         out
     } else {
         let mut llf = vec![0.0f32; bw as usize * bh as usize];
@@ -250,10 +247,10 @@ pub fn llf_from_lf(
 
         let cx = bw.max(bh) as usize;
         let cy = bw.min(bh) as usize;
-        let mut out = Grid::new_usize(cx, cy, cx, cy);
+        let mut out = SimpleGrid::new(cx, cy);
         for y in 0..cy {
             for x in 0..cx {
-                out.set(x, y, llf[y * cx + x] * scale_f(y, cy * 8) * scale_f(x, cx * 8));
+                out.buf_mut()[y * cx + x] = llf[y * cx + x] * scale_f(y, cy * 8) * scale_f(x, cx * 8);
             }
         }
 
