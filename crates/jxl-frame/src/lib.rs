@@ -21,6 +21,11 @@ use crate::data::*;
 enum GroupInstr {
     Read(usize, TocGroup),
     Decode(usize),
+    ProgressiveScan {
+        pass_idx: Option<u32>,
+        downsample_factor: u32,
+        done: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -33,6 +38,17 @@ pub struct Frame<'a> {
     buf_slot: HashMap<usize, (TocGroupKind, Vec<u8>)>,
     data: FrameData,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ProgressiveResult {
+    NeedMoreData,
+    SingleScan {
+        pass_idx: Option<u32>,
+        downsample_factor: u32,
+        done: bool,
+    },
+    FrameComplete,
 }
 
 impl<'a> Bundle<&'a Headers> for Frame<'a> {
@@ -61,11 +77,18 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
             plan.push(GroupInstr::Decode(0));
         } else {
             let groups = toc.iter_bitstream_order();
+            let num_lf_groups = header.num_lf_groups() as usize;
+            let num_groups = header.num_groups() as usize;
+
             let mut read_slot = HashMap::new();
             let mut decoded_slots = HashSet::new();
             let mut need_lf_global = true;
             let mut need_hf_global = header.encoding == Encoding::VarDct;
             let mut next_slot_idx = 0usize;
+            let mut lf_group_count = 0usize;
+            let mut group_count_per_pass = (0..passes.num_passes)
+                .map(|pass| (pass, 0usize))
+                .collect::<BTreeMap<_, _>>();
             for group in groups {
                 if !need_hf_global && group.kind == TocGroupKind::HfGlobal {
                     continue;
@@ -101,16 +124,20 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
                         } else {
                             plan.push(GroupInstr::Decode(current_slot_idx));
                             decoded_slots.insert(group.kind);
+                            lf_group_count += 1;
                             update_pass_groups = true;
                         }
                     },
-                    TocGroupKind::GroupPass { group_idx, .. } => {
+                    TocGroupKind::GroupPass { pass_idx, group_idx } => {
                         let lf_group_idx = header.lf_group_idx_from_group_idx(group_idx);
                         if need_lf_global || need_hf_global || !decoded_slots.contains(&TocGroupKind::LfGroup(lf_group_idx)) {
                             read_slot.insert(group.kind, current_slot_idx);
                         } else {
                             plan.push(GroupInstr::Decode(current_slot_idx));
                             decoded_slots.insert(group.kind);
+                            *group_count_per_pass
+                                .get_mut(&pass_idx)
+                                .unwrap() += 1;
                         }
                     },
                 }
@@ -123,6 +150,7 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
                             decoded.push(kind);
                         }
                     }
+                    lf_group_count += decoded.len();
                     for kind in decoded {
                         read_slot.remove(&kind);
                         decoded_slots.insert(kind);
@@ -133,11 +161,14 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
                 if update_pass_groups && !need_hf_global {
                     let mut decoded = Vec::new();
                     for (&kind, &slot_idx) in &read_slot {
-                        if let TocGroupKind::GroupPass { group_idx, .. } = kind {
+                        if let TocGroupKind::GroupPass { pass_idx, group_idx } = kind {
                             let lf_group_idx = header.lf_group_idx_from_group_idx(group_idx);
                             if decoded_slots.contains(&TocGroupKind::LfGroup(lf_group_idx)) {
                                 plan.push(GroupInstr::Decode(slot_idx));
                                 decoded.push(kind);
+                                *group_count_per_pass
+                                    .get_mut(&pass_idx)
+                                    .unwrap() += 1;
                             }
                         }
                     }
@@ -146,7 +177,44 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
                         decoded_slots.insert(kind);
                     }
                 }
+
+                if lf_group_count == num_lf_groups && !need_hf_global {
+                    let done = passes.downsample.first().copied().unwrap_or(1) != 8;
+                    plan.push(GroupInstr::ProgressiveScan {
+                        pass_idx: None,
+                        downsample_factor: 8,
+                        done,
+                    });
+                    lf_group_count += 1;
+                }
+                if lf_group_count > num_lf_groups {
+                    while let Some((&pass_idx, &v)) = group_count_per_pass.first_key_value() {
+                        if v == num_groups {
+                            let search_result = passes.last_pass.binary_search(&pass_idx);
+                            let factor_idx = match search_result {
+                                Ok(v) | Err(v) => v,
+                            };
+                            let done = search_result.is_ok() || passes.last_pass.len() == factor_idx;
+                            let downsample_factor = passes.downsample
+                                .get(factor_idx)
+                                .copied()
+                                .unwrap_or(1);
+                            plan.push(GroupInstr::ProgressiveScan {
+                                pass_idx: Some(pass_idx),
+                                downsample_factor,
+                                done,
+                            });
+                            group_count_per_pass.pop_first();
+                        } else {
+                            break;
+                        }
+                    }
+                }
             }
+        }
+
+        if let Some(GroupInstr::ProgressiveScan { .. }) = plan.last() {
+            plan.pop();
         }
 
         Ok(Self {
@@ -177,36 +245,112 @@ impl Frame<'_> {
 }
 
 impl Frame<'_> {
+    pub fn adjust_region(&self, (left, top, width, height): &mut (u32, u32, u32, u32)) {
+        if self.header.have_crop {
+            *left = left.saturating_add_signed(-self.header.x0);
+            *top = top.saturating_add_signed(-self.header.y0);
+        };
+
+        let mut padding = 0u32;
+        if self.header.restoration_filter.gab.enabled() {
+            tracing::debug!("Gabor-like filter requires padding of 1 pixel");
+            padding = 1;
+        }
+        if self.header.restoration_filter.epf.enabled() {
+            tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
+            padding = 3;
+        }
+        if padding > 0 {
+            let delta_w = (*left).min(padding);
+            let delta_h = (*top).min(padding);
+            *left -= delta_w;
+            *top -= delta_h;
+            *width += delta_w + padding;
+            *height += delta_h + padding;
+        }
+    }
+
+    pub fn crop_filter_fn(&self, adjusted_region: Option<(u32, u32, u32, u32)>) -> impl for<'a, 'b> FnMut(&'a FrameHeader, &'b FrameData, TocGroupKind) -> bool {
+        let mut region = adjusted_region;
+        let mut region_adjust_done = false;
+
+        move |frame_header: &FrameHeader, frame_data: &FrameData, kind| {
+            if !region_adjust_done {
+                let Some(lf_global) = frame_data.lf_global.as_ref() else {
+                    return true;
+                };
+                if lf_global.gmodular.modular.has_delta_palette() {
+                    if region.take().is_some() {
+                        tracing::debug!("GlobalModular has delta palette, forcing full decode");
+                    }
+                } else if lf_global.gmodular.modular.has_squeeze() {
+                    if let Some((left, top, width, height)) = &mut region {
+                        *width += *left;
+                        *height += *top;
+                        *left = 0;
+                        *top = 0;
+                        tracing::debug!("GlobalModular has squeeze, decoding from top-left");
+                    }
+                }
+                if let Some(region) = &region {
+                    tracing::debug!("Cropped decoding: {:?}", region);
+                }
+                region_adjust_done = true;
+            }
+
+            let Some(region) = region else { return true; };
+
+            match kind {
+                TocGroupKind::LfGroup(lf_group_idx) => {
+                    frame_header.is_lf_group_collides_region(lf_group_idx, region)
+                },
+                TocGroupKind::GroupPass { group_idx, .. } => {
+                    frame_header.is_group_collides_region(group_idx, region)
+                },
+                _ => true,
+            }
+        }
+    }
+
     pub fn load_progressive<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
         filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
-    ) -> Result<bool> {
+    ) -> Result<ProgressiveResult> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_progressive");
         let _guard = span.enter();
 
-        let result = self.load_with_filter(bitstream, filter_fn);
+        let result = self.load_with_filter(bitstream, true, filter_fn);
         match result {
-            Err(e) if e.unexpected_eof() => Ok(false),
-            Err(e) => Err(e),
-            Ok(()) => Ok(true),
+            Err(e) if e.unexpected_eof() => Ok(ProgressiveResult::NeedMoreData),
+            result => result,
         }
     }
 
     pub fn load_with_filter<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
+        progressive: bool,
         mut filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
-    ) -> Result<()> {
+    ) -> Result<ProgressiveResult> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_with_filter");
         let _guard = span.enter();
 
         while let Some(&instr) = self.plan.get(self.next_instr) {
             self.process_instr(bitstream, instr, &mut filter_fn)?;
             self.next_instr += 1;
+            if progressive {
+                if let GroupInstr::ProgressiveScan { pass_idx, downsample_factor, done } = instr {
+                    return Ok(ProgressiveResult::SingleScan {
+                        pass_idx,
+                        downsample_factor,
+                        done,
+                    });
+                }
+            }
         }
 
-        Ok(())
+        Ok(ProgressiveResult::FrameComplete)
     }
 
     #[inline]
@@ -214,7 +358,7 @@ impl Frame<'_> {
         &mut self,
         bitstream: &mut Bitstream<R>,
     ) -> Result<()> {
-        self.load_with_filter(bitstream, |_, _, _| true)
+        self.load_with_filter(bitstream, false, |_, _, _| true).map(drop)
     }
 
     fn process_instr<R: Read>(
@@ -247,6 +391,9 @@ impl Frame<'_> {
 
                 let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
                 self.load_single(&mut bitstream, kind)?;
+            },
+            GroupInstr::ProgressiveScan { downsample_factor, done, .. } => {
+                tracing::debug!(downsample_factor, done, "Single progressive scan");
             },
         }
         Ok(())
@@ -300,56 +447,7 @@ impl Frame<'_> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
         let _guard = span.enter();
 
-        let mut region = if region.is_some() && self.header.have_crop {
-            region.map(|(left, top, width, height)| (
-                left.saturating_add_signed(-self.header.x0),
-                top.saturating_add_signed(-self.header.y0),
-                width,
-                height,
-            ))
-        } else {
-            region
-        };
-        let mut region_adjust_done = false;
-
-        let crop_filter_fn = |frame_header: &FrameHeader, frame_data: &FrameData, kind| {
-            if !region_adjust_done {
-                let Some(lf_global) = frame_data.lf_global.as_ref() else {
-                    return true;
-                };
-                if lf_global.gmodular.modular.has_delta_palette() {
-                    if region.take().is_some() {
-                        tracing::debug!("GlobalModular has delta palette, forcing full decode");
-                    }
-                } else if lf_global.gmodular.modular.has_squeeze() {
-                    if let Some((left, top, width, height)) = &mut region {
-                        *width += *left;
-                        *height += *top;
-                        *left = 0;
-                        *top = 0;
-                        tracing::debug!("GlobalModular has squeeze, decoding from top-left");
-                    }
-                }
-                if let Some(region) = &region {
-                    tracing::debug!("Cropped decoding: {:?}", region);
-                }
-                region_adjust_done = true;
-            }
-
-            let Some(region) = region else { return true; };
-
-            match kind {
-                TocGroupKind::LfGroup(lf_group_idx) => {
-                    frame_header.is_lf_group_collides_region(lf_group_idx, region)
-                },
-                TocGroupKind::GroupPass { group_idx, .. } => {
-                    frame_header.is_group_collides_region(group_idx, region)
-                },
-                _ => true,
-            }
-        };
-
-        self.load_with_filter(bitstream, crop_filter_fn)
+        self.load_with_filter(bitstream, false, self.crop_filter_fn(region)).map(drop)
     }
 
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {

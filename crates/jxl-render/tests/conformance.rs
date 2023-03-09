@@ -76,7 +76,7 @@ fn run_test(
     }
 
     render
-        .load_all_frames(&mut bitstream)
+        .load_all_frames(&mut bitstream, false)
         .expect("failed to load frames");
     let mut fb = render.render_cropped(None).expect("failed to render");
 

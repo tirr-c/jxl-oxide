@@ -1,16 +1,22 @@
 use std::{io::Read, collections::BTreeMap};
 
 use jxl_bitstream::{Bitstream, Bundle};
-use jxl_frame::{Frame, header::{FrameType, Encoding}, filter::Gabor};
+use jxl_frame::{
+    data::HfCoeff,
+    filter::Gabor,
+    header::{Encoding, FrameType},
+    Frame,
+    ProgressiveResult,
+};
 use jxl_grid::SimpleGrid;
 use jxl_image::{Headers, ImageMetadata, ColourSpace};
+use jxl_modular::ChannelShift;
 
 mod dct;
 mod error;
 mod filter;
 mod vardct;
 pub use error::{Error, Result};
-use jxl_modular::ChannelShift;
 
 #[derive(Debug)]
 pub struct RenderContext<'a> {
@@ -18,6 +24,7 @@ pub struct RenderContext<'a> {
     frames: Vec<Frame<'a>>,
     lf_frame: Vec<usize>,
     reference: Vec<usize>,
+    loading_frame: Option<Frame<'a>>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -27,6 +34,7 @@ impl<'a> RenderContext<'a> {
             frames: Vec::new(),
             lf_frame: vec![usize::MAX; 4],
             reference: vec![usize::MAX; 4],
+            loading_frame: None,
         }
     }
 
@@ -38,7 +46,9 @@ impl<'a> RenderContext<'a> {
         self.image_header.metadata.xyb_encoded
     }
 
-    fn preserve_frame(&mut self, frame: Frame<'a>) {
+    fn preserve_current_frame(&mut self) {
+        let Some(frame) = self.loading_frame.take() else { return; };
+
         let header = frame.header();
         let idx = self.frames.len();
         let is_last = header.is_last;
@@ -78,12 +88,24 @@ impl RenderContext<'_> {
         Ok(())
     }
 
-    pub fn load_cropped<R: Read>(&mut self, bitstream: &mut Bitstream<R>, mut region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+    pub fn load_cropped<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        progressive: bool,
+        mut region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<ProgressiveResult> {
         let image_header = self.image_header;
 
         loop {
-            bitstream.zero_pad_to_byte()?;
-            let mut frame = Frame::parse(bitstream, image_header)?;
+            let frame = match &mut self.loading_frame {
+                Some(frame) => frame,
+                slot => {
+                    let frame = Frame::parse(bitstream, image_header)?;
+                    *slot = Some(frame);
+                    slot.as_mut().unwrap()
+                },
+            };
+
             let header = frame.header();
             let is_last = header.is_last;
             tracing::info!(
@@ -96,45 +118,44 @@ impl RenderContext<'_> {
             );
 
             if let Some(region) = &mut region {
-                let mut padding = 0u32;
-                if header.restoration_filter.gab.enabled() {
-                    tracing::debug!("Gabor-like filter requires padding of 1 pixel");
-                    padding = 1;
-                }
-                if header.restoration_filter.epf.enabled() {
-                    tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
-                    padding = 3;
-                }
-
-                let delta_w = region.0.min(padding);
-                let delta_h = region.1.min(padding);
-                region.0 -= delta_w;
-                region.1 -= delta_h;
-                region.2 += delta_w + padding;
-                region.3 += delta_h + padding;
-            }
+                frame.adjust_region(region);
+            };
+            let filter = if region.is_some() {
+                Box::new(frame.crop_filter_fn(region)) as Box<dyn FnMut(&_, &_, _) -> bool>
+            } else {
+                Box::new(|_: &_, _: &_, _| true)
+            };
 
             if header.frame_type.is_normal_frame() {
-                frame.load_cropped(bitstream, region)?;
+                let result = frame.load_with_filter(bitstream, progressive, filter)?;
+                match result {
+                    ProgressiveResult::FrameComplete => frame.complete()?,
+                    result => return Ok(result),
+                }
             } else {
                 frame.load_all(bitstream)?;
+                frame.complete()?;
             }
-            frame.complete()?;
 
             let toc = frame.toc();
             let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-            self.preserve_frame(frame);
+            self.preserve_current_frame();
             if is_last {
                 break;
             }
 
             bitstream.skip_to_bookmark(bookmark)?;
         }
-        Ok(())
+
+        Ok(ProgressiveResult::FrameComplete)
     }
 
-    pub fn load_all_frames<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        self.load_cropped(bitstream, None)
+    pub fn load_all_frames<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        progressive: bool,
+    ) -> Result<ProgressiveResult> {
+        self.load_cropped(bitstream, progressive, None)
     }
 }
 
@@ -142,6 +163,7 @@ impl RenderContext<'_> {
     pub fn render_cropped(&self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
         let Some(target_frame) = self.frames
             .iter()
+            .chain(self.loading_frame.as_ref())
             .find(|f| f.header().frame_type.is_normal_frame())
             else {
                 panic!("No regular frame found");
@@ -154,22 +176,7 @@ impl RenderContext<'_> {
 impl<'f> RenderContext<'f> {
     fn render_frame<'a>(&'a self, frame: &'a Frame<'f>, mut region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
         if let Some(region) = &mut region {
-            let mut padding = 0u32;
-            if frame.header().restoration_filter.gab.enabled() {
-                tracing::debug!("Gabor-like filter requires padding of 1 pixel");
-                padding = 1;
-            }
-            if frame.header().restoration_filter.epf.enabled() {
-                tracing::debug!("Edge-preserving filter requires padding of 3 pixels");
-                padding = 3;
-            }
-
-            let delta_w = region.0.min(padding);
-            let delta_h = region.1.min(padding);
-            region.0 -= delta_w;
-            region.1 -= delta_h;
-            region.2 += delta_w + padding;
-            region.3 += delta_h + padding;
+            frame.adjust_region(region);
         }
 
         let mut fb = match frame.header().encoding {
@@ -276,6 +283,9 @@ impl<'f> RenderContext<'f> {
     }
 
     fn render_vardct<'a>(&'a self, frame: &'a Frame<'f>, region: Option<(u32, u32, u32, u32)>) -> Result<[SimpleGrid<f32>; 3]> {
+        let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_vardct");
+        let _guard = span.enter();
+
         let metadata = self.metadata();
         let frame_header = frame.header();
         let frame_data = frame.data();
@@ -291,7 +301,7 @@ impl<'f> RenderContext<'f> {
 
         // Modular extra channels are already merged into GlobalModular,
         // so it's okay to drop PassGroup modular
-        let mut group_coeffs: BTreeMap<_, jxl_frame::data::HfCoeff> = BTreeMap::new();
+        let mut group_coeffs: BTreeMap<_, HfCoeff> = BTreeMap::new();
         for (&(_, group_idx), group_pass) in &frame_data.group_pass {
             if let Some(region) = region {
                 if !frame_header.is_group_collides_region(group_idx, region) {
@@ -302,7 +312,7 @@ impl<'f> RenderContext<'f> {
             let hf_coeff = group_pass.hf_coeff.as_ref().unwrap();
             group_coeffs
                 .entry(group_idx as usize)
-                .or_insert_with(jxl_frame::data::HfCoeff::empty)
+                .or_insert_with(HfCoeff::empty)
                 .merge(hf_coeff);
         }
 

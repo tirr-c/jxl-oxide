@@ -1,3 +1,5 @@
+use std::{collections::BTreeMap, sync::Mutex};
+
 fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
     let n = input.len();
     assert!(n.is_power_of_two());
@@ -124,34 +126,76 @@ fn small_dct<const N: usize, const N4: usize, const INV: bool>(input: &[f32], ou
     }
 }
 
-const COS_SIN: [f32; 24] = [
-    1.0,
-    0.98078525,
-    0.9238795,
-    0.8314696,
-    std::f32::consts::FRAC_1_SQRT_2,
-    0.55557024,
-    0.38268343,
-    0.19509032,
+const F1S2: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
-    0.0,
-    -0.19509032,
-    -0.38268343,
-    -0.55557024,
-    -std::f32::consts::FRAC_1_SQRT_2,
-    -0.8314696,
-    -0.9238795,
-    -0.98078525,
+const COS_SIN_SMALL: [&[f32]; 4] = [
+    &[1.0, 0.0, -1.0],
+    &[1.0, F1S2, 0.0, -F1S2, -1.0, -F1S2],
+    &[
+        1.0,
+        0.9238795,
+        F1S2,
+        0.38268343,
+        0.0,
+        -0.38268343,
+        -F1S2,
+        -0.9238795,
+        -1.0,
+        -0.9238795,
+        -F1S2,
+        -0.38268343,
+    ],
+    &[
+        1.0,
+        0.98078525,
+        0.9238795,
+        0.8314696,
+        F1S2,
+        0.55557024,
+        0.38268343,
+        0.19509032,
 
-    -1.0,
-    -0.98078525,
-    -0.9238795,
-    -0.8314696,
-    -std::f32::consts::FRAC_1_SQRT_2,
-    -0.55557024,
-    -0.38268343,
-    -0.19509032,
+        0.0,
+        -0.19509032,
+        -0.38268343,
+        -0.55557024,
+        -F1S2,
+        -0.8314696,
+        -0.9238795,
+        -0.98078525,
+
+        -1.0,
+        -0.98078525,
+        -0.9238795,
+        -0.8314696,
+        -F1S2,
+        -0.55557024,
+        -0.38268343,
+        -0.19509032,
+    ],
 ];
+
+fn cos_sin(n: usize) -> &'static [f32] {
+    let n4 = n / 4;
+    let idx = n4 - 1;
+
+    static COS_SIN_LARGE: Mutex<BTreeMap<usize, &'static [f32]>> = Mutex::new(BTreeMap::new());
+
+    if let Some(idx) = idx.checked_sub(4) {
+        let mut map = COS_SIN_LARGE.lock().unwrap();
+        map.entry(idx)
+            .or_insert_with(|| {
+                let mut cos_sin_table = vec![0f32; n4 * 3];
+                for (k, cos) in cos_sin_table.iter_mut().enumerate() {
+                    let theta = (2 * k) as f32 / n as f32 * std::f32::consts::PI;
+                    *cos = theta.cos();
+                }
+                &*cos_sin_table.leak()
+            })
+    } else {
+        COS_SIN_SMALL[idx]
+    }
+}
 
 /// Assumes that inputs are reordered.
 fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
@@ -159,32 +203,22 @@ fn fft_in_place(real: &mut [f32], imag: &mut [f32]) {
     assert!(n.is_power_of_two());
     assert!(imag.len() == n);
 
+    let cos_sin_table = cos_sin(n);
+
     let mut m;
     let mut k_iter;
-    let mut theta;
-    let mut skip;
     m = 1;
     k_iter = n;
-    theta = std::f32::consts::PI * (-2.0);
-    skip = 32usize;
 
     for _ in 0..n.trailing_zeros() {
         m <<= 1;
         k_iter >>= 1;
-        theta /= 2.0;
-        skip >>= 1;
 
         for k in 0..k_iter {
             let k = k * m;
             for j in 0..(m / 2) {
-                let (sin, cos) = if skip == 0 {
-                    let theta = theta * (j as f32);
-                    theta.sin_cos()
-                } else {
-                    let cos = COS_SIN[j * skip];
-                    let sin = COS_SIN[j * skip + 8];
-                    (sin, cos)
-                };
+                let cos = cos_sin_table[j * k_iter];
+                let sin = cos_sin_table[j * k_iter + n / 4];
 
                 let r = real[k + m / 2 + j];
                 let i = imag[k + m / 2 + j];
@@ -211,16 +245,16 @@ fn small_fft_in_place<const N: usize>(real: &mut [f32], imag: &mut [f32]) {
     assert!(real.len() >= N);
     assert!(imag.len() >= N);
 
+    let cos_sin_table = COS_SIN_SMALL[iters as usize - 2];
     for it in 0..iters {
         let m = 1usize << (it + 1);
         let k_iter = N >> (it + 1);
-        let skip = 16usize >> it;
 
         for k in 0..k_iter {
             let k = k * m;
             for j in 0..(m / 2) {
-                let cos = COS_SIN[j * skip];
-                let sin = COS_SIN[j * skip + 8];
+                let cos = cos_sin_table[j * k_iter];
+                let sin = cos_sin_table[j * k_iter + N / 4];
 
                 let ur = real[k + j];
                 let ui = imag[k + j];
