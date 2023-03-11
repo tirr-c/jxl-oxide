@@ -11,7 +11,7 @@ use jxl_vardct::{
     LfChannelCorrelation, TransformType,
 };
 
-use crate::dct::dct_2d_in_place;
+use crate::dct::dct_2d;
 
 mod transform;
 pub use transform::transform;
@@ -237,20 +237,20 @@ pub fn llf_from_lf(
         out.buf_mut()[0] = *lf.get(0, 0).unwrap();
         out
     } else {
-        let mut llf = vec![0.0f32; bw as usize * bh as usize];
-        for y in 0..bh as usize {
-            for x in 0..bw as usize {
-                llf[y * bw as usize + x] = *lf.get(x, y).unwrap();
-            }
-        }
-        dct_2d_in_place(&mut llf, bw as usize, bh as usize);
-
         let cx = bw.max(bh) as usize;
         let cy = bw.min(bh) as usize;
         let mut out = SimpleGrid::new(cx, cy);
+        let mut tmp = vec![0.0f32; bw as usize * bh as usize];
+        for y in 0..bh as usize {
+            for x in 0..bw as usize {
+                out.buf_mut()[y * bw as usize + x] = *lf.get(x, y).unwrap();
+            }
+        }
+        dct_2d(out.buf_mut(), &mut tmp, bw as usize, bh as usize);
+
         for y in 0..cy {
             for x in 0..cx {
-                out.buf_mut()[y * cx + x] = llf[y * cx + x] * scale_f(y, cy * 8) * scale_f(x, cx * 8);
+                out.buf_mut()[y * cx + x] *= scale_f(y, cy * 8) * scale_f(x, cx * 8);
             }
         }
 
