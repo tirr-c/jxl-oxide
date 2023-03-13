@@ -180,13 +180,17 @@ unsafe fn dct(input_scratch: &mut [Lane], output: &mut [Lane], inverse: bool) {
         let (real, imag) = input_scratch.split_at_mut(n / 2);
         fft_in_place(imag, real);
 
-        let it = (0..n).step_by(4).chain((0..n).rev().step_by(4)).zip(real);
-        for (idx, i) in it {
-            output[idx] = *i;
+        for (idx, i) in real[..n / 4].iter().enumerate() {
+            output[idx * 4] = *i;
         }
-        let it = (2..n).step_by(4).chain((0..n - 2).rev().step_by(4)).zip(imag);
-        for (idx, i) in it {
-            output[idx] = *i;
+        for (idx, i) in real[n / 4..].iter().enumerate() {
+            output[n - idx * 4 - 1] = *i;
+        }
+        for (idx, i) in imag[..n / 4].iter().enumerate() {
+            output[2 + idx * 4] = *i;
+        }
+        for (idx, i) in imag[n / 4..].iter().enumerate() {
+            output[n - idx * 4 - 3] = *i;
         }
     } else {
         let it = input_scratch.iter().step_by(2).chain(input_scratch.iter().rev().step_by(2)).zip(&mut *output);
