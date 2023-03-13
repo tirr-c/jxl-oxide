@@ -170,9 +170,9 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             let vi = _mm_sub_ps(rcos, isin);
 
             output[idx * 2] = _mm_add_ps(tr, vr);
-            output[idx * 2 + 1] = _mm_add_ps(ti, vi);
+            output[idx * 2 + 1] = _mm_sub_ps(vi, ti);
             output[n - idx * 2] = _mm_sub_ps(tr, vr);
-            output[n - idx * 2 + 1] = _mm_sub_ps(vi, ti);
+            output[n - idx * 2 + 1] = _mm_add_ps(vi, ti);
         }
         output[n / 2] = _mm_mul_ps(output[n / 2], _mm_set1_ps(2.0));
         output[n / 2 + 1] = _mm_mul_ps(output[n / 2 + 1], _mm_set1_ps(2.0));
@@ -259,8 +259,8 @@ unsafe fn dct4(input: &[Lane], output: &mut [Lane], inverse: bool) {
 
     const COS: f32 = 0.9238795;
     const SIN: f32 = -0.38268343;
-    let cos = _mm_set1_ps(COS * std::f32::consts::FRAC_1_SQRT_2);
-    let sin = _mm_set1_ps(SIN * std::f32::consts::FRAC_1_SQRT_2);
+    let cos = _mm_set1_ps(COS * std::f32::consts::SQRT_2);
+    let sin = _mm_set1_ps(SIN * std::f32::consts::SQRT_2);
 
     if inverse {
         output[0] = _mm_add_ps(input[0], input[2]);
@@ -271,9 +271,8 @@ unsafe fn dct4(input: &[Lane], output: &mut [Lane], inverse: bool) {
         let rsin = _mm_mul_ps(r, sin);
         let icos = _mm_mul_ps(i, cos);
         let isin = _mm_mul_ps(i, sin);
-        let two = _mm_set1_ps(2.0);
-        let tr = _mm_mul_ps(_mm_sub_ps(rcos, isin), two);
-        let ti = _mm_mul_ps(_mm_add_ps(icos, rsin), two);
+        let tr = _mm_sub_ps(rcos, isin);
+        let ti = _mm_add_ps(icos, rsin);
         output[1] = tr;
         output[3] = ti;
 
@@ -298,15 +297,14 @@ unsafe fn dct4(input: &[Lane], output: &mut [Lane], inverse: bool) {
 
         let r = real[1];
         let i = imag[1];
-        let scale = _mm_set1_ps(std::f32::consts::FRAC_1_SQRT_2 / 2.0);
         let rcos = _mm_mul_ps(r, cos);
         let rsin = _mm_mul_ps(r, sin);
         let icos = _mm_mul_ps(i, cos);
         let isin = _mm_mul_ps(i, sin);
         let tr = _mm_add_ps(rcos, isin);
         let ti = _mm_sub_ps(icos, rsin);
-        real[1] = _mm_mul_ps(tr, scale);
-        imag[1] = _mm_mul_ps(ti, scale);
+        real[1] = _mm_mul_ps(tr, one_fourth);
+        imag[1] = _mm_mul_ps(ti, one_fourth);
     }
 }
 
@@ -327,7 +325,7 @@ unsafe fn dct8(input: &[Lane], output: &mut [Lane], inverse: bool) {
         output[6] = input[7];
         output[7] = input[5];
 
-        for (i, idx) in [(2, 6), (1, 5), (3, 7)].into_iter().enumerate().skip(1) {
+        for (i, idx) in [(2, 6), (1, 5), (3, 7)].into_iter().enumerate() {
             let cos = _mm_set1_ps(cos_sin_table_4n[i + 1] * std::f32::consts::FRAC_1_SQRT_2);
             let sin = _mm_set1_ps(cos_sin_table_4n[i + 9] * std::f32::consts::FRAC_1_SQRT_2);
             let r = output[idx.0];

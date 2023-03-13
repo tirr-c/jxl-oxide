@@ -126,9 +126,9 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             let vi = ur * cos - ui * sin;
 
             output[idx * 2] = tr + vr;
-            output[idx * 2 + 1] = ti + vi;
+            output[idx * 2 + 1] = vi - ti;
             output[n - idx * 2] = tr - vr;
-            output[n - idx * 2 + 1] = vi - ti;
+            output[n - idx * 2 + 1] = vi + ti;
         }
         output[n / 2] *= 2.0;
         output[n / 2 + 1] *= 2.0;
@@ -205,8 +205,8 @@ fn dct4(input: &[f32], output: &mut [f32], inverse: bool) {
     assert_eq!(input.len(), 4);
     assert_eq!(output.len(), 4);
 
-    const COS: f32 = 0.9238795;
-    const SIN: f32 = -0.38268343;
+    const COS: f32 = 0.9238795 * std::f32::consts::SQRT_2;
+    const SIN: f32 = -0.38268343 * std::f32::consts::SQRT_2;
 
     if inverse {
         output[0] = input[0] + input[2];
@@ -215,8 +215,8 @@ fn dct4(input: &[f32], output: &mut [f32], inverse: bool) {
         let i = input[3];
         let tr = r * COS - i * SIN;
         let ti = i * COS + r * SIN;
-        output[1] = tr * std::f32::consts::SQRT_2;
-        output[3] = ti * std::f32::consts::SQRT_2;
+        output[1] = tr;
+        output[3] = ti;
 
         let (real, imag) = output.split_at_mut(2);
         small_fft_in_place::<2>(imag, real);
@@ -236,13 +236,12 @@ fn dct4(input: &[f32], output: &mut [f32], inverse: bool) {
         real[0] = l + r;
         imag[0] = l - r;
 
-        let r = real[1];
-        let i = imag[1];
-        let scale = std::f32::consts::FRAC_1_SQRT_2 / 2.0;
+        let r = real[1] / 4.0;
+        let i = imag[1] / 4.0;
         let tr = r * COS + i * SIN;
         let ti = i * COS - r * SIN;
-        real[1] = tr * scale;
-        imag[1] = ti * scale;
+        real[1] = tr;
+        imag[1] = ti;
     }
 }
 
@@ -263,7 +262,7 @@ fn dct8(input: &[f32], output: &mut [f32], inverse: bool) {
         output[6] = input[7];
         output[7] = input[5];
 
-        for (i, idx) in [(2, 6), (1, 5), (3, 7)].into_iter().enumerate().skip(1) {
+        for (i, idx) in [(2, 6), (1, 5), (3, 7)].into_iter().enumerate() {
             let cos = cos_sin_table_4n[i + 1] * std::f32::consts::FRAC_1_SQRT_2;
             let sin = cos_sin_table_4n[i + 9] * std::f32::consts::FRAC_1_SQRT_2;
             let r = output[idx.0];
@@ -463,8 +462,32 @@ fn small_fft_in_place<const N: usize>(real: &mut [f32], imag: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn forward_dct_small() {
-        let input = [1.0, 0.0, 1.0, 0.0];
+    fn forward_dct_2() {
+        let input = [-1.0, 3.0];
+        let mut output = [0.0f32; 2];
+        super::dct(&input, &mut output, false);
+
+        let s = input.len();
+        for (k, output) in output.iter().enumerate() {
+            let mut exp_value = 0.0f64;
+            for (n, input) in input.iter().enumerate() {
+                let cos = ((k * (2 * n + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
+                exp_value += *input as f64 * cos;
+            }
+            exp_value /= s as f64;
+            if k != 0 {
+                exp_value *= std::f64::consts::SQRT_2;
+            }
+
+            let q_expected = (exp_value * 65536.0) as i32;
+            let q_actual = (*output * 65536.0) as i32;
+            assert_eq!(q_expected, q_actual);
+        }
+    }
+
+    #[test]
+    fn forward_dct_4() {
+        let input = [-1.0, 2.0, 3.0, -4.0];
         let mut output = [0.0f32; 4];
         super::dct(&input, &mut output, false);
 
@@ -487,8 +510,8 @@ mod tests {
     }
 
     #[test]
-    fn forward_dct() {
-        let input = [1.0, 0.0, 1.0, 2.0, -2.0, 0.0, 1.0, 0.0];
+    fn forward_dct_8() {
+        let input = [1.0, 0.3, 1.0, 2.0, -2.0, -0.1, 1.0, 0.1];
         let mut output = [0.0f32; 8];
         super::dct(&input, &mut output, false);
 
@@ -511,8 +534,28 @@ mod tests {
     }
 
     #[test]
-    fn backward_dct_small() {
-        let input = [3.0, 0.2, 0.0, -1.0];
+    fn backward_dct_2() {
+        let input = [3.0, 0.2];
+        let mut output = [0.0f32; 2];
+        super::dct(&input, &mut output, true);
+
+        let s = input.len();
+        for (k, output) in output.iter().enumerate() {
+            let mut exp_value = input[0] as f64;
+            for (n, input) in input.iter().enumerate().skip(1) {
+                let cos = ((n * (2 * k + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
+                exp_value += *input as f64 * cos * std::f64::consts::SQRT_2;
+            }
+
+            let q_expected = (exp_value * 65536.0) as i32;
+            let q_actual = (*output * 65536.0) as i32;
+            assert_eq!(q_expected, q_actual);
+        }
+    }
+
+    #[test]
+    fn backward_dct_4() {
+        let input = [3.0, 0.2, 0.3, -1.0];
         let mut output = [0.0f32; 4];
         super::dct(&input, &mut output, true);
 
@@ -531,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn backward_dct() {
+    fn backward_dct_8() {
         let input = [3.0, 0.0, 0.0, -1.0, 0.0, 0.3, 0.2, 0.0];
         let mut output = [0.0f32; 8];
         super::dct(&input, &mut output, true);
