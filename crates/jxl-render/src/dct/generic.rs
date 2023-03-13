@@ -98,14 +98,14 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             *o = *i;
         }
         for (i, o) in input[n / 2 + 1..].iter().rev().zip(output[3..].iter_mut().step_by(2)) {
-            *o = -*i;
+            *o = *i;
         }
         for (idx, slice) in output.chunks_exact_mut(2).enumerate().skip(1) {
             let [r, i] = slice else { unreachable!() };
             let cos = cos_sin_table_4n[idx];
             let sin = cos_sin_table_4n[idx + n];
-            let tr = *r * cos + *i * sin;
-            let ti = *i * cos - *r * sin;
+            let tr = *r * cos - *i * sin;
+            let ti = *i * cos + *r * sin;
             *r = tr;
             *i = ti;
         }
@@ -122,8 +122,8 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
 
             let cos = cos_sin_table_4n[idx * 4];
             let sin = cos_sin_table_4n[idx * 4 + n];
-            let vr = ur * sin - ui * cos;
-            let vi = ui * sin + ur * cos;
+            let vr = ur * sin + ui * cos;
+            let vi = ur * cos - ui * sin;
 
             output[idx * 2] = tr + vr;
             output[idx * 2 + 1] = ti + vi;
@@ -131,7 +131,7 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             output[n - idx * 2 + 1] = vi - ti;
         }
         output[n / 2] *= 2.0;
-        output[n / 2 + 1] *= -2.0;
+        output[n / 2 + 1] *= 2.0;
         reorder(output, &mut scratch);
 
         let (real, imag) = scratch.split_at_mut(n / 2);
@@ -188,12 +188,12 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
         let scale = (n as f32).recip() * std::f32::consts::FRAC_1_SQRT_2;
         for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
             let cos = cos_sin_table_4n[idx];
-            let sin = cos_sin_table_4n[idx + n];
+            let sin = -cos_sin_table_4n[idx + n];
 
-            let tr = *r * cos - *i * sin;
-            let ti = *r * sin + *i * cos;
+            let tr = *r * cos + *i * sin;
+            let ti = *r * sin - *i * cos;
             *r = tr * scale;
-            *i = -ti * scale;
+            *i = ti * scale;
         }
         real[0] /= n as f32;
         imag[0] /= n as f32;
@@ -269,7 +269,7 @@ fn dct8(input: &[f32], output: &mut [f32], inverse: bool) {
             let r = output[idx.0];
             let i = output[idx.1];
             let tr = r * cos - i * sin;
-            let ti = -(i * cos + r * sin);
+            let ti = i * cos + r * sin;
             output[idx.0] = tr;
             output[idx.1] = ti;
         }
@@ -285,15 +285,15 @@ fn dct8(input: &[f32], output: &mut [f32], inverse: bool) {
 
         let cos = cos_sin_table_4n[4];
         let sin = cos_sin_table_4n[12];
-        let vr = ur * sin - ui * cos;
-        let vi = ui * sin + ur * cos;
+        let vr = ur * sin + ui * cos;
+        let vi = ur * cos - ui * sin;
 
         output[2] = tr + vr;
-        output[6] = ti + vi;
+        output[6] = vi - ti;
         output[3] = tr - vr;
-        output[7] = vi - ti;
+        output[7] = vi + ti;
         output[1] *= 2.0;
-        output[5] *= -2.0;
+        output[5] *= 2.0;
 
         let (real, imag) = output.split_at_mut(4);
         small_fft_in_place::<4>(imag, real);
@@ -340,12 +340,12 @@ fn dct8(input: &[f32], output: &mut [f32], inverse: bool) {
         let scale = std::f32::consts::FRAC_1_SQRT_2 / 8.0;
         for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
             let cos = cos_sin_table_4n[idx];
-            let sin = cos_sin_table_4n[idx + 8];
+            let sin = -cos_sin_table_4n[idx + 8];
 
-            let tr = *r * cos - *i * sin;
-            let ti = *r * sin + *i * cos;
+            let tr = *r * cos + *i * sin;
+            let ti = *r * sin - *i * cos;
             *r = tr * scale;
-            *i = -ti * scale;
+            *i = ti * scale;
         }
         real[0] /= 8.0;
         imag[0] /= 8.0;

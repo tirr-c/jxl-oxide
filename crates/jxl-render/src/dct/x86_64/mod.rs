@@ -145,7 +145,7 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             let icos = _mm_mul_ps(*i, cos);
             let isin = _mm_mul_ps(*i, sin);
             let tr = _mm_sub_ps(rcos, isin);
-            let ti = _mm_mul_ps(_mm_add_ps(icos, rsin), _mm_set1_ps(-1.0));
+            let ti = _mm_add_ps(icos, rsin);
             *r = tr;
             *i = ti;
         }
@@ -166,8 +166,8 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             let rsin = _mm_mul_ps(ur, sin);
             let icos = _mm_mul_ps(ui, cos);
             let isin = _mm_mul_ps(ui, sin);
-            let vr = _mm_sub_ps(rsin, icos);
-            let vi = _mm_add_ps(isin, rcos);
+            let vr = _mm_add_ps(rsin, icos);
+            let vi = _mm_sub_ps(rcos, isin);
 
             output[idx * 2] = _mm_add_ps(tr, vr);
             output[idx * 2 + 1] = _mm_add_ps(ti, vi);
@@ -175,7 +175,7 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             output[n - idx * 2 + 1] = _mm_sub_ps(vi, ti);
         }
         output[n / 2] = _mm_mul_ps(output[n / 2], _mm_set1_ps(2.0));
-        output[n / 2 + 1] = _mm_mul_ps(output[n / 2 + 1], _mm_set1_ps(-2.0));
+        output[n / 2 + 1] = _mm_mul_ps(output[n / 2 + 1], _mm_set1_ps(2.0));
         reorder(output, &mut scratch);
 
         let (real, imag) = scratch.split_at_mut(n / 2);
@@ -235,14 +235,14 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
         let scale = _mm_set1_ps((n as f32).recip() * std::f32::consts::FRAC_1_SQRT_2);
         for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
             let cos = _mm_load1_ps(&cos_sin_table_4n[idx]);
-            let sin = _mm_load1_ps(&cos_sin_table_4n[idx + n]);
+            let sin = _mm_set1_ps(-cos_sin_table_4n[idx + n]);
 
             let rcos = _mm_mul_ps(*r, cos);
             let rsin = _mm_mul_ps(*r, sin);
             let icos = _mm_mul_ps(*i, cos);
             let isin = _mm_mul_ps(*i, sin);
             let tr = _mm_add_ps(rcos, isin);
-            let ti = _mm_mul_ps(_mm_sub_ps(icos, rsin), _mm_set1_ps(-1.0));
+            let ti = _mm_sub_ps(rsin, icos);
             *r = _mm_mul_ps(tr, scale);
             *i = _mm_mul_ps(ti, scale);
         }
@@ -337,7 +337,7 @@ unsafe fn dct8(input: &[Lane], output: &mut [Lane], inverse: bool) {
             let icos = _mm_mul_ps(i, cos);
             let isin = _mm_mul_ps(i, sin);
             let tr = _mm_sub_ps(rcos, isin);
-            let ti = _mm_mul_ps(_mm_add_ps(icos, rsin), _mm_set1_ps(-1.0));
+            let ti = _mm_add_ps(icos, rsin);
             output[idx.0] = tr;
             output[idx.1] = ti;
         }
@@ -357,15 +357,15 @@ unsafe fn dct8(input: &[Lane], output: &mut [Lane], inverse: bool) {
         let rsin = _mm_mul_ps(ur, sin);
         let icos = _mm_mul_ps(ui, cos);
         let isin = _mm_mul_ps(ui, sin);
-        let vr = _mm_sub_ps(rsin, icos);
-        let vi = _mm_add_ps(isin, rcos);
+        let vr = _mm_add_ps(rsin, icos);
+        let vi = _mm_sub_ps(rcos, isin);
 
         output[2] = _mm_add_ps(tr, vr);
-        output[6] = _mm_add_ps(ti, vi);
+        output[6] = _mm_sub_ps(vi, ti);
         output[3] = _mm_sub_ps(tr, vr);
-        output[7] = _mm_sub_ps(vi, ti);
+        output[7] = _mm_add_ps(vi, ti);
         output[1] = _mm_mul_ps(output[1], _mm_set1_ps(2.0));
-        output[5] = _mm_mul_ps(output[5], _mm_set1_ps(-2.0));
+        output[5] = _mm_mul_ps(output[5], _mm_set1_ps(2.0));
 
         let (real, imag) = output.split_at_mut(4);
         small_fft_in_place::<4>(imag, real);
@@ -416,14 +416,14 @@ unsafe fn dct8(input: &[Lane], output: &mut [Lane], inverse: bool) {
         let scale = _mm_set1_ps(std::f32::consts::FRAC_1_SQRT_2 / 8.0);
         for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
             let cos = _mm_load1_ps(&cos_sin_table_4n[idx]);
-            let sin = _mm_load1_ps(&cos_sin_table_4n[idx + 8]);
+            let sin = _mm_set1_ps(-cos_sin_table_4n[idx + 8]);
 
             let rcos = _mm_mul_ps(*r, cos);
             let rsin = _mm_mul_ps(*r, sin);
             let icos = _mm_mul_ps(*i, cos);
             let isin = _mm_mul_ps(*i, sin);
             let tr = _mm_add_ps(rcos, isin);
-            let ti = _mm_mul_ps(_mm_sub_ps(icos, rsin), _mm_set1_ps(-1.0));
+            let ti = _mm_sub_ps(rsin, icos);
             *r = _mm_mul_ps(tr, scale);
             *i = _mm_mul_ps(ti, scale);
         }
