@@ -1,20 +1,11 @@
-use super::super::{consts, reorder, small_reorder};
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
+use super::{consts, reorder, small_reorder};
 use std::arch::x86_64::*;
-
-mod avx2;
 
 const LANE: usize = 4;
 
 pub fn dct_2d(io: &mut [f32], scratch: &mut [f32], width: usize, height: usize) {
     if width % LANE != 0 || height % LANE != 0 {
         return super::generic::dct_2d(io, scratch, width, height);
-    }
-
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && width % 8 == 0 && height % 8 == 0 {
-        return avx2::dct_2d(io, scratch, width, height);
     }
 
     let target_width = width.max(height);
@@ -37,10 +28,6 @@ pub fn dct_2d(io: &mut [f32], scratch: &mut [f32], width: usize, height: usize) 
 pub fn idct_2d(coeffs_output: &mut [f32], scratch: &mut [f32], target_width: usize, target_height: usize) {
     if target_width % LANE != 0 || target_height % LANE != 0 {
         return super::generic::idct_2d(coeffs_output, scratch, target_width, target_height);
-    }
-
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && target_width % 8 == 0 && target_height % 8 == 0 {
-        return avx2::idct_2d(coeffs_output, scratch, target_width, target_height);
     }
 
     let width = target_width.max(target_height);

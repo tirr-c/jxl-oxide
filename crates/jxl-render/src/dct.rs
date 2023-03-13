@@ -1,5 +1,5 @@
 mod consts;
-mod impls;
+mod generic;
 
 fn reorder<T: Copy>(input: &[T], output: &mut [T]) {
     let n = input.len();
@@ -49,5 +49,22 @@ fn small_reorder<const N: usize, T: Copy>(input: &[T], output: &mut [T]) {
     }
 }
 
-pub use impls::dct_2d;
-pub use impls::idct_2d;
+/*
+#[cfg(
+    not(
+        any(target_arch = "x86", target_arch = "x86_64"),
+    )
+)]
+pub use generic::*;
+
+#[cfg(
+    any(target_arch = "x86", target_arch = "x86_64"),
+)]
+mod x86_64;
+#[cfg(
+    any(target_arch = "x86", target_arch = "x86_64"),
+)]
+pub use x86_64::*;
+*/
+
+pub use generic::*;
