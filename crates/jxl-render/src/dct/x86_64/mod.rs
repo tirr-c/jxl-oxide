@@ -95,20 +95,20 @@ unsafe fn row_dct_transpose_lane(
     }
 }
 
-unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
-    let n = input.len();
+unsafe fn dct(input_scratch: &mut [Lane], output: &mut [Lane], inverse: bool) {
+    let n = input_scratch.len();
     assert!(output.len() == n);
 
     if n == 0 {
         return;
     }
     if n == 1 {
-        output[0] = input[0];
+        output[0] = input_scratch[0];
         return;
     }
     if n == 2 {
-        output[0] = _mm_add_ps(input[0], input[1]);
-        output[1] = _mm_sub_ps(input[0], input[1]);
+        output[0] = _mm_add_ps(input_scratch[0], input_scratch[1]);
+        output[1] = _mm_sub_ps(input_scratch[0], input_scratch[1]);
         if !inverse {
             let half = _mm_set1_ps(0.5);
             output[0] = _mm_mul_ps(output[0], half);
@@ -117,23 +117,22 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
         return;
     }
     if n == 4 {
-        return dct4(input, output, inverse);
+        return dct4(input_scratch, output, inverse);
     }
     if n == 8 {
-        return dct8(input, output, inverse);
+        return dct8(input_scratch, output, inverse);
     }
     assert!(n.is_power_of_two());
 
-    let mut scratch = vec![_mm_setzero_ps(); n];
     let cos_sin_table_4n = consts::cos_sin(4 * n);
 
     if inverse {
-        output[0] = _mm_add_ps(input[0], input[n / 2]);
-        output[1] = _mm_sub_ps(input[0], input[n / 2]);
-        for (i, o) in input[1..n / 2].iter().zip(output[2..].iter_mut().step_by(2)) {
+        output[0] = _mm_add_ps(input_scratch[0], input_scratch[n / 2]);
+        output[1] = _mm_sub_ps(input_scratch[0], input_scratch[n / 2]);
+        for (i, o) in input_scratch[1..n / 2].iter().zip(output[2..].iter_mut().step_by(2)) {
             *o = *i;
         }
-        for (i, o) in input[n / 2 + 1..].iter().rev().zip(output[3..].iter_mut().step_by(2)) {
+        for (i, o) in input_scratch[n / 2 + 1..].iter().rev().zip(output[3..].iter_mut().step_by(2)) {
             *o = *i;
         }
         for (idx, slice) in output.chunks_exact_mut(2).enumerate().skip(1) {
@@ -176,9 +175,9 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
         }
         output[n / 2] = _mm_mul_ps(output[n / 2], _mm_set1_ps(2.0));
         output[n / 2 + 1] = _mm_mul_ps(output[n / 2 + 1], _mm_set1_ps(2.0));
-        reorder(output, &mut scratch);
+        reorder(output, input_scratch);
 
-        let (real, imag) = scratch.split_at_mut(n / 2);
+        let (real, imag) = input_scratch.split_at_mut(n / 2);
         fft_in_place(imag, real);
 
         let it = (0..n).step_by(4).chain((0..n).rev().step_by(4)).zip(real);
@@ -190,19 +189,19 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             output[idx] = *i;
         }
     } else {
-        let it = input.iter().step_by(2).chain(input.iter().rev().step_by(2)).zip(&mut scratch);
+        let it = input_scratch.iter().step_by(2).chain(input_scratch.iter().rev().step_by(2)).zip(&mut *output);
         for (i, o) in it {
             *o = *i;
         }
-        reorder(&scratch, output);
+        reorder(output, input_scratch);
 
-        let (real, imag) = output.split_at_mut(n / 2);
+        let (real, imag) = input_scratch.split_at_mut(n / 2);
         fft_in_place(real, imag);
 
-        let l = real[0];
-        let r = imag[0];
-        real[0] = _mm_add_ps(l, r);
-        imag[0] = _mm_sub_ps(l, r);
+        let (oreal, oimag) = output.split_at_mut(n / 2);
+
+        oreal[0] = _mm_add_ps(real[0], imag[0]);
+        oimag[0] = _mm_sub_ps(real[0], imag[0]);
 
         for idx in 1..(n / 4) {
             let lr = real[idx];
@@ -224,16 +223,16 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             let vr = _mm_add_ps(rsin, icos);
             let vi = _mm_sub_ps(isin, rcos);
 
-            real[idx] = _mm_add_ps(tr, vr);
-            imag[idx] = _mm_add_ps(ti, vi);
-            real[n / 2 - idx] = _mm_sub_ps(tr, vr);
-            imag[n / 2 - idx] = _mm_sub_ps(vi, ti);
+            oreal[idx] = _mm_add_ps(tr, vr);
+            oimag[idx] = _mm_add_ps(ti, vi);
+            oreal[n / 2 - idx] = _mm_sub_ps(tr, vr);
+            oimag[n / 2 - idx] = _mm_sub_ps(vi, ti);
         }
-        real[n / 4] = _mm_mul_ps(real[n / 4], _mm_set1_ps(2.0));
-        imag[n / 4] = _mm_mul_ps(imag[n / 4], _mm_set1_ps(-2.0));
+        oreal[n / 4] = _mm_mul_ps(real[n / 4], _mm_set1_ps(2.0));
+        oimag[n / 4] = _mm_mul_ps(imag[n / 4], _mm_set1_ps(-2.0));
 
         let scale = _mm_set1_ps((n as f32).recip() * std::f32::consts::FRAC_1_SQRT_2);
-        for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
+        for (idx, (r, i)) in oreal.iter_mut().zip(&mut *oimag).enumerate().skip(1) {
             let cos = _mm_load1_ps(&cos_sin_table_4n[idx]);
             let sin = _mm_set1_ps(-cos_sin_table_4n[idx + n]);
 
@@ -247,9 +246,9 @@ unsafe fn dct(input: &[Lane], output: &mut [Lane], inverse: bool) {
             *i = _mm_mul_ps(ti, scale);
         }
         let n = _mm_set1_ps(n as f32);
-        real[0] = _mm_div_ps(real[0], n);
-        imag[0] = _mm_div_ps(imag[0], n);
-        imag[1..].reverse();
+        oreal[0] = _mm_div_ps(real[0], n);
+        oimag[0] = _mm_div_ps(imag[0], n);
+        oimag[1..].reverse();
     }
 }
 

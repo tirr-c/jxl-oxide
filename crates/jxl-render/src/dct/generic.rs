@@ -6,7 +6,7 @@ pub fn dct_2d(io: &mut [f32], scratch: &mut [f32], width: usize, height: usize) 
     // Performs row DCT instead of column DCT, it should be okay
     // r x c => c x r
     let row = &mut buf[..width];
-    for (y, input_row) in io.chunks_exact(width).enumerate() {
+    for (y, input_row) in io.chunks_exact_mut(width).enumerate() {
         dct(input_row, row, false);
         for (tmp_row, v) in scratch.chunks_exact_mut(height).zip(&*row) {
             tmp_row[y] = *v;
@@ -15,12 +15,12 @@ pub fn dct_2d(io: &mut [f32], scratch: &mut [f32], width: usize, height: usize) 
 
     // c x r => if c > r then r x c else c x r
     if width <= height {
-        for (input_row, output_row) in scratch.chunks_exact(height).zip(io.chunks_exact_mut(height)) {
+        for (input_row, output_row) in scratch.chunks_exact_mut(height).zip(io.chunks_exact_mut(height)) {
             dct(input_row, output_row, false);
         }
     } else {
         let col = &mut buf[..height];
-        for (x, input_col) in scratch.chunks_exact(height).enumerate() {
+        for (x, input_col) in scratch.chunks_exact_mut(height).enumerate() {
             dct(input_col, col, false);
             for (output_row, v) in io.chunks_exact_mut(width).zip(&*col) {
                 output_row[x] = *v;
@@ -37,7 +37,7 @@ pub fn idct_2d(coeffs_output: &mut [f32], scratch: &mut [f32], target_width: usi
     // Performs row DCT instead of column DCT, it should be okay
     // r x c => c x r
     let row = &mut buf[..width];
-    for (y, input_row) in coeffs_output.chunks_exact(width).enumerate() {
+    for (y, input_row) in coeffs_output.chunks_exact_mut(width).enumerate() {
         dct(input_row, row, true);
         for (tmp_row, v) in scratch.chunks_exact_mut(height).zip(&*row) {
             tmp_row[y] = *v;
@@ -46,12 +46,12 @@ pub fn idct_2d(coeffs_output: &mut [f32], scratch: &mut [f32], target_width: usi
 
     // c x r => if c > r then r x c else c x r
     if target_height >= target_width {
-        for (input_row, output_row) in scratch.chunks_exact(height).zip(coeffs_output.chunks_exact_mut(height)) {
+        for (input_row, output_row) in scratch.chunks_exact_mut(height).zip(coeffs_output.chunks_exact_mut(height)) {
             dct(input_row, output_row, true);
         }
     } else {
         let col = &mut buf[..height];
-        for (x, input_col) in scratch.chunks_exact(height).enumerate() {
+        for (x, input_col) in scratch.chunks_exact_mut(height).enumerate() {
             dct(input_col, col, true);
             for (output_row, v) in coeffs_output.chunks_exact_mut(width).zip(&*col) {
                 output_row[x] = *v;
@@ -60,20 +60,20 @@ pub fn idct_2d(coeffs_output: &mut [f32], scratch: &mut [f32], target_width: usi
     }
 }
 
-fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
-    let n = input.len();
+fn dct(input_scratch: &mut [f32], output: &mut [f32], inverse: bool) {
+    let n = input_scratch.len();
     assert!(output.len() == n);
 
     if n == 0 {
         return;
     }
     if n == 1 {
-        output[0] = input[0];
+        output[0] = input_scratch[0];
         return;
     }
     if n == 2 {
-        output[0] = input[0] + input[1];
-        output[1] = input[0] - input[1];
+        output[0] = input_scratch[0] + input_scratch[1];
+        output[1] = input_scratch[0] - input_scratch[1];
         if !inverse {
             output[0] /= 2.0;
             output[1] /= 2.0;
@@ -81,23 +81,22 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
         return;
     }
     if n == 4 {
-        return dct4(input, output, inverse);
+        return dct4(input_scratch, output, inverse);
     }
     if n == 8 {
-        return dct8(input, output, inverse);
+        return dct8(input_scratch, output, inverse);
     }
     assert!(n.is_power_of_two());
 
-    let mut scratch = vec![0.0f32; n];
     let cos_sin_table_4n = consts::cos_sin(4 * n);
 
     if inverse {
-        output[0] = (input[0] + input[n / 2]) * std::f32::consts::SQRT_2;
-        output[1] = (input[0] - input[n / 2]) * std::f32::consts::SQRT_2;
-        for (i, o) in input[1..n / 2].iter().zip(output[2..].iter_mut().step_by(2)) {
+        output[0] = (input_scratch[0] + input_scratch[n / 2]) * std::f32::consts::SQRT_2;
+        output[1] = (input_scratch[0] - input_scratch[n / 2]) * std::f32::consts::SQRT_2;
+        for (i, o) in input_scratch[1..n / 2].iter().zip(output[2..].iter_mut().step_by(2)) {
             *o = *i;
         }
-        for (i, o) in input[n / 2 + 1..].iter().rev().zip(output[3..].iter_mut().step_by(2)) {
+        for (i, o) in input_scratch[n / 2 + 1..].iter().rev().zip(output[3..].iter_mut().step_by(2)) {
             *o = *i;
         }
         for (idx, slice) in output.chunks_exact_mut(2).enumerate().skip(1) {
@@ -132,9 +131,9 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
         }
         output[n / 2] *= 2.0;
         output[n / 2 + 1] *= 2.0;
-        reorder(output, &mut scratch);
+        reorder(output, input_scratch);
 
-        let (real, imag) = scratch.split_at_mut(n / 2);
+        let (real, imag) = input_scratch.split_at_mut(n / 2);
         fft_in_place(imag, real);
 
         let scale = std::f32::consts::FRAC_1_SQRT_2;
@@ -147,19 +146,19 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             output[idx] = *i * scale;
         }
     } else {
-        let it = input.iter().step_by(2).chain(input.iter().rev().step_by(2)).zip(&mut scratch);
+        let it = input_scratch.iter().step_by(2).chain(input_scratch.iter().rev().step_by(2)).zip(&mut *output);
         for (i, o) in it {
             *o = *i;
         }
-        reorder(&scratch, output);
+        reorder(output, input_scratch);
 
-        let (real, imag) = output.split_at_mut(n / 2);
+        let (real, imag) = input_scratch.split_at_mut(n / 2);
         fft_in_place(real, imag);
 
-        let l = real[0];
-        let r = imag[0];
-        real[0] = l + r;
-        imag[0] = l - r;
+        let (oreal, oimag) = output.split_at_mut(n / 2);
+
+        oreal[0] = real[0] + imag[0];
+        oimag[0] = real[0] - imag[0];
 
         for idx in 1..(n / 4) {
             let lr = real[idx];
@@ -177,16 +176,16 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             let vr = ur * sin + ui * cos;
             let vi = ui * sin - ur * cos;
 
-            real[idx] = tr + vr;
-            imag[idx] = ti + vi;
-            real[n / 2 - idx] = tr - vr;
-            imag[n / 2 - idx] = vi - ti;
+            oreal[idx] = tr + vr;
+            oimag[idx] = ti + vi;
+            oreal[n / 2 - idx] = tr - vr;
+            oimag[n / 2 - idx] = vi - ti;
         }
-        real[n / 4] *= 2.0;
-        imag[n / 4] *= -2.0;
+        oreal[n / 4] *= 2.0;
+        oimag[n / 4] *= -2.0;
 
         let scale = (n as f32).recip() * std::f32::consts::FRAC_1_SQRT_2;
-        for (idx, (r, i)) in real.iter_mut().zip(&mut *imag).enumerate().skip(1) {
+        for (idx, (r, i)) in oreal.iter_mut().zip(&mut *oimag).enumerate().skip(1) {
             let cos = cos_sin_table_4n[idx];
             let sin = -cos_sin_table_4n[idx + n];
 
@@ -195,9 +194,9 @@ fn dct(input: &[f32], output: &mut [f32], inverse: bool) {
             *r = tr * scale;
             *i = ti * scale;
         }
-        real[0] /= n as f32;
-        imag[0] /= n as f32;
-        imag[1..].reverse();
+        oreal[0] /= n as f32;
+        oimag[0] /= n as f32;
+        oimag[1..].reverse();
     }
 }
 
@@ -463,9 +462,9 @@ fn small_fft_in_place<const N: usize>(real: &mut [f32], imag: &mut [f32]) {
 mod tests {
     #[test]
     fn forward_dct_2() {
-        let input = [-1.0, 3.0];
+        let mut input = [-1.0, 3.0];
         let mut output = [0.0f32; 2];
-        super::dct(&input, &mut output, false);
+        super::dct(&mut input, &mut output, false);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
@@ -487,9 +486,9 @@ mod tests {
 
     #[test]
     fn forward_dct_4() {
-        let input = [-1.0, 2.0, 3.0, -4.0];
+        let mut input = [-1.0, 2.0, 3.0, -4.0];
         let mut output = [0.0f32; 4];
-        super::dct(&input, &mut output, false);
+        super::dct(&mut input, &mut output, false);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
@@ -511,9 +510,9 @@ mod tests {
 
     #[test]
     fn forward_dct_8() {
-        let input = [1.0, 0.3, 1.0, 2.0, -2.0, -0.1, 1.0, 0.1];
+        let mut input = [1.0, 0.3, 1.0, 2.0, -2.0, -0.1, 1.0, 0.1];
         let mut output = [0.0f32; 8];
-        super::dct(&input, &mut output, false);
+        super::dct(&mut input, &mut output, false);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
@@ -535,9 +534,9 @@ mod tests {
 
     #[test]
     fn backward_dct_2() {
-        let input = [3.0, 0.2];
+        let mut input = [3.0, 0.2];
         let mut output = [0.0f32; 2];
-        super::dct(&input, &mut output, true);
+        super::dct(&mut input, &mut output, true);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
@@ -555,9 +554,9 @@ mod tests {
 
     #[test]
     fn backward_dct_4() {
-        let input = [3.0, 0.2, 0.3, -1.0];
+        let mut input = [3.0, 0.2, 0.3, -1.0];
         let mut output = [0.0f32; 4];
-        super::dct(&input, &mut output, true);
+        super::dct(&mut input, &mut output, true);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
@@ -575,9 +574,9 @@ mod tests {
 
     #[test]
     fn backward_dct_8() {
-        let input = [3.0, 0.0, 0.0, -1.0, 0.0, 0.3, 0.2, 0.0];
+        let mut input = [3.0, 0.0, 0.0, -1.0, 0.0, 0.3, 0.2, 0.0];
         let mut output = [0.0f32; 8];
-        super::dct(&input, &mut output, true);
+        super::dct(&mut input, &mut output, true);
 
         let s = input.len();
         for (k, output) in output.iter().enumerate() {
