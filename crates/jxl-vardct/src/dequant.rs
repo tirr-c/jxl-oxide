@@ -135,7 +135,7 @@ impl DequantMatrixParams {
         }
     }
 
-    fn into_matrix(self) -> [Vec<Vec<f32>>; 3] {
+    fn into_matrix(self) -> [Vec<f32>; 3] {
         use DequantMatrixParamsEncoding::*;
 
         fn interpolate(pos: f32, max: f32, bands: &[f32]) -> f32 {
@@ -165,7 +165,7 @@ impl DequantMatrixParams {
             }
         }
 
-        fn dct_quant_weights(params: &[f32], width: u32, height: u32) -> Vec<Vec<f32>> {
+        fn dct_quant_weights(params: &[f32], width: u32, height: u32) -> Vec<f32> {
             let mut bands = Vec::with_capacity(params.len());
             let mut last_band = params[0];
             bands.push(last_band);
@@ -176,17 +176,15 @@ impl DequantMatrixParams {
                 last_band = band;
             }
 
-            let mut ret = Vec::with_capacity(height as usize);
+            let mut ret = Vec::with_capacity(height as usize * width as usize);
             for y in 0..height {
-                let mut row = Vec::with_capacity(width as usize);
                 for x in 0..width {
                     let dx = x as f32 / (width - 1) as f32;
                     let dy = y as f32 / (height - 1) as f32;
                     let distance = (dx * dx + dy * dy).sqrt();
                     let weight = interpolate(distance, std::f32::consts::SQRT_2 + 1e-6, &bands);
-                    row.push(weight);
+                    ret.push(weight);
                 }
-                ret.push(row);
             }
 
             ret
@@ -201,30 +199,32 @@ impl DequantMatrixParams {
             },
             Hornuss(params) => {
                 params.map(|params| {
-                    let mut ret = vec![vec![params[0]; 8]; 8];
-                    ret[0][0] = 1.0;
-                    ret[0][1] = params[1];
-                    ret[1][0] = params[1];
-                    ret[1][1] = params[2];
+                    let mut ret = vec![params[0]; 64];
+                    ret[0] = 1.0;
+                    ret[1] = params[1];
+                    ret[8] = params[1];
+                    ret[9] = params[2];
                     ret
                 })
             },
             Dct2(params) => {
                 params.map(|params| {
-                    let mut ret = vec![vec![0.0f32; 8]; 8];
+                    let mut ret = vec![0.0f32; 64];
                     for (idx, val) in params.into_iter().enumerate() {
                         let shift = idx / 2;
                         let dim = 1usize << shift;
                         if idx % 2 == 0 {
-                            for w in ret[..dim].iter_mut().flat_map(|v| &mut v[dim..][..dim]) {
-                                *w = val;
-                            }
-                            for w in ret[dim..][..dim].iter_mut().flat_map(|v| &mut v[..dim]) {
-                                *w = val;
+                            for y in 0..dim {
+                                for x in dim..dim * 2 {
+                                    ret[y * 8 + x] = val;
+                                    ret[x * 8 + y] = val;
+                                }
                             }
                         } else {
-                            for w in ret[dim..][..dim].iter_mut().flat_map(|v| &mut v[dim..][..dim]) {
-                                *w = val;
+                            for y in dim..dim * 2 {
+                                for x in dim..dim * 2 {
+                                    ret[y * 8 + x] = val;
+                                }
                             }
                         }
                     }
@@ -235,13 +235,18 @@ impl DequantMatrixParams {
                 let mut ret = [Vec::new(), Vec::new(), Vec::new()];
                 for (ret, (params, dct_params)) in ret.iter_mut().zip(params.into_iter().zip(dct_params)) {
                     let mat = dct_quant_weights(&dct_params, 4, 4);
-                    *ret = mat.into_iter()
-                        .map(|v| vec![v[0], v[0], v[1], v[1], v[2], v[2], v[3], v[3]])
-                        .flat_map(|v| [v.clone(), v])
-                        .collect();
-                    ret[0][1] /= params[0];
-                    ret[1][0] /= params[0];
-                    ret[1][1] /= params[1];
+                    *ret = vec![0.0f32; 64];
+                    for y in 0..4 {
+                        for x in 0..4 {
+                            ret[y * 16 + x * 2] = mat[y * 4 + x];
+                            ret[y * 16 + x * 2 + 1] = mat[y * 4 + x];
+                            ret[(y * 2 + 1) * 8 + x * 2] = mat[y * 4 + x];
+                            ret[(y * 2 + 1) * 8 + x * 2 + 1] = mat[y * 4 + x];
+                        }
+                    }
+                    ret[1] /= params[0];
+                    ret[8] /= params[0];
+                    ret[9] /= params[1];
                 }
                 ret
             },
@@ -249,10 +254,12 @@ impl DequantMatrixParams {
                 let mut ret = [Vec::new(), Vec::new(), Vec::new()];
                 for (ret, (params, dct_params)) in ret.iter_mut().zip(params.into_iter().zip(dct_params)) {
                     let mat = dct_quant_weights(&dct_params, 8, 4);
-                    *ret = mat.into_iter()
-                        .flat_map(|v| [v.clone(), v])
+                    *ret = mat.chunks_exact(8)
+                        .flat_map(|v| [v, v])
+                        .flatten()
+                        .copied()
                         .collect();
-                    ret[1][0] /= params[0];
+                    ret[8] /= params[0];
                 }
                 ret
             },
@@ -275,10 +282,10 @@ impl DequantMatrixParams {
                         prev_band = *band;
                     }
 
-                    *ret = vec![vec![0.0; 8]; 8];
+                    *ret = vec![0.0f32; 64];
                     for y in 0..4 {
                         for x in 0..4 {
-                            ret[2 * y][2 * x] = match (x, y) {
+                            ret[16 * y + 2 * x] = match (x, y) {
                                 (0, 0) => 1.0,
                                 (0, 1) => params[2],
                                 (1, 0) => params[3],
@@ -291,16 +298,19 @@ impl DequantMatrixParams {
                             };
                         }
                     }
-                    for (y, ((rows, weights_8), weights_4)) in ret.chunks_exact_mut(2).zip(weights_4x8).zip(weights_4x4).enumerate() {
-                        let [row0, row1] = rows else { unreachable!() };
-                        for (x, (w, dct_weight)) in row1.iter_mut().zip(weights_8).enumerate() {
+
+                    let weights_4x8 = weights_4x8.chunks_exact(8);
+                    let weights_4x4 = weights_4x4.chunks_exact(4);
+                    for (y, ((rows, weights_8), weights_4)) in ret.chunks_exact_mut(16).zip(weights_4x8).zip(weights_4x4).enumerate() {
+                        let (row0, row1) = rows.split_at_mut(8);
+                        for (x, (w, &dct_weight)) in row1.iter_mut().zip(weights_8).enumerate() {
                             *w = if y == 0 && x == 0 {
                                 params[0]
                             } else {
                                 dct_weight
                             };
                         }
-                        for (x, (pair, dct_weight)) in row0.chunks_exact_mut(2).zip(weights_4).enumerate() {
+                        for (x, (pair, &dct_weight)) in row0.chunks_exact_mut(2).zip(weights_4).enumerate() {
                             pair[1] = if y == 0 && x == 0 {
                                 params[1]
                             } else {
@@ -315,12 +325,10 @@ impl DequantMatrixParams {
                 let (width, height) = dct_select.dequant_matrix_size();
                 let channel_data = params.image().channel_data();
                 [0usize, 1, 2].map(|c| {
-                    let channel = &channel_data[c];
-                    let mut ret = vec![vec![0.0f32; width as usize]; height as usize];
-                    for (y, ret) in ret.iter_mut().enumerate() {
-                        for (x, ret) in ret.iter_mut().enumerate() {
-                            *ret = *channel.get(x, y).unwrap() as f32 * denominator;
-                        }
+                    let channel = channel_data[c].as_simple().unwrap();
+                    let mut ret = vec![0.0f32; width as usize * height as usize];
+                    for (c, ret) in channel.buf().iter().zip(&mut ret) {
+                        *ret = *c as f32 * denominator;
                     }
                     ret
                 })
@@ -328,7 +336,7 @@ impl DequantMatrixParams {
         };
 
         if need_recip {
-            for w in weights.iter_mut().flatten().flatten() {
+            for w in weights.iter_mut().flatten() {
                 *w = 1.0 / *w;
             }
         }
@@ -474,7 +482,7 @@ impl BundleDefault<TransformType> for DequantMatrixParams {
 
 #[derive(Debug)]
 pub struct DequantMatrixSet {
-    matrices: Vec<[Vec<Vec<f32>>; 3]>,
+    matrices: Vec<[Vec<f32>; 3]>,
 }
 
 impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
@@ -523,7 +531,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
 }
 
 impl DequantMatrixSet {
-    pub fn get(&self, channel: usize, dct_select: TransformType) -> &[Vec<f32>] {
+    pub fn get(&self, channel: usize, dct_select: TransformType) -> &[f32] {
         use TransformType::*;
 
         let idx = match dct_select {

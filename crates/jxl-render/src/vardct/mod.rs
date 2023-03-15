@@ -114,29 +114,33 @@ pub fn dequant_hf_varblock(
     qm_scale: Option<u32>,
 ) -> SimpleGrid<f32> {
     let CoeffData { dct_select, hf_mul, ref coeff } = *coeff_data;
+    let mut mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32;
+    if let Some(qm_scale) = qm_scale {
+        let scale = 0.8f32.powi(qm_scale as i32 - 2);
+        mul *= scale;
+    }
+    let quant_bias = oim.quant_bias[channel];
+    let quant_bias_numerator = oim.quant_bias_numerator;
+
     let coeff = &coeff[channel];
     let mut out = SimpleGrid::new(coeff.width(), coeff.height());
 
-    let quant_bias = oim.quant_bias[channel];
-    let quant_bias_numerator = oim.quant_bias_numerator;
-    let matrix = dequant_matrices.get(channel, dct_select);
-    for ((&mat, &quant), out) in matrix.iter().flatten().zip(coeff.buf()).zip(out.buf_mut()) {
-        let quant = if (-1..=1).contains(&quant) {
-            quant as f32 * quant_bias
-        } else {
-            let q = quant as f32;
-            q - (quant_bias_numerator / q)
+    for (&quant, out) in coeff.buf().iter().zip(out.buf_mut()) {
+        *out = match quant {
+            -1 => -quant_bias,
+            0 => 0.0,
+            1 => quant_bias,
+            quant => {
+                let q = quant as f32;
+                q - (quant_bias_numerator / q)
+            },
         };
+    }
 
-        let mul = 65536.0 / quantizer.global_scale as f32 / hf_mul as f32;
-        let mut quant = quant * mul;
-
-        if let Some(qm_scale) = qm_scale {
-            let scale = 0.8f32.powi(qm_scale as i32 - 2);
-            quant *= scale;
-        }
-
-        *out = quant * mat;
+    let matrix = dequant_matrices.get(channel, dct_select);
+    for (out, &mat) in out.buf_mut().iter_mut().zip(matrix) {
+        let val = *out * mat;
+        *out = val * mul;
     }
 
     out
@@ -231,7 +235,7 @@ pub fn llf_from_lf(
     debug_assert_eq!(bw as usize, lf.width());
     debug_assert_eq!(bh as usize, lf.height());
 
-    if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Afv0 | Afv1 | Afv2 | Afv3) {
+    if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
         debug_assert_eq!(bw * bh, 1);
         let mut out = SimpleGrid::new(1, 1);
         out.buf_mut()[0] = *lf.get(0, 0).unwrap();

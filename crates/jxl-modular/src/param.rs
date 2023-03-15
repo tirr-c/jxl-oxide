@@ -116,10 +116,12 @@ pub enum ChannelShift {
 }
 
 impl ChannelShift {
+    #[inline]
     pub fn from_shift(shift: u32) -> ChannelShift {
         Self::Shifts(shift)
     }
 
+    #[inline]
     pub fn from_upsampling_factor_and_shift(upsampling: u32, dim_shift: u32) -> ChannelShift {
         Self::Shifts(upsampling.next_power_of_two().trailing_zeros() + dim_shift)
     }
@@ -143,6 +145,7 @@ impl ChannelShift {
         }
     }
 
+    #[inline]
     pub fn hshift(&self) -> i32 {
         match self {
             Self::JpegUpsampling { h_subsample, .. } => *h_subsample as i32,
@@ -151,6 +154,7 @@ impl ChannelShift {
         }
     }
 
+    #[inline]
     pub fn vshift(&self) -> i32 {
         match self {
             Self::JpegUpsampling { v_subsample, .. } => *v_subsample as i32,
