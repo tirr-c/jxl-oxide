@@ -95,29 +95,42 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    pub fn render_cropped(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
-        let mut target = self.inner.frames
-            .iter()
-            .zip(&mut self.state.renders)
-            .find(|(f, _)| f.header().frame_type.is_normal_frame());
+    fn render_by_index(&mut self, index: usize, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+        let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
+        let _guard = span.enter();
 
-        let (f, cache) = if let Some((f, state)) = &mut target {
-            let cache = match state {
-                FrameRender::None => {
-                    **state = FrameRender::InProgress(RenderCache::new(f));
-                    let FrameRender::InProgress(cache) = state else { unreachable!() };
-                    cache
-                },
-                FrameRender::InProgress(cache) => {
-                    cache
-                },
-                FrameRender::Done(grid) => {
-                    return Ok(grid.clone());
-                },
-            };
-            (*f, cache)
+        for dep in self.inner.frame_deps[index].indices() {
+            self.render_by_index(dep, None)?;
+        }
+
+        tracing::debug!(index, region = format_args!("{:?}", region), "Rendering frame");
+        let frame = &self.inner.frames[index];
+        let state = &mut self.state.renders[index];
+        let cache = match state {
+            FrameRender::Done(_) => return Ok(()),
+            FrameRender::InProgress(cache) => cache,
+            FrameRender::None => {
+                *state = FrameRender::InProgress(RenderCache::new(frame));
+                let FrameRender::InProgress(cache) = state else { unreachable!() };
+                cache
+            },
+        };
+
+        let grid = self.inner.render_frame(frame, cache, region)?;
+        *state = FrameRender::Done(grid);
+        Ok(())
+    }
+
+    pub fn render_cropped(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
+        let target_idx = self.inner.frames
+            .iter()
+            .position(|f| f.header().frame_type.is_normal_frame());
+        if let Some(index) = target_idx {
+            self.render_by_index(index, region)?;
+            let FrameRender::Done(grid) = &self.state.renders[index] else { panic!(); };
+            Ok(grid.clone())
         } else {
-            match &self.inner.loading_frame {
+            let (f, cache) = match &self.inner.loading_frame {
                 Some(f) if f.header().frame_type.is_normal_frame() => {
                     if f.data().lf_global.is_none() {
                         return Err(Error::IncompleteFrame);
@@ -132,14 +145,10 @@ impl RenderContext<'_> {
                     (f, cache)
                 },
                 _ => panic!(),
-            }
-        };
-
-        let grid = self.inner.render_frame(f, cache, region)?;
-        if let Some((_, render)) = target {
-            *render = FrameRender::Done(grid.clone());
+            };
+            let grid = self.inner.render_frame(f, cache, region)?;
+            Ok(grid)
         }
-        Ok(grid)
     }
 }
 
@@ -454,8 +463,9 @@ impl<'f> ContextInner<'f> {
 struct ContextInner<'a> {
     image_header: &'a Headers,
     frames: Vec<Frame<'a>>,
-    lf_frame: Vec<usize>,
-    reference: Vec<usize>,
+    frame_deps: Vec<FrameDependence>,
+    lf_frame: [usize; 4],
+    reference: [usize; 4],
     loading_frame: Option<Frame<'a>>,
 }
 
@@ -464,8 +474,9 @@ impl<'a> ContextInner<'a> {
         Self {
             image_header,
             frames: Vec::new(),
-            lf_frame: vec![usize::MAX; 4],
-            reference: vec![usize::MAX; 4],
+            frame_deps: Vec::new(),
+            lf_frame: [usize::MAX; 4],
+            reference: [usize::MAX; 4],
             loading_frame: None,
         }
     }
@@ -499,6 +510,16 @@ impl<'a> ContextInner<'a> {
         let idx = self.frames.len();
         let is_last = header.is_last;
 
+        let lf = if header.flags.use_lf_frame() {
+            self.lf_frame[header.lf_level as usize]
+        } else {
+            usize::MAX
+        };
+        let deps = FrameDependence {
+            lf,
+            ref_slots: self.reference,
+        };
+
         if !is_last && (header.duration == 0 || header.save_as_reference != 0) && header.frame_type != FrameType::LfFrame {
             let ref_idx = header.save_as_reference as usize;
             self.reference[ref_idx] = idx;
@@ -508,6 +529,7 @@ impl<'a> ContextInner<'a> {
             self.lf_frame[lf_idx] = idx;
         }
         self.frames.push(frame);
+        self.frame_deps.push(deps);
     }
 }
 
@@ -560,6 +582,18 @@ impl ContextInner<'_> {
         }
 
         Ok((ProgressiveResult::FrameComplete, frame))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FrameDependence {
+    lf: usize,
+    ref_slots: [usize; 4],
+}
+
+impl FrameDependence {
+    pub fn indices(&self) -> impl Iterator<Item = usize> + 'static {
+        std::iter::once(self.lf).chain(self.ref_slots).filter(|&v| v != usize::MAX)
     }
 }
 
