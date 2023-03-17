@@ -83,9 +83,9 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
         } = params;
 
         let hf_coeff = lf_vardct
-            .zip(lf_group.lf_coeff.as_ref().zip(lf_group.hf_meta.as_ref()))
+            .zip(lf_group.hf_meta.as_ref())
             .zip(hf_global)
-            .map(|((lf_vardct, (lf_coeff, hf_meta)), hf_global)| -> Result<HfCoeff> {
+            .map(|((lf_vardct, hf_meta), hf_global)| -> Result<HfCoeff> {
                 let hf_pass = &hf_global.hf_passes[pass_idx as usize];
                 let coeff_shift = frame_header.passes.shift.get(pass_idx as usize)
                     .copied()
@@ -97,7 +97,6 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
                 let lf_row = (group_row % 8) as usize;
                 let group_dim_blocks = (frame_header.group_dim() / 8) as usize;
 
-                let lf_quant_channels = lf_coeff.lf_quant.image().channel_data();
                 let block_info = &hf_meta.block_info;
 
                 let block_left = lf_col * group_dim_blocks;
@@ -107,7 +106,8 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
 
                 let jpeg_upsampling = frame_header.jpeg_upsampling;
                 let block_info = block_info.subgrid(block_left, block_top, block_width, block_height);
-                let lf_quant: Option<[_; 3]> = (!frame_header.flags.use_lf_frame()).then(|| {
+                let lf_quant: Option<[_; 3]> = lf_group.lf_coeff.as_ref().map(|lf_coeff| {
+                    let lf_quant_channels = lf_coeff.lf_quant.image().channel_data();
                     std::array::from_fn(|idx| {
                         let lf_quant = &lf_quant_channels[[1, 0, 2][idx]];
                         let shift = ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx);

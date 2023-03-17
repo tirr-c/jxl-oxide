@@ -99,13 +99,20 @@ impl RenderContext<'_> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
         let _guard = span.enter();
 
-        for dep in self.inner.frame_deps[index].indices() {
+        let deps = self.inner.frame_deps[index];
+        for dep in deps.indices() {
             self.render_by_index(dep, None)?;
         }
 
         tracing::debug!(index, region = format_args!("{:?}", region), "Rendering frame");
         let frame = &self.inner.frames[index];
-        let state = &mut self.state.renders[index];
+        let (prev, state) = self.state.renders.split_at_mut(index);
+        let state = &mut state[0];
+        let reference_frames = ReferenceFrames {
+            lf: (deps.lf != usize::MAX).then(|| prev[deps.lf].as_grid().unwrap()),
+            refs: deps.ref_slots.map(|r| (r != usize::MAX).then(|| prev[r].as_grid().unwrap())),
+        };
+
         let cache = match state {
             FrameRender::Done(_) => return Ok(()),
             FrameRender::InProgress(cache) => cache,
@@ -116,7 +123,10 @@ impl RenderContext<'_> {
             },
         };
 
-        let grid = self.inner.render_frame(frame, cache, region)?;
+        let grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
+        if !frame.header().save_before_ct {
+            tracing::warn!("save_before_ct=false is not supported, ignoring");
+        }
         *state = FrameRender::Done(grid);
         Ok(())
     }
@@ -125,30 +135,49 @@ impl RenderContext<'_> {
         let target_idx = self.inner.frames
             .iter()
             .position(|f| f.header().frame_type.is_normal_frame());
-        if let Some(index) = target_idx {
+        let (mut grid, do_ycbcr) = if let Some(index) = target_idx {
             self.render_by_index(index, region)?;
             let FrameRender::Done(grid) = &self.state.renders[index] else { panic!(); };
-            Ok(grid.clone())
+            (grid.clone(), self.inner.frames[index].header().do_ycbcr)
         } else {
-            let (f, cache) = match &self.inner.loading_frame {
-                Some(f) if f.header().frame_type.is_normal_frame() => {
-                    if f.data().lf_global.is_none() {
-                        return Err(Error::IncompleteFrame);
-                    }
-
-                    if self.state.loading_render_cache.is_none() {
-                        self.state.loading_render_cache = Some(RenderCache::new(f));
-                    }
-                    let Some(cache) = &mut self.state.loading_render_cache else {
-                        unreachable!()
-                    };
-                    (f, cache)
-                },
-                _ => panic!(),
+            let lf_frame = if let Some(f) = &self.inner.loading_frame {
+                if !f.header().frame_type.is_normal_frame() {
+                    return Err(Error::NotReady);
+                }
+                if f.header().flags.use_lf_frame() {
+                    let lf_frame_idx = self.inner.lf_frame[f.header().lf_level as usize];
+                    self.render_by_index(lf_frame_idx, None)?;
+                    Some(self.state.renders[lf_frame_idx].as_grid().unwrap())
+                } else {
+                    None
+                }
+            } else {
+                return Err(Error::NotReady);
             };
-            let grid = self.inner.render_frame(f, cache, region)?;
-            Ok(grid)
+
+            let Some(f) = &self.inner.loading_frame else { unreachable!() };
+            if f.data().lf_global.is_none() {
+                return Err(Error::IncompleteFrame);
+            }
+
+            if self.state.loading_render_cache.is_none() {
+                self.state.loading_render_cache = Some(RenderCache::new(f));
+            }
+            let Some(cache) = &mut self.state.loading_render_cache else { unreachable!() };
+
+            let reference_frames = ReferenceFrames {
+                lf: lf_frame,
+                refs: [None; 4],
+            };
+            let grid = self.inner.render_frame(f, reference_frames, cache, region)?;
+            (grid, f.header().do_ycbcr)
+        };
+
+        if do_ycbcr {
+            let [y, cb, cr, ..] = &mut *grid else { panic!() };
+            jxl_color::ycbcr::perform_inverse_ycbcr([y, cb, cr]);
         }
+        Ok(grid)
     }
 }
 
@@ -156,6 +185,7 @@ impl<'f> ContextInner<'f> {
     fn render_frame<'a>(
         &'a self,
         frame: &'a Frame<'f>,
+        reference_frames: ReferenceFrames<'a>,
         cache: &mut RenderCache,
         mut region: Option<(u32, u32, u32, u32)>,
     ) -> Result<Vec<SimpleGrid<f32>>> {
@@ -168,7 +198,7 @@ impl<'f> ContextInner<'f> {
                 self.render_modular(frame, cache, region)
             },
             Encoding::VarDct => {
-                self.render_vardct(frame, cache, region)
+                self.render_vardct(frame, reference_frames.lf, cache, region)
             },
         }?;
 
@@ -180,10 +210,6 @@ impl<'f> ContextInner<'f> {
             filter::apply_gabor_like([a, b, c], weights);
         }
         filter::apply_epf([a, b, c], &frame.data().lf_group, frame.header());
-
-        if frame.header().do_ycbcr {
-            jxl_color::ycbcr::perform_inverse_ycbcr([a, b, c]);
-        }
 
         let [a, b, c] = fb;
         Ok(vec![a, b, c])
@@ -277,6 +303,7 @@ impl<'f> ContextInner<'f> {
     fn render_vardct<'a>(
         &'a self,
         frame: &'a Frame<'f>,
+        lf_frame: Option<&'a [SimpleGrid<f32>]>,
         cache: &mut RenderCache,
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<[SimpleGrid<f32>; 3]> {
@@ -321,11 +348,6 @@ impl<'f> ContextInner<'f> {
         let dequant_matrices = &hf_global.dequant_matrices;
         let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 
-        if frame_header.flags.use_lf_frame() {
-            tracing::error!("LF frame is not supported");
-            return Err(Error::NotSupported("LF frame is not supported"));
-        }
-
         let lf_group_it = frame_data.lf_group
             .iter()
             .filter(|(&lf_group_idx, _)| {
@@ -334,17 +356,45 @@ impl<'f> ContextInner<'f> {
             });
         let mut hf_meta_map = HashMap::new();
         for (&lf_group_idx, data) in lf_group_it {
+            let group_x = lf_group_idx % frame_header.lf_groups_per_row();
+            let group_y = lf_group_idx / frame_header.lf_groups_per_row();
+            let lf_group_size = frame_header.lf_group_size_for(lf_group_idx);
+            let gw = (lf_group_size.0 + 7) / 8;
+            let gh = (lf_group_size.1 + 7) / 8;
+
             let lf_group_idx = lf_group_idx as usize;
             hf_meta_map.insert(lf_group_idx, data.hf_meta.as_ref().unwrap());
             cache.dequantized_lf
                 .entry(lf_group_idx)
                 .or_insert_with(|| {
-                    let lf_coeff = data.lf_coeff.as_ref().unwrap();
-                    // let hf_meta = data.hf_meta.as_ref().unwrap();
-                    let mut dequant_lf = vardct::dequant_lf(frame_header, &lf_global.lf_dequant, quantizer, lf_coeff);
-                    if !subsampled {
-                        vardct::chroma_from_luma_lf(&mut dequant_lf, &lf_global_vardct.lf_chan_corr);
-                    }
+                    let dequant_lf = if let Some(lf_frame) = lf_frame {
+                        std::array::from_fn(|idx| {
+                            let shift = shifts_ycbcr[idx];
+                            let base_x = (group_x * frame_header.group_dim()) >> shift.hshift();
+                            let base_x = base_x as usize;
+                            let base_y = (group_y * frame_header.group_dim()) >> shift.vshift();
+                            let base_y = base_y as usize;
+                            let (gw, gh) = shift.shift_size((gw, gh));
+
+                            let stride = lf_frame[idx].width();
+                            let grid = lf_frame[idx].buf();
+                            let mut out = Grid::new(gw, gh, gw, gh);
+                            for y in 0..gh as usize {
+                                for x in 0..gw as usize {
+                                    out.set(x, y, grid[(base_y + y) * stride + (base_x + x)]);
+                                }
+                            }
+                            out
+                        })
+                    } else {
+                        let lf_coeff = data.lf_coeff.as_ref().unwrap();
+                        let mut dequant_lf = vardct::dequant_lf(frame_header, &lf_global.lf_dequant, quantizer, lf_coeff);
+                        if !subsampled {
+                            vardct::chroma_from_luma_lf(&mut dequant_lf, &lf_global_vardct.lf_chan_corr);
+                        }
+                        dequant_lf
+                    };
+
                     dequant_lf
                 });
         }
@@ -597,6 +647,13 @@ impl FrameDependence {
     }
 }
 
+#[derive(Debug, Default)]
+struct ReferenceFrames<'state> {
+    lf: Option<&'state [SimpleGrid<f32>]>,
+    #[allow(unused)]
+    refs: [Option<&'state [SimpleGrid<f32>]>; 4],
+}
+
 #[derive(Debug)]
 struct RenderState {
     renders: Vec<FrameRender>,
@@ -627,6 +684,16 @@ enum FrameRender {
     None,
     InProgress(RenderCache),
     Done(Vec<SimpleGrid<f32>>),
+}
+
+impl FrameRender {
+    fn as_grid(&self) -> Option<&[SimpleGrid<f32>]> {
+        if let Self::Done(grid) = self {
+            Some(grid)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
