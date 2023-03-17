@@ -3,7 +3,7 @@ use std::{path::PathBuf, fs::File};
 use clap::Parser;
 use jxl_bitstream::read_bits;
 use jxl_frame::ProgressiveResult;
-use jxl_image::{FrameBuffer, Headers, TransferFunction};
+use jxl_image::{FrameBuffer, Headers, TransferFunction, ExtraChannelType};
 use jxl_render::RenderContext;
 
 #[derive(Debug, Parser)]
@@ -213,7 +213,22 @@ fn run(
         jxl_color::xyb::perform_inverse_xyb(fb_yxb, &headers.metadata);
     }
 
-    let grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    let alpha_channel = headers.metadata.ec_info.iter().position(|ec| ec.ty == ExtraChannelType::Alpha);
+    if let Some(idx) = alpha_channel {
+        tracing::debug!("Image has alpha channel");
+
+        let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated;
+        if alpha_premultiplied {
+            tracing::warn!("Premultiplied alpha is not supported, ignoring");
+        }
+
+        let alpha = grids.drain(3..).nth(idx).unwrap();
+        grids.push(alpha);
+    } else {
+        grids.drain(3..);
+    }
+
     let image = FrameBuffer::from_grids(&grids).unwrap();
     let elapsed = decode_start.elapsed();
 

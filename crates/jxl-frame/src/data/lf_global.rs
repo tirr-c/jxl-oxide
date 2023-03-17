@@ -1,5 +1,5 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_image::{Headers, ColourSpace};
+use jxl_image::Headers;
 use jxl_modular::{ChannelShift, Modular, ModularParams, MaConfig, MaContext};
 use jxl_vardct::{
     LfChannelDequantization,
@@ -79,11 +79,16 @@ define_bundle! {
 pub struct GlobalModular {
     pub ma_config: Option<MaConfig>,
     pub modular: Modular,
+    extra_channel_from: usize,
 }
 
 impl GlobalModular {
     pub fn make_context(&self) -> Option<MaContext> {
         Some(self.ma_config.as_ref()?.make_context())
+    }
+
+    pub fn extra_channel_from(&self) -> usize {
+        self.extra_channel_from
     }
 }
 
@@ -103,11 +108,12 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
                 shifts.push(ChannelShift::from_jpeg_upsampling(header.jpeg_upsampling, 2));
             } else {
                 let shift = ChannelShift::from_shift(0);
-                let is_single_channel = !image_header.metadata.xyb_encoded && image_header.metadata.colour_encoding.colour_space == ColourSpace::Grey;
-                let channels = if is_single_channel { 1 } else { 3 };
+                let channels = header.gmodular_extra_channel_from as usize;
                 shifts.extend(std::iter::repeat(shift).take(channels));
             }
         }
+
+        let extra_channel_from = shifts.len();
 
         for (&ec_upsampling, ec_info) in header.ec_upsampling.iter().zip(image_header.metadata.ec_info.iter()) {
             let dim_shift = ec_info.dim_shift;
@@ -130,6 +136,7 @@ impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
         Ok(Self {
             ma_config,
             modular,
+            extra_channel_from,
         })
     }
 }

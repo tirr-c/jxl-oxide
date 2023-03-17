@@ -119,6 +119,20 @@ define_bundle! {
         pub restoration_filter: ty(Bundle(RestorationFilter)) ctx(encoding) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
         pub bit_depth: ty(Bundle(BitDepth)) cond(false) default(headers.metadata.bit_depth),
+        pub gmodular_extra_channel_from:
+            ty(u(0))
+            cond(false)
+            default(if encoding == Encoding::Modular {
+                if do_ycbcr {
+                    3
+                } else if !headers.metadata.xyb_encoded && headers.metadata.colour_encoding.colour_space == ColourSpace::Grey {
+                    1
+                } else {
+                    3
+                }
+            } else {
+                0
+            }),
     }
 
     #[derive(Debug)]

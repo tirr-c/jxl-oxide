@@ -212,7 +212,56 @@ impl<'f> ContextInner<'f> {
         filter::apply_epf([a, b, c], &frame.data().lf_group, frame.header());
 
         let [a, b, c] = fb;
-        Ok(vec![a, b, c])
+        let mut ret = vec![a, b, c];
+        self.append_extra_channels(frame, &mut ret);
+
+        Ok(ret)
+    }
+
+    fn append_extra_channels<'a>(
+        &'a self,
+        frame: &'a Frame<'f>,
+        fb: &mut Vec<SimpleGrid<f32>>,
+    ) {
+        tracing::debug!("Attaching extra channels");
+
+        let frame_data = frame.data();
+        let lf_global = frame_data.lf_global.as_ref().unwrap();
+        let extra_channel_from = lf_global.gmodular.extra_channel_from();
+        let gmodular = &lf_global.gmodular.modular;
+
+        let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
+
+        let width = self.width() as usize;
+        let height = self.height() as usize;
+
+        for (g, ec_info) in channel_data.iter().zip(&self.image_header.metadata.ec_info) {
+            let bit_depth = ec_info.bit_depth;
+
+            let mut out = SimpleGrid::new(width, height);
+            let buffer = out.buf_mut();
+
+            let (gw, gh) = g.group_dim();
+            let group_stride = g.groups_per_row();
+            for (group_idx, g) in g.groups() {
+                let base_x = (group_idx % group_stride) * gw;
+                let base_y = (group_idx / group_stride) * gh;
+                for (idx, &s) in g.buf().iter().enumerate() {
+                    let y = base_y + idx / g.width();
+                    if y >= height {
+                        break;
+                    }
+                    let x = base_x + idx % g.width();
+                    if x >= width {
+                        continue;
+                    }
+
+                    buffer[y * width + x] = bit_depth.parse_integer_sample(s);
+                }
+            }
+
+            fb.push(out);
+        }
     }
 
     fn render_modular<'a>(
