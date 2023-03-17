@@ -2,14 +2,14 @@
 JPEG XL decoder written in pure Rust.
 
 ## Supported features
-- Single-frame Modular and VarDCT
+- Simple Modular and VarDCT images
+- Progressive LF (LF frames)
 - XYB
 - Chroma subsampled YCbCr
 - Restoration filters
 - Cropped decoding (sort of)
 
 ## TODO
-- LF frames
 - Rendering extra channels
 - Image features
   - Non-separable upsampling
