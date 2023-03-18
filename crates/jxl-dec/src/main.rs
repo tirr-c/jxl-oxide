@@ -18,6 +18,8 @@ struct Args {
     crop: Option<CropInfo>,
     #[arg(long)]
     experimental_progressive: bool,
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -76,15 +78,23 @@ impl std::str::FromStr for CropInfo {
 }
 
 fn main() {
+    let args = Args::parse();
+
+    let filter = if args.verbose {
+        tracing::level_filters::LevelFilter::DEBUG
+    } else {
+        tracing::level_filters::LevelFilter::INFO
+    };
+    let env_filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(filter.into())
+        .from_env_lossy();
     tracing_subscriber::fmt()
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(env_filter)
         .init();
 
     let span = tracing::span!(tracing::Level::TRACE, "jxl_dec (main)");
     let _guard = span.enter();
-
-    let args = Args::parse();
 
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
