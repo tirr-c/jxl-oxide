@@ -501,6 +501,7 @@ dependencies = [
  "jxl-frame",
  "jxl-image",
  "jxl-render",
+ "miniz_oxide",
  "png",
  "tracing",
  "tracing-subscriber",
@@ -512,6 +513,7 @@ version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
+ "jxl-color",
  "jxl-grid",
  "jxl-image",
  "jxl-modular",

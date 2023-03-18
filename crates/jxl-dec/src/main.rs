@@ -3,7 +3,7 @@ use std::{path::PathBuf, fs::File};
 use clap::Parser;
 use jxl_bitstream::read_bits;
 use jxl_frame::ProgressiveResult;
-use jxl_image::{FrameBuffer, Headers, TransferFunction, ExtraChannelType};
+use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
 use jxl_render::RenderContext;
 
 #[derive(Debug, Parser)]
@@ -134,7 +134,7 @@ fn main() {
 
     let mut idx = 0usize;
     loop {
-        let (result, mut fb) = run(&mut bitstream, &mut render, &headers, crop, args.experimental_progressive);
+        let (result, fb) = run(&mut bitstream, &mut render, &headers, crop, args.experimental_progressive);
 
         if let Some(output) = &args.output {
             let mut output = output.clone();
@@ -148,30 +148,70 @@ fn main() {
             let output = std::fs::File::create(output).expect("failed to open output file");
             let mut encoder = png::Encoder::new(output, width as u32, height as u32);
             encoder.set_color(if fb.channels() == 4 { png::ColorType::Rgba } else { png::ColorType::Rgb });
-            encoder.set_depth(png::BitDepth::Eight);
-            // TODO: set colorspace
-            encoder.set_srgb(match headers.metadata.colour_encoding.rendering_intent {
-                jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
-                jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
-                jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
-                jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
-            });
-            let mut writer = encoder
-                .write_header()
-                .expect("failed to write header")
-                .into_stream_writer()
-                .unwrap();
 
-            if headers.metadata.xyb_encoded || headers.metadata.colour_encoding.tf == TransferFunction::Linear {
-                jxl_color::tf::linear_to_srgb(fb.buf_mut());
+            let sixteen_bits = headers.metadata.bit_depth.bits_per_sample() > 8;
+            if sixteen_bits {
+                encoder.set_depth(png::BitDepth::Sixteen);
+            } else {
+                encoder.set_depth(png::BitDepth::Eight);
             }
 
-            let mut buf = vec![0u8; fb.width() * fb.channels()];
-            for row in fb.buf().chunks(fb.width() * fb.channels()) {
-                for (s, b) in row.iter().zip(&mut buf) {
-                    *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
+            let colour_encoding = &headers.metadata.colour_encoding;
+            let icc_cicp = if colour_encoding.is_srgb() {
+                encoder.set_srgb(match colour_encoding.rendering_intent {
+                    jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+                    jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+                    jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+                    jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+                });
+
+                None
+            } else {
+                let icc = jxl_color::icc::colour_encoding_to_icc(colour_encoding).expect("failed to build ICC profile");
+                let cicp = colour_encoding.png_cicp();
+                // TODO: emit gAMA and cHRM
+                Some((icc, cicp))
+            };
+
+            let mut writer = encoder
+                .write_header()
+                .expect("failed to write header");
+
+            if let Some((icc, cicp)) = icc_cicp {
+                tracing::debug!("Embedding ICC profile");
+                let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&icc, 7);
+                let mut iccp_chunk_data = vec![b' ', 0, 0];
+                iccp_chunk_data.extend(compressed_icc);
+                writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
+
+                if let Some(cicp) = cicp {
+                    tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
+                    writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp).expect("failed to write cICP");
                 }
-                std::io::Write::write_all(&mut writer, &buf[..row.len()]).expect("failed to write image data");
+            }
+
+            let mut writer = writer.into_stream_writer().unwrap();
+
+            tracing::debug!("Writing image data");
+            if sixteen_bits {
+                let mut buf = vec![0u8; fb.width() * fb.channels() * 2];
+                for row in fb.buf().chunks(fb.width() * fb.channels()) {
+                    for (s, b) in row.iter().zip(buf.chunks_exact_mut(2)) {
+                        let w = (*s * 65535.0).clamp(0.0, 65535.0) as u16;
+                        let [b0, b1] = w.to_be_bytes();
+                        b[0] = b0;
+                        b[1] = b1;
+                    }
+                    std::io::Write::write_all(&mut writer, &buf[..row.len() * 2]).expect("failed to write image data");
+                }
+            } else {
+                let mut buf = vec![0u8; fb.width() * fb.channels()];
+                for row in fb.buf().chunks(fb.width() * fb.channels()) {
+                    for (s, b) in row.iter().zip(&mut buf) {
+                        *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
+                    }
+                    std::io::Write::write_all(&mut writer, &buf[..row.len()]).expect("failed to write image data");
+                }
             }
             writer.finish().expect("failed to finish writing png");
 
@@ -199,19 +239,7 @@ fn run(
     let result = render
         .load_cropped(bitstream, progressive, region)
         .expect("failed to load frames");
-    let mut fb = render.render_cropped(region).expect("failed to render");
-
-    if headers.metadata.xyb_encoded {
-        let fb_yxb = {
-            let mut it = fb.iter_mut();
-            [
-                it.next().unwrap(),
-                it.next().unwrap(),
-                it.next().unwrap(),
-            ]
-        };
-        jxl_color::xyb::perform_inverse_xyb(fb_yxb, &headers.metadata);
-    }
+    let fb = render.render_cropped(region).expect("failed to render");
 
     let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
     let alpha_channel = headers.metadata.ec_info.iter().position(|ec| ec.ty == ExtraChannelType::Alpha);

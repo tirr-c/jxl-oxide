@@ -4,6 +4,7 @@ use std::io::Read;
 
 use header::Encoding;
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
+use jxl_grid::SimpleGrid;
 use jxl_image::Headers;
 
 mod error;
@@ -227,6 +228,21 @@ impl<'a> Bundle<&'a Headers> for Frame<'a> {
             data,
             pass_shifts,
         })
+    }
+}
+
+impl Frame<'_> {
+    pub fn transform_color(&self, grid: &mut [SimpleGrid<f32>]) {
+        let metadata = &self.image_header.metadata;
+        if metadata.xyb_encoded {
+            let [y, x, b, ..] = grid else { panic!() };
+            jxl_color::xyb::perform_inverse_xyb([y, x, b], metadata);
+
+            jxl_color::convert::convert_in_place(grid, &metadata.colour_encoding, &metadata.tone_mapping);
+        } else if self.header.do_ycbcr {
+            let [y, cb, cr, ..] = &mut *grid else { panic!() };
+            jxl_color::ycbcr::perform_inverse_ycbcr([y, cb, cr]);
+        }
     }
 }
 

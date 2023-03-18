@@ -337,6 +337,21 @@ impl ColourEncoding {
             self.white_point == WhitePoint::D65 &&
             self.primaries == Primaries::Srgb
     }
+
+    pub fn png_cicp(&self) -> Option<[u8; 4]> {
+        let primaries_cicp = self.primaries.cicp();
+        let tf_cicp = self.tf.cicp();
+        if let (Some(primaries), Some(tf)) = (primaries_cicp, tf_cicp) {
+            let valid = matches!(
+                (primaries, &self.white_point),
+                | (1 | 9, WhitePoint::D65)
+                | (11, WhitePoint::Dci)
+            );
+            valid.then_some([primaries, tf, 0, 1])
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -386,12 +401,13 @@ impl TryFrom<u32> for WhitePointDiscriminator {
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum WhitePoint {
     #[default]
-    D65,
-    Custom(Customxy),
-    E,
-    Dci,
+    D65 = 1,
+    Custom(Customxy) = 2,
+    E = 10,
+    Dci = 11,
 }
 
 impl<Ctx> Bundle<Ctx> for WhitePoint {
@@ -412,6 +428,7 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
 enum PrimariesDiscriminator {
     #[default]
     Srgb = 1,
@@ -435,16 +452,17 @@ impl TryFrom<u32> for PrimariesDiscriminator {
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum Primaries {
     #[default]
-    Srgb,
+    Srgb = 1,
     Custom {
         red: Customxy,
         green: Customxy,
         blue: Customxy,
-    },
-    Bt2100,
-    P3,
+    } = 2,
+    Bt2100 = 9,
+    P3 = 11,
 }
 
 impl<Ctx> Bundle<Ctx> for Primaries {
@@ -466,17 +484,29 @@ impl<Ctx> Bundle<Ctx> for Primaries {
     }
 }
 
+impl Primaries {
+    pub fn cicp(&self) -> Option<u8> {
+        match self {
+            Primaries::Srgb => Some(1),
+            Primaries::Custom { .. } => None,
+            Primaries::Bt2100 => Some(9),
+            Primaries::P3 => Some(11),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum TransferFunction {
-    Gamma(u32),
-    Bt709,
-    Unknown,
-    Linear,
+    Gamma(u32) = 0,
+    Bt709 = 1,
+    Unknown = 2,
+    Linear = 8,
     #[default]
-    Srgb,
-    Pq,
-    Dci,
-    Hlg,
+    Srgb = 13,
+    Pq = 16,
+    Dci = 17,
+    Hlg = 18,
 }
 
 impl TryFrom<u32> for TransferFunction {
@@ -506,6 +536,21 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
             Ok(Self::Gamma(gamma))
         } else {
             read_bits!(bitstream, Enum(TransferFunction))
+        }
+    }
+}
+
+impl TransferFunction {
+    pub fn cicp(&self) -> Option<u8> {
+        match self {
+            TransferFunction::Gamma(_) => None,
+            TransferFunction::Bt709 => Some(1),
+            TransferFunction::Unknown => None,
+            TransferFunction::Linear => Some(8),
+            TransferFunction::Srgb => Some(13),
+            TransferFunction::Pq => Some(16),
+            TransferFunction::Dci => Some(17),
+            TransferFunction::Hlg => Some(18),
         }
     }
 }

@@ -27,5 +27,5 @@ version = "5.5.0"
 optional = true
 
 [features]
-color_management = ["lcms2"]
-default_features = []
+icc = ["lcms2"]
+default = []

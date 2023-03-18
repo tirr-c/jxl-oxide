@@ -123,9 +123,11 @@ impl RenderContext<'_> {
             },
         };
 
-        let grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
+        let mut grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
+
         if !frame.header().save_before_ct {
-            tracing::warn!("save_before_ct=false is not supported, ignoring");
+            tracing::debug!("Converting color encoding before saving");
+            frame.transform_color(&mut grid);
         }
         *state = FrameRender::Done(grid);
         Ok(())
@@ -135,10 +137,10 @@ impl RenderContext<'_> {
         let target_idx = self.inner.frames
             .iter()
             .position(|f| f.header().frame_type.is_normal_frame());
-        let (mut grid, do_ycbcr) = if let Some(index) = target_idx {
+        let (mut grid, frame) = if let Some(index) = target_idx {
             self.render_by_index(index, region)?;
             let FrameRender::Done(grid) = &self.state.renders[index] else { panic!(); };
-            (grid.clone(), self.inner.frames[index].header().do_ycbcr)
+            (grid.clone(), &self.inner.frames[index])
         } else {
             let lf_frame = if let Some(f) = &self.inner.loading_frame {
                 if !f.header().frame_type.is_normal_frame() {
@@ -170,12 +172,11 @@ impl RenderContext<'_> {
                 refs: [None; 4],
             };
             let grid = self.inner.render_frame(f, reference_frames, cache, region)?;
-            (grid, f.header().do_ycbcr)
+            (grid, f)
         };
 
-        if do_ycbcr {
-            let [y, cb, cr, ..] = &mut *grid else { panic!() };
-            jxl_color::ycbcr::perform_inverse_ycbcr([y, cb, cr]);
+        if frame.header().save_before_ct {
+            frame.transform_color(&mut grid);
         }
         Ok(grid)
     }

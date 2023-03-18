@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
+miniz_oxide = "0.6.2"
 png = "0.17.7"
 
 [dependencies.clap]
@@ -21,6 +22,7 @@ path = "../jxl-coding"
 
 [dependencies.jxl-color]
 path = "../jxl-color"
+features = ["icc"]
 
 [dependencies.jxl-frame]
 path = "../jxl-frame"

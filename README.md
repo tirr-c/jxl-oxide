@@ -5,6 +5,7 @@ JPEG XL decoder written in pure Rust.
 - Simple Modular and VarDCT images
 - Progressive LF (LF frames)
 - XYB
+- HDR images
 - Chroma subsampled YCbCr
 - Restoration filters
 - Cropped decoding (sort of)
@@ -18,4 +19,3 @@ JPEG XL decoder written in pure Rust.
   - Noise
 - Handling multiple frames (layers, animation)
 - Multithreading
-- Color management
