@@ -6,6 +6,10 @@ pub enum Error {
     InvalidIccStream(&'static str),
     #[cfg(feature = "icc")]
     Cms(lcms2::Error),
+    #[cfg(feature = "icc")]
+    IccProfileEmbedded,
+    #[cfg(feature = "icc")]
+    InvalidEnumColorspace,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -37,6 +41,10 @@ impl std::fmt::Display for Error {
             InvalidIccStream(s) => write!(f, "invalid ICC stream: {s}"),
             #[cfg(feature = "icc")]
             Cms(err) => write!(f, "LCMS2 error: {err}"),
+            #[cfg(feature = "icc")]
+            IccProfileEmbedded => write!(f, "embedded ICC profile is signalled, use it instead"),
+            #[cfg(feature = "icc")]
+            InvalidEnumColorspace => write!(f, "unknown colorspace without embedded ICC profile"),
         }
     }
 }

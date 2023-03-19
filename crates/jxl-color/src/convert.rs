@@ -185,7 +185,12 @@ pub fn convert_in_place(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, t
             tf::linear_to_pq(g, intensity_target);
             tf::linear_to_pq(b, intensity_target);
         },
-        jxl_image::TransferFunction::Dci => todo!(),
+        jxl_image::TransferFunction::Dci => {
+            let gamma = 1.0 / 2.6;
+            tf::linear_to_gamma(r, gamma);
+            tf::linear_to_gamma(g, gamma);
+            tf::linear_to_gamma(b, gamma);
+        },
         jxl_image::TransferFunction::Hlg => {
             tf::linear_to_hlg(r);
             tf::linear_to_hlg(g);
