@@ -1,5 +1,3 @@
-use jxl_image::ToneMapping;
-
 pub fn linear_to_gamma(samples: &mut [f32], gamma: f32) {
     for s in samples {
         let a = s.abs();
