@@ -94,18 +94,22 @@ define_bundle! {
             ty(u(2))
             cond(!all_default && frame_type != FrameType::LfFrame && !is_last)
             default(0),
+        pub resets_canvas:
+            ty(Bool)
+            cond(false)
+            default(Self::resets_canvas(
+                Some(blending_info.mode),
+                have_crop,
+                x0, y0,
+                width, height,
+                &headers.size,
+            )),
         pub save_before_ct:
             ty(Bool)
             cond(
                 !all_default && (
                     frame_type == FrameType::ReferenceOnly || (
-                        Self::resets_canvas(
-                            Some(blending_info.mode),
-                            have_crop,
-                            x0, y0,
-                            width, height,
-                            &headers.size,
-                        ) &&
+                        resets_canvas &&
                         (!is_last && (duration == 0 || save_as_reference != 0) && frame_type != FrameType::LfFrame)
                     )
                 )

@@ -134,51 +134,78 @@ impl RenderContext<'_> {
     }
 
     pub fn render_cropped(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
-        let target_idx = self.inner.frames
-            .iter()
-            .position(|f| f.header().frame_type.is_normal_frame());
-        let (mut grid, frame) = if let Some(index) = target_idx {
-            self.render_by_index(index, region)?;
-            let FrameRender::Done(grid) = &self.state.renders[index] else { panic!(); };
-            (grid.clone(), &self.inner.frames[index])
+        let mut current_frame_grid = None;
+        let layers = if let Some(layers) = self.inner.frame_layers.first() {
+            layers.clone()
         } else {
-            let lf_frame = if let Some(f) = &self.inner.loading_frame {
-                if !f.header().frame_type.is_normal_frame() {
-                    return Err(Error::NotReady);
+            if let Some(frame) = &self.inner.loading_frame {
+                if frame.header().frame_type.is_normal_frame() {
+                    let ret = self.render_loading_frame(region);
+                    match ret {
+                        Ok(grid) => current_frame_grid = Some(grid),
+                        Err(Error::IncompleteFrame) => {},
+                        Err(e) => return Err(e),
+                    }
                 }
-                if f.header().flags.use_lf_frame() {
-                    let lf_frame_idx = self.inner.lf_frame[f.header().lf_level as usize];
-                    self.render_by_index(lf_frame_idx, None)?;
-                    Some(self.state.renders[lf_frame_idx].as_grid().unwrap())
-                } else {
-                    None
-                }
-            } else {
-                return Err(Error::NotReady);
-            };
+            }
 
-            let Some(f) = &self.inner.loading_frame else { unreachable!() };
-            if f.data().lf_global.is_none() {
+            if self.inner.loading_frame_layers.is_empty() && current_frame_grid.is_none() {
                 return Err(Error::IncompleteFrame);
             }
 
-            if self.state.loading_render_cache.is_none() {
-                self.state.loading_render_cache = Some(RenderCache::new(f));
-            }
-            let Some(cache) = &mut self.state.loading_render_cache else { unreachable!() };
-
-            let reference_frames = ReferenceFrames {
-                lf: lf_frame,
-                refs: [None; 4],
-            };
-            let grid = self.inner.render_frame(f, reference_frames, cache, region)?;
-            (grid, f)
+            self.inner.loading_frame_layers.clone()
         };
 
-        if frame.header().save_before_ct {
-            frame.transform_color(&mut grid);
+        // TODO: compose layers
+        if layers.len() + (current_frame_grid.is_some() as usize) > 1 {
+            tracing::warn!("Layers are not composed for now");
+        }
+        let mut grid = if let Some(&layer_idx) = layers.first() {
+            self.render_by_index(layer_idx, region)?;
+            let FrameRender::Done(grid) = &self.state.renders[layer_idx] else { panic!(); };
+            grid.clone()
+        } else {
+            current_frame_grid.unwrap()
+        };
+
+        let ct_base_frame = if let Some(&layer_idx) = layers.first() {
+            &self.inner.frames[layer_idx]
+        } else {
+            self.inner.loading_frame.as_ref().unwrap()
+        };
+        if ct_base_frame.header().save_before_ct {
+            ct_base_frame.transform_color(&mut grid);
         }
         Ok(grid)
+    }
+
+    fn render_loading_frame(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
+        let frame = self.inner.loading_frame.as_ref().unwrap();
+        let header = frame.header();
+        if frame.data().lf_global.is_none() {
+            return Err(Error::IncompleteFrame);
+        }
+
+        let lf_frame = if header.flags.use_lf_frame() {
+            let lf_frame_idx = self.inner.lf_frame[header.lf_level as usize];
+            self.render_by_index(lf_frame_idx, None)?;
+            Some(self.state.renders[lf_frame_idx].as_grid().unwrap())
+        } else {
+            None
+        };
+
+        let frame = self.inner.loading_frame.as_ref().unwrap();
+        if self.state.loading_render_cache.is_none() {
+            self.state.loading_render_cache = Some(RenderCache::new(frame));
+        }
+        let Some(cache) = &mut self.state.loading_render_cache else { unreachable!() };
+
+        let reference_frames = ReferenceFrames {
+            lf: lf_frame,
+            refs: [None; 4],
+        };
+
+        self.inner.render_frame(frame, reference_frames, cache, region)
     }
 }
 
@@ -563,10 +590,12 @@ impl<'f> ContextInner<'f> {
 struct ContextInner<'a> {
     image_header: &'a Headers,
     frames: Vec<Frame<'a>>,
+    frame_layers: Vec<Vec<usize>>,
     frame_deps: Vec<FrameDependence>,
     lf_frame: [usize; 4],
     reference: [usize; 4],
     loading_frame: Option<Frame<'a>>,
+    loading_frame_layers: Vec<usize>,
 }
 
 impl<'a> ContextInner<'a> {
@@ -574,10 +603,12 @@ impl<'a> ContextInner<'a> {
         Self {
             image_header,
             frames: Vec::new(),
+            frame_layers: Vec::new(),
             frame_deps: Vec::new(),
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
             loading_frame: None,
+            loading_frame_layers: Vec::new(),
         }
     }
 }
@@ -628,6 +659,16 @@ impl<'a> ContextInner<'a> {
             let lf_idx = header.lf_level as usize - 1;
             self.lf_frame[lf_idx] = idx;
         }
+
+        if header.frame_type.is_normal_frame() {
+            self.loading_frame_layers.push(idx);
+            if is_last {
+                self.frame_layers.push(std::mem::take(&mut self.loading_frame_layers));
+            } else if header.duration != 0 {
+                self.frame_layers.push(self.loading_frame_layers.clone());
+            }
+        }
+
         self.frames.push(frame);
         self.frame_deps.push(deps);
     }
@@ -646,6 +687,10 @@ impl ContextInner<'_> {
             Some(frame) => frame,
             slot => {
                 let frame = Frame::parse(bitstream, image_header)?;
+                if frame.header().resets_canvas && !self.loading_frame_layers.is_empty() {
+                    self.frame_layers.push(std::mem::take(&mut self.loading_frame_layers));
+                }
+
                 *slot = Some(frame);
                 slot.as_mut().unwrap()
             },
