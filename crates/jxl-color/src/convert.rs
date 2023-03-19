@@ -144,20 +144,29 @@ pub fn convert_in_place(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, t
         jxl_image::Primaries::P3 => primaries::P3,
     };
 
-    let srgb_xyz = primaries_to_xyz_mat(primaries::SRGB, illuminant::D65);
-    let adapt = adapt_mat(illuminant::D65, target_wp);
-    let xyz_target = xyz_to_primaries_mat(target_primaries, target_wp);
-    let merged = matmul3(&xyz_target, &matmul3(&adapt, &srgb_xyz));
+    let merged = (target_primaries != primaries::SRGB || target_wp != illuminant::D65).then(|| {
+        let srgb_xyz = primaries_to_xyz_mat(primaries::SRGB, illuminant::D65);
+        let xyz_target = xyz_to_primaries_mat(target_primaries, target_wp);
+
+        let mut merged = srgb_xyz;
+        if target_wp != illuminant::D65 {
+            let adapt = adapt_mat(illuminant::D65, target_wp);
+            merged = matmul3(&adapt, &merged);
+        }
+        matmul3(&xyz_target, &merged)
+    });
 
     let [r, g, b, ..] = fb else { panic!() };
     let r = r.buf_mut();
     let g = g.buf_mut();
     let b = b.buf_mut();
-    for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
-        let [or, og, ob] = matmul3vec(&merged, &[*r, *g, *b]);
-        *r = or;
-        *g = og;
-        *b = ob;
+    if let Some(merged) = &merged {
+        for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
+            let [or, og, ob] = matmul3vec(merged, &[*r, *g, *b]);
+            *r = or;
+            *g = og;
+            *b = ob;
+        }
     }
 
     match encoding.tf {
