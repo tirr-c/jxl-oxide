@@ -29,30 +29,19 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
     }
 }
 
-pub fn linear_to_pq(samples: &mut [f32], tone_mapping: &ToneMapping) {
+pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     const M1: f32 = 1305.0 / 8192.0;
     const M2: f32 = 2523.0 / 32.0;
     const C1: f32 = 107.0 / 128.0;
     const C2: f32 = 2413.0 / 128.0;
     const C3: f32 = 2392.0 / 128.0;
 
-    let &ToneMapping {
-        intensity_target,
-        linear_below,
-        relative_to_max_display,
-        ..
-    } = tone_mapping;
-
     let y_mult = intensity_target / 10000.0;
 
     for s in samples {
-        let a = *s;
-        if (relative_to_max_display && a * intensity_target < linear_below) || (!relative_to_max_display && a < linear_below) {
-            continue;
-        }
-
+        let a = s.abs();
         let y_m1 = (a * y_mult).powf(M1);
-        *s = ((C1 + C2 * y_m1) / (1.0 + C3 * y_m1)).powf(M2);
+        *s = ((C1 + C2 * y_m1) / (1.0 + C3 * y_m1)).powf(M2).copysign(*s);
     }
 }
 
@@ -77,29 +66,18 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     out
 }
 
-pub fn linear_to_hlg(samples: &mut [f32], tone_mapping: &ToneMapping) {
+pub fn linear_to_hlg(samples: &mut [f32]) {
     const A: f32 = 0.17883277;
     const B: f32 = 0.28466892;
     const C: f32 = 0.5599107;
 
-    let &ToneMapping {
-        intensity_target,
-        linear_below,
-        relative_to_max_display,
-        ..
-    } = tone_mapping;
-
     for s in samples {
-        let a = *s;
-        if (relative_to_max_display && a * intensity_target < linear_below) || (!relative_to_max_display && a < linear_below) {
-            continue;
-        }
-
+        let a = s.abs();
         *s = if a <= 1.0 / 12.0 {
             (3.0 * a).sqrt()
         } else {
             A * (12.0 * a - B).ln() + C
-        };
+        }.copysign(*s);
     }
 }
 

@@ -180,15 +180,16 @@ pub fn convert_in_place(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, t
             tf::linear_to_srgb(b);
         },
         jxl_image::TransferFunction::Pq => {
-            tf::linear_to_pq(r, tone_mapping);
-            tf::linear_to_pq(g, tone_mapping);
-            tf::linear_to_pq(b, tone_mapping);
+            let intensity_target = tone_mapping.intensity_target;
+            tf::linear_to_pq(r, intensity_target);
+            tf::linear_to_pq(g, intensity_target);
+            tf::linear_to_pq(b, intensity_target);
         },
         jxl_image::TransferFunction::Dci => todo!(),
         jxl_image::TransferFunction::Hlg => {
-            tf::linear_to_hlg(r, tone_mapping);
-            tf::linear_to_hlg(g, tone_mapping);
-            tf::linear_to_hlg(b, tone_mapping);
+            tf::linear_to_hlg(r);
+            tf::linear_to_hlg(g);
+            tf::linear_to_hlg(b);
         },
     }
 }
