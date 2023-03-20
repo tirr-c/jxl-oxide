@@ -231,6 +231,8 @@ impl<'f> ContextInner<'f> {
         let mut ret = vec![a, b, c];
         self.append_extra_channels(frame, &mut ret);
 
+        self.render_features(frame, &mut ret, reference_frames.refs)?;
+
         if !frame.header().save_before_ct {
             frame.transform_color(&mut ret);
         }
@@ -286,6 +288,35 @@ impl<'f> ContextInner<'f> {
 
             fb.push(out);
         }
+    }
+
+    fn render_features<'a>(
+        &'a self,
+        frame: &'a Frame<'f>,
+        grid: &mut [SimpleGrid<f32>],
+        reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
+    ) -> Result<()> {
+        let frame_data = frame.data();
+        let lf_global = frame_data.lf_global.as_ref().unwrap();
+
+        if let Some(patches) = &lf_global.patches {
+            for patch in &patches.patches {
+                let Some(ref_grid) = reference_grids[patch.ref_idx as usize] else {
+                    return Err(Error::InvalidReference(patch.ref_idx));
+                };
+                blend::patch(self.image_header, grid, ref_grid, patch);
+            }
+        }
+
+        if let Some(_splines) = &lf_global.splines {
+            tracing::warn!("Splines are not supported");
+        }
+
+        if let Some(_noise) = &lf_global.noise {
+            tracing::warn!("Noise is not supported");
+        }
+
+        Ok(())
     }
 
     fn render_modular<'a>(

@@ -1,32 +1,30 @@
-#![allow(unused_variables, unused_mut, dead_code)]
-
 use std::io::Read;
 
-use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
 use jxl_image::{Headers, ExtraChannelType};
 
 use crate::Result;
 
 #[derive(Debug)]
 pub struct Patches {
-    patches: Vec<PatchRef>,
+    pub patches: Vec<PatchRef>,
 }
 
 #[derive(Debug)]
-struct PatchRef {
-    ref_idx: u32,
-    x0: u32,
-    y0: u32,
-    width: u32,
-    height: u32,
-    patch_targets: Vec<PatchTarget>,
+pub struct PatchRef {
+    pub ref_idx: u32,
+    pub x0: u32,
+    pub y0: u32,
+    pub width: u32,
+    pub height: u32,
+    pub patch_targets: Vec<PatchTarget>,
 }
 
 #[derive(Debug)]
-struct PatchTarget {
-    x: u32,
-    y: u32,
-    blending: Vec<BlendingModeInformation>,
+pub struct PatchTarget {
+    pub x: i32,
+    pub y: i32,
+    pub blending: Vec<BlendingModeInformation>,
 }
 
 #[derive(Debug)]
@@ -96,9 +94,11 @@ impl Bundle<&Headers> for Patches {
                 let (x, y) = if let Some((px, py)) = prev_xy {
                     let dx = decoder.read_varint(bitstream, 6)?;
                     let dy = decoder.read_varint(bitstream, 6)?;
+                    let dx = unpack_signed(dx);
+                    let dy = unpack_signed(dy);
                     (dx + px, dy + py)
                 } else {
-                    (decoder.read_varint(bitstream, 4)?, decoder.read_varint(bitstream, 4)?)
+                    (decoder.read_varint(bitstream, 4)? as i32, decoder.read_varint(bitstream, 4)? as i32)
                 };
                 prev_xy = Some((x, y));
 
