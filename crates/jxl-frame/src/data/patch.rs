@@ -30,15 +30,15 @@ struct PatchTarget {
 }
 
 #[derive(Debug)]
-struct BlendingModeInformation {
-    mode: PatchBlendMode,
-    alpha_channel: u32,
-    clamp: bool,
+pub struct BlendingModeInformation {
+    pub mode: PatchBlendMode,
+    pub alpha_channel: u32,
+    pub clamp: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
-enum PatchBlendMode {
+pub enum PatchBlendMode {
     None = 0,
     Replace,
     Add,

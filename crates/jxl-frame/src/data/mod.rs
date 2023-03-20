@@ -14,5 +14,5 @@ mod noise;
 mod patch;
 mod spline;
 pub use noise::NoiseParameters;
-pub use patch::Patches;
+pub use patch::*;
 pub use spline::Splines;

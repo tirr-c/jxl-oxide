@@ -12,6 +12,7 @@ use jxl_grid::{Grid, SimpleGrid};
 use jxl_image::{Headers, ImageMetadata, ColourSpace};
 use jxl_modular::ChannelShift;
 
+mod blend;
 mod dct;
 mod error;
 mod filter;
@@ -123,21 +124,19 @@ impl RenderContext<'_> {
             },
         };
 
-        let mut grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
-
-        if !frame.header().save_before_ct {
-            tracing::debug!("Converting color encoding before saving");
-            frame.transform_color(&mut grid);
-        }
+        let grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
         *state = FrameRender::Done(grid);
         Ok(())
     }
 
     pub fn render_cropped(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
-        let mut current_frame_grid = None;
-        let layers = if let Some(layers) = self.inner.frame_layers.first() {
-            layers.clone()
+        let (frame, mut grid) = if let Some(&idx) = self.inner.keyframes.first() {
+            self.render_by_index(idx, region)?;
+            let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
+            let frame = &self.inner.frames[idx];
+            (frame, grid.clone())
         } else {
+            let mut current_frame_grid = None;
             if let Some(frame) = &self.inner.loading_frame {
                 if frame.header().frame_type.is_normal_frame() {
                     let ret = self.render_loading_frame(region);
@@ -149,32 +148,21 @@ impl RenderContext<'_> {
                 }
             }
 
-            if self.inner.loading_frame_layers.is_empty() && current_frame_grid.is_none() {
+            if let Some(grid) = current_frame_grid {
+                let frame = self.inner.loading_frame.as_ref().unwrap();
+                (frame, grid)
+            } else if let Some(idx) = self.inner.keyframe_in_progress {
+                self.render_by_index(idx, region)?;
+                let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
+                let frame = &self.inner.frames[idx];
+                (frame, grid.clone())
+            } else {
                 return Err(Error::IncompleteFrame);
             }
-
-            self.inner.loading_frame_layers.clone()
         };
 
-        // TODO: compose layers
-        if layers.len() + (current_frame_grid.is_some() as usize) > 1 {
-            tracing::warn!("Layers are not composed for now");
-        }
-        let mut grid = if let Some(&layer_idx) = layers.first() {
-            self.render_by_index(layer_idx, region)?;
-            let FrameRender::Done(grid) = &self.state.renders[layer_idx] else { panic!(); };
-            grid.clone()
-        } else {
-            current_frame_grid.unwrap()
-        };
-
-        let ct_base_frame = if let Some(&layer_idx) = layers.first() {
-            &self.inner.frames[layer_idx]
-        } else {
-            self.inner.loading_frame.as_ref().unwrap()
-        };
-        if ct_base_frame.header().save_before_ct {
-            ct_base_frame.transform_color(&mut grid);
+        if frame.header().save_before_ct {
+            frame.transform_color(&mut grid);
         }
         Ok(grid)
     }
@@ -243,7 +231,15 @@ impl<'f> ContextInner<'f> {
         let mut ret = vec![a, b, c];
         self.append_extra_channels(frame, &mut ret);
 
-        Ok(ret)
+        if !frame.header().save_before_ct {
+            frame.transform_color(&mut ret);
+        }
+
+        Ok(if frame.header().resets_canvas {
+            ret
+        } else {
+            blend::blend(self.image_header, reference_frames.refs, frame, &ret)
+        })
     }
 
     fn append_extra_channels<'a>(
@@ -316,8 +312,8 @@ impl<'f> ContextInner<'f> {
             return Err(Error::NotSupported("Single-channel modular image is not supported"));
         }
 
-        let width = self.width() as usize;
-        let height = self.height() as usize;
+        let width = frame_header.sample_width() as usize;
+        let height = frame_header.sample_height() as usize;
         let bit_depth = metadata.bit_depth;
         let mut fb_yxb = [
             SimpleGrid::new(width, height),
@@ -536,8 +532,8 @@ impl<'f> ContextInner<'f> {
                     })
             });
 
-        let width = self.width() as usize;
-        let height = self.height() as usize;
+        let width = frame_header.sample_width() as usize;
+        let height = frame_header.sample_height() as usize;
         let mut fb_yxb = [
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
@@ -590,12 +586,12 @@ impl<'f> ContextInner<'f> {
 struct ContextInner<'a> {
     image_header: &'a Headers,
     frames: Vec<Frame<'a>>,
-    frame_layers: Vec<Vec<usize>>,
+    keyframes: Vec<usize>,
+    keyframe_in_progress: Option<usize>,
     frame_deps: Vec<FrameDependence>,
     lf_frame: [usize; 4],
     reference: [usize; 4],
     loading_frame: Option<Frame<'a>>,
-    loading_frame_layers: Vec<usize>,
 }
 
 impl<'a> ContextInner<'a> {
@@ -603,12 +599,12 @@ impl<'a> ContextInner<'a> {
         Self {
             image_header,
             frames: Vec::new(),
-            frame_layers: Vec::new(),
+            keyframes: Vec::new(),
+            keyframe_in_progress: None,
             frame_deps: Vec::new(),
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
             loading_frame: None,
-            loading_frame_layers: Vec::new(),
         }
     }
 }
@@ -661,11 +657,11 @@ impl<'a> ContextInner<'a> {
         }
 
         if header.frame_type.is_normal_frame() {
-            self.loading_frame_layers.push(idx);
-            if is_last {
-                self.frame_layers.push(std::mem::take(&mut self.loading_frame_layers));
-            } else if header.duration != 0 {
-                self.frame_layers.push(self.loading_frame_layers.clone());
+            if is_last || header.duration != 0 {
+                self.keyframes.push(idx);
+                self.keyframe_in_progress = None;
+            } else {
+                self.keyframe_in_progress = Some(idx);
             }
         }
 
@@ -687,10 +683,6 @@ impl ContextInner<'_> {
             Some(frame) => frame,
             slot => {
                 let frame = Frame::parse(bitstream, image_header)?;
-                if frame.header().resets_canvas && !self.loading_frame_layers.is_empty() {
-                    self.frame_layers.push(std::mem::take(&mut self.loading_frame_layers));
-                }
-
                 *slot = Some(frame);
                 slot.as_mut().unwrap()
             },
@@ -698,12 +690,12 @@ impl ContextInner<'_> {
 
         let header = frame.header();
         tracing::info!(
-            width = header.width,
-            height = header.height,
+            width = header.sample_width(),
+            height = header.sample_height(),
             frame_type = format_args!("{:?}", header.frame_type),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
-            "Decoding {}x{} frame", header.width, header.height
+            "Decoding {}x{} frame", header.sample_width(), header.sample_height()
         );
 
         if let Some(region) = &mut region {
