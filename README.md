@@ -8,14 +8,16 @@ JPEG XL decoder written in pure Rust.
 - HDR images
 - Chroma subsampled YCbCr
 - Restoration filters
+- Image features
+  - Patches
+- Frame composition
 - Cropped decoding (sort of)
 
 ## TODO
-- Rendering extra channels
+- Rendering spot color channels
 - Image features
   - Non-separable upsampling
-  - Patches
   - Splines
   - Noise
-- Handling multiple frames (layers, animation)
+- Animation
 - Multithreading
