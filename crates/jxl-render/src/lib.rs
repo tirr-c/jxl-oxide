@@ -49,7 +49,7 @@ impl RenderContext<'_> {
 impl RenderContext<'_> {
     pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         if self.inner.metadata().colour_encoding.want_icc {
-            tracing::info!("Image has ICC profile");
+            tracing::debug!("Image has ICC profile");
             let icc = jxl_color::icc::read_icc(bitstream)?;
 
             tracing::warn!("Discarding encoded ICC profile");
@@ -720,7 +720,7 @@ impl ContextInner<'_> {
         };
 
         let header = frame.header();
-        tracing::info!(
+        tracing::debug!(
             width = header.sample_width(),
             height = header.sample_height(),
             frame_type = format_args!("{:?}", header.frame_type),

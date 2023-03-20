@@ -99,6 +99,7 @@ fn main() {
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
+    tracing::info!("Image dimension: {}x{}", headers.size.width, headers.size.height);
 
     let mut render = RenderContext::new(&headers);
     tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
@@ -258,7 +259,7 @@ fn run(
 
         let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated;
         if alpha_premultiplied {
-            tracing::warn!("Premultiplied alpha is not supported, ignoring");
+            tracing::warn!("Premultiplied alpha is not supported for output");
         }
 
         let alpha = grids.drain(3..).nth(idx).unwrap();
@@ -271,7 +272,7 @@ fn run(
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    tracing::info!(elapsed_ms, "Took {:.2} ms", elapsed_ms);
+    tracing::info!("Took {:.2} ms", elapsed_ms);
 
     (result, image)
 }
