@@ -470,6 +470,9 @@ dependencies = [
 [[package]]
 name = "jxl-bitstream"
 version = "0.1.0"
+dependencies = [
+ "tracing",
+]
 
 [[package]]
 name = "jxl-coding"

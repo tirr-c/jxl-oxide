@@ -51,8 +51,8 @@ fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
     }
 }
 
-fn run_test(
-    mut bitstream: jxl_bitstream::Bitstream<std::fs::File>,
+fn run_test<R: std::io::Read>(
+    mut bitstream: jxl_bitstream::Bitstream<R>,
     target_icc: Vec<u8>,
     expected: Vec<f32>,
     expected_peak_error: f32,
@@ -151,7 +151,7 @@ macro_rules! conformance_test {
             path.push(stringify!($name));
             path.push("input.jxl");
             let file = std::fs::File::open(path).expect("Failed to open file");
-            let bitstream = jxl_bitstream::Bitstream::new(file);
+            let bitstream = jxl_bitstream::Bitstream::new_detect(file);
 
             let (peak_error, max_rmse) = run_test(bitstream, target_icc, expected, $peak_error);
 

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, fs::File};
+use std::path::PathBuf;
 
 use clap::Parser;
 use jxl_bitstream::read_bits;
@@ -97,7 +97,7 @@ fn main() {
     let _guard = span.enter();
 
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
-    let mut bitstream = jxl_bitstream::Bitstream::new(file);
+    let mut bitstream = jxl_bitstream::Bitstream::new_detect(file);
     let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
     tracing::info!("Image dimension: {}x{}", headers.size.width, headers.size.height);
 
@@ -237,8 +237,8 @@ fn main() {
     }
 }
 
-fn run(
-    bitstream: &mut jxl_bitstream::Bitstream<File>,
+fn run<R: std::io::Read>(
+    bitstream: &mut jxl_bitstream::Bitstream<R>,
     render: &mut RenderContext,
     headers: &Headers,
     crop: Option<CropInfo>,

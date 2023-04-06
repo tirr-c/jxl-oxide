@@ -1,10 +1,14 @@
 use std::io::prelude::*;
 
+mod container;
 mod error;
 mod macros;
+mod reader;
 
+pub use container::*;
 pub use error::{Error, Result};
 pub use macros::{unpack_signed, unpack_signed_u64};
+pub use reader::ContainerDetectingReader;
 
 pub trait Bundle<Ctx = ()>: Sized {
     type Error;
@@ -70,6 +74,20 @@ impl<R> std::fmt::Debug for Bitstream<R> {
     }
 }
 
+impl<R> Bitstream<ContainerDetectingReader<R>> {
+    pub fn new_detect(reader: R) -> Self {
+        Self {
+            global_pos: 0,
+            buf: Vec::new(),
+            buf_valid_len: 0,
+            buf_offset: 0,
+            current: 0,
+            bits_left: 0,
+            reader: ContainerDetectingReader::new(reader),
+        }
+    }
+}
+
 impl<R> Bitstream<R> {
     pub fn new(reader: R) -> Self {
         Self {
@@ -81,6 +99,10 @@ impl<R> Bitstream<R> {
             bits_left: 0,
             reader,
         }
+    }
+
+    pub fn into_inner(self) -> R {
+        self.reader
     }
 
     fn left_in_buffer(&self) -> &[u8] {

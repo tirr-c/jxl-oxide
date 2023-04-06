@@ -1,6 +1,7 @@
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
+    InvalidBoxSize,
     NonZeroPadding,
     InvalidFloat,
     InvalidEnum {
@@ -26,6 +27,7 @@ impl std::fmt::Display for Error {
             Self::Io(e) => {
                 write!(f, "I/O error: {}", e)
             },
+            Self::InvalidBoxSize => write!(f, "invalid box size"),
             Self::NonZeroPadding => {
                 write!(f, "PadZeroToByte() read non-zero bits")
             },
