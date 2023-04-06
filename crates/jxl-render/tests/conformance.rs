@@ -81,17 +81,18 @@ fn run_test<R: std::io::Read>(
     let fb = render.render_cropped(None).expect("failed to render");
 
     let source_profile = {
-        let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
+        let icc = if headers.metadata.colour_encoding.want_icc {
+            todo!()
+        } else {
+            jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap()
+        };
         Profile::new_icc(&icc).unwrap()
     };
 
-    let grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
-    let mut fb = jxl_image::FrameBuffer::from_grids(&grids).unwrap();
+    let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3]).unwrap();
     let width = fb.width();
     let height = fb.height();
-    let channels = fb.channels();
-    assert_eq!(channels, 3);
-
     let pixfmt = lcms2::PixelFormat::RGB_FLT;
     let transform = lcms2::Transform::new(
         &source_profile,
@@ -101,8 +102,19 @@ fn run_test<R: std::io::Read>(
         lcms2::Intent::RelativeColorimetric,
     ).expect("failed to create transform");
     transform.transform_in_place(fb.buf_grouped_mut::<3>());
+    let fb = fb.buf();
+    for y in 0..height {
+        for x in 0..width {
+            for c in 0..3 {
+                grids[c].set(x, y, fb[c + (x + y * width) * 3]);
+            }
+        }
+    }
 
-    let interleaved_buffer = fb.buf_mut();
+    let fb = jxl_image::FrameBuffer::from_grids(&grids).unwrap();
+    let channels = fb.channels();
+
+    let interleaved_buffer = fb.buf();
     assert_eq!(expected.len(), interleaved_buffer.len());
 
     let mut sum_se = vec![0.0f32; channels];
@@ -186,5 +198,25 @@ conformance_test! {
         "793cb9df4e4ce93ce8fe827fde34e7fb925b7079fcb68fba1e56fc4b35508ccb",
         0.000976562,
         0.000976562,
+    )
+}
+
+conformance_test! {
+    #[ignore = "has embedded ICC profile"]
+    patches_lossless(
+        "806201a2c99d27a54c400134b3db7bfc57476f9bc0775e59eea802d28aba75de",
+        "3a10bcd8e4c39d12053ebf66d18075c7ded4fd6cf78d26d9c47bdc0cde215115",
+        0.000976562,
+        0.000976562,
+    )
+}
+
+conformance_test! {
+    #[ignore = "high error on some pixels"]
+    bike(
+        "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
+        "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",
+        0.06,
+        0.02,
     )
 }
