@@ -23,6 +23,7 @@ pub use error::{Error, Result};
 pub struct RenderContext<'a> {
     inner: ContextInner<'a>,
     state: RenderState,
+    icc: Vec<u8>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -30,6 +31,7 @@ impl<'a> RenderContext<'a> {
         Self {
             inner: ContextInner::new(image_header),
             state: RenderState::new(),
+            icc: Vec::new(),
         }
     }
 }
@@ -47,16 +49,18 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<&[u8]> {
         if self.inner.metadata().colour_encoding.want_icc {
             tracing::debug!("Image has ICC profile");
             let icc = jxl_color::icc::read_icc(bitstream)?;
-
-            tracing::warn!("Discarding encoded ICC profile");
-            drop(icc);
+            self.icc = jxl_color::icc::decode_icc(&icc)?;
         }
 
-        Ok(())
+        Ok(&self.icc)
+    }
+
+    pub fn icc(&self) -> &[u8] {
+        &self.icc
     }
 
     pub fn load_cropped<R: Read>(

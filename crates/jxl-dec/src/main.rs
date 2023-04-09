@@ -12,6 +12,9 @@ struct Args {
     /// Output file
     #[arg(short, long)]
     output: Option<PathBuf>,
+    /// Output ICC file
+    #[arg(long)]
+    icc_output: Option<PathBuf>,
     /// Input file
     input: PathBuf,
     #[arg(long, value_parser = str::parse::<CropInfo>)]
@@ -103,7 +106,15 @@ fn main() {
 
     let mut render = RenderContext::new(&headers);
     tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
-    render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
+    let icc = render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
+    if let Some(icc_path) = &args.icc_output {
+        if icc.is_empty() {
+            tracing::warn!("Input does not have embedded ICC profile, ignoring --icc-output");
+        } else {
+            tracing::info!("Writing ICC profile");
+            std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
+        }
+    }
 
     if headers.metadata.have_preview {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");

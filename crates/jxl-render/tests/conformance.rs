@@ -4,7 +4,7 @@ use jxl_bitstream::Bundle;
 use jxl_render::RenderContext;
 use jxl_image::Headers;
 
-fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
+fn read_numpy(mut r: impl std::io::Read, channels: usize) -> Vec<f32> {
     let mut magic = [0u8; 6];
     let mut version = [0u8; 2];
     let mut meta_len = [0u8; 2];
@@ -19,7 +19,7 @@ fn read_numpy(mut r: impl std::io::Read) -> Vec<f32> {
     r.read_exact(&mut meta).unwrap();
 
     let mut out = Vec::new();
-    let mut buf = [0u8; 12];
+    let mut buf = vec![0u8; channels * 4];
     while r.read_exact(&mut buf).is_ok() {
         let mut val = [0u8; 4];
         for c in buf.chunks_exact(4) {
@@ -81,12 +81,12 @@ fn run_test<R: std::io::Read>(
     let fb = render.render_cropped(None).expect("failed to render");
 
     let source_profile = {
-        let icc = if headers.metadata.colour_encoding.want_icc {
-            todo!()
+        if headers.metadata.colour_encoding.want_icc {
+            Profile::new_icc(render.icc()).unwrap()
         } else {
-            jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap()
-        };
-        Profile::new_icc(&icc).unwrap()
+            let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
+            Profile::new_icc(&icc).unwrap()
+        }
     };
 
     let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
@@ -149,14 +149,14 @@ fn run_test<R: std::io::Read>(
 }
 
 macro_rules! conformance_test {
-    ($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $peak_error:expr, $max_rmse:expr $(,)? )) => {
+    ($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $channels:literal, $peak_error:expr, $max_rmse:expr $(,)? )) => {
         #[test]
         $(#[$attr])*
         fn $name() {
             let buf = download_object_with_cache($npy_hash, "npy");
             let target_icc = download_object_with_cache($icc_hash, "icc");
 
-            let expected = read_numpy(std::io::Cursor::new(buf));
+            let expected = read_numpy(std::io::Cursor::new(buf), $channels);
 
             let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             path.push("tests/conformance/testcases");
@@ -177,6 +177,7 @@ conformance_test! {
     bicycles(
         "6f71d8ca122872e7d850b672e7fb46b818c2dfddacd00b3934fe70aa8e0b327e",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        3,
         0.000976562,
         0.000976562,
     )
@@ -186,6 +187,7 @@ conformance_test! {
     delta_palette(
         "952b9e16aa0ae23df38c6b358cb4835b5f9479838f6855b96845ea54b0528c1f",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        3,
         0.000976562,
         0.000976562,
     )
@@ -196,16 +198,17 @@ conformance_test! {
     lz77_flower(
         "953d3ada476e3218653834c9addc9c16bb6f9f03b18be1be8a85c07a596ea32d",
         "793cb9df4e4ce93ce8fe827fde34e7fb925b7079fcb68fba1e56fc4b35508ccb",
+        3,
         0.000976562,
         0.000976562,
     )
 }
 
 conformance_test! {
-    #[ignore = "has embedded ICC profile"]
     patches_lossless(
         "806201a2c99d27a54c400134b3db7bfc57476f9bc0775e59eea802d28aba75de",
         "3a10bcd8e4c39d12053ebf66d18075c7ded4fd6cf78d26d9c47bdc0cde215115",
+        4,
         0.000976562,
         0.000976562,
     )
@@ -216,6 +219,7 @@ conformance_test! {
     bike(
         "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
         "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",
+        3,
         0.06,
         0.02,
     )
