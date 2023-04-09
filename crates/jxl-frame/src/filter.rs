@@ -18,6 +18,11 @@ impl<Ctx> Bundle<Ctx> for Gabor {
     type Error = crate::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+        let gab_enabled = bitstream.read_bool()?;
+        if !gab_enabled {
+            return Ok(Self::Disabled);
+        }
+
         let custom = bitstream.read_bool()?;
         if !custom {
             return Ok(Self::default());

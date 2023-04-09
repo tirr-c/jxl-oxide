@@ -168,8 +168,7 @@ define_bundle! {
     #[derive(Debug)]
     pub struct RestorationFilter ctx(encoding: Encoding) error(crate::Error) {
         all_default: ty(Bool) default(true),
-        gab_enabled: ty(Bool) cond(!all_default) default(true),
-        pub gab: ty(Bundle(crate::filter::Gabor)) cond(gab_enabled) default(crate::filter::Gabor::Disabled),
+        pub gab: ty(Bundle(crate::filter::Gabor)) cond(!all_default),
         pub epf: ty(Bundle(crate::filter::EdgePreservingFilter)) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
     }

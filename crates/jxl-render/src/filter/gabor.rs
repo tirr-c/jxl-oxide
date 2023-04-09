@@ -1,6 +1,8 @@
 use jxl_grid::SimpleGrid;
 
 pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+    tracing::debug!("Running gaborish");
+
     let mut weights_yxb = weights_xyb;
     weights_yxb.swap(0, 1);
 
