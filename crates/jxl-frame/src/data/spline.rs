@@ -1,6 +1,6 @@
 #![allow(unused_variables, unused_mut, dead_code, clippy::needless_range_loop)]
 
-use std::io::Read;
+use std::{fmt::Write, io::Read};
 
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
@@ -54,6 +54,12 @@ impl<Ctx> Bundle<Ctx> for Splines {
         let mut splines = vec![QuantSpline::new(); num_splines];
         for spline in &mut splines {
             spline.decode(&mut decoder, bitstream)?;
+        }
+
+        // TODO remove this 
+        for (i, spline) in splines.iter().enumerate() {
+            let a = spline.dequant(start_points[i], quant_adjust, 0.0, 0.0);
+            tracing::debug!("\n{}", a.to_string());
         }
 
         Ok(Self {
@@ -152,3 +158,19 @@ impl QuantSpline {
     }
 }
 
+impl ToString for Spline {
+    fn to_string(&self) -> String {
+        let mut res = String::from("Spline\n");
+        for i in self.xyb_dct.iter().chain(&[self.sigma_dct]) {
+            for val in i {
+                write!(res, "{} ", val).unwrap();
+            }
+            writeln!(res).unwrap();
+        }
+        for point in &self.points {
+            writeln!(res, "{} {}", point.0 as i32, point.1 as i32).unwrap();
+        }
+        writeln!(res, "EndSpline").unwrap();
+        res
+    }
+}
