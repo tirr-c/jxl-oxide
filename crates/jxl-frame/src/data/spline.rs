@@ -5,22 +5,30 @@ use std::{fmt::Write, io::Read};
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
 
-use crate::Result;
+use crate::{FrameHeader, Result};
 
+const MAX_NUM_SPLINES: usize = 1 << 24;
+const MAX_NUM_CONTROL_POINTS: usize = 1 << 20;
+
+/// Holds quantized splines
 #[derive(Debug)]
 pub struct Splines {
-    pub splines: Vec<QuantSpline>,
+    splines: Vec<QuantSpline>,
     start_points: Vec<(i32, i32)>,
     quant_adjust: i32,
 }
 
+/// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
 #[derive(Debug, Default)]
 pub struct Spline {
-    points: Vec<(f32, f32)>,
-    xyb_dct: [[f32; 32]; 3],
-    sigma_dct: [f32; 32],
+    pub points: Vec<(f32, f32)>,
+    pub xyb_dct: [[f32; 32]; 3],
+    pub sigma_dct: [f32; 32],
 }
 
+/// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
+///
+/// Use [`QuantSpline::dequant`] to get normal [Spline]
 #[derive(Debug, Default, Clone)]
 pub struct QuantSpline {
     points_deltas: Vec<(i32, i32)>,
@@ -28,14 +36,22 @@ pub struct QuantSpline {
     sigma_dct: [i32; 32],
 }
 
-impl<Ctx> Bundle<Ctx> for Splines {
+impl Bundle<&FrameHeader> for Splines {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, header: &FrameHeader) -> Result<Self> {
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 6)?;
         decoder.begin(bitstream)?;
+        let num_pixels = (header.width * header.height) as usize;
 
         let num_splines = (decoder.read_varint(bitstream, 2)? + 1) as usize;
+
+        let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
+        if num_splines > max_num_splines {
+            return Err(crate::Error::Decoder(jxl_coding::Error::TooManySplines(
+                num_splines,
+            )));
+        }
 
         let mut start_points = vec![(0i32, 0i32); num_splines];
         for i in 0..num_splines {
@@ -53,10 +69,10 @@ impl<Ctx> Bundle<Ctx> for Splines {
 
         let mut splines = vec![QuantSpline::new(); num_splines];
         for spline in &mut splines {
-            spline.decode(&mut decoder, bitstream)?;
+            spline.decode(&mut decoder, bitstream, num_pixels)?;
         }
 
-        // TODO remove this 
+        // TODO remove this example
         for (i, spline) in splines.iter().enumerate() {
             let a = spline.dequant(start_points[i], quant_adjust, 0.0, 0.0);
             tracing::debug!("\n{}", a.to_string());
@@ -79,13 +95,22 @@ impl QuantSpline {
         &mut self,
         decoder: &mut Decoder,
         bitstream: &mut Bitstream<R>,
+        num_pixels: usize,
     ) -> Result<()> {
         let num_points = decoder.read_varint(bitstream, 3)? as usize;
+
+        let max_num_points = usize::min(MAX_NUM_CONTROL_POINTS, num_pixels / 2);
+        if num_points > max_num_points {
+            return Err(crate::Error::Decoder(
+                jxl_coding::Error::TooManySplinePoints(num_points),
+            ));
+        }
+
         self.points_deltas.resize(num_points, (0, 0));
 
-        for cp in &mut self.points_deltas {
-            cp.0 = unpack_signed(decoder.read_varint(bitstream, 4)?);
-            cp.1 = unpack_signed(decoder.read_varint(bitstream, 4)?);
+        for delta in &mut self.points_deltas {
+            delta.0 = unpack_signed(decoder.read_varint(bitstream, 4)?);
+            delta.1 = unpack_signed(decoder.read_varint(bitstream, 4)?);
         }
         for color_dct in &mut self.xyb_dct {
             for i in color_dct {
@@ -98,14 +123,16 @@ impl QuantSpline {
         Ok(())
     }
 
+    // TODO check Maximum total_estimated_area_reached
     fn dequant(
         &self,
         start_point: (i32, i32),
         quant_adjust: i32,
         base_correlation_x: f32,
         base_correlation_b: f32,
+        // estimated_area_reached: &mut usize,
     ) -> Spline {
-        let mut manhattan_distance = 0;
+        // let mut manhattan_distance = 0;
         let mut points = Vec::with_capacity(self.points_deltas.len() + 1);
 
         let mut cur_value = start_point;
@@ -114,7 +141,7 @@ impl QuantSpline {
         for delta in &self.points_deltas {
             cur_delta.0 += delta.0;
             cur_delta.1 += delta.1;
-            manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
+            // manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
             cur_value.0 += cur_delta.0;
             cur_value.1 += cur_delta.1;
             points.push((cur_value.0 as f32, cur_value.1 as f32));
@@ -144,11 +171,11 @@ impl QuantSpline {
         }
         for i in 0..32 {
             sigma_dct[i] = self.sigma_dct[i] as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
-            let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
-            width_estimate += weight * weight;
+            // let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
+            // width_estimate += weight * weight;
         }
 
-        let estimated_area_reached = width_estimate * manhattan_distance as f32;
+        // *estimated_area_reached += (width_estimate * manhattan_distance as f32) as usize;
 
         Spline {
             points,
