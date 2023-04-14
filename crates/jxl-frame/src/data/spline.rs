@@ -1,6 +1,6 @@
-#![allow(unused_variables, unused_mut, dead_code, clippy::needless_range_loop)]
+#![allow(clippy::needless_range_loop)]
 
-use std::{fmt::Write, io::Read};
+use std::{fmt::Display, io::Read};
 
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
@@ -13,13 +13,12 @@ const MAX_NUM_CONTROL_POINTS: usize = 1 << 20;
 /// Holds quantized splines
 #[derive(Debug)]
 pub struct Splines {
-    splines: Vec<QuantSpline>,
-    start_points: Vec<(i32, i32)>,
-    quant_adjust: i32,
+    pub quant_splines: Vec<QuantSpline>,
+    pub quant_adjust: i32,
 }
 
 /// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Spline {
     pub points: Vec<(f32, f32)>,
     pub xyb_dct: [[f32; 32]; 3],
@@ -31,6 +30,7 @@ pub struct Spline {
 /// Use [`QuantSpline::dequant`] to get normal [Spline]
 #[derive(Debug, Default, Clone)]
 pub struct QuantSpline {
+    start_point: (i32, i32),
     points_deltas: Vec<(i32, i32)>,
     xyb_dct: [[i32; 32]; 3],
     sigma_dct: [i32; 32],
@@ -48,9 +48,7 @@ impl Bundle<&FrameHeader> for Splines {
 
         let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
         if num_splines > max_num_splines {
-            return Err(crate::Error::Decoder(jxl_coding::Error::TooManySplines(
-                num_splines,
-            )));
+            return Err(crate::Error::TooManySplines(num_splines));
         }
 
         let mut start_points = vec![(0i32, 0i32); num_splines];
@@ -67,28 +65,29 @@ impl Bundle<&FrameHeader> for Splines {
 
         let quant_adjust = unpack_signed(decoder.read_varint(bitstream, 0)?);
 
-        let mut splines = vec![QuantSpline::new(); num_splines];
-        for spline in &mut splines {
+        let mut splines: Vec<QuantSpline> = Vec::with_capacity(num_splines);
+        for start_point in start_points {
+            let mut spline = QuantSpline::new(start_point);
             spline.decode(&mut decoder, bitstream, num_pixels)?;
-        }
-
-        // TODO remove this example
-        for (i, spline) in splines.iter().enumerate() {
-            let a = spline.dequant(start_points[i], quant_adjust, 0.0, 0.0);
-            tracing::debug!("\n{}", a.to_string());
+            spline.start_point = start_point;
+            splines.push(spline);
         }
 
         Ok(Self {
             quant_adjust,
-            splines,
-            start_points,
+            quant_splines: splines,
         })
     }
 }
 
 impl QuantSpline {
-    fn new() -> Self {
-        Self::default()
+    fn new(start_point: (i32, i32)) -> Self {
+        Self {
+            start_point,
+            points_deltas: Vec::new(),
+            xyb_dct: [[0; 32]; 3],
+            sigma_dct: [0; 32],
+        }
     }
 
     fn decode<R: Read>(
@@ -101,9 +100,7 @@ impl QuantSpline {
 
         let max_num_points = usize::min(MAX_NUM_CONTROL_POINTS, num_pixels / 2);
         if num_points > max_num_points {
-            return Err(crate::Error::Decoder(
-                jxl_coding::Error::TooManySplinePoints(num_points),
-            ));
+            return Err(crate::Error::TooManySplinePoints(num_points));
         }
 
         self.points_deltas.resize(num_points, (0, 0));
@@ -124,24 +121,22 @@ impl QuantSpline {
     }
 
     // TODO check Maximum total_estimated_area_reached
-    fn dequant(
+    pub fn dequant(
         &self,
-        start_point: (i32, i32),
         quant_adjust: i32,
-        base_correlation_x: f32,
-        base_correlation_b: f32,
-        // estimated_area_reached: &mut usize,
+        base_correlations_xb: Option<(f32, f32)>,
+        estimated_area: &mut u64,
     ) -> Spline {
-        // let mut manhattan_distance = 0;
+        let mut manhattan_distance = 0;
         let mut points = Vec::with_capacity(self.points_deltas.len() + 1);
 
-        let mut cur_value = start_point;
+        let mut cur_value = self.start_point;
         points.push((cur_value.0 as f32, cur_value.1 as f32));
         let mut cur_delta = (0, 0);
         for delta in &self.points_deltas {
             cur_delta.0 += delta.0;
             cur_delta.1 += delta.1;
-            // manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
+            manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
             cur_value.0 += cur_delta.0;
             cur_value.1 += cur_delta.1;
             points.push((cur_value.0 as f32, cur_value.1 as f32));
@@ -165,17 +160,19 @@ impl QuantSpline {
                     self.xyb_dct[chan_idx][i] as f32 * CHANNEL_WEIGHTS[chan_idx] * inverted_qa;
             }
         }
-        for i in 0..32 {
-            xyb_dct[0][i] += base_correlation_x * xyb_dct[1][i];
-            xyb_dct[2][i] += base_correlation_b * xyb_dct[1][i];
+        if let Some((corr_x, corr_b)) = base_correlations_xb {
+            for i in 0..32 {
+                xyb_dct[0][i] += corr_x * xyb_dct[1][i];
+                xyb_dct[2][i] += corr_b * xyb_dct[1][i];
+            }
         }
         for i in 0..32 {
             sigma_dct[i] = self.sigma_dct[i] as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
-            // let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
-            // width_estimate += weight * weight;
+            let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
+            width_estimate += weight * weight;
         }
 
-        // *estimated_area_reached += (width_estimate * manhattan_distance as f32) as usize;
+        *estimated_area += (width_estimate * manhattan_distance as f32) as u64;
 
         Spline {
             points,
@@ -185,19 +182,19 @@ impl QuantSpline {
     }
 }
 
-impl ToString for Spline {
-    fn to_string(&self) -> String {
-        let mut res = String::from("Spline\n");
+impl Display for Spline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Spline").unwrap();
         for i in self.xyb_dct.iter().chain(&[self.sigma_dct]) {
             for val in i {
-                write!(res, "{} ", val).unwrap();
+                write!(f, "{} ", val).unwrap();
             }
-            writeln!(res).unwrap();
+            writeln!(f).unwrap();
         }
         for point in &self.points {
-            writeln!(res, "{} {}", point.0 as i32, point.1 as i32).unwrap();
+            writeln!(f, "{} {}", point.0 as i32, point.1 as i32).unwrap();
         }
-        writeln!(res, "EndSpline").unwrap();
-        res
+        writeln!(f, "EndSpline").unwrap();
+        Ok(())
     }
 }
