@@ -312,7 +312,22 @@ impl<'f> ContextInner<'f> {
             }
         }
 
-        if let Some(_splines) = &lf_global.splines {
+        if let Some(splines) = &lf_global.splines {
+            let mut estimated_area = 0;
+            let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
+                (
+                    x.lf_chan_corr.base_correlation_x,
+                    x.lf_chan_corr.base_correlation_b,
+                )
+            });
+            for quant_spline in &splines.quant_splines {
+                let spline = quant_spline.dequant(
+                    splines.quant_adjust,
+                    base_correlations_xb,
+                    &mut estimated_area,
+                );
+                blend::spline(self.image_header, grid, spline, estimated_area)?;
+            }
             tracing::warn!("Splines are not supported");
         }
 

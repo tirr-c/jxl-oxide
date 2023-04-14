@@ -1,4 +1,4 @@
-use jxl_frame::{Frame, header::BlendingInfo, data::{PatchRef, BlendingModeInformation}};
+use jxl_frame::{Frame, header::BlendingInfo, data::{PatchRef, BlendingModeInformation, Spline}};
 use jxl_grid::SimpleGrid;
 use jxl_image::Headers;
 
@@ -331,6 +331,31 @@ pub fn patch(
             blend_single(base_grid, &patch_ref_grid[idx], &blend_params);
         }
     }
+}
+
+#[allow(unused_variables, unreachable_code)]
+pub fn spline(
+    image_header: &Headers,
+    base_grid: &mut [SimpleGrid<f32>],
+    spline: Spline,
+    estimated_area: u64
+) -> crate::Result<()> {
+    if estimated_area > (image_header.size.height * image_header.size.width + (1 << 18)).min(1 << 22) as u64 {
+        tracing::warn!(
+            "Large estimated_area of splines, expect slower decoding: {}",
+            estimated_area
+        );
+    }
+    if estimated_area
+        > (64 * (image_header.size.height * image_header.size.width) as u64 + (1u64 << 34)).min(1u64 << 38)
+    {
+        return Err(crate::Error::Frame(
+            jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+        ));
+    }
+    println!("{}", spline);
+    todo!();
+    Ok(())
 }
 
 fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {

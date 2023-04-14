@@ -120,7 +120,6 @@ impl QuantSpline {
         Ok(())
     }
 
-    // TODO check Maximum total_estimated_area_reached
     pub fn dequant(
         &self,
         quant_adjust: i32,
