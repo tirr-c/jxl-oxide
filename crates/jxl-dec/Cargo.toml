@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
-miniz_oxide = "0.6.2"
-png = "0.17.7"
+miniz_oxide = "0.7.1"
+png = "0.17.8"
 
 [dependencies.clap]
 version = "4.0.32"
