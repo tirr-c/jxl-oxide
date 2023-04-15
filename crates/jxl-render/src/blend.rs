@@ -1,4 +1,8 @@
-use jxl_frame::{Frame, header::BlendingInfo, data::{PatchRef, BlendingModeInformation, Spline}};
+use jxl_frame::{
+    data::{continuous_idct, erf, BlendingModeInformation, PatchRef, Spline},
+    header::BlendingInfo,
+    Frame,
+};
 use jxl_grid::SimpleGrid;
 use jxl_image::Headers;
 
@@ -338,23 +342,70 @@ pub fn spline(
     image_header: &Headers,
     base_grid: &mut [SimpleGrid<f32>],
     spline: Spline,
-    estimated_area: u64
+    estimated_area: u64,
 ) -> crate::Result<()> {
-    if estimated_area > (image_header.size.height * image_header.size.width + (1 << 18)).min(1 << 22) as u64 {
+    // Maximum total_estimated_area_reached for Level 5
+    if estimated_area
+        > (image_header.size.height * image_header.size.width + (1 << 18)).min(1 << 22) as u64
+    {
         tracing::warn!(
             "Large estimated_area of splines, expect slower decoding: {}",
             estimated_area
         );
     }
-    if estimated_area
-        > (64 * (image_header.size.height * image_header.size.width) as u64 + (1u64 << 34)).min(1u64 << 38)
-    {
-        return Err(crate::Error::Frame(
-            jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
-        ));
+    // Maximum total_estimated_area_reached for Level 10
+    // if estimated_area
+    //     > (64 * (image_header.size.height * image_header.size.width) as u64 + (1u64 << 34))
+    //         .min(1u64 << 38)
+    // {
+    //     return Err(crate::Error::Frame(
+    //         jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+    //     ));
+    // }
+
+    let all_samaples = spline.get_samples();
+    let arclength = all_samaples.len() as f32 - 2.0 + all_samaples.last().unwrap().lenght;
+    for (i, arc) in all_samaples.iter().enumerate() {
+        let arclength_from_start = f32::min(1.0, (i as f32) / arclength);
+
+        let t = 31.0 * arclength_from_start;
+        let sigma = continuous_idct(&spline.sigma_dct, t);
+        let inv_sigma = 1.0 / sigma;
+        let max_distance = -2.0 * 0.1f32.ln() * sigma * sigma;
+
+        let xbegin = i32::max(0, (arc.point.x - max_distance + 0.5).floor() as i32);
+        let xend = i32::min(
+            (image_header.size.width - 1) as i32,
+            (arc.point.x + max_distance + 0.5).floor() as i32,
+        );
+        let ybegin = i32::max(0, (arc.point.y - max_distance + 0.5).floor() as i32);
+        let yend = i32::min(
+            (image_header.size.height - 1) as i32,
+            (arc.point.y + max_distance + 0.5).floor() as i32,
+        );
+
+        #[allow(clippy::needless_range_loop)]
+        for channel in 0..3 {
+            let value = continuous_idct(
+                &spline.xyb_dct[channel],
+                t,
+            );
+            let buffer = &mut base_grid[channel];
+            for y in ybegin..yend {
+                for x in xbegin..xend {
+                    let sample = buffer.get_mut(x as usize, y as usize).unwrap();
+                    let dx = arc.point.x - x as f32;
+                    let dy = arc.point.y - y as f32;
+                    let distance = f32::sqrt(dx * dx + dy * dy);
+                    const SQRT_0125: f32 = 0.353_553_38;
+                    let factor = erf((0.5 * distance + SQRT_0125) * inv_sigma)
+                        - erf((0.5 * distance - SQRT_0125) * inv_sigma);
+                    *sample += 0.25 * value * sigma * factor * factor;
+                }
+            }
+        }
     }
-    println!("{}", spline);
-    todo!();
+    tracing::trace!("{}", spline);
     Ok(())
 }
 

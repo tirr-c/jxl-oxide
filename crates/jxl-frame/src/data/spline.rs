@@ -21,10 +21,11 @@ pub struct Splines {
     pub quant_adjust: i32,
 }
 
+/// 2D Point in f32 coordinates
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Point {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 /// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
@@ -33,6 +34,11 @@ pub struct Spline {
     pub points: Vec<Point>,
     pub xyb_dct: [[f32; 32]; 3],
     pub sigma_dct: [f32; 32],
+}
+
+pub struct SplineArc {
+    pub point: Point,
+    pub lenght: f32,
 }
 
 /// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
@@ -163,18 +169,21 @@ impl QuantSpline {
         };
 
         const CHANNEL_WEIGHTS: [f32; 4] = [0.0042, 0.075, 0.07, 0.3333];
-        for chan_idx in 0..2 {
+        for chan_idx in 0..3 {
             for i in 0..32 {
                 xyb_dct[chan_idx][i] =
                     self.xyb_dct[chan_idx][i] as f32 * CHANNEL_WEIGHTS[chan_idx] * inverted_qa;
             }
         }
-        if let Some((corr_x, corr_b)) = base_correlations_xb {
-            for i in 0..32 {
-                xyb_dct[0][i] += corr_x * xyb_dct[1][i];
-                xyb_dct[2][i] += corr_b * xyb_dct[1][i];
-            }
+        let (corr_x, corr_b) = match base_correlations_xb {
+            Some(val) => (val.0, val.1),
+            None => (0.0, 1.0),
+        };
+        for i in 0..32 {
+            xyb_dct[0][i] += corr_x * xyb_dct[1][i];
+            xyb_dct[2][i] += corr_b * xyb_dct[1][i];
         }
+
         for i in 0..32 {
             sigma_dct[i] = self.sigma_dct[i] as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
             let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
@@ -192,31 +201,76 @@ impl QuantSpline {
 }
 
 impl Spline {
-    pub fn get_upsampled_points(&self) -> Vec<Point> {
+    pub fn get_samples(&self) -> Vec<SplineArc> {
+        let upsampled_points = self.get_upsampled_points();
+
+        let mut current = upsampled_points[0];
+        let mut next_idx = 0;
+        let mut all_samples = vec![SplineArc {
+            point: current,
+            lenght: 1f32,
+        }];
+
+        while next_idx < upsampled_points.len() {
+            let mut prev = current;
+            let mut arclength = 0f32;
+            loop {
+                if next_idx == upsampled_points.len() {
+                    all_samples.push(SplineArc {
+                        point: prev,
+                        lenght: arclength,
+                    });
+                    break;
+                }
+                let arclength_to_next = ((upsampled_points[next_idx].x - prev.x).powi(2)
+                    + (upsampled_points[next_idx].y - prev.y).powi(2))
+                .sqrt();
+
+                if arclength + arclength_to_next >= 1.0 {
+                    current = prev
+                        + (upsampled_points[next_idx] - prev)
+                            * ((1.0 - arclength) / arclength_to_next);
+                    all_samples.push(SplineArc {
+                        point: current,
+                        lenght: 1.0,
+                    });
+                    break;
+                }
+                arclength += arclength_to_next;
+                prev = upsampled_points[next_idx];
+                next_idx += 1;
+            }
+        }
+        all_samples
+    }
+
+    fn get_upsampled_points(&self) -> Vec<Point> {
         let s = &self.points;
         if s.len() == 1 {
             return vec![s[0]];
         }
 
-        let mut upsampled = Vec::with_capacity(16 * (s.len() - 3) + 1);
         let mut extended = Vec::with_capacity(s.len() + 2);
 
         extended.push(s[1].mirror(&s[0]));
         extended.append(&mut s.clone());
         extended.push(s[s.len() - 2].mirror(&s[s.len() - 1]));
 
+        let mut upsampled = Vec::with_capacity(16 * (extended.len() - 3) + 1);
+
         for i in 0..extended.len() - 3 {
             let mut p: [Point; 4] = Default::default();
             let mut t: [f32; 4] = Default::default();
             let mut a: [Point; 4] = Default::default();
             let mut b: [Point; 4] = Default::default();
+
             p.clone_from_slice(&extended[i..i + 4]);
             upsampled.push(p[1]);
             t[0] = 0f32;
 
             for k in 1..4 {
                 t[k] = t[k - 1]
-                    + ((p[k].x - p[k - 1].x).powi(2) + (p[k].y - p[k - 1].y).powi(2)).powf(0.25)
+                    + ((p[k].x - p[k - 1].x).powi(2) + (p[k].y - p[k - 1].y).powi(2)).powf(0.25);
             }
 
             for step in 1..16 {
@@ -227,7 +281,7 @@ impl Spline {
                 for k in 0..2 {
                     b[k] = a[k] + (a[k + 1] - a[k]) * ((knot - t[k]) / (t[k + 2] - t[k]));
                 }
-                upsampled.push(b[0] + (b[1] - b[0] * ((knot - t[1]) / (t[2] - t[1]))));
+                upsampled.push(b[0] + (b[1] - b[0]) * ((knot - t[1]) / (t[2] - t[1])));
             }
         }
         upsampled.push(s[s.len() - 1]);
@@ -285,5 +339,34 @@ impl Mul<f32> for Point {
             x: self.x * rhs,
             y: self.y * rhs,
         }
+    }
+}
+
+pub fn continuous_idct(dct: &[f32; 32], t: f32) -> f32 {
+    let mut res = dct[0];
+    for i in 1..32 {
+        res += dct[i]
+            * std::f32::consts::SQRT_2
+            * f32::cos((i as f32) * (std::f32::consts::PI / 32.0) * (t + 0.5));
+    }
+    res
+}
+
+#[allow(clippy::excessive_precision)]
+pub fn erf(x: f32) -> f32 {
+    let ax = x.abs();
+
+    let denom1 = ax * 7.77394369e-02 + 2.05260015e-04;
+    let denom2 = denom1 * ax + 2.32120216e-01;
+    let denom3 = denom2 * ax + 2.77820801e-01;
+    let denom4 = denom3 * ax + 1.0;
+    let denom5 = denom4 * denom4;
+    let inv_denom5 = 1.0 / denom5;
+    let result = -inv_denom5 * inv_denom5 + 1.0;
+
+    if x < 0.0 {
+        -result
+    } else {
+        result
     }
 }

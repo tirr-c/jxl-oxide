@@ -15,4 +15,4 @@ mod patch;
 mod spline;
 pub use noise::NoiseParameters;
 pub use patch::*;
-pub use spline::{Splines, Spline};
+pub use spline::{Splines, Spline, continuous_idct, erf};

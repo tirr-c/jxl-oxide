@@ -328,7 +328,6 @@ impl<'f> ContextInner<'f> {
                 );
                 blend::spline(self.image_header, grid, spline, estimated_area)?;
             }
-            tracing::warn!("Splines are not supported");
         }
 
         if let Some(_noise) = &lf_global.noise {
