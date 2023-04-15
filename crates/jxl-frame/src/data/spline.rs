@@ -1,6 +1,10 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::{fmt::Display, io::Read};
+use std::{
+    fmt::Display,
+    io::Read,
+    ops::{Add, Mul, Sub},
+};
 
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
@@ -17,10 +21,16 @@ pub struct Splines {
     pub quant_adjust: i32,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Point {
+    x: f32,
+    y: f32,
+}
+
 /// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
 #[derive(Debug)]
 pub struct Spline {
-    pub points: Vec<(f32, f32)>,
+    pub points: Vec<Point>,
     pub xyb_dct: [[f32; 32]; 3],
     pub sigma_dct: [f32; 32],
 }
@@ -130,7 +140,7 @@ impl QuantSpline {
         let mut points = Vec::with_capacity(self.points_deltas.len() + 1);
 
         let mut cur_value = self.start_point;
-        points.push((cur_value.0 as f32, cur_value.1 as f32));
+        points.push(Point::new(cur_value.0 as f32, cur_value.1 as f32));
         let mut cur_delta = (0, 0);
         for delta in &self.points_deltas {
             cur_delta.0 += delta.0;
@@ -138,7 +148,7 @@ impl QuantSpline {
             manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
             cur_value.0 += cur_delta.0;
             cur_value.1 += cur_delta.1;
-            points.push((cur_value.0 as f32, cur_value.1 as f32));
+            points.push(Point::new(cur_value.0 as f32, cur_value.1 as f32));
         }
 
         let mut xyb_dct = [[0f32; 32]; 3];
@@ -181,6 +191,50 @@ impl QuantSpline {
     }
 }
 
+impl Spline {
+    pub fn get_upsampled_points(&self) -> Vec<Point> {
+        let s = &self.points;
+        if s.len() == 1 {
+            return vec![s[0]];
+        }
+
+        let mut upsampled = Vec::with_capacity(16 * (s.len() - 3) + 1);
+        let mut extended = Vec::with_capacity(s.len() + 2);
+
+        extended.push(s[1].mirror(&s[0]));
+        extended.append(&mut s.clone());
+        extended.push(s[s.len() - 2].mirror(&s[s.len() - 1]));
+
+        for i in 0..extended.len() - 3 {
+            let mut p: [Point; 4] = Default::default();
+            let mut t: [f32; 4] = Default::default();
+            let mut a: [Point; 4] = Default::default();
+            let mut b: [Point; 4] = Default::default();
+            p.clone_from_slice(&extended[i..i + 4]);
+            upsampled.push(p[1]);
+            t[0] = 0f32;
+
+            for k in 1..4 {
+                t[k] = t[k - 1]
+                    + ((p[k].x - p[k - 1].x).powi(2) + (p[k].y - p[k - 1].y).powi(2)).powf(0.25)
+            }
+
+            for step in 1..16 {
+                let knot = t[1] + (step as f32 / 16.0) * (t[2] - t[1]);
+                for k in 0..3 {
+                    a[k] = p[k] + (p[k + 1] - p[k]) * ((knot - t[k]) / (t[k + 1] - t[k]));
+                }
+                for k in 0..2 {
+                    b[k] = a[k] + (a[k + 1] - a[k]) * ((knot - t[k]) / (t[k + 2] - t[k]));
+                }
+                upsampled.push(b[0] + (b[1] - b[0] * ((knot - t[1]) / (t[2] - t[1]))));
+            }
+        }
+        upsampled.push(s[s.len() - 1]);
+        upsampled
+    }
+}
+
 impl Display for Spline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Spline").unwrap();
@@ -191,9 +245,45 @@ impl Display for Spline {
             writeln!(f).unwrap();
         }
         for point in &self.points {
-            writeln!(f, "{} {}", point.0 as i32, point.1 as i32).unwrap();
+            writeln!(f, "{} {}", point.x as i32, point.y as i32).unwrap();
         }
         writeln!(f, "EndSpline").unwrap();
         Ok(())
+    }
+}
+
+impl Point {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+    pub fn mirror(&self, center: &Self) -> Self {
+        Self {
+            x: center.x + center.x - self.x,
+            y: center.y + center.y - self.y,
+        }
+    }
+}
+
+impl Add for Point {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.x + rhs.x, self.y + rhs.y)
+    }
+}
+
+impl Sub for Point {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.x - rhs.x, self.y - rhs.y)
+    }
+}
+
+impl Mul<f32> for Point {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        Self {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
     }
 }
