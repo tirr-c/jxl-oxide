@@ -326,7 +326,25 @@ impl<'f> ContextInner<'f> {
                     base_correlations_xb,
                     &mut estimated_area,
                 );
-                blend::spline(self.image_header, grid, spline, estimated_area)?;
+                // Maximum total_estimated_area_reached for Level 5
+                if estimated_area
+                    > (self.image_header.size.height * self.image_header.size.width + (1 << 18)).min(1 << 22) as u64
+                {
+                    tracing::warn!(
+                        "Large estimated_area of splines, expect slower decoding: {}",
+                        estimated_area
+                    );
+                }
+                // Maximum total_estimated_area_reached for Level 10
+                // if estimated_area
+                //     > (64 * (self.image_header.size.height * self.image_header.size.width) as u64 + (1u64 << 34))
+                //         .min(1u64 << 38)
+                // {
+                //     return Err(crate::Error::Frame(
+                //         jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+                //     ));
+                // }
+                blend::spline(self.image_header, grid, spline)?;
             }
         }
 

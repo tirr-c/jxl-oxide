@@ -1,6 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::{
+    f32::consts::SQRT_2,
     fmt::Display,
     io::Read,
     ops::{Add, Mul, Sub},
@@ -38,7 +39,7 @@ pub struct Spline {
 
 pub struct SplineArc {
     pub point: Point,
-    pub lenght: f32,
+    pub length: f32,
 }
 
 /// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
@@ -85,7 +86,6 @@ impl Bundle<&FrameHeader> for Splines {
         for start_point in start_points {
             let mut spline = QuantSpline::new(start_point);
             spline.decode(&mut decoder, bitstream, num_pixels)?;
-            spline.start_point = start_point;
             splines.push(spline);
         }
 
@@ -175,10 +175,7 @@ impl QuantSpline {
                     self.xyb_dct[chan_idx][i] as f32 * CHANNEL_WEIGHTS[chan_idx] * inverted_qa;
             }
         }
-        let (corr_x, corr_b) = match base_correlations_xb {
-            Some(val) => (val.0, val.1),
-            None => (0.0, 1.0),
-        };
+        let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
         for i in 0..32 {
             xyb_dct[0][i] += corr_x * xyb_dct[1][i];
             xyb_dct[2][i] += corr_b * xyb_dct[1][i];
@@ -208,36 +205,34 @@ impl Spline {
         let mut next_idx = 0;
         let mut all_samples = vec![SplineArc {
             point: current,
-            lenght: 1f32,
+            length: 1f32,
         }];
 
         while next_idx < upsampled_points.len() {
             let mut prev = current;
             let mut arclength = 0f32;
             loop {
-                if next_idx == upsampled_points.len() {
+                if next_idx >= upsampled_points.len() {
                     all_samples.push(SplineArc {
                         point: prev,
-                        lenght: arclength,
+                        length: arclength,
                     });
                     break;
                 }
-                let arclength_to_next = ((upsampled_points[next_idx].x - prev.x).powi(2)
-                    + (upsampled_points[next_idx].y - prev.y).powi(2))
-                .sqrt();
-
+                let next = upsampled_points[next_idx];
+                let arclength_to_next = (next - prev).norm();
                 if arclength + arclength_to_next >= 1.0 {
                     current = prev
-                        + (upsampled_points[next_idx] - prev)
-                            * ((1.0 - arclength) / arclength_to_next);
+                        + ((upsampled_points[next_idx] - prev)
+                            * ((1.0 - arclength) / arclength_to_next));
                     all_samples.push(SplineArc {
                         point: current,
-                        lenght: 1.0,
+                        length: 1.0,
                     });
                     break;
                 }
                 arclength += arclength_to_next;
-                prev = upsampled_points[next_idx];
+                prev = next;
                 next_idx += 1;
             }
         }
@@ -262,26 +257,25 @@ impl Spline {
             let mut p: [Point; 4] = Default::default();
             let mut t: [f32; 4] = Default::default();
             let mut a: [Point; 4] = Default::default();
-            let mut b: [Point; 4] = Default::default();
+            let mut b: [Point; 3] = Default::default();
 
             p.clone_from_slice(&extended[i..i + 4]);
             upsampled.push(p[1]);
             t[0] = 0f32;
 
             for k in 1..4 {
-                t[k] = t[k - 1]
-                    + ((p[k].x - p[k - 1].x).powi(2) + (p[k].y - p[k - 1].y).powi(2)).powf(0.25);
+                t[k] = t[k - 1] + (p[k] - p[k - 1]).norm_squared().powf(0.25);
             }
 
             for step in 1..16 {
                 let knot = t[1] + (step as f32 / 16.0) * (t[2] - t[1]);
                 for k in 0..3 {
-                    a[k] = p[k] + (p[k + 1] - p[k]) * ((knot - t[k]) / (t[k + 1] - t[k]));
+                    a[k] = p[k] + ((p[k + 1] - p[k]) * ((knot - t[k]) / (t[k + 1] - t[k])));
                 }
                 for k in 0..2 {
-                    b[k] = a[k] + (a[k + 1] - a[k]) * ((knot - t[k]) / (t[k + 2] - t[k]));
+                    b[k] = a[k] + ((a[k + 1] - a[k]) * ((knot - t[k]) / (t[k + 2] - t[k])));
                 }
-                upsampled.push(b[0] + (b[1] - b[0]) * ((knot - t[1]) / (t[2] - t[1])));
+                upsampled.push(b[0] + ((b[1] - b[0]) * ((knot - t[1]) / (t[2] - t[1]))));
             }
         }
         upsampled.push(s[s.len() - 1]);
@@ -289,20 +283,20 @@ impl Spline {
     }
 }
 
+// Done in jxl_from_tree syntax
 impl Display for Spline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Spline").unwrap();
+        writeln!(f, "Spline")?;
         for i in self.xyb_dct.iter().chain(&[self.sigma_dct]) {
             for val in i {
-                write!(f, "{} ", val).unwrap();
+                write!(f, "{} ", val)?;
             }
-            writeln!(f).unwrap();
+            writeln!(f)?;
         }
         for point in &self.points {
-            writeln!(f, "{} {}", point.x as i32, point.y as i32).unwrap();
+            writeln!(f, "{} {}", point.x as i32, point.y as i32)?;
         }
-        writeln!(f, "EndSpline").unwrap();
-        Ok(())
+        writeln!(f, "EndSpline")
     }
 }
 
@@ -315,6 +309,14 @@ impl Point {
             x: center.x + center.x - self.x,
             y: center.y + center.y - self.y,
         }
+    }
+
+    pub fn norm_squared(&self) -> f32 {
+        self.x * self.x + self.y * self.y
+    }
+
+    pub fn norm(&self) -> f32 {
+        f32::sqrt(self.norm_squared())
     }
 }
 
@@ -345,17 +347,18 @@ impl Mul<f32> for Point {
 pub fn continuous_idct(dct: &[f32; 32], t: f32) -> f32 {
     let mut res = dct[0];
     for i in 1..32 {
-        res += dct[i]
-            * std::f32::consts::SQRT_2
-            * f32::cos((i as f32) * (std::f32::consts::PI / 32.0) * (t + 0.5));
+        res += SQRT_2 * dct[i] * f32::cos((i as f32) * (std::f32::consts::PI / 32.0) * (t + 0.5));
     }
     res
 }
 
+/// Computes the error function
+/// L1 error 7e-4.
 #[allow(clippy::excessive_precision)]
 pub fn erf(x: f32) -> f32 {
     let ax = x.abs();
 
+    // Compute 1 - 1 / ((((x * a + b) * x + c) * x + d) * x + 1)**4
     let denom1 = ax * 7.77394369e-02 + 2.05260015e-04;
     let denom2 = denom1 * ax + 2.32120216e-01;
     let denom3 = denom2 * ax + 2.77820801e-01;
@@ -364,6 +367,7 @@ pub fn erf(x: f32) -> f32 {
     let inv_denom5 = 1.0 / denom5;
     let result = -inv_denom5 * inv_denom5 + 1.0;
 
+    // Change sign if needed.
     if x < 0.0 {
         -result
     } else {
