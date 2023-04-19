@@ -256,9 +256,11 @@ impl<S> Grid<S> {
         let groups_per_row = self.groups_per_row();
         match *self {
             Self::Simple(Some(ref mut g)) => {
-                for y in 0..g.height {
-                    for x in 0..g.width {
-                        f(x, y, &mut g.buf[y * g.width + x]);
+                let width = g.width;
+                let height = g.height;
+                for y in 0..height {
+                    for x in 0..width {
+                        f(x, y, &mut g.buf_mut()[y * width + x]);
                     }
                 }
             },
@@ -269,9 +271,11 @@ impl<S> Grid<S> {
                     let group_col = group_idx % groups_per_row;
                     let base_x = group_col * gw;
                     let base_y = group_row * gh;
-                    for y in 0..g.height {
-                        for x in 0..g.width {
-                            f(base_x + x, base_y + y, &mut g.buf[y * g.width + x]);
+                    let width = g.width;
+                    let height = g.height;
+                    for y in 0..height {
+                        for x in 0..width {
+                            f(base_x + x, base_y + y, &mut g.buf_mut()[y * width + x]);
                         }
                     }
                 }
@@ -377,7 +381,7 @@ impl<S: Default + Clone> Grid<S> {
                     } else {
                         let target_group = target_group
                             .get_or_insert_with(|| SimpleGrid::new(gw, gh));
-                        for (idx, sample) in subgrid_group.buf.into_iter().enumerate() {
+                        for (idx, sample) in subgrid_group.buf.into_iter().skip(subgrid_group.offset).enumerate() {
                             let y = idx / subgrid_group.width;
                             let x = idx % subgrid_group.width;
                             *target_group.get_mut(x, y).unwrap() = sample;
