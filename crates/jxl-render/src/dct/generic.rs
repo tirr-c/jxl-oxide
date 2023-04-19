@@ -1,84 +1,148 @@
+use jxl_grid::SimpleGrid;
+
+use crate::cut_grid::CutGrid;
+
 use super::consts;
 
-pub fn dct_2d(io: &mut [f32], scratch: &mut [f32], width: usize, height: usize) {
-    let scratch = &mut scratch[..io.len()];
-    let mut buf = vec![0.0f32; width.max(height)];
+pub fn dct_2d(io: &mut SimpleGrid<f32>) {
+    let width = io.width();
+    let height = io.height();
+    let io_buf = io.buf_mut();
+    dct_2d_generic(io_buf, width, height, false)
+}
 
-    // Performs row DCT instead of column DCT, it should be okay
-    // r x c => c x r
+pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
+    let mut buf = vec![0f32; width.max(height)];
+
     let row = &mut buf[..width];
-    for (y, input_row) in io.chunks_exact_mut(width).enumerate() {
-        dct(input_row, row, false);
-        for (tmp_row, v) in scratch.chunks_exact_mut(height).zip(&*row) {
-            tmp_row[y] = *v;
+    for y in 0..height {
+        dct(&mut io_buf[y * width..][..width], row, inverse);
+    }
+
+    let block_size = width.min(height);
+    for by in (0..height).step_by(block_size) {
+        for bx in (0..width).step_by(block_size) {
+            for dy in 0..block_size {
+                for dx in (dy + 1)..block_size {
+                    io_buf.swap((by + dy) * width + (bx + dx), (by + dx) * width + (bx + dy));
+                }
+            }
         }
     }
 
-    // c x r => if c > r then r x c else c x r
-    if width <= height {
-        for (input_row, output_row) in scratch.chunks_exact_mut(height).zip(io.chunks_exact_mut(height)) {
-            dct(input_row, output_row, false);
+    let scratch = &mut buf[..height];
+    if block_size == height {
+        for row in io_buf.chunks_exact_mut(height) {
+            dct(row, scratch, inverse);
         }
     } else {
-        let col = &mut buf[..height];
-        for (x, input_col) in scratch.chunks_exact_mut(height).enumerate() {
-            dct(input_col, col, false);
-            for (output_row, v) in io.chunks_exact_mut(width).zip(&*col) {
-                output_row[x] = *v;
+        let mut row = vec![0f32; height];
+        for y in 0..width {
+            for (idx, chunk) in row.chunks_exact_mut(width).enumerate() {
+                let y = y + idx * block_size;
+                chunk.copy_from_slice(&io_buf[y * width..][..width]);
+            }
+            dct(&mut row, scratch, inverse);
+            for (idx, chunk) in row.chunks_exact(width).enumerate() {
+                let y = y + idx * block_size;
+                io_buf[y * width..][..width].copy_from_slice(chunk);
+            }
+        }
+    }
+
+    if width != height {
+        for by in (0..height).step_by(block_size) {
+            for bx in (0..width).step_by(block_size) {
+                for dy in 0..block_size {
+                    for dx in (dy + 1)..block_size {
+                        io_buf.swap((by + dy) * width + (bx + dx), (by + dx) * width + (bx + dy));
+                    }
+                }
             }
         }
     }
 }
 
-pub fn idct_2d(coeffs_output: &mut [f32], scratch: &mut [f32], target_width: usize, target_height: usize) {
-    let scratch = &mut scratch[..coeffs_output.len()];
-    let width = target_width.max(target_height);
-    let height = target_width.min(target_height);
-    let mut buf = vec![0.0f32; width];
+pub fn idct_2d(io: &mut CutGrid<'_>) {
+    let width = io.width();
+    let height = io.height();
+    let mut buf = vec![0f32; width.max(height)];
 
-    // Performs row DCT instead of column DCT, it should be okay
-    // r x c => c x r
     let row = &mut buf[..width];
-    for (y, input_row) in coeffs_output.chunks_exact_mut(width).enumerate() {
-        dct(input_row, row, true);
-        for (tmp_row, v) in scratch.chunks_exact_mut(height).zip(&*row) {
-            tmp_row[y] = *v;
+    for y in 0..height {
+        dct(io.get_row_mut(y), row, true);
+    }
+
+    let block_size = width.min(height);
+    for by in (0..height).step_by(block_size) {
+        for bx in (0..width).step_by(block_size) {
+            for dy in 0..block_size {
+                for dx in (dy + 1)..block_size {
+                    let t = io.get(bx + dx, by + dy);
+                    *io.get_mut(bx + dx, by + dy) = io.get(bx + dy, by + dx);
+                    *io.get_mut(bx + dy, by + dx) = t;
+                }
+            }
         }
     }
 
-    // c x r => if c > r then r x c else c x r
-    if target_height >= target_width {
-        for (input_row, output_row) in scratch.chunks_exact_mut(height).zip(coeffs_output.chunks_exact_mut(height)) {
-            dct(input_row, output_row, true);
+    let scratch = &mut buf[..height];
+    if block_size == height {
+        for y in 0..height {
+            let grouped_row = io.get_row_mut(y);
+            for row in grouped_row.chunks_exact_mut(height) {
+                dct(row, scratch, true);
+            }
         }
     } else {
-        let col = &mut buf[..height];
-        for (x, input_col) in scratch.chunks_exact_mut(height).enumerate() {
-            dct(input_col, col, true);
-            for (output_row, v) in coeffs_output.chunks_exact_mut(width).zip(&*col) {
-                output_row[x] = *v;
+        let mut row = vec![0f32; height];
+        for y in 0..width {
+            for (idx, chunk) in row.chunks_exact_mut(width).enumerate() {
+                let y = y + idx * block_size;
+                chunk.copy_from_slice(io.get_row(y));
+            }
+            dct(&mut row, scratch, true);
+            for (idx, chunk) in row.chunks_exact(width).enumerate() {
+                let y = y + idx * block_size;
+                io.get_row_mut(y).copy_from_slice(chunk);
+            }
+        }
+    }
+
+    if width != height {
+        for by in (0..height).step_by(block_size) {
+            for bx in (0..width).step_by(block_size) {
+                for dy in 0..block_size {
+                    for dx in (dy + 1)..block_size {
+                        let t = io.get(bx + dx, by + dy);
+                        *io.get_mut(bx + dx, by + dy) = io.get(bx + dy, by + dx);
+                        *io.get_mut(bx + dy, by + dx) = t;
+                    }
+                }
             }
         }
     }
 }
 
-fn dct(input_scratch: &mut [f32], output: &mut [f32], inverse: bool) {
-    let n = input_scratch.len();
-    assert!(output.len() == n);
+fn dct(input_output: &mut [f32], scratch: &mut [f32], inverse: bool) {
+    let n = input_output.len();
+    assert!(scratch.len() == n);
 
     if n == 0 {
         return;
     }
     if n == 1 {
-        output[0] = input_scratch[0];
         return;
     }
     if n == 2 {
-        output[0] = input_scratch[0] + input_scratch[1];
-        output[1] = input_scratch[0] - input_scratch[1];
-        if !inverse {
-            output[0] /= 2.0;
-            output[1] /= 2.0;
+        let tmp0 = input_output[0] + input_output[1];
+        let tmp1 = input_output[0] - input_output[1];
+        if inverse {
+            input_output[0] = tmp0;
+            input_output[1] = tmp1;
+        } else {
+            input_output[0] = tmp0 / 2.0;
+            input_output[1] = tmp1 / 2.0;
         }
         return;
     }
@@ -87,19 +151,19 @@ fn dct(input_scratch: &mut [f32], output: &mut [f32], inverse: bool) {
         let sec0 = 0.5411961;
         let sec1 = 1.306563;
 
-        let input = input_scratch;
+        let input = input_output;
         if !inverse {
             let sum03 = input[0] + input[3];
             let sum12 = input[1] + input[2];
-            output[0] = (sum03 + sum12) / 4.0;
-            output[2] = (sum03 - sum12) / 4.0;
-
             let tmp0 = (input[0] - input[3]) * sec0;
             let tmp1 = (input[1] - input[2]) * sec1;
             let out0 = (tmp0 + tmp1) / 4.0;
             let out1 = (tmp0 - tmp1) / 4.0;
-            output[1] = out0 * std::f32::consts::SQRT_2 + out1;
-            output[3] = out1;
+
+            input[0] = (sum03 + sum12) / 4.0;
+            input[1] = out0 * std::f32::consts::SQRT_2 + out1;
+            input[2] = (sum03 - sum12) / 4.0;
+            input[3] = out1;
         } else {
             let tmp0 = input[1] * std::f32::consts::SQRT_2;
             let tmp1 = input[1] + input[3];
@@ -108,56 +172,56 @@ fn dct(input_scratch: &mut [f32], output: &mut [f32], inverse: bool) {
             let sum02 = input[0] + input[2];
             let sub02 = input[0] - input[2];
 
-            output[0] = sum02 + out0;
-            output[1] = sub02 + out1;
-            output[2] = sub02 - out1;
-            output[3] = sum02 - out0;
+            input[0] = sum02 + out0;
+            input[1] = sub02 + out1;
+            input[2] = sub02 - out1;
+            input[3] = sum02 - out0;
         }
         return;
     }
     assert!(n.is_power_of_two());
 
     if !inverse {
-        let (input0, input1) = output.split_at_mut(n / 2);
+        let (input0, input1) = scratch.split_at_mut(n / 2);
         for idx in 0..(n / 2) {
-            input0[idx] = (input_scratch[idx] + input_scratch[n - idx - 1]) / 2.0;
-            input1[idx] = (input_scratch[idx] - input_scratch[n - idx - 1]) / 2.0;
+            input0[idx] = (input_output[idx] + input_output[n - idx - 1]) / 2.0;
+            input1[idx] = (input_output[idx] - input_output[n - idx - 1]) / 2.0;
         }
-        let (output0, output1) = input_scratch.split_at_mut(n / 2);
+        let (output0, output1) = input_output.split_at_mut(n / 2);
         for (v, &sec) in input1.iter_mut().zip(consts::sec_half(n)) {
             *v *= sec;
         }
         dct(input0, output0, false);
         dct(input1, output1, false);
-        output1[0] *= std::f32::consts::SQRT_2;
+        input1[0] *= std::f32::consts::SQRT_2;
         for idx in 0..(n / 2 - 1) {
-            output1[idx] += output1[idx + 1];
+            input1[idx] += input1[idx + 1];
         }
-        for (idx, v) in output0.iter().enumerate() {
-            output[idx * 2] = *v;
+        for (idx, v) in input0.iter().enumerate() {
+            input_output[idx * 2] = *v;
         }
-        for (idx, v) in output1.iter().enumerate() {
-            output[idx * 2 + 1] = *v;
+        for (idx, v) in input1.iter().enumerate() {
+            input_output[idx * 2 + 1] = *v;
         }
     } else {
-        let (input0, input1) = output.split_at_mut(n / 2);
+        let (input0, input1) = scratch.split_at_mut(n / 2);
         for idx in 0..(n / 2) {
-            input0[idx] = input_scratch[idx * 2];
-            input1[idx] = input_scratch[idx * 2 + 1];
+            input0[idx] = input_output[idx * 2];
+            input1[idx] = input_output[idx * 2 + 1];
         }
         for idx in 1..(n / 2) {
             input1[n / 2 - idx] += input1[n / 2 - idx - 1];
         }
         input1[0] *= std::f32::consts::SQRT_2;
-        let (output0, output1) = input_scratch.split_at_mut(n / 2);
+        let (output0, output1) = input_output.split_at_mut(n / 2);
         dct(input0, output0, true);
         dct(input1, output1, true);
-        for (v, &sec) in output1.iter_mut().zip(consts::sec_half(n)) {
+        for (v, &sec) in input1.iter_mut().zip(consts::sec_half(n)) {
             *v *= sec;
         }
         for idx in 0..(n / 2) {
-            input0[idx] = input_scratch[idx] + input_scratch[idx + n / 2];
-            input1[n / 2 - idx - 1] = input_scratch[idx] - input_scratch[idx + n / 2];
+            output0[idx] = scratch[idx] + scratch[idx + n / 2];
+            output1[n / 2 - idx - 1] = scratch[idx] - scratch[idx + n / 2];
         }
     }
 }
@@ -167,12 +231,12 @@ mod tests {
     #[test]
     fn forward_dct_2() {
         let original = [-1.0, 3.0];
-        let mut input = original;
-        let mut output = [0.0f32; 2];
-        super::dct(&mut input, &mut output, false);
+        let mut io = original;
+        let mut scratch = [0.0f32; 2];
+        super::dct(&mut io, &mut scratch, false);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = 0.0f64;
             for (n, input) in original.iter().enumerate() {
                 let cos = ((k * (2 * n + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
@@ -192,12 +256,12 @@ mod tests {
     #[test]
     fn forward_dct_4() {
         let original = [-1.0, 2.0, 3.0, -4.0];
-        let mut input = original;
-        let mut output = [0.0f32; 4];
-        super::dct(&mut input, &mut output, false);
+        let mut io = original;
+        let mut scratch = [0.0f32; 4];
+        super::dct(&mut io, &mut scratch, false);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = 0.0f64;
             for (n, input) in original.iter().enumerate() {
                 let cos = ((k * (2 * n + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
@@ -217,12 +281,12 @@ mod tests {
     #[test]
     fn forward_dct_8() {
         let original = [1.0, 0.3, 1.0, 2.0, -2.0, -0.1, 1.0, 0.1];
-        let mut input = original;
-        let mut output = [0.0f32; 8];
-        super::dct(&mut input, &mut output, false);
+        let mut io = original;
+        let mut scratch = [0.0f32; 8];
+        super::dct(&mut io, &mut scratch, false);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = 0.0f64;
             for (n, input) in original.iter().enumerate() {
                 let cos = ((k * (2 * n + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
@@ -242,12 +306,12 @@ mod tests {
     #[test]
     fn backward_dct_2() {
         let original = [3.0, 0.2];
-        let mut input = original;
-        let mut output = [0.0f32; 2];
-        super::dct(&mut input, &mut output, true);
+        let mut io = original;
+        let mut scratch = [0.0f32; 2];
+        super::dct(&mut io, &mut scratch, true);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = original[0] as f64;
             for (n, input) in original.iter().enumerate().skip(1) {
                 let cos = ((n * (2 * k + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
@@ -263,12 +327,12 @@ mod tests {
     #[test]
     fn backward_dct_4() {
         let original = [3.0, 0.2, 0.3, -1.0];
-        let mut input = original;
-        let mut output = [0.0f32; 4];
-        super::dct(&mut input, &mut output, true);
+        let mut io = original;
+        let mut scratch = [0.0f32; 4];
+        super::dct(&mut io, &mut scratch, true);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = original[0] as f64;
             for (n, input) in original.iter().enumerate().skip(1) {
                 let cos = ((n * (2 * k + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();
@@ -284,12 +348,12 @@ mod tests {
     #[test]
     fn backward_dct_8() {
         let original = [3.0, 0.0, 0.0, -1.0, 0.0, 0.3, 0.2, 0.0];
-        let mut input = original;
-        let mut output = [0.0f32; 8];
-        super::dct(&mut input, &mut output, true);
+        let mut io = original;
+        let mut scratch = [0.0f32; 8];
+        super::dct(&mut io, &mut scratch, true);
 
         let s = original.len();
-        for (k, output) in output.iter().enumerate() {
+        for (k, output) in io.iter().enumerate() {
             let mut exp_value = original[0] as f64;
             for (n, input) in original.iter().enumerate().skip(1) {
                 let cos = ((n * (2 * k + 1)) as f64 / s as f64 * std::f64::consts::FRAC_PI_2).cos();

@@ -40,18 +40,18 @@ pub fn ycbcr_upsample(grids: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3
             let height = if v_upsampled { height } else { (height + 1) / 2 };
 
             for y in 0..height {
-                let y = if v_upsampled { y } else { y * 2 };
                 let idx_base = y * orig_width;
-                let mut prev_sample = buf[idx_base];
-                for x in 0..width {
-                    let curr_sample = buf[idx_base + x * 2];
-                    let right_x = if x == width - 1 { x } else { x + 1 };
+                let mut prev_sample = buf[idx_base + width - 1];
+                for x in (0..width).rev() {
+                    let curr_sample = buf[idx_base + x];
+                    let left_x = x.saturating_sub(1);
 
                     let (me, next) = interpolate(
                         prev_sample,
                         curr_sample,
-                        buf[idx_base + right_x * 2],
+                        buf[idx_base + left_x],
                     );
+
                     buf[idx_base + x * 2] = me;
                     if x * 2 + 1 < orig_width {
                         buf[idx_base + x * 2 + 1] = next;
@@ -67,10 +67,10 @@ pub fn ycbcr_upsample(grids: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3
             let orig_height = height;
             let height = (height + 1) / 2;
 
-            let mut prev_row = buf[..width].to_vec();
-            for y in 0..height {
-                let idx_base = y * 2 * width;
-                let bottom_base = if y == height - 1 { idx_base } else { idx_base + width * 2 };
+            let mut prev_row = buf[(height - 1) * width..][..width].to_vec();
+            for y in (0..height).rev() {
+                let idx_base = y * width;
+                let bottom_base = if y == height - 1 { idx_base } else { idx_base + width };
                 for x in 0..width {
                     let curr_sample = buf[idx_base + x];
 
@@ -79,9 +79,9 @@ pub fn ycbcr_upsample(grids: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3
                         curr_sample,
                         buf[bottom_base + x],
                     );
-                    buf[idx_base + x] = me;
+                    buf[idx_base * 2 + x] = me;
                     if y * 2 + 1 < orig_height {
-                        buf[idx_base + width + x] = next;
+                        buf[idx_base * 2 + width + x] = next;
                     }
 
                     prev_row[x] = curr_sample;

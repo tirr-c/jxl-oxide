@@ -110,4 +110,10 @@ impl TransformType {
             Dct256x128 | Dct128x256 => 12,
         }
     }
+
+    #[inline]
+    pub fn need_transpose(&self) -> bool {
+        let (w, h) = self.dct_select_size();
+        h > w
+    }
 }

@@ -279,7 +279,7 @@ fn run<R: std::io::Read>(
         grids.drain(3..);
     }
 
-    let image = FrameBuffer::from_grids(&grids).unwrap();
+    let image = FrameBuffer::from_grids(&grids, headers.size.width as usize, headers.size.height as usize).unwrap();
     let elapsed = decode_start.elapsed();
 
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;

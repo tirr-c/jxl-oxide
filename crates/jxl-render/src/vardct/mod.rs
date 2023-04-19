@@ -11,7 +11,7 @@ use jxl_vardct::{
     LfChannelCorrelation, TransformType,
 };
 
-use crate::dct::dct_2d;
+use crate::{dct::dct_2d, cut_grid::CutGrid};
 
 mod transform;
 pub use transform::transform;
@@ -107,13 +107,16 @@ pub fn dequant_lf(
 
 pub fn dequant_hf_varblock(
     coeff_data: &CoeffData,
+    out: &mut CutGrid<'_>,
     channel: usize,
     oim: &OpsinInverseMatrix,
     quantizer: &Quantizer,
     dequant_matrices: &DequantMatrixSet,
     qm_scale: Option<u32>,
-) -> SimpleGrid<f32> {
+) {
     let CoeffData { dct_select, hf_mul, ref coeff } = *coeff_data;
+    let need_transpose = dct_select.need_transpose();
+
     let mut mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32;
     if let Some(qm_scale) = qm_scale {
         let scale = 0.8f32.powi(qm_scale as i32 - 2);
@@ -123,9 +126,9 @@ pub fn dequant_hf_varblock(
     let quant_bias_numerator = oim.quant_bias_numerator;
 
     let coeff = &coeff[channel];
-    let mut out = SimpleGrid::new(coeff.width(), coeff.height());
+    let mut buf = vec![0f32; coeff.width() * coeff.height()];
 
-    for (&quant, out) in coeff.buf().iter().zip(out.buf_mut()) {
+    for (&quant, out) in coeff.buf().iter().zip(&mut buf) {
         *out = match quant {
             -1 => -quant_bias,
             0 => 0.0,
@@ -138,12 +141,23 @@ pub fn dequant_hf_varblock(
     }
 
     let matrix = dequant_matrices.get(channel, dct_select);
-    for (out, &mat) in out.buf_mut().iter_mut().zip(matrix) {
+    for (out, &mat) in buf.iter_mut().zip(matrix) {
         let val = *out * mat;
         *out = val * mul;
     }
 
-    out
+    if need_transpose {
+        for y in 0..coeff.height() {
+            for x in 0..coeff.width() {
+                *out.get_mut(y, x) = buf[y * coeff.width() + x];
+            }
+        }
+    } else {
+        for y in 0..coeff.height() {
+            let row = out.get_row_mut(y);
+            row.copy_from_slice(&buf[y * coeff.width()..][..coeff.width()]);
+        }
+    }
 }
 
 pub fn chroma_from_luma_lf(
@@ -176,13 +190,12 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_yxb: &mut [SimpleGrid<f32>; 3],
+    coeff_yxb: &mut [&mut CutGrid<'_>; 3],
     lf_left: usize,
     lf_top: usize,
     x_from_y: &Grid<i32>,
     b_from_y: &Grid<i32>,
     lf_chan_corr: &LfChannelCorrelation,
-    transposed: bool,
 ) {
     let LfChannelCorrelation {
         colour_factor,
@@ -197,11 +210,7 @@ pub fn chroma_from_luma_hf(
 
     for cy in 0..height {
         for cx in 0..width {
-            let (x, y) = if transposed {
-                (lf_left + cy, lf_top + cx)
-            } else {
-                (lf_left + cx, lf_top + cy)
-            };
+            let (x, y) = (lf_left + cx, lf_top + cy);
             let cfactor_x = x / 64;
             let cfactor_y = y / 64;
 
@@ -210,9 +219,9 @@ pub fn chroma_from_luma_hf(
             let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
             let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-            let coeff_y = *coeff_y.get(cx, cy).unwrap();
-            *coeff_x.get_mut(cx, cy).unwrap() += kx * coeff_y;
-            *coeff_b.get_mut(cx, cy).unwrap() += kb * coeff_y;
+            let coeff_y = coeff_y.get(cx, cy);
+            *coeff_x.get_mut(cx, cy) += kx * coeff_y;
+            *coeff_b.get_mut(cx, cy) += kb * coeff_y;
         }
     }
 }
@@ -232,8 +241,10 @@ pub fn llf_from_lf(
     }
 
     let (bw, bh) = dct_select.dct_select_size();
-    debug_assert_eq!(bw as usize, lf.width());
-    debug_assert_eq!(bh as usize, lf.height());
+    let bw = bw as usize;
+    let bh = bh as usize;
+    debug_assert_eq!(bw, lf.width());
+    debug_assert_eq!(bh, lf.height());
 
     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
         debug_assert_eq!(bw * bh, 1);
@@ -241,20 +252,17 @@ pub fn llf_from_lf(
         out.buf_mut()[0] = *lf.get(0, 0).unwrap();
         out
     } else {
-        let cx = bw.max(bh) as usize;
-        let cy = bw.min(bh) as usize;
-        let mut out = SimpleGrid::new(cx, cy);
-        let mut tmp = vec![0.0f32; bw as usize * bh as usize];
-        for y in 0..bh as usize {
-            for x in 0..bw as usize {
-                out.buf_mut()[y * bw as usize + x] = *lf.get(x, y).unwrap();
+        let mut out = SimpleGrid::new(bw, bh);
+        for y in 0..bh {
+            for x in 0..bw {
+                out.buf_mut()[y * bw + x] = *lf.get(x, y).unwrap();
             }
         }
-        dct_2d(out.buf_mut(), &mut tmp, bw as usize, bh as usize);
+        dct_2d(&mut out);
 
-        for y in 0..cy {
-            for x in 0..cx {
-                out.buf_mut()[y * cx + x] *= scale_f(y, cy * 8) * scale_f(x, cx * 8);
+        for y in 0..bh {
+            for x in 0..bw {
+                out.buf_mut()[y * bw + x] *= scale_f(y, bh * 8) * scale_f(x, bw * 8);
             }
         }
 

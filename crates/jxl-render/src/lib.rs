@@ -13,9 +13,11 @@ use jxl_image::{Headers, ImageMetadata, ColourSpace};
 use jxl_modular::ChannelShift;
 
 mod blend;
+mod cut_grid;
 mod dct;
 mod error;
 mod filter;
+mod lane;
 mod vardct;
 pub use error::{Error, Result};
 
@@ -456,6 +458,26 @@ impl<'f> ContextInner<'f> {
         let dequant_matrices = &hf_global.dequant_matrices;
         let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 
+        let width = frame_header.sample_width() as usize;
+        let height = frame_header.sample_height() as usize;
+        let width_rounded = ((width + 7) / 8) * 8;
+        let height_rounded = ((height + 7) / 8) * 8;
+        let mut fb_yxb = [
+            SimpleGrid::new(width_rounded, height_rounded),
+            SimpleGrid::new(width_rounded, height_rounded),
+            SimpleGrid::new(width_rounded, height_rounded),
+        ];
+
+        let mut subgrids = {
+            let [y, x, b] = &mut fb_yxb;
+            let group_dim = frame_header.group_dim() as usize;
+            [
+                cut_grid::cut_with_block_info(y, group_coeffs, group_dim, shifts_ycbcr[0]),
+                cut_grid::cut_with_block_info(x, group_coeffs, group_dim, shifts_ycbcr[1]),
+                cut_grid::cut_with_block_info(b, group_coeffs, group_dim, shifts_ycbcr[2]),
+            ]
+        };
+
         let lf_group_it = frame_data.lf_group
             .iter()
             .filter(|(&lf_group_idx, _)| {
@@ -511,109 +533,94 @@ impl<'f> ContextInner<'f> {
         let group_dim = frame_header.group_dim() as usize;
         let groups_per_row = frame_header.groups_per_row() as usize;
 
-        let varblocks = group_coeffs
-            .iter()
-            .flat_map(|(group_idx, hf_coeff)| {
-                let lf_group_id = frame_header.lf_group_idx_from_group_idx(*group_idx as u32) as usize;
-                let lf_dequant = dequantized_lf.get(&lf_group_id).unwrap();
-                let hf_meta = hf_meta_map.get(&lf_group_id).unwrap();
-                let x_from_y = &hf_meta.x_from_y;
-                let b_from_y = &hf_meta.b_from_y;
+        for (group_idx, hf_coeff) in group_coeffs {
+            let mut y = subgrids[0].remove(group_idx).unwrap();
+            let mut x = subgrids[1].remove(group_idx).unwrap();
+            let mut b = subgrids[2].remove(group_idx).unwrap();
+            let lf_group_id = frame_header.lf_group_idx_from_group_idx(*group_idx as u32) as usize;
+            let lf_dequant = dequantized_lf.get(&lf_group_id).unwrap();
+            let hf_meta = hf_meta_map.get(&lf_group_id).unwrap();
+            let x_from_y = &hf_meta.x_from_y;
+            let b_from_y = &hf_meta.b_from_y;
 
-                let group_row = group_idx / groups_per_row;
-                let group_col = group_idx % groups_per_row;
-                let base_lf_left = (group_col % 8) * group_dim;
-                let base_lf_top = (group_row % 8) * group_dim;
+            let group_row = group_idx / groups_per_row;
+            let group_col = group_idx % groups_per_row;
+            let base_lf_left = (group_col % 8) * group_dim;
+            let base_lf_top = (group_row % 8) * group_dim;
 
-                hf_coeff.data
-                    .iter()
-                    .map(move |(&(bx, by), coeff_data)| {
-                        let dct_select = coeff_data.dct_select;
-                        let y = vardct::dequant_hf_varblock(coeff_data, 1, oim, quantizer, dequant_matrices, None);
-                        let x = vardct::dequant_hf_varblock(coeff_data, 0, oim, quantizer, dequant_matrices, Some(frame_header.x_qm_scale));
-                        let b = vardct::dequant_hf_varblock(coeff_data, 2, oim, quantizer, dequant_matrices, Some(frame_header.b_qm_scale));
-                        let mut yxb = [y, x, b];
+            for (coord, coeff_data) in &hf_coeff.data {
+                let &(bx, by) = coord;
+                let mut y = y.get_mut(coord);
+                let mut x = x.get_mut(coord);
+                let mut b = b.get_mut(coord);
+                let dct_select = coeff_data.dct_select;
 
-                        let (bw, bh) = dct_select.dct_select_size();
-                        let bw = bw as usize;
-                        let bh = bh as usize;
-                        let bx = bx * 8;
-                        let by = by * 8;
-                        let lf_left = base_lf_left + bx;
-                        let lf_top = base_lf_top + by;
-                        if !subsampled {
-                            let transposed = bw < bh;
-                            vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr, transposed);
-                        }
-
-                        for ((coeff, lf_dequant), shift) in yxb.iter_mut().zip(lf_dequant.iter()).zip(shifts_ycbcr) {
-                            let lf_left = lf_left / 8;
-                            let lf_top = lf_top / 8;
-                            let s_lf_left = lf_left >> shift.hshift();
-                            let s_lf_top = lf_top >> shift.vshift();
-                            if s_lf_left << shift.hshift() != lf_left || s_lf_top << shift.vshift() != lf_top {
-                                continue;
-                            }
-
-                            let lf_subgrid = lf_dequant.subgrid(s_lf_left, s_lf_top, bw, bh);
-                            let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
-                            for y in 0..llf.height() {
-                                for x in 0..llf.width() {
-                                    *coeff.get_mut(x, y).unwrap() = *llf.get(x, y).unwrap();
-                                }
-                            }
-                        }
-                        ((group_row * group_dim + by, group_col * group_dim + bx), (dct_select, yxb))
-                    })
-            });
-
-        let width = frame_header.sample_width() as usize;
-        let height = frame_header.sample_height() as usize;
-        let mut fb_yxb = [
-            SimpleGrid::new(width, height),
-            SimpleGrid::new(width, height),
-            SimpleGrid::new(width, height),
-        ];
-        for ((y, x), (dct_select, mut yxb)) in varblocks {
-            let y8 = y / 8;
-            let x8 = x / 8;
-            let (w8, h8) = dct_select.dct_select_size();
-            let tw = w8 * 8;
-            let th = h8 * 8;
-
-            for (idx, (coeff, shift)) in yxb.iter_mut().zip(shifts_ycbcr).enumerate() {
-                let sx8 = x8 >> shift.hshift();
-                let sy8 = y8 >> shift.vshift();
-                if sx8 << shift.hshift() != x8 || sy8 << shift.vshift() != y8 {
-                    continue;
+                if let Some(y) = &mut y {
+                    vardct::dequant_hf_varblock(coeff_data, y, 1, oim, quantizer, dequant_matrices, None);
+                }
+                if let Some(x) = &mut x {
+                    vardct::dequant_hf_varblock(coeff_data, x, 0, oim, quantizer, dequant_matrices, Some(frame_header.x_qm_scale));
+                }
+                if let Some(b) = &mut b {
+                    vardct::dequant_hf_varblock(coeff_data, b, 2, oim, quantizer, dequant_matrices, Some(frame_header.b_qm_scale));
                 }
 
-                let hsize = width - x;
-                let vsize = height - y;
-                let (limit_w, limit_h) = shift.shift_size((hsize as u32, vsize as u32));
-                let w = tw.min(limit_w) as usize;
-                let h = th.min(limit_h) as usize;
+                let (bw, bh) = dct_select.dct_select_size();
+                let bw = bw as usize;
+                let bh = bh as usize;
+                let bx = bx * 8;
+                let by = by * 8;
+                let lf_left = base_lf_left + bx;
+                let lf_top = base_lf_top + by;
+                if !subsampled {
+                    let mut yxb = [
+                        &mut **y.as_mut().unwrap(),
+                        &mut **x.as_mut().unwrap(),
+                        &mut **b.as_mut().unwrap(),
+                    ];
+                    vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr);
+                }
 
-                let fb = fb_yxb[idx].buf_mut();
-                vardct::transform(coeff, dct_select);
+                for ((coeff, lf_dequant), shift) in [y, x, b].into_iter().zip(lf_dequant.iter()).zip(shifts_ycbcr) {
+                    let Some(coeff) = coeff else { continue; };
 
-                for (idx, &s) in coeff.buf().iter().enumerate() {
-                    let iy = idx / tw as usize;
-                    if iy >= h {
-                        break;
-                    }
-                    let y = y + (iy << shift.vshift());
-                    let ix = idx % tw as usize;
-                    if ix >= w {
+                    let lf_left = lf_left / 8;
+                    let lf_top = lf_top / 8;
+                    let s_lf_left = lf_left >> shift.hshift();
+                    let s_lf_top = lf_top >> shift.vshift();
+                    if s_lf_left << shift.hshift() != lf_left || s_lf_top << shift.vshift() != lf_top {
                         continue;
                     }
-                    let x = x + (ix << shift.hshift());
-                    fb[y * width + x] = s;
+
+                    let lf_subgrid = lf_dequant.subgrid(s_lf_left, s_lf_top, bw, bh);
+                    let llf = vardct::llf_from_lf(lf_subgrid, dct_select);
+                    // llf is transposed
+                    for y in 0..llf.height() {
+                        for x in 0..llf.width() {
+                            *coeff.get_mut(x, y) = *llf.get(x, y).unwrap();
+                        }
+                    }
+
+                    vardct::transform(coeff, dct_select);
                 }
             }
         }
 
-        Ok(fb_yxb)
+        if subsampled {
+            // TODO
+        }
+
+        if width == width_rounded && height == width_rounded {
+            Ok(fb_yxb)
+        } else {
+            Ok(fb_yxb.map(|g| {
+                let mut new_g = SimpleGrid::new(width, height);
+                for (new_row, row) in new_g.buf_mut().chunks_exact_mut(width).zip(g.buf().chunks_exact(width_rounded)) {
+                    new_row.copy_from_slice(&row[..width]);
+                }
+                new_g
+            }))
+        }
     }
 }
 

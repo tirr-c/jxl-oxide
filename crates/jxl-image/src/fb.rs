@@ -20,15 +20,13 @@ impl FrameBuffer {
         }
     }
 
-    pub fn from_grids(grids: &[Grid<f32>]) -> Result<Self> {
+    pub fn from_grids(grids: &[Grid<f32>], width: usize, height: usize) -> Result<Self> {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
         }
 
-        let width = grids[0].width();
-        let height = grids[0].height();
-        if !grids.iter().all(|g| g.width() == width && g.height() == height) {
+        if !grids.iter().all(|g| g.width() >= width && g.height() >= height) {
             return Err(Error::GridSizeMismatch);
         }
 

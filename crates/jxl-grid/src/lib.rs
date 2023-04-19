@@ -439,16 +439,22 @@ impl<S> Subgrid<'_, S> {
 pub struct SimpleGrid<S> {
     width: usize,
     height: usize,
+    offset: usize,
     buf: Vec<S>,
 }
 
 impl<S: Default + Clone> SimpleGrid<S> {
     pub fn new(width: usize, height: usize) -> Self {
         let len = width * height;
-        let buf = vec![S::default(); len];
+        let mut buf = vec![S::default(); len];
+
+        let extra = buf.as_ptr() as usize & 31;
+        let offset = (32 - extra) % 32;
+        buf.resize(buf.len() + offset, S::default());
         Self {
             width,
             height,
+            offset,
             buf,
         }
     }
@@ -471,7 +477,7 @@ impl<S> SimpleGrid<S> {
             return None;
         }
 
-        Some(&self.buf[y * self.width + x])
+        Some(&self.buf[y * self.width + x + self.offset])
     }
 
     #[inline]
@@ -480,17 +486,17 @@ impl<S> SimpleGrid<S> {
             return None;
         }
 
-        Some(&mut self.buf[y * self.width + x])
+        Some(&mut self.buf[y * self.width + x + self.offset])
     }
 
     #[inline]
     pub fn buf(&self) -> &[S] {
-        &self.buf
+        &self.buf[self.offset..]
     }
 
     #[inline]
     pub fn buf_mut(&mut self) -> &mut [S] {
-        &mut self.buf
+        &mut self.buf[self.offset..]
     }
 
     #[inline]
