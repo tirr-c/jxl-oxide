@@ -12,6 +12,7 @@ JPEG XL decoder written in pure Rust.
   - Patches
   - Splines
 - Frame composition
+- Animation
 - Cropped decoding (sort of)
 
 ## TODO
@@ -19,5 +20,4 @@ JPEG XL decoder written in pure Rust.
 - Image features
   - Non-separable upsampling
   - Noise
-- Animation
 - Multithreading
