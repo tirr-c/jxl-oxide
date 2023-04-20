@@ -314,8 +314,40 @@ impl<'f> ContextInner<'f> {
             }
         }
 
-        if let Some(_splines) = &lf_global.splines {
-            tracing::warn!("Splines are not supported");
+        if let Some(splines) = &lf_global.splines {
+            let mut estimated_area = 0;
+            let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
+                (
+                    x.lf_chan_corr.base_correlation_x,
+                    x.lf_chan_corr.base_correlation_b,
+                )
+            });
+            for quant_spline in &splines.quant_splines {
+                let spline = quant_spline.dequant(
+                    splines.quant_adjust,
+                    base_correlations_xb,
+                    &mut estimated_area,
+                );
+                // Maximum total_estimated_area_reached for Level 5
+                if estimated_area
+                    > (self.image_header.size.height * self.image_header.size.width + (1 << 18)).min(1 << 22) as u64
+                {
+                    tracing::warn!(
+                        "Large estimated_area of splines, expect slower decoding: {}",
+                        estimated_area
+                    );
+                }
+                // Maximum total_estimated_area_reached for Level 10
+                // if estimated_area
+                //     > (64 * (self.image_header.size.height * self.image_header.size.width) as u64 + (1u64 << 34))
+                //         .min(1u64 << 38)
+                // {
+                //     return Err(crate::Error::Frame(
+                //         jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+                //     ));
+                // }
+                blend::spline(self.image_header, grid, spline)?;
+            }
         }
 
         if let Some(_noise) = &lf_global.noise {

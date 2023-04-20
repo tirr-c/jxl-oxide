@@ -38,7 +38,7 @@ impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
             Patches::parse(bitstream, image_header)
         }).transpose()?;
         let splines = header.flags.splines().then(|| {
-            Splines::parse(bitstream, ())
+            Splines::parse(bitstream, header)
         }).transpose()?;
         let noise = header.flags.noise().then(|| {
             NoiseParameters::parse(bitstream, ())
