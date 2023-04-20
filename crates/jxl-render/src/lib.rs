@@ -364,8 +364,8 @@ impl<'f> ContextInner<'f> {
 
         let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
 
-        let width = self.width() as usize;
-        let height = self.height() as usize;
+        let width = frame.header().sample_width() as usize;
+        let height = frame.header().sample_height() as usize;
 
         for (g, ec_info) in channel_data.iter().zip(&self.image_header.metadata.ec_info) {
             let bit_depth = ec_info.bit_depth;
