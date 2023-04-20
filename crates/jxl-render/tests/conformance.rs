@@ -90,7 +90,7 @@ fn run_test<R: std::io::Read>(
     };
 
     let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
-    let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3], headers.size.width as usize, headers.size.height as usize).unwrap();
+    let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3]).unwrap();
     let width = fb.width();
     let height = fb.height();
     let pixfmt = lcms2::PixelFormat::RGB_FLT;
@@ -111,7 +111,7 @@ fn run_test<R: std::io::Read>(
         }
     }
 
-    let fb = jxl_image::FrameBuffer::from_grids(&grids, headers.size.width as usize, headers.size.height as usize).unwrap();
+    let fb = jxl_image::FrameBuffer::from_grids(&grids).unwrap();
     let channels = fb.channels();
 
     let interleaved_buffer = fb.buf();

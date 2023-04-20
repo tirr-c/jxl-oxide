@@ -235,13 +235,13 @@ impl Frame<'_> {
     pub fn transform_color(&self, grid: &mut [SimpleGrid<f32>]) {
         let metadata = &self.image_header.metadata;
         if metadata.xyb_encoded {
-            let [y, x, b, ..] = grid else { panic!() };
-            jxl_color::xyb::perform_inverse_xyb([y, x, b], metadata);
+            let [x, y, b, ..] = grid else { panic!() };
+            jxl_color::xyb::perform_inverse_xyb([x, y, b], metadata);
 
             jxl_color::convert::convert_in_place(grid, &metadata.colour_encoding, &metadata.tone_mapping);
         } else if self.header.do_ycbcr {
-            let [y, cb, cr, ..] = &mut *grid else { panic!() };
-            jxl_color::ycbcr::perform_inverse_ycbcr([y, cb, cr]);
+            let [cb, y, cr, ..] = &mut *grid else { panic!() };
+            jxl_color::ycbcr::perform_inverse_ycbcr([cb, y, cr]);
         }
     }
 }

@@ -21,20 +21,28 @@ pub fn dequant_lf(
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
     lf_coeff: &LfCoeff,
-) -> [Grid<f32>; 3] { // [y, x, b]
+    channel_flipped: bool,
+) -> [Grid<f32>; 3] { // [x, y, b]
     let subsampled = frame_header.jpeg_upsampling.into_iter().any(|x| x != 0);
     let do_smoothing = !frame_header.flags.skip_adaptive_lf_smoothing();
 
-    let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
+    let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf = [lf_y, lf_x, lf_b];
+    let lf = [lf_x, lf_y, lf_b];
 
     let precision_scale = (-(lf_coeff.extra_precision as f32)).exp2();
     let channel_data = lf_coeff.lf_quant.image().channel_data();
 
-    let mut it = channel_data.iter().zip(lf)
-        .map(|(g, lf)| {
+    let channel_order = if channel_flipped {
+        // modular images are in YXB and YCbCr
+        [1, 0, 2]
+    } else {
+        [0, 1, 2]
+    };
+    let mut it = channel_order.into_iter().zip(lf)
+        .map(|(c, lf)| {
+            let g = &channel_data[c];
             let width = g.width();
             let height = g.height();
             let mut out = Grid::new_similar(g);
@@ -47,7 +55,6 @@ pub fn dequant_lf(
             out
         });
 
-    // [y, x, b]
     let dq_channels = [
         it.next().unwrap(),
         it.next().unwrap(),
@@ -90,8 +97,8 @@ pub fn dequant_lf(
                 s_self[2] * SCALE_SELF + s_side[2] * SCALE_SIDE + s_diag[2] * SCALE_DIAG,
             ];
             let gap_t = [
-                (wa[0] - s_self[0]).abs() / lf_y,
-                (wa[1] - s_self[1]).abs() / lf_x,
+                (wa[0] - s_self[0]).abs() / lf_x,
+                (wa[1] - s_self[1]).abs() / lf_y,
                 (wa[2] - s_self[2]).abs() / lf_b,
             ];
             let gap = gap_t.into_iter().fold(0.5f32, |acc, v| acc.max(v));
@@ -161,7 +168,7 @@ pub fn dequant_hf_varblock(
 }
 
 pub fn chroma_from_luma_lf(
-    coeff_yxb: &mut [Grid<f32>; 3],
+    coeff_xyb: &mut [Grid<f32>; 3],
     lf_chan_corr: &LfChannelCorrelation,
 ) {
     let LfChannelCorrelation {
@@ -178,11 +185,11 @@ pub fn chroma_from_luma_lf(
     let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
     let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-    let mut it = coeff_yxb.iter_mut();
-    let y = it.next().unwrap();
+    let mut it = coeff_xyb.iter_mut();
     let x = it.next().unwrap();
+    let y = it.next().unwrap();
     let b = it.next().unwrap();
-    y.zip3_mut(x, b, |y, x, b| {
+    x.zip3_mut(y, b, |x, y, b| {
         let y = *y;
         *x += kx * y;
         *b += kb * y;
@@ -190,7 +197,7 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_yxb: &mut [&mut CutGrid<'_>; 3],
+    coeff_xyb: &mut [&mut CutGrid<'_>; 3],
     lf_left: usize,
     lf_top: usize,
     x_from_y: &Grid<i32>,
@@ -204,9 +211,9 @@ pub fn chroma_from_luma_hf(
         ..
     } = *lf_chan_corr;
 
-    let [coeff_y, coeff_x, coeff_b] = coeff_yxb;
-    let width = coeff_y.width();
-    let height = coeff_y.height();
+    let [coeff_x, coeff_y, coeff_b] = coeff_xyb;
+    let width = coeff_x.width();
+    let height = coeff_x.height();
 
     for cy in 0..height {
         for cx in 0..width {

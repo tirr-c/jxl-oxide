@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use jxl_bitstream::read_bits;
 use jxl_frame::ProgressiveResult;
+use jxl_grid::Grid;
 use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
 use jxl_render::RenderContext;
 
@@ -154,120 +155,160 @@ fn main() {
         }
     }
 
-    let mut idx = 0usize;
+    let (width, height) = if let Some(crop) = crop {
+        (crop.width, crop.height)
+    } else {
+        (headers.size.width, headers.size.height)
+    };
+
+    let decode_start = std::time::Instant::now();
+
     loop {
-        let (result, fb) = run(&mut bitstream, &mut render, &headers, crop, args.experimental_progressive);
+        let result = run(&mut bitstream, &mut render, crop, args.experimental_progressive);
 
-        if let Some(output) = &args.output {
-            let mut output = output.clone();
-            if args.experimental_progressive {
-                output.push(format!("{}.png", idx));
-            }
-
-            tracing::info!("Encoding samples to PNG");
-            let width = fb.width();
-            let height = fb.height();
-            let output = std::fs::File::create(output).expect("failed to open output file");
-            let mut encoder = png::Encoder::new(output, width as u32, height as u32);
-            encoder.set_color(if fb.channels() == 4 { png::ColorType::Rgba } else { png::ColorType::Rgb });
-
-            let sixteen_bits = headers.metadata.bit_depth.bits_per_sample() > 8;
-            if sixteen_bits {
-                encoder.set_depth(png::BitDepth::Sixteen);
-            } else {
-                encoder.set_depth(png::BitDepth::Eight);
-            }
-
-            let colour_encoding = &headers.metadata.colour_encoding;
-            let icc_cicp = if colour_encoding.is_srgb() {
-                encoder.set_srgb(match colour_encoding.rendering_intent {
-                    jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
-                    jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
-                    jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
-                    jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
-                });
-
-                None
-            } else {
-                let icc = jxl_color::icc::colour_encoding_to_icc(colour_encoding).expect("failed to build ICC profile");
-                let cicp = colour_encoding.png_cicp();
-                // TODO: emit gAMA and cHRM
-                Some((icc, cicp))
-            };
-
-            let mut writer = encoder
-                .write_header()
-                .expect("failed to write header");
-
-            if let Some((icc, cicp)) = icc_cicp {
-                tracing::debug!("Embedding ICC profile");
-                let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&icc, 7);
-                let mut iccp_chunk_data = vec![b' ', 0, 0];
-                iccp_chunk_data.extend(compressed_icc);
-                writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
-
-                if let Some(cicp) = cicp {
-                    tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-                    writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp).expect("failed to write cICP");
-                }
-            }
-
-            let mut writer = writer.into_stream_writer().unwrap();
-
-            tracing::debug!("Writing image data");
-            if sixteen_bits {
-                let mut buf = vec![0u8; fb.width() * fb.channels() * 2];
-                for row in fb.buf().chunks(fb.width() * fb.channels()) {
-                    for (s, b) in row.iter().zip(buf.chunks_exact_mut(2)) {
-                        let w = (*s * 65535.0).clamp(0.0, 65535.0) as u16;
-                        let [b0, b1] = w.to_be_bytes();
-                        b[0] = b0;
-                        b[1] = b1;
-                    }
-                    std::io::Write::write_all(&mut writer, &buf[..row.len() * 2]).expect("failed to write image data");
-                }
-            } else {
-                let mut buf = vec![0u8; fb.width() * fb.channels()];
-                for row in fb.buf().chunks(fb.width() * fb.channels()) {
-                    for (s, b) in row.iter().zip(&mut buf) {
-                        *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
-                    }
-                    std::io::Write::write_all(&mut writer, &buf[..row.len()]).expect("failed to write image data");
-                }
-            }
-            writer.finish().expect("failed to finish writing png");
-
-            idx += 1;
-        } else {
-            tracing::info!("No output path specified, skipping PNG encoding");
-        }
-
-        if result == ProgressiveResult::FrameComplete {
+        let keyframe_idx = render.loaded_keyframes() - 1;
+        let frame = render.keyframe(keyframe_idx).unwrap();
+        if result == ProgressiveResult::FrameComplete && frame.header().is_last {
             break;
         }
     }
+
+    let elapsed = decode_start.elapsed();
+    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    tracing::info!("Took {:.2} ms", elapsed_ms);
+
+    if let Some(output) = &args.output {
+        let output = std::fs::File::create(output).expect("failed to open output file");
+        let mut encoder = png::Encoder::new(output, width, height);
+
+        let has_alpha_channel = headers.metadata.ec_info.iter().any(|ec| ec.ty == ExtraChannelType::Alpha);
+        if has_alpha_channel {
+            tracing::debug!("Image has alpha channel");
+        }
+        encoder.set_color(if has_alpha_channel { png::ColorType::Rgba } else { png::ColorType::Rgb });
+
+        let sixteen_bits = headers.metadata.bit_depth.bits_per_sample() > 8;
+        if sixteen_bits {
+            encoder.set_depth(png::BitDepth::Sixteen);
+        } else {
+            encoder.set_depth(png::BitDepth::Eight);
+        }
+
+        let keyframes = render.loaded_keyframes();
+        if headers.metadata.have_animation {
+            let num_plays = headers.metadata.animation.num_loops;
+            encoder.set_animated(keyframes as u32, num_plays).unwrap();
+        }
+
+        let colour_encoding = &headers.metadata.colour_encoding;
+        let icc_cicp = if colour_encoding.is_srgb() {
+            encoder.set_srgb(match colour_encoding.rendering_intent {
+                jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+                jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+                jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+                jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+            });
+
+            None
+        } else {
+            let icc = jxl_color::icc::colour_encoding_to_icc(colour_encoding).expect("failed to build ICC profile");
+            let cicp = colour_encoding.png_cicp();
+            // TODO: emit gAMA and cHRM
+            Some((icc, cicp))
+        };
+        encoder.validate_sequence(true);
+
+        let mut writer = encoder
+            .write_header()
+            .expect("failed to write header");
+
+        if let Some((icc, cicp)) = icc_cicp {
+            tracing::debug!("Embedding ICC profile");
+            let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&icc, 7);
+            let mut iccp_chunk_data = vec![b' ', 0, 0];
+            iccp_chunk_data.extend(compressed_icc);
+            writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
+
+            if let Some(cicp) = cicp {
+                tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
+                writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp).expect("failed to write cICP");
+            }
+        }
+
+        let region = crop.as_ref().map(|crop| (crop.left, crop.top, crop.width, crop.height));
+
+        tracing::debug!("Writing image data");
+        for keyframe_idx in 0..keyframes {
+            if headers.metadata.have_animation {
+                let frame = render.keyframe(keyframe_idx).unwrap();
+                let duration = frame.header().duration;
+                let numer = headers.metadata.animation.tps_denominator * duration;
+                let denom = headers.metadata.animation.tps_numerator;
+                let (numer, denom) = if numer >= 0x10000 || denom >= 0x10000 {
+                    if duration == 0xffffffff {
+                        tracing::warn!(numer, denom, "Writing multi-page image in APNG");
+                    } else {
+                        tracing::warn!(numer, denom, "Frame duration is not representable in APNG");
+                    }
+                    let duration = (numer as f32 / denom as f32) * 65535.0;
+                    (duration as u16, 0xffffu16)
+                } else {
+                    (numer as u16, denom as u16)
+                };
+                writer.set_frame_delay(numer, denom).unwrap();
+            }
+
+            let mut grids = render.render_keyframe_cropped(keyframe_idx, region).unwrap();
+            filter_alpha_channel(&mut grids, &headers);
+            let grids = grids.into_iter().map(Grid::from).collect::<Vec<_>>();
+            let fb = FrameBuffer::from_grids(&grids).unwrap();
+            assert!(fb.width() == width as usize && fb.height() == height as usize);
+            assert!(fb.channels() == if has_alpha_channel { 4 } else { 3 });
+
+            if sixteen_bits {
+                let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];
+                for (b, s) in buf.chunks_exact_mut(2).zip(fb.buf()) {
+                    let w = (*s * 65535.0).clamp(0.0, 65535.0) as u16;
+                    let [b0, b1] = w.to_be_bytes();
+                    b[0] = b0;
+                    b[1] = b1;
+                }
+                writer.write_image_data(&buf).expect("failed to write frame");
+            } else {
+                let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels()];
+                for (b, s) in buf.iter_mut().zip(fb.buf()) {
+                    *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
+                }
+                writer.write_image_data(&buf).expect("failed to write frame");
+            }
+        }
+
+        writer.finish().expect("failed to finish writing png");
+    } else {
+        tracing::info!("No output path specified, skipping PNG encoding");
+    };
 }
 
 fn run<R: std::io::Read>(
     bitstream: &mut jxl_bitstream::Bitstream<R>,
     render: &mut RenderContext,
-    headers: &Headers,
     crop: Option<CropInfo>,
     progressive: bool,
-) -> (ProgressiveResult, FrameBuffer) {
+) -> ProgressiveResult {
     let region = crop.as_ref().map(|crop| (crop.left, crop.top, crop.width, crop.height));
 
-    let decode_start = std::time::Instant::now();
     let result = render
-        .load_cropped(bitstream, progressive, region)
+        .load_until_keyframe(bitstream, progressive, region)
         .expect("failed to load frames");
-    let fb = render.render_cropped(region).expect("failed to render");
+    let keyframe_idx = render.loaded_keyframes() - 1;
+    render.render_keyframe_cropped(keyframe_idx, region).expect("failed to render");
 
-    let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+    result
+}
+
+fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &Headers) {
     let alpha_channel = headers.metadata.ec_info.iter().position(|ec| ec.ty == ExtraChannelType::Alpha);
     if let Some(idx) = alpha_channel {
-        tracing::debug!("Image has alpha channel");
-
         let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated;
         if alpha_premultiplied {
             tracing::warn!("Premultiplied alpha is not supported for output");
@@ -278,12 +319,4 @@ fn run<R: std::io::Read>(
     } else {
         grids.drain(3..);
     }
-
-    let image = FrameBuffer::from_grids(&grids, headers.size.width as usize, headers.size.height as usize).unwrap();
-    let elapsed = decode_start.elapsed();
-
-    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    tracing::info!("Took {:.2} ms", elapsed_ms);
-
-    (result, image)
 }

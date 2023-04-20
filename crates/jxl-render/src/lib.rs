@@ -48,6 +48,11 @@ impl RenderContext<'_> {
     pub fn height(&self) -> u32 {
         self.inner.height()
     }
+
+    #[inline]
+    pub fn loaded_keyframes(&self) -> usize {
+        self.inner.keyframes.len() + (self.inner.keyframe_in_progress.is_some() as usize)
+    }
 }
 
 impl RenderContext<'_> {
@@ -92,6 +97,33 @@ impl RenderContext<'_> {
         Ok(ProgressiveResult::FrameComplete)
     }
 
+    pub fn load_until_keyframe<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        progressive: bool,
+        region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<ProgressiveResult> {
+        loop {
+            let (result, frame) = self.inner.load_cropped_single(bitstream, progressive, region)?;
+            if result != ProgressiveResult::FrameComplete {
+                return Ok(result);
+            }
+
+            let is_keyframe = frame.header().is_keyframe();
+            let toc = frame.toc();
+            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
+            self.inner.preserve_current_frame();
+            self.state.preserve_current_frame();
+            if is_keyframe {
+                break;
+            }
+
+            bitstream.skip_to_bookmark(bookmark)?;
+        }
+
+        Ok(ProgressiveResult::FrameComplete)
+    }
+
     pub fn load_all_frames<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -101,10 +133,31 @@ impl RenderContext<'_> {
     }
 }
 
+impl<'a> RenderContext<'a> {
+    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&Frame<'a>> {
+        if keyframe_idx == self.inner.keyframes.len() {
+            if let Some(idx) = self.inner.keyframe_in_progress {
+                Some(&self.inner.frames[idx])
+            } else {
+                let Some(frame) = &self.inner.loading_frame else { return None; };
+                frame.header().is_keyframe().then_some(frame)
+            }
+        } else if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
+            Some(&self.inner.frames[idx])
+        } else {
+            None
+        }
+    }
+}
+
 impl RenderContext<'_> {
     fn render_by_index(&mut self, index: usize, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
         let _guard = span.enter();
+
+        if matches!(&self.state.renders[index], FrameRender::Done(_)) {
+            return Ok(());
+        }
 
         let deps = self.inner.frame_deps[index];
         for dep in deps.indices() {
@@ -132,11 +185,42 @@ impl RenderContext<'_> {
 
         let grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
         *state = FrameRender::Done(grid);
+
+        let mut unref = |idx: usize| {
+            tracing::debug!("Dereference frame #{idx}");
+            let new_refcount = self.inner.refcounts[idx].saturating_sub(1);
+            if new_refcount == 0 {
+                tracing::debug!("Frame #{idx} is not referenced, dropping framebuffer");
+                self.state.renders[idx] = FrameRender::None;
+            }
+        };
+
+        if deps.lf != usize::MAX {
+            unref(deps.lf);
+        }
+        for ref_idx in deps.ref_slots {
+            if ref_idx != usize::MAX {
+                unref(ref_idx);
+            }
+        }
+
         Ok(())
     }
 
-    pub fn render_cropped(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
-        let (frame, mut grid) = if let Some(&idx) = self.inner.keyframes.first() {
+    #[inline]
+    pub fn render_cropped(
+        &mut self,
+        region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<Vec<SimpleGrid<f32>>> {
+        self.render_keyframe_cropped(0, region)
+    }
+
+    pub fn render_keyframe_cropped(
+        &mut self,
+        keyframe_idx: usize,
+        region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<Vec<SimpleGrid<f32>>> {
+        let (frame, grid) = if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
             self.render_by_index(idx, region)?;
             let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
             let frame = &self.inner.frames[idx];
@@ -167,10 +251,26 @@ impl RenderContext<'_> {
             }
         };
 
+        let mut cropped = if let Some((l, t, w, h)) = region {
+            let mut cropped = Vec::with_capacity(grid.len());
+            for g in grid {
+                let mut new_grid = SimpleGrid::new(w as usize, h as usize);
+                for (idx, v) in new_grid.buf_mut().iter_mut().enumerate() {
+                    let y = idx / w as usize;
+                    let x = idx % w as usize;
+                    *v = *g.get(x + l as usize, y + t as usize).unwrap();
+                }
+                cropped.push(new_grid);
+            }
+            cropped
+        } else {
+            grid
+        };
+
         if frame.header().save_before_ct {
-            frame.transform_color(&mut grid);
+            frame.transform_color(&mut cropped);
         }
-        Ok(grid)
+        Ok(cropped)
     }
 
     fn render_loading_frame(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
@@ -384,17 +484,16 @@ impl<'f> ContextInner<'f> {
         let width = frame_header.sample_width() as usize;
         let height = frame_header.sample_height() as usize;
         let bit_depth = metadata.bit_depth;
-        let mut fb_yxb = [
+        let mut fb_xyb = [
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
         ];
         let mut buffers = {
-            let [a, b, c] = &mut fb_yxb;
+            let [a, b, c] = &mut fb_xyb;
             [a, b, c]
         };
-        if frame_header.do_ycbcr {
-            // make CbYCr into YCbCr
+        if xyb_encoded {
             buffers.swap(0, 1);
         }
 
@@ -428,18 +527,18 @@ impl<'f> ContextInner<'f> {
 
         if xyb_encoded {
             let [y, x, b] = buffers;
-            let y = y.buf_mut();
             let x = x.buf_mut();
+            let y = y.buf_mut();
             let b = b.buf_mut();
-            for ((y, x), b) in y.iter_mut().zip(x).zip(b) {
+            for ((x, y), b) in x.iter_mut().zip(y).zip(b) {
                 *b += *y;
-                *y *= lf_global.lf_dequant.m_y_lf_unscaled();
                 *x *= lf_global.lf_dequant.m_x_lf_unscaled();
+                *y *= lf_global.lf_dequant.m_y_lf_unscaled();
                 *b *= lf_global.lf_dequant.m_b_lf_unscaled();
             }
         }
 
-        Ok(fb_yxb)
+        Ok(fb_xyb)
     }
 
     fn render_vardct<'a>(
@@ -455,12 +554,14 @@ impl<'f> ContextInner<'f> {
         let metadata = self.metadata();
         let frame_header = frame.header();
         let frame_data = frame.data();
+        let xyb_encoded = metadata.xyb_encoded;
+        let do_ycbcr = frame_header.do_ycbcr;
         let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
         let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
         let hf_global = frame_data.hf_global.as_ref().ok_or(Error::IncompleteFrame)?;
         let hf_global = hf_global.as_ref().expect("HfGlobal not found for VarDCT frame");
         let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let shifts_ycbcr = [1, 0, 2].map(|idx| {
+        let shifts_cbycr = [0, 1, 2].map(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
         let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
@@ -494,19 +595,19 @@ impl<'f> ContextInner<'f> {
         let height = frame_header.sample_height() as usize;
         let width_rounded = ((width + 7) / 8) * 8;
         let height_rounded = ((height + 7) / 8) * 8;
-        let mut fb_yxb = [
+        let mut fb_xyb = [
             SimpleGrid::new(width_rounded, height_rounded),
             SimpleGrid::new(width_rounded, height_rounded),
             SimpleGrid::new(width_rounded, height_rounded),
         ];
 
         let mut subgrids = {
-            let [y, x, b] = &mut fb_yxb;
+            let [x, y, b] = &mut fb_xyb;
             let group_dim = frame_header.group_dim() as usize;
             [
-                cut_grid::cut_with_block_info(y, group_coeffs, group_dim, shifts_ycbcr[0]),
-                cut_grid::cut_with_block_info(x, group_coeffs, group_dim, shifts_ycbcr[1]),
-                cut_grid::cut_with_block_info(b, group_coeffs, group_dim, shifts_ycbcr[2]),
+                cut_grid::cut_with_block_info(x, group_coeffs, group_dim, shifts_cbycr[0]),
+                cut_grid::cut_with_block_info(y, group_coeffs, group_dim, shifts_cbycr[1]),
+                cut_grid::cut_with_block_info(b, group_coeffs, group_dim, shifts_cbycr[2]),
             ]
         };
 
@@ -531,7 +632,7 @@ impl<'f> ContextInner<'f> {
                 .or_insert_with(|| {
                     let dequant_lf = if let Some(lf_frame) = lf_frame {
                         std::array::from_fn(|idx| {
-                            let shift = shifts_ycbcr[idx];
+                            let shift = shifts_cbycr[idx];
                             let base_x = (group_x * frame_header.group_dim()) >> shift.hshift();
                             let base_x = base_x as usize;
                             let base_y = (group_y * frame_header.group_dim()) >> shift.vshift();
@@ -550,7 +651,13 @@ impl<'f> ContextInner<'f> {
                         })
                     } else {
                         let lf_coeff = data.lf_coeff.as_ref().unwrap();
-                        let mut dequant_lf = vardct::dequant_lf(frame_header, &lf_global.lf_dequant, quantizer, lf_coeff);
+                        let mut dequant_lf = vardct::dequant_lf(
+                            frame_header,
+                            &lf_global.lf_dequant,
+                            quantizer,
+                            lf_coeff,
+                            xyb_encoded || do_ycbcr,
+                        );
                         if !subsampled {
                             vardct::chroma_from_luma_lf(&mut dequant_lf, &lf_global_vardct.lf_chan_corr);
                         }
@@ -566,8 +673,8 @@ impl<'f> ContextInner<'f> {
         let groups_per_row = frame_header.groups_per_row() as usize;
 
         for (group_idx, hf_coeff) in group_coeffs {
-            let mut y = subgrids[0].remove(group_idx).unwrap();
-            let mut x = subgrids[1].remove(group_idx).unwrap();
+            let mut x = subgrids[0].remove(group_idx).unwrap();
+            let mut y = subgrids[1].remove(group_idx).unwrap();
             let mut b = subgrids[2].remove(group_idx).unwrap();
             let lf_group_id = frame_header.lf_group_idx_from_group_idx(*group_idx as u32) as usize;
             let lf_dequant = dequantized_lf.get(&lf_group_id).unwrap();
@@ -582,16 +689,16 @@ impl<'f> ContextInner<'f> {
 
             for (coord, coeff_data) in &hf_coeff.data {
                 let &(bx, by) = coord;
-                let mut y = y.get_mut(coord);
                 let mut x = x.get_mut(coord);
+                let mut y = y.get_mut(coord);
                 let mut b = b.get_mut(coord);
                 let dct_select = coeff_data.dct_select;
 
-                if let Some(y) = &mut y {
-                    vardct::dequant_hf_varblock(coeff_data, y, 1, oim, quantizer, dequant_matrices, None);
-                }
                 if let Some(x) = &mut x {
                     vardct::dequant_hf_varblock(coeff_data, x, 0, oim, quantizer, dequant_matrices, Some(frame_header.x_qm_scale));
+                }
+                if let Some(y) = &mut y {
+                    vardct::dequant_hf_varblock(coeff_data, y, 1, oim, quantizer, dequant_matrices, None);
                 }
                 if let Some(b) = &mut b {
                     vardct::dequant_hf_varblock(coeff_data, b, 2, oim, quantizer, dequant_matrices, Some(frame_header.b_qm_scale));
@@ -605,15 +712,15 @@ impl<'f> ContextInner<'f> {
                 let lf_left = base_lf_left + bx;
                 let lf_top = base_lf_top + by;
                 if !subsampled {
-                    let mut yxb = [
-                        &mut **y.as_mut().unwrap(),
+                    let mut xyb = [
                         &mut **x.as_mut().unwrap(),
+                        &mut **y.as_mut().unwrap(),
                         &mut **b.as_mut().unwrap(),
                     ];
-                    vardct::chroma_from_luma_hf(&mut yxb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr);
+                    vardct::chroma_from_luma_hf(&mut xyb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr);
                 }
 
-                for ((coeff, lf_dequant), shift) in [y, x, b].into_iter().zip(lf_dequant.iter()).zip(shifts_ycbcr) {
+                for ((coeff, lf_dequant), shift) in [x, y, b].into_iter().zip(lf_dequant.iter()).zip(shifts_cbycr) {
                     let Some(coeff) = coeff else { continue; };
 
                     let lf_left = lf_left / 8;
@@ -638,14 +745,10 @@ impl<'f> ContextInner<'f> {
             }
         }
 
-        if subsampled {
-            // TODO
-        }
-
         if width == width_rounded && height == width_rounded {
-            Ok(fb_yxb)
+            Ok(fb_xyb)
         } else {
-            Ok(fb_yxb.map(|g| {
+            Ok(fb_xyb.map(|g| {
                 let mut new_g = SimpleGrid::new(width, height);
                 for (new_row, row) in new_g.buf_mut().chunks_exact_mut(width).zip(g.buf().chunks_exact(width_rounded)) {
                     new_row.copy_from_slice(&row[..width]);
@@ -662,6 +765,7 @@ struct ContextInner<'a> {
     frames: Vec<Frame<'a>>,
     keyframes: Vec<usize>,
     keyframe_in_progress: Option<usize>,
+    refcounts: Vec<usize>,
     frame_deps: Vec<FrameDependence>,
     lf_frame: [usize; 4],
     reference: [usize; 4],
@@ -675,6 +779,7 @@ impl<'a> ContextInner<'a> {
             frames: Vec::new(),
             keyframes: Vec::new(),
             keyframe_in_progress: None,
+            refcounts: Vec::new(),
             frame_deps: Vec::new(),
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
@@ -711,11 +816,21 @@ impl<'a> ContextInner<'a> {
         let idx = self.frames.len();
         let is_last = header.is_last;
 
+        self.refcounts.push(0);
+
         let lf = if header.flags.use_lf_frame() {
-            self.lf_frame[header.lf_level as usize]
+            let lf = self.lf_frame[header.lf_level as usize];
+            self.refcounts[lf] += 1;
+            lf
         } else {
             usize::MAX
         };
+        for ref_idx in self.reference {
+            if ref_idx != usize::MAX {
+                self.refcounts[ref_idx] += 1;
+            }
+        }
+
         let deps = FrameDependence {
             lf,
             ref_slots: self.reference,
@@ -730,13 +845,12 @@ impl<'a> ContextInner<'a> {
             self.lf_frame[lf_idx] = idx;
         }
 
-        if header.frame_type.is_normal_frame() {
-            if is_last || header.duration != 0 {
-                self.keyframes.push(idx);
-                self.keyframe_in_progress = None;
-            } else {
-                self.keyframe_in_progress = Some(idx);
-            }
+        if header.is_keyframe() {
+            self.refcounts[idx] += 1;
+            self.keyframes.push(idx);
+            self.keyframe_in_progress = None;
+        } else if header.frame_type.is_normal_frame() {
+            self.keyframe_in_progress = Some(idx);
         }
 
         self.frames.push(frame);
@@ -767,6 +881,7 @@ impl ContextInner<'_> {
             width = header.sample_width(),
             height = header.sample_height(),
             frame_type = format_args!("{:?}", header.frame_type),
+            encoding = format_args!("{:?}", header.encoding),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
             "Decoding {}x{} frame", header.sample_width(), header.sample_height()
@@ -781,7 +896,7 @@ impl ContextInner<'_> {
             Box::new(|_: &_, _: &_, _| true)
         };
 
-        if header.frame_type.is_normal_frame() {
+        if header.frame_type == FrameType::RegularFrame {
             let result = frame.load_with_filter(bitstream, progressive, filter)?;
             match result {
                 ProgressiveResult::FrameComplete => frame.complete()?,

@@ -511,6 +511,7 @@ dependencies = [
  "jxl-coding",
  "jxl-color",
  "jxl-frame",
+ "jxl-grid",
  "jxl-image",
  "jxl-render",
  "miniz_oxide 0.7.1",

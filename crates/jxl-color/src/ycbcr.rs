@@ -1,14 +1,14 @@
 use jxl_grid::SimpleGrid;
 
-pub fn perform_inverse_ycbcr(fb_ycbcr: [&mut SimpleGrid<f32>; 3]) {
-    let [y, cb, cr] = fb_ycbcr;
-    let y = y.buf_mut();
+pub fn perform_inverse_ycbcr(fb_cbycr: [&mut SimpleGrid<f32>; 3]) {
+    let [cb, y, cr] = fb_cbycr;
     let cb = cb.buf_mut();
+    let y = y.buf_mut();
     let cr = cr.buf_mut();
 
-    for ((r, g), b) in y.iter_mut().zip(cb).zip(cr) {
-        let y = *r + 0.5;
-        let cb = *g;
+    for ((r, g), b) in cb.iter_mut().zip(y).zip(cr) {
+        let cb = *r;
+        let y = *g + 0.5;
         let cr = *b;
 
         *r = y + 1.402 * cr;
@@ -17,16 +17,16 @@ pub fn perform_inverse_ycbcr(fb_ycbcr: [&mut SimpleGrid<f32>; 3]) {
     }
 }
 
-pub fn ycbcr_upsample(grids: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3]) {
+pub fn ycbcr_upsample(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3]) {
     fn interpolate(left: f32, center: f32, right: f32) -> (f32, f32) {
         (0.25 * left + 0.75 * center, 0.75 * center + 0.25 * right)
     }
 
-    let shifts_ycbcr = [1, 0, 2].map(|idx| {
+    let shifts_cbycr = [0, 1, 2].map(|idx| {
         jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
     });
 
-    for (buf, shift) in grids.into_iter().zip(shifts_ycbcr) {
+    for (buf, shift) in grids_cbycr.into_iter().zip(shifts_cbycr) {
         let width = buf.width();
         let height = buf.height();
         let buf = buf.buf_mut();

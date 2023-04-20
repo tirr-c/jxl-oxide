@@ -27,6 +27,9 @@ features = ["icc"]
 [dependencies.jxl-frame]
 path = "../jxl-frame"
 
+[dependencies.jxl-grid]
+path = "../jxl-grid"
+
 [dependencies.jxl-image]
 path = "../jxl-image"
 

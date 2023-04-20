@@ -205,6 +205,11 @@ impl FrameHeader {
         }
     }
 
+    #[inline]
+    pub fn is_keyframe(&self) -> bool {
+        self.frame_type.is_normal_frame() && (self.is_last || self.duration != 0)
+    }
+
     // (h, v)
     pub fn need_jpeg_upscale(&self) -> (bool, bool) {
         let h_upscale = self.jpeg_upsampling.into_iter().any(|j| j == 1 || j == 2);
