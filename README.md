@@ -10,6 +10,7 @@ JPEG XL decoder written in pure Rust.
 - Restoration filters
 - Image features
   - Patches
+  - Splines
 - Frame composition
 - Cropped decoding (sort of)
 
@@ -17,7 +18,6 @@ JPEG XL decoder written in pure Rust.
 - Rendering spot color channels
 - Image features
   - Non-separable upsampling
-  - Splines
   - Noise
 - Animation
 - Multithreading
