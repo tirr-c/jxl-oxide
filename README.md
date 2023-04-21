@@ -21,3 +21,7 @@ JPEG XL decoder written in pure Rust.
   - Non-separable upsampling
   - Noise
 - Multithreading
+
+---
+
+Dual-licensed under MIT and Apache 2.0.
