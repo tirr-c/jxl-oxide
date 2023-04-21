@@ -1,5 +1,6 @@
 use jxl_bitstream::Bitstream;
 
+/// Read a permutation from the entropy encoded stream.
 pub fn read_permutation<R: std::io::Read>(bitstream: &mut Bitstream<R>, decoder: &mut crate::Decoder, size: u32, skip: u32) -> crate::Result<Vec<usize>> {
     let end = decoder.read_varint(bitstream, get_context(size))?;
 

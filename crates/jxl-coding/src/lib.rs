@@ -1,3 +1,9 @@
+//! This crate provides [`Decoder`], an entropy decoder, implemented as specified in the JPEG XL
+//! specification.
+//!
+//! This also provides [`read_permutation`] and [`read_clusters`], which are used in some parts of
+//! the specification.
+
 use std::io::Read;
 use std::sync::Arc;
 
@@ -13,6 +19,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub use permutation::read_permutation;
 
+/// An entropy decoder.
 #[derive(Debug, Clone)]
 pub struct Decoder {
     lz77: Lz77,
@@ -35,6 +42,8 @@ impl Decoder {
         [-6, 7], [7, 6], [-7, 6], [8, 5], [7, 7], [-7, 7], [8, 6], [8, 7],
     ];
 
+    /// Create a decoder by reading symbol distribution, integer configurations and LZ77
+    /// configuration from the bitstream.
     pub fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
         let lz77 = Lz77::parse(bitstream)?;
         let num_dist = if let Lz77::Disabled = &lz77 {
@@ -55,10 +64,12 @@ impl Decoder {
         Ok(Self { lz77: Lz77::Disabled, inner })
     }
 
+    /// Read an integer from the bitstream with the given context.
     pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32) -> Result<u32> {
         self.read_varint_with_multiplier(bitstream, ctx, 0)
     }
 
+    /// Read an integer from the bitstream with the given context and LZ77 distance multiplier.
     pub fn read_varint_with_multiplier<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32, dist_multiplier: u32) -> Result<u32> {
         let cluster = self.inner.clusters[ctx as usize];
         Ok(if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
@@ -105,10 +116,18 @@ impl Decoder {
         })
     }
 
+    /// Explicitly start reading an entropy encoded stream.
+    ///
+    /// This involves reading an initial state for the ANS stream. It's okay to skip this method,
+    /// as the state will be initialized on the first read.
     pub fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         self.inner.code.begin(bitstream)
     }
 
+    /// Finalizes the stream, and check whether the stream was valid.
+    ///
+    /// For prefix code stream, this method will always succeed. For ANS streams, this method
+    /// checks if the final state matches expected state, which is specified in the specification.
     pub fn finalize(&self) -> Result<()> {
         self.inner.code.finalize()
     }
@@ -338,6 +357,7 @@ fn add_log2_ceil(x: u32) -> u32 {
     (x + 1).next_power_of_two().trailing_zeros()
 }
 
+/// Read a clustering information of distributions from the bitstream.
 pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
     if num_dist == 1 {
         return Ok((1, vec![0u8]));
