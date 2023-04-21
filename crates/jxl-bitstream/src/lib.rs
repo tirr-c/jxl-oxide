@@ -1,3 +1,8 @@
+///! This crate provides a JPEG XL bitstream reader and helper macros. The bitstream reader supports both
+///! bare codestream and container format, and it can detect which format to read.
+///!
+///! Consumers of this crate can use [`Bitstream::new_detect`] to create a bitstream reader.
+
 use std::io::prelude::*;
 
 mod container;
@@ -13,10 +18,12 @@ pub use reader::ContainerDetectingReader;
 pub trait Bundle<Ctx = ()>: Sized {
     type Error;
 
+    /// Parse from the bitstream with the given context.
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> std::result::Result<Self, Self::Error>;
 }
 
 pub trait BundleDefault<Ctx = ()>: Sized {
+    /// Create a default value with the given context.
     fn default_with_context(ctx: Ctx) -> Self;
 }
 
@@ -34,6 +41,7 @@ impl<T, Ctx> Bundle<Ctx> for Option<T> where T: Bundle<Ctx> {
     }
 }
 
+/// JPEG XL bitstream reader.
 pub struct Bitstream<R> {
     global_pos: u64,
     buf: Vec<u8>,
@@ -75,6 +83,7 @@ impl<R> std::fmt::Debug for Bitstream<R> {
 }
 
 impl<R> Bitstream<ContainerDetectingReader<R>> {
+    /// Create a bitstream reader which detects the container format automatically.
     pub fn new_detect(reader: R) -> Self {
         Self {
             global_pos: 0,
@@ -89,6 +98,7 @@ impl<R> Bitstream<ContainerDetectingReader<R>> {
 }
 
 impl<R> Bitstream<R> {
+    /// Create a bitstream reader which reads bare codestream.
     pub fn new(reader: R) -> Self {
         Self {
             global_pos: 0,
@@ -226,6 +236,7 @@ impl<R: Read> Bitstream<R> {
         }
     }
 
+    /// Read an `U64` as defined in the JPEG XL specification.
     pub fn read_u64(&mut self) -> Result<u64> {
         let selector = self.read_bits(2)?;
         Ok(match selector {
@@ -249,6 +260,7 @@ impl<R: Read> Bitstream<R> {
         })
     }
 
+    /// Read a `Bool` as defined in the JPEG XL specification.
     pub fn read_bool(&mut self) -> Result<bool> {
         if self.bits_left == 0 {
             self.fill()?;
@@ -256,6 +268,10 @@ impl<R: Read> Bitstream<R> {
         Ok(self.read_single_bit_inner() != 0)
     }
 
+    /// Read an `F16` as defined in the JPEG XL specification, and convert it to `f32`.
+    ///
+    /// # Errors
+    /// Returns `Error::InvalidFloat` if the value is `NaN` or `Infinity`.
     pub fn read_f16_as_f32(&mut self) -> Result<f32> {
         let v = self.read_bits(16)?;
         let mantissa = v & 0x3ff; // 10 bits
@@ -271,6 +287,7 @@ impl<R: Read> Bitstream<R> {
         }
     }
 
+    /// Perform `ZeroPadToByte` as defined in the JPEG XL specification.
     pub fn zero_pad_to_byte(&mut self) -> Result<()> {
         let bits = self.bits_left % 8;
         let data = self.read_bits_inner(bits);
