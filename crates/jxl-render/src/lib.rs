@@ -494,6 +494,7 @@ impl<'f> ContextInner<'f> {
             [a, b, c]
         };
         if xyb_encoded {
+            // Make Y'X'B' to X'Y'B'
             buffers.swap(0, 1);
         }
 
@@ -554,14 +555,12 @@ impl<'f> ContextInner<'f> {
         let metadata = self.metadata();
         let frame_header = frame.header();
         let frame_data = frame.data();
-        let xyb_encoded = metadata.xyb_encoded;
-        let do_ycbcr = frame_header.do_ycbcr;
         let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
         let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
         let hf_global = frame_data.hf_global.as_ref().ok_or(Error::IncompleteFrame)?;
         let hf_global = hf_global.as_ref().expect("HfGlobal not found for VarDCT frame");
         let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let shifts_cbycr = [0, 1, 2].map(|idx| {
+        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
         let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
@@ -656,7 +655,6 @@ impl<'f> ContextInner<'f> {
                             &lf_global.lf_dequant,
                             quantizer,
                             lf_coeff,
-                            xyb_encoded || do_ycbcr,
                         );
                         if !subsampled {
                             vardct::chroma_from_luma_lf(&mut dequant_lf, &lf_global_vardct.lf_chan_corr);

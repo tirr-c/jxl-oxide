@@ -21,7 +21,6 @@ pub fn dequant_lf(
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
     lf_coeff: &LfCoeff,
-    channel_flipped: bool,
 ) -> [Grid<f32>; 3] { // [x, y, b]
     let subsampled = frame_header.jpeg_upsampling.into_iter().any(|x| x != 0);
     let do_smoothing = !frame_header.flags.skip_adaptive_lf_smoothing();
@@ -34,13 +33,8 @@ pub fn dequant_lf(
     let precision_scale = (-(lf_coeff.extra_precision as f32)).exp2();
     let channel_data = lf_coeff.lf_quant.image().channel_data();
 
-    let channel_order = if channel_flipped {
-        // modular images are in YXB and YCbCr
-        [1, 0, 2]
-    } else {
-        [0, 1, 2]
-    };
-    let mut it = channel_order.into_iter().zip(lf)
+    // the first two channels are flipped (YXB)
+    let mut it = [1, 0, 2].into_iter().zip(lf)
         .map(|(c, lf)| {
             let g = &channel_data[c];
             let width = g.width();
