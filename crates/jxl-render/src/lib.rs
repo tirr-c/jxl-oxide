@@ -438,14 +438,14 @@ impl<'f> ContextInner<'f> {
                     );
                 }
                 // Maximum total_estimated_area_reached for Level 10
-                // if estimated_area
-                //     > (64 * (self.image_header.size.height * self.image_header.size.width) as u64 + (1u64 << 34))
-                //         .min(1u64 << 38)
-                // {
-                //     return Err(crate::Error::Frame(
-                //         jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
-                //     ));
-                // }
+                if estimated_area
+                    > (64 * (self.image_header.size.height * self.image_header.size.width) as u64 + (1u64 << 34))
+                        .min(1u64 << 38)
+                {
+                    return Err(crate::Error::Frame(
+                        jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+                    ));
+                }
                 blend::spline(self.image_header, grid, spline)?;
             }
         }
