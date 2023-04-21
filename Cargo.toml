@@ -11,6 +11,7 @@ members = [
   "crates/jxl-render",
   "crates/jxl-vardct",
 ]
+resolver = "2"
 
 [profile.release]
 debug = 1
