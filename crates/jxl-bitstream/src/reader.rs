@@ -2,11 +2,13 @@ use std::io::prelude::*;
 
 use super::container::*;
 
+/// Wrapper that detects container format from underlying reader.
 pub struct ContainerDetectingReader<R> {
     detected: bool,
     buffer: std::io::Cursor<Vec<u8>>,
     box_header: Option<(ContainerBoxHeader, u64)>,
     aux_boxes: Vec<(ContainerBoxType, Vec<u8>)>,
+    next_jxlp_index: u32,
     inner: R,
 }
 
@@ -17,6 +19,7 @@ impl<R> ContainerDetectingReader<R> {
             buffer: std::io::Cursor::new(Vec::new()),
             box_header: None,
             aux_boxes: Vec::new(),
+            next_jxlp_index: 0,
             inner: reader,
         }
     }
@@ -29,15 +32,50 @@ impl<R: Read> ContainerDetectingReader<R> {
             tracing::trace!(header = format_args!("{:?}", header));
             let box_type = header.box_type();
             if box_type == ContainerBoxType::CODESTREAM {
+                if self.next_jxlp_index == u32::MAX {
+                    tracing::error!("Duplicate jxlc box found");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Duplicate jxlc box found",
+                    ));
+                } else if self.next_jxlp_index != 0 {
+                    tracing::error!("Found jxlc box instead of jxlp box");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Found jxlc box instead of jxlp box",
+                    ));
+                }
+
+                self.next_jxlp_index = u32::MAX;
                 self.box_header = Some((header, 0));
                 return Ok(true);
             }
             if box_type == ContainerBoxType::PARTIAL_CODESTREAM {
+                if self.next_jxlp_index == u32::MAX {
+                    tracing::error!("jxlp box found after jxlc box");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "jxlp box found after jxlc box",
+                    ));
+                }
+
                 let mut index = [0u8; 4];
                 self.inner.read_exact(&mut index)?;
                 let index = u32::from_be_bytes(index);
                 tracing::trace!(index = index & 0x7fffffff, is_last = index & 0x80000000 != 0);
-                // TODO: check index
+                if index != self.next_jxlp_index {
+                    tracing::error!(
+                        "Out-of-order jxlp box found: expected {}, got {}",
+                        self.next_jxlp_index,
+                        index,
+                    );
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Out-of-order jxlp box found",
+                    ));
+                }
+
+                self.next_jxlp_index += 1;
                 self.box_header = Some((header, 4));
                 return Ok(true);
             }
