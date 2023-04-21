@@ -183,7 +183,7 @@ impl QuantSpline {
 
         for i in 0..32 {
             sigma_dct[i] = self.sigma_dct[i] as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
-            let weight = (self.sigma_dct[i]).abs() as f32 * (inverted_qa).ceil();
+            let weight = f32::ceil(self.sigma_dct[i].abs() as f32 * inverted_qa);
             width_estimate += weight * weight;
         }
 
