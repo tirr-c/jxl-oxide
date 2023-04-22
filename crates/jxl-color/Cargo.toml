@@ -21,11 +21,3 @@ path = "../jxl-grid"
 
 [dependencies.jxl-modular]
 path = "../jxl-modular"
-
-[dependencies.lcms2]
-version = "5.5.0"
-optional = true
-
-[features]
-icc = ["lcms2"]
-default = []

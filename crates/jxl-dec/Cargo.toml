@@ -22,7 +22,6 @@ path = "../jxl-coding"
 
 [dependencies.jxl-color]
 path = "../jxl-color"
-features = ["icc"]
 
 [dependencies.jxl-frame]
 path = "../jxl-frame"

@@ -499,7 +499,6 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-modular",
- "lcms2",
 ]
 
 [[package]]

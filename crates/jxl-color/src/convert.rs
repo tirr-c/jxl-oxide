@@ -65,11 +65,11 @@ fn matinv(mat: &[f32; 9]) -> [f32; 9] {
 }
 
 #[inline]
-fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
+pub(crate) fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
     [x / y, 1.0, (1.0 - x) / y - 1.0]
 }
 
-fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
+pub(crate) fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
     let from_w = illuminant_to_xyz(from_illuminant);
     let to_w = illuminant_to_xyz(to_illuminant);
 
@@ -85,7 +85,7 @@ fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
     matmul3(&MAT_BRADFORD_INV, &multiplied)
 }
 
-fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
+pub(crate) fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
     let mut primaries = [
         primaries[0][0], primaries[1][0], primaries[2][0],
         primaries[0][1], primaries[1][1], primaries[2][1],

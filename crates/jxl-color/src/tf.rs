@@ -43,7 +43,6 @@ pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     }
 }
 
-#[cfg(feature = "icc")]
 pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     const M1_RECIP: f64 = 8192.0 / 1305.0;
     const M2_RECIP: f64 = 32.0 / 2523.0;
@@ -79,7 +78,6 @@ pub fn linear_to_hlg(samples: &mut [f32]) {
     }
 }
 
-#[cfg(feature = "icc")]
 pub(crate) fn hlg_table(n: usize) -> Vec<u16> {
     const A_RECIP: f64 = 1.0 / 0.17883277;
     const B: f64 = 0.28466892;

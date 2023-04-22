@@ -194,7 +194,6 @@ conformance_test! {
 }
 
 conformance_test! {
-    #[ignore = "slight ICC profile mismatch"]
     lz77_flower(
         "953d3ada476e3218653834c9addc9c16bb6f9f03b18be1be8a85c07a596ea32d",
         "793cb9df4e4ce93ce8fe827fde34e7fb925b7079fcb68fba1e56fc4b35508ccb",
