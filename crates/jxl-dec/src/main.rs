@@ -128,7 +128,7 @@ fn main() {
         bitstream.skip_to_bookmark(bookmark).expect("Failed to skip");
     }
 
-    let crop = args.crop.and_then(|crop| {
+    let mut crop = args.crop.and_then(|crop| {
         if crop.width == 0 && crop.height == 0 {
             None
         } else if crop.width == 0 {
@@ -146,8 +146,19 @@ fn main() {
         }
     });
 
-    if let Some(crop) = &crop {
+    if let Some(crop) = &mut crop {
         tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
+        let (w, h, x, y) = headers.metadata.apply_orientation(
+            crop.width,
+            crop.height,
+            crop.left,
+            crop.top,
+            true,
+        );
+        crop.width = w;
+        crop.height = h;
+        crop.left = x;
+        crop.top = y
     }
 
     if args.experimental_progressive {
@@ -180,6 +191,7 @@ fn main() {
 
     if let Some(output) = &args.output {
         let output = std::fs::File::create(output).expect("failed to open output file");
+        let (width, height, _, _) = headers.metadata.apply_orientation(width, height, 0, 0, false);
         let mut encoder = png::Encoder::new(output, width, height);
 
         let has_alpha_channel = headers.metadata.ec_info.iter().any(|ec| ec.ty == ExtraChannelType::Alpha);
@@ -262,9 +274,7 @@ fn main() {
             let mut grids = render.render_keyframe_cropped(keyframe_idx, region).unwrap();
             filter_alpha_channel(&mut grids, &headers);
             let grids = grids.into_iter().map(Grid::from).collect::<Vec<_>>();
-            let fb = FrameBuffer::from_grids(&grids).unwrap();
-            assert!(fb.width() == width as usize && fb.height() == height as usize);
-            assert!(fb.channels() == if has_alpha_channel { 4 } else { 3 });
+            let fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
 
             if sixteen_bits {
                 let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];

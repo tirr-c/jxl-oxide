@@ -20,10 +20,13 @@ impl FrameBuffer {
         }
     }
 
-    pub fn from_grids(grids: &[Grid<f32>]) -> Result<Self> {
+    pub fn from_grids(grids: &[Grid<f32>], orientation: u32) -> Result<Self> {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
+        }
+        if !(1..=8).contains(&orientation) {
+            panic!("Invalid orientation {orientation}");
         }
 
         let width = grids[0].width();
@@ -32,18 +35,34 @@ impl FrameBuffer {
             return Err(Error::GridSizeMismatch);
         }
 
+        let (outw, outh) = match orientation {
+            1..=4 => (width, height),
+            5..=8 => (height, width),
+            _ => unreachable!(),
+        };
         let mut buf = vec![0.0f32; width * height * channels];
         for y in 0..height {
             for x in 0..width {
                 for (c, g) in grids.iter().enumerate() {
-                    buf[c + (x + y * width) * channels] = g.get(x, y).copied().unwrap_or(0.0);
+                    let (outx, outy) = match orientation {
+                        1 => (x, y),
+                        2 => (width - x - 1, y),
+                        3 => (width - x - 1, height - y - 1),
+                        4 => (x, height - y - 1),
+                        5 => (y, x),
+                        6 => (height - y - 1, x),
+                        7 => (height - y - 1, width - x - 1),
+                        8 => (y, width - x - 1),
+                        _ => unreachable!(),
+                    };
+                    buf[c + (outx + outy * outw) * channels] = g.get(x, y).copied().unwrap_or(0.0);
                 }
             }
         }
 
         Ok(Self {
-            width,
-            height,
+            width: outw,
+            height: outh,
             channels,
             buf,
         })

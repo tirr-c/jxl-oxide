@@ -90,7 +90,7 @@ fn run_test<R: std::io::Read>(
     };
 
     let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
-    let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3]).unwrap();
+    let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3], 1).unwrap();
     let width = fb.width();
     let height = fb.height();
     let pixfmt = lcms2::PixelFormat::RGB_FLT;
@@ -111,7 +111,7 @@ fn run_test<R: std::io::Read>(
         }
     }
 
-    let fb = jxl_image::FrameBuffer::from_grids(&grids).unwrap();
+    let fb = jxl_image::FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
     let channels = fb.channels();
 
     let interleaved_buffer = fb.buf();
@@ -221,5 +221,15 @@ conformance_test! {
         3,
         0.06,
         0.02,
+    )
+}
+
+conformance_test! {
+    sunset_logo(
+        "bf1c1d5626ced3746df867cf3e3a25f3d17512c2e837b5e3a04743660e42ad81",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        4,
+        0.000244141,
+        0.000244141,
     )
 }

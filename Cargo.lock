@@ -542,6 +542,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-color",
  "jxl-grid",
+ "tracing",
 ]
 
 [[package]]
