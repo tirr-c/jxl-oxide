@@ -1,3 +1,4 @@
+#![allow(clippy::excessive_precision)]
 use std::io::Read;
 
 use jxl_bitstream::{

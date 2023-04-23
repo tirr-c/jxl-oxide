@@ -1,14 +1,40 @@
+/// Trait representing SIMD lane.
 pub trait SimdLane: Copy {
+    /// The number of `f32` elements in a single SIMD lane.
     const SIZE: usize;
 
+    /// Initialize a SIMD lane with zeroes.
     fn zero() -> Self;
+    /// Initialize a SIMD lane with given floats.
     fn set<const N: usize>(val: [f32; N]) -> Self;
+    /// Initialize a SIMD lane filled with given float.
     fn splat_f32(val: f32) -> Self;
+    /// Load a SIMD lane from memory.
+    ///
+    /// The pointer doesn't need to be aligned.
+    ///
+    /// # Safety
+    /// The given pointer must be valid.
     unsafe fn load(ptr: *const f32) -> Self;
+    /// Load a SIMD lane from memory with aligned pointer.
+    ///
+    /// # Safety
+    /// The given pointer must be valid and properly aligned.
     unsafe fn load_aligned(ptr: *const f32) -> Self;
 
+    /// Extract a single element from the SIMD lane.
     fn extract_f32<const N: i32>(self) -> f32;
+    /// Store the SIMD lane to memory.
+    ///
+    /// The pointer doesn't need to be aligned.
+    ///
+    /// # Safety
+    /// The given pointer must be valid.
     unsafe fn store(self, ptr: *mut f32);
+    /// Store the SIMD lane to memory with aligned pointer.
+    ///
+    /// # Safety
+    /// The given pointer must be valid and properly aligned.
     unsafe fn store_aligned(self, ptr: *mut f32);
 
     fn add(self, lhs: Self) -> Self;

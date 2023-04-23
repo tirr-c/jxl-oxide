@@ -1,4 +1,4 @@
-#![allow(dead_code, clippy::excessive_precision)]
+#![allow(clippy::excessive_precision)]
 use std::io::Read;
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result};
 use jxl_color::header::*;
