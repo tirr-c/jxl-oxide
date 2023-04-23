@@ -497,8 +497,6 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
- "jxl-image",
- "jxl-modular",
 ]
 
 [[package]]
@@ -542,6 +540,7 @@ name = "jxl-image"
 version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
+ "jxl-color",
  "jxl-grid",
 ]
 

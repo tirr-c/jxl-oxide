@@ -1,9 +1,9 @@
+use jxl_color::OpsinInverseMatrix;
 use jxl_frame::{
     data::{LfCoeff, CoeffData},
     FrameHeader,
 };
-use jxl_grid::{Grid, Subgrid, SimpleGrid};
-use jxl_image::OpsinInverseMatrix;
+use jxl_grid::{CutGrid, Grid, Subgrid, SimpleGrid};
 use jxl_vardct::{
     LfChannelDequantization,
     Quantizer,
@@ -11,7 +11,7 @@ use jxl_vardct::{
     LfChannelCorrelation, TransformType,
 };
 
-use crate::{dct::dct_2d, cut_grid::CutGrid};
+use crate::dct::dct_2d;
 
 mod transform;
 pub use transform::transform;

@@ -10,5 +10,8 @@ edition = "2021"
 [dependencies.jxl-bitstream]
 path = "../jxl-bitstream"
 
+[dependencies.jxl-color]
+path = "../jxl-color"
+
 [dependencies.jxl-grid]
 path = "../jxl-grid"

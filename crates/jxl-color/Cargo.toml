@@ -13,11 +13,5 @@ path = "../jxl-bitstream"
 [dependencies.jxl-coding]
 path = "../jxl-coding"
 
-[dependencies.jxl-image]
-path = "../jxl-image"
-
 [dependencies.jxl-grid]
 path = "../jxl-grid"
-
-[dependencies.jxl-modular]
-path = "../jxl-modular"

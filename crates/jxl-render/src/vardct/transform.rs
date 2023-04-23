@@ -1,6 +1,7 @@
+use jxl_grid::CutGrid;
 use jxl_vardct::TransformType;
 
-use crate::{dct::{idct_2d, dct_2d_generic}, cut_grid::CutGrid};
+use crate::dct::{idct_2d, dct_2d_generic};
 
 fn aux_idct2_in_place(block: &mut CutGrid<'_>, size: usize) {
     debug_assert!(size.is_power_of_two());

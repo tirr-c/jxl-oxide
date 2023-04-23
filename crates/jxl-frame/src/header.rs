@@ -129,7 +129,7 @@ define_bundle! {
             default(if encoding == Encoding::Modular {
                 if do_ycbcr {
                     3
-                } else if !headers.metadata.xyb_encoded && headers.metadata.colour_encoding.colour_space == ColourSpace::Grey {
+                } else if !headers.metadata.xyb_encoded && headers.metadata.colour_encoding.colour_space == jxl_color::ColourSpace::Grey {
                     1
                 } else {
                     3

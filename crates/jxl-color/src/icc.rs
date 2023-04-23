@@ -2,9 +2,8 @@ use std::io::prelude::*;
 use std::io::Cursor;
 
 use jxl_bitstream::Bitstream;
-use jxl_image::ColourEncoding;
 
-use crate::{Error, Result};
+use crate::{ColourEncoding, Error, Result};
 
 pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
@@ -419,8 +418,15 @@ fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
 }
 
 pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8>> {
-    use jxl_image::{ColourSpace, Primaries, TransferFunction, WhitePoint};
-    use crate::{consts::{illuminant, primaries}, tf};
+    use crate::{
+        consts::*,
+        tf,
+        ColourSpace,
+        Primaries,
+        RenderingIntent,
+        TransferFunction,
+        WhitePoint,
+    };
 
     if colour_encoding.want_icc {
         return Err(Error::IccProfileEmbedded);
@@ -461,10 +467,10 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         ColourSpace::Unknown => b"3CLR",
     });
     header[0x43] = match colour_encoding.rendering_intent {
-        jxl_image::RenderingIntent::Perceptual => 0,
-        jxl_image::RenderingIntent::Relative => 1,
-        jxl_image::RenderingIntent::Saturation => 2,
-        jxl_image::RenderingIntent::Absolute => 3,
+        RenderingIntent::Perceptual => 0,
+        RenderingIntent::Relative => 1,
+        RenderingIntent::Saturation => 2,
+        RenderingIntent::Absolute => 3,
     };
 
     let mut tags = Vec::new();

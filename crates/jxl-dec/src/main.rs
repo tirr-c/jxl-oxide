@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use jxl_bitstream::read_bits;
+use jxl_color::RenderingIntent;
 use jxl_frame::ProgressiveResult;
 use jxl_grid::Grid;
 use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
@@ -203,10 +204,10 @@ fn main() {
         let colour_encoding = &headers.metadata.colour_encoding;
         let icc_cicp = if colour_encoding.is_srgb() {
             encoder.set_srgb(match colour_encoding.rendering_intent {
-                jxl_image::RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
-                jxl_image::RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
-                jxl_image::RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
-                jxl_image::RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+                RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+                RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+                RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+                RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
             });
 
             None

@@ -1,6 +1,7 @@
 use std::{io::Read, collections::{HashSet, HashMap}};
 
 use jxl_bitstream::{Bitstream, Bundle};
+use jxl_color::ColourSpace;
 use jxl_frame::{
     data::HfCoeff,
     filter::Gabor,
@@ -9,7 +10,7 @@ use jxl_frame::{
     ProgressiveResult,
 };
 use jxl_grid::{Grid, SimpleGrid};
-use jxl_image::{Headers, ImageMetadata, ColourSpace};
+use jxl_image::{Headers, ImageMetadata};
 use jxl_modular::ChannelShift;
 
 mod blend;
@@ -17,7 +18,6 @@ mod cut_grid;
 mod dct;
 mod error;
 mod filter;
-mod lane;
 mod vardct;
 pub use error::{Error, Result};
 
@@ -326,7 +326,7 @@ impl<'f> ContextInner<'f> {
 
         let [a, b, c] = &mut fb;
         if frame.header().do_ycbcr {
-            jxl_color::ycbcr::ycbcr_upsample([a, b, c], frame.header().jpeg_upsampling);
+            filter::apply_jpeg_upsampling([a, b, c], frame.header().jpeg_upsampling);
         }
         if let Gabor::Enabled(weights) = frame.header().restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);

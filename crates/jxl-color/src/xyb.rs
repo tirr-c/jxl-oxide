@@ -1,12 +1,12 @@
-use jxl_image::ImageMetadata;
 use jxl_grid::SimpleGrid;
 
-pub fn perform_inverse_xyb(fb_xyb: [&mut SimpleGrid<f32>; 3], metadata: &ImageMetadata) {
-    let itscale = 255.0 / metadata.tone_mapping.intensity_target;
-    let oim = &metadata.opsin_inverse_matrix;
-
+pub fn perform_inverse_xyb(
+    fb_xyb: [&mut SimpleGrid<f32>; 3],
+    oim: &crate::OpsinInverseMatrix,
+    intensity_target: f32,
+) {
+    let itscale = 255.0 / intensity_target;
     let ob = oim.opsin_bias;
-
     let inv_mat = oim.inv_mat;
 
     let [x, y, b] = fb_xyb;

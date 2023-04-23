@@ -1,11 +1,3 @@
-use jxl_grid::SimpleGrid;
-use jxl_image::{ColourEncoding, ToneMapping};
-
-use crate::{
-    consts::{illuminant, primaries},
-    tf,
-};
-
 const MAT_BRADFORD: [f32; 9] = [
     0.8951, 0.2664, -0.1614,
     -0.7502, 1.7135, 0.0367,
@@ -65,11 +57,11 @@ fn matinv(mat: &[f32; 9]) -> [f32; 9] {
 }
 
 #[inline]
-pub(crate) fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
+pub fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
     [x / y, 1.0, (1.0 - x) / y - 1.0]
 }
 
-pub(crate) fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
+pub fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
     let from_w = illuminant_to_xyz(from_illuminant);
     let to_w = illuminant_to_xyz(to_illuminant);
 
@@ -85,7 +77,7 @@ pub(crate) fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [
     matmul3(&MAT_BRADFORD_INV, &multiplied)
 }
 
-pub(crate) fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
+pub fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
     let mut primaries = [
         primaries[0][0], primaries[1][0], primaries[2][0],
         primaries[0][1], primaries[1][1], primaries[2][1],
@@ -104,7 +96,7 @@ pub(crate) fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f
     primaries
 }
 
-fn xyz_to_primaries_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
+pub fn xyz_to_primaries_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
     let primaries = [
         primaries[0][0], primaries[1][0], primaries[2][0],
         primaries[0][1], primaries[1][1], primaries[2][1],
@@ -121,89 +113,4 @@ fn xyz_to_primaries_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
         *p /= mul[idx / 3];
     }
     primaries_inv
-}
-
-/// Converts given framebuffer to the target color encoding.
-///
-/// Assumes that input framebuffer is in linear sRGB.
-pub fn convert_in_place(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, tone_mapping: &ToneMapping) {
-    let target_wp = match &encoding.white_point {
-        jxl_image::WhitePoint::D65 => illuminant::D65,
-        jxl_image::WhitePoint::Custom(xy) => [xy.x as f32 / 1e6, xy.y as f32 / 1e6],
-        jxl_image::WhitePoint::E => illuminant::E,
-        jxl_image::WhitePoint::Dci => illuminant::DCI,
-    };
-    let target_primaries = match &encoding.primaries {
-        jxl_image::Primaries::Srgb => primaries::SRGB,
-        jxl_image::Primaries::Custom { red, green, blue } => [
-            [red.x as f32 / 1e6, red.y as f32 / 1e6],
-            [green.x as f32 / 1e6, green.y as f32 / 1e6],
-            [blue.x as f32 / 1e6, blue.y as f32 / 1e6],
-        ],
-        jxl_image::Primaries::Bt2100 => primaries::BT2100,
-        jxl_image::Primaries::P3 => primaries::P3,
-    };
-
-    let merged = (target_primaries != primaries::SRGB || target_wp != illuminant::D65).then(|| {
-        let srgb_xyz = primaries_to_xyz_mat(primaries::SRGB, illuminant::D65);
-        let xyz_target = xyz_to_primaries_mat(target_primaries, target_wp);
-
-        let mut merged = srgb_xyz;
-        if target_wp != illuminant::D65 {
-            let adapt = adapt_mat(illuminant::D65, target_wp);
-            merged = matmul3(&adapt, &merged);
-        }
-        matmul3(&xyz_target, &merged)
-    });
-
-    let [r, g, b, ..] = fb else { panic!() };
-    let r = r.buf_mut();
-    let g = g.buf_mut();
-    let b = b.buf_mut();
-    if let Some(merged) = &merged {
-        for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
-            let [or, og, ob] = matmul3vec(merged, &[*r, *g, *b]);
-            *r = or;
-            *g = og;
-            *b = ob;
-        }
-    }
-
-    match encoding.tf {
-        jxl_image::TransferFunction::Gamma(gamma) => {
-            let gamma = gamma as f32 / 1e7;
-            tf::linear_to_gamma(r, gamma);
-            tf::linear_to_gamma(g, gamma);
-            tf::linear_to_gamma(b, gamma);
-        },
-        jxl_image::TransferFunction::Bt709 => {
-            tf::linear_to_bt709(r);
-            tf::linear_to_bt709(g);
-            tf::linear_to_bt709(b);
-        },
-        jxl_image::TransferFunction::Unknown => {}
-        jxl_image::TransferFunction::Linear => {},
-        jxl_image::TransferFunction::Srgb => {
-            tf::linear_to_srgb(r);
-            tf::linear_to_srgb(g);
-            tf::linear_to_srgb(b);
-        },
-        jxl_image::TransferFunction::Pq => {
-            let intensity_target = tone_mapping.intensity_target;
-            tf::linear_to_pq(r, intensity_target);
-            tf::linear_to_pq(g, intensity_target);
-            tf::linear_to_pq(b, intensity_target);
-        },
-        jxl_image::TransferFunction::Dci => {
-            let gamma = 1.0 / 2.6;
-            tf::linear_to_gamma(r, gamma);
-            tf::linear_to_gamma(g, gamma);
-            tf::linear_to_gamma(b, gamma);
-        },
-        jxl_image::TransferFunction::Hlg => {
-            tf::linear_to_hlg(r);
-            tf::linear_to_hlg(g);
-            tf::linear_to_hlg(b);
-        },
-    }
 }

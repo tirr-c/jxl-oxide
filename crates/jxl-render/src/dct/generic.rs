@@ -1,6 +1,4 @@
-use jxl_grid::SimpleGrid;
-
-use crate::cut_grid::CutGrid;
+use jxl_grid::{CutGrid, SimpleGrid};
 
 use super::consts;
 

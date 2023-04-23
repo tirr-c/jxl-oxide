@@ -1,3 +1,8 @@
+mod simd;
+mod simple_grid;
+pub use simd::SimdLane;
+pub use simple_grid::*;
+
 #[derive(Debug, Clone)]
 pub enum Grid<S> {
     Simple(Option<SimpleGrid<S>>),
@@ -46,7 +51,9 @@ impl<S: Default + Clone> Grid<S> {
 
     pub fn new_similar<S2>(grid: &Grid<S2>) -> Self {
         match *grid {
-            Grid::Simple(Some(ref g)) => Self::Simple(Some(SimpleGrid::new(g.width, g.height))),
+            Grid::Simple(Some(ref g)) => {
+                Self::Simple(Some(SimpleGrid::new(g.width(), g.height())))
+            },
             Grid::Grouped { width, height, group_width, group_height, .. } => {
                 let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
                 let mut groups = Vec::with_capacity(num_groups);
@@ -68,7 +75,7 @@ impl<S> Grid<S> {
     #[inline]
     pub fn width(&self) -> usize {
         match *self {
-            Self::Simple(Some(SimpleGrid { width, .. })) => width,
+            Self::Simple(Some(ref g)) => g.width(),
             Self::Grouped { width, .. } => width,
             _ => unreachable!(),
         }
@@ -77,7 +84,7 @@ impl<S> Grid<S> {
     #[inline]
     pub fn height(&self) -> usize {
         match *self {
-            Self::Simple(Some(SimpleGrid { height, .. })) => height,
+            Self::Simple(Some(ref g)) => g.height(),
             Self::Grouped { height, .. } => height,
             _ => unreachable!(),
         }
@@ -86,7 +93,7 @@ impl<S> Grid<S> {
     #[inline]
     pub fn group_dim(&self) -> (usize, usize) {
         match *self {
-            Self::Simple(Some(SimpleGrid { width, height, .. })) => (width, height),
+            Self::Simple(Some(ref g)) => (g.width(), g.height()),
             Self::Grouped { group_width, group_height, .. } => (group_width, group_height),
             _ => unreachable!(),
         }
@@ -256,8 +263,8 @@ impl<S> Grid<S> {
         let groups_per_row = self.groups_per_row();
         match *self {
             Self::Simple(Some(ref mut g)) => {
-                let width = g.width;
-                let height = g.height;
+                let width = g.width();
+                let height = g.height();
                 for y in 0..height {
                     for x in 0..width {
                         f(x, y, &mut g.buf_mut()[y * width + x]);
@@ -271,8 +278,8 @@ impl<S> Grid<S> {
                     let group_col = group_idx % groups_per_row;
                     let base_x = group_col * gw;
                     let base_y = group_row * gh;
-                    let width = g.width;
-                    let height = g.height;
+                    let width = g.width();
+                    let height = g.height();
                     for y in 0..height {
                         for x in 0..width {
                             f(base_x + x, base_y + y, &mut g.buf_mut()[y * width + x]);
@@ -297,8 +304,8 @@ impl<S> Grid<S> {
         });
 
         for (a, b, c) in it {
-            let width = a.width;
-            let height = a.height;
+            let width = a.width();
+            let height = a.height();
             for y in 0..height {
                 for x in 0..width {
                     let a = a.get_mut(x, y).unwrap();
@@ -376,14 +383,16 @@ impl<S: Default + Clone> Grid<S> {
                 let subgrid_group = &mut subgrid_groups[subgrid_group_idx];
 
                 if let Some(subgrid_group) = subgrid_group.take() {
-                    if gw == subgrid_group.width && gh == subgrid_group.height {
+                    let subgrid_group_width = subgrid_group.width();
+                    let subgrid_group_height = subgrid_group.height();
+                    if gw == subgrid_group_width && gh == subgrid_group_height {
                         *target_group = Some(subgrid_group);
                     } else {
                         let target_group = target_group
                             .get_or_insert_with(|| SimpleGrid::new(gw, gh));
-                        for (idx, sample) in subgrid_group.buf.into_iter().skip(subgrid_group.offset).enumerate() {
-                            let y = idx / subgrid_group.width;
-                            let x = idx % subgrid_group.width;
+                        for (idx, sample) in subgrid_group.into_buf_iter().enumerate() {
+                            let y = idx / subgrid_group_width;
+                            let x = idx % subgrid_group_width;
                             *target_group.get_mut(x, y).unwrap() = sample;
                         }
                     }
@@ -436,75 +445,5 @@ impl<S> Subgrid<'_, S> {
             return None;
         }
         self.grid.get(self.left + x, self.top + y)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SimpleGrid<S> {
-    width: usize,
-    height: usize,
-    offset: usize,
-    buf: Vec<S>,
-}
-
-impl<S: Default + Clone> SimpleGrid<S> {
-    pub fn new(width: usize, height: usize) -> Self {
-        let len = width * height;
-        let mut buf = vec![S::default(); len];
-
-        let extra = buf.as_ptr() as usize & 31;
-        let offset = (32 - extra) % 32;
-        buf.resize(buf.len() + offset, S::default());
-        Self {
-            width,
-            height,
-            offset,
-            buf,
-        }
-    }
-}
-
-impl<S> SimpleGrid<S> {
-    #[inline]
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-
-        Some(&self.buf[y * self.width + x + self.offset])
-    }
-
-    #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-
-        Some(&mut self.buf[y * self.width + x + self.offset])
-    }
-
-    #[inline]
-    pub fn buf(&self) -> &[S] {
-        &self.buf[self.offset..]
-    }
-
-    #[inline]
-    pub fn buf_mut(&mut self) -> &mut [S] {
-        &mut self.buf[self.offset..]
-    }
-
-    #[inline]
-    pub fn reinterpret_transposed(&mut self) {
-        std::mem::swap(&mut self.width, &mut self.height);
     }
 }
