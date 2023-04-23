@@ -344,7 +344,26 @@ impl<'f> ContextInner<'f> {
         }
 
         Ok(if frame.header().resets_canvas {
-            ret
+            let mut cropped = Vec::with_capacity(ret.len());
+            let l = (-frame.header().x0) as usize;
+            let t = (-frame.header().y0) as usize;
+            let w = self.width() as usize;
+            let h = self.height() as usize;
+            for g in ret {
+                if g.width() == w && g.height() == h {
+                    cropped.push(g);
+                    continue;
+                }
+
+                let mut new_grid = SimpleGrid::new(w, h);
+                for (idx, v) in new_grid.buf_mut().iter_mut().enumerate() {
+                    let y = idx / w;
+                    let x = idx % w;
+                    *v = *g.get(x + l, y + t).unwrap();
+                }
+                cropped.push(new_grid);
+            }
+            cropped
         } else {
             blend::blend(self.image_header, reference_frames.refs, frame, &ret)
         })
