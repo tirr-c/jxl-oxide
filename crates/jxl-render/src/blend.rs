@@ -1,6 +1,6 @@
 use jxl_frame::{
     data::{BlendingModeInformation, PatchRef, continuous_idct, Spline, erf},
-    header::BlendingInfo,
+    header::{BlendMode as FrameBlendMode, BlendingInfo},
     Frame,
 };
 use jxl_grid::SimpleGrid;
@@ -10,10 +10,10 @@ use jxl_image::Headers;
 enum BlendMode<'a> {
     Replace,
     Add,
-    Mul,
+    Mul(bool),
     Blend(BlendAlpha<'a>),
     MulAdd(BlendAlpha<'a>),
-    MixAlpha,
+    MixAlpha(bool),
 }
 
 #[derive(Debug)]
@@ -25,13 +25,22 @@ struct BlendParams<'a> {
     height: usize,
 }
 
-#[derive(Debug)]
 struct BlendAlpha<'a> {
     base: Option<&'a SimpleGrid<f32>>,
     new: &'a SimpleGrid<f32>,
     clamp: bool,
     swapped: bool,
     premultiplied: bool,
+}
+
+impl std::fmt::Debug for BlendAlpha<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlendAlpha")
+            .field("clamp", &self.clamp)
+            .field("swapped", &self.swapped)
+            .field("premultiplied", &self.premultiplied)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> BlendParams<'a> {
@@ -41,8 +50,6 @@ impl<'a> BlendParams<'a> {
         new_alpha: Option<&'a SimpleGrid<f32>>,
         premultiplied: Option<bool>,
     ) -> Self {
-        use jxl_frame::header::BlendMode as FrameBlendMode;
-
         let mode = match blending_info.mode {
             FrameBlendMode::Replace => BlendMode::Replace,
             FrameBlendMode::Add => BlendMode::Add,
@@ -64,7 +71,7 @@ impl<'a> BlendParams<'a> {
                     premultiplied: premultiplied.unwrap(),
                 })
             },
-            FrameBlendMode::Mul => BlendMode::Mul,
+            FrameBlendMode::Mul => BlendMode::Mul(blending_info.clamp),
         };
 
         Self {
@@ -88,7 +95,7 @@ impl<'a> BlendParams<'a> {
             PatchBlendMode::None => return None,
             PatchBlendMode::Replace => BlendMode::Replace,
             PatchBlendMode::Add => BlendMode::Add,
-            PatchBlendMode::Mul => BlendMode::Mul,
+            PatchBlendMode::Mul => BlendMode::Mul(blending_info.clamp),
             PatchBlendMode::BlendAbove | PatchBlendMode::BlendBelow => {
                 let swapped = blending_info.mode == PatchBlendMode::BlendBelow;
                 BlendMode::Blend(BlendAlpha {
@@ -182,15 +189,20 @@ pub fn blend(
             } else {
                 &empty_grid
             };
+            output_grid.push(base_grid.clone());
+
+            if blending_info.mode == FrameBlendMode::MulAdd {
+                continue;
+            }
+
             let blend_params = BlendParams {
-                mode: BlendMode::MixAlpha,
+                mode: BlendMode::MixAlpha(blending_info.clamp),
                 base_topleft: (base_x, base_y),
                 new_topleft: (new_x, new_y),
                 width,
                 height,
             };
 
-            output_grid.push(base_grid.clone());
             let base_grid = &mut output_grid[idx];
             blend_single(base_grid, &new_grid[idx], &blend_params);
             continue;
@@ -281,8 +293,23 @@ pub fn patch(
 
         for (idx, blending_info) in [&target.blending[0]; 3].into_iter().chain(&target.blending[1..]).enumerate() {
             if used_as_alpha[idx] {
+                if blending_info.mode == PatchBlendMode::MulAddAbove {
+                    continue;
+                }
+                if blending_info.mode == PatchBlendMode::MulAddBelow {
+                    let blend_params = BlendParams {
+                        mode: BlendMode::Replace,
+                        base_topleft: (base_x, base_y),
+                        new_topleft: (new_x, new_y),
+                        width,
+                        height,
+                    };
+                    blend_single(&mut base_grid[idx], &patch_ref_grid[idx], &blend_params);
+                    continue;
+                }
+
                 let blend_params = BlendParams {
-                    mode: BlendMode::MixAlpha,
+                    mode: BlendMode::MixAlpha(blending_info.clamp),
                     base_topleft: (base_x, base_y),
                     new_topleft: (new_x, new_y),
                     width,
@@ -394,6 +421,7 @@ pub fn spline(
 }
 
 fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {
+    tracing::trace!(blend_params = format_args!("{:?}", blend_params));
     let &BlendParams {
         ref mode,
         base_topleft: (base_x, base_y),
@@ -430,14 +458,18 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                 }
             }
         },
-        BlendMode::Mul => {
+        BlendMode::Mul(clamp) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
                 for dx in 0..width {
                     let base_buf_x = base_x + dx;
                     let new_buf_x = new_x + dx;
-                    base_buf[base_buf_y * base_stride + base_buf_x] *= new_buf[new_buf_y * new_stride + new_buf_x];
+                    let mut new_sample = new_buf[new_buf_y * new_stride + new_buf_x];
+                    if *clamp {
+                        new_sample = new_sample.clamp(0.0, 1.0);
+                    }
+                    base_buf[base_buf_y * base_stride + base_buf_x] *= new_sample;
                 }
             }
         },
@@ -456,18 +488,21 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
 
                     let base_sample;
                     let new_sample;
+                    let base_alpha;
+                    let mut new_alpha;
                     if alpha.swapped {
                         base_sample = new_buf[new_idx];
                         new_sample = base_buf[base_idx];
+                        base_alpha = new_alpha_buf[new_idx];
+                        new_alpha = base_alpha_buf.map(|b| b[base_idx]).unwrap_or(0.0);
                     } else {
                         base_sample = base_buf[base_idx];
                         new_sample = new_buf[new_idx];
+                        base_alpha = base_alpha_buf.map(|b| b[base_idx]).unwrap_or(0.0);
+                        new_alpha = new_alpha_buf[new_idx];
                     }
 
-                    let mut base_alpha = base_alpha_buf.map(|b| b[base_idx]).unwrap_or(0.0);
-                    let mut new_alpha = new_alpha_buf[new_idx];
                     if alpha.clamp {
-                        base_alpha = base_alpha.clamp(0.0, 1.0);
                         new_alpha = new_alpha.clamp(0.0, 1.0);
                     }
 
@@ -495,27 +530,24 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
 
                     let base_sample;
                     let new_sample;
+                    let mut new_alpha;
                     if alpha.swapped {
                         base_sample = new_buf[new_idx];
                         new_sample = base_buf[base_idx];
+                        new_alpha = base_alpha_buf.map(|b| b[base_idx]).unwrap_or(0.0);
                     } else {
                         base_sample = base_buf[base_idx];
                         new_sample = new_buf[new_idx];
+                        new_alpha = new_alpha_buf[new_idx];
                     }
 
-                    let mut base_alpha = base_alpha_buf.map(|b| b[base_idx]).unwrap_or(0.0);
-                    let mut new_alpha = new_alpha_buf[new_idx];
-                    if alpha.clamp {
-                        base_alpha = base_alpha.clamp(0.0, 1.0);
-                        new_alpha = new_alpha.clamp(0.0, 1.0);
-                    }
+                    new_alpha = new_alpha.clamp(0.0, 1.0);
 
-                    let mixed_alpha = base_alpha + new_alpha * (1.0 - base_alpha);
-                    base_buf[base_idx] = base_sample + mixed_alpha * new_sample;
+                    base_buf[base_idx] = base_sample + new_alpha * new_sample;
                 }
             }
         },
-        BlendMode::MixAlpha => {
+        BlendMode::MixAlpha(clamp) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -525,7 +557,12 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
 
                     let base_idx = base_buf_y * base_stride + base_buf_x;
                     let base = base_buf[base_idx];
-                    base_buf[base_idx] = base + new_buf[new_buf_y * new_stride + new_buf_x] * (1.0 - base);
+                    let mut new = new_buf[new_buf_y * new_stride + new_buf_x];
+                    if *clamp {
+                        new = new.clamp(0.0, 1.0);
+                    }
+
+                    base_buf[base_idx] = base + new * (1.0 - base);
                 }
             }
         },
