@@ -18,12 +18,12 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
 
 pub fn linear_to_bt709(samples: &mut [f32]) {
     for s in samples {
-        let a = s.abs();
+        let a = *s;
         *s = if a <= 0.018f32 {
             4.5 * a
         } else {
             1.099 * a.powf(0.45) - 0.099
-        }.copysign(*s);
+        };
     }
 }
 
