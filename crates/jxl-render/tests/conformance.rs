@@ -235,6 +235,7 @@ conformance_test! {
 }
 
 conformance_test! {
+    #[ignore = "conformance test is not updated yet"]
     blendmodes(
         "dfb94f997c30984cb6ccdc66be353a18b34f1bd98268d6419b8ecf28917d8cb5",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",

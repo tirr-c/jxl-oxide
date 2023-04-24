@@ -541,7 +541,9 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                         new_alpha = new_alpha_buf[new_idx];
                     }
 
-                    new_alpha = new_alpha.clamp(0.0, 1.0);
+                    if alpha.clamp {
+                        new_alpha = new_alpha.clamp(0.0, 1.0);
+                    }
 
                     base_buf[base_idx] = base_sample + new_alpha * new_sample;
                 }
