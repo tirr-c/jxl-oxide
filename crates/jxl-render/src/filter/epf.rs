@@ -40,15 +40,20 @@ fn epf_step(
             let x8 = x / 8;
             let sigma_val = *sigma_grid.get(x8, y8).unwrap();
             if sigma_val < 0.3 {
+                for (&input, ch) in input.iter().zip(&mut output) {
+                    let input_ch = input.buf();
+                    let output_ch = ch.buf_mut();
+                    output_ch[y * width + x] = input_ch[y * width + x];
+                }
                 continue;
             }
             let is_border = is_y_border || (x % 8) == 0 || (x % 8) == 7;
 
-            let mut sum_weights = weight(0.0f32, sigma_val, step_multiplier);
+            let mut sum_weights = 1.0f32;
             let mut sum_channels = [0.0f32; 3];
             for (sum, ch) in sum_channels.iter_mut().zip(input) {
                 let ch = ch.buf();
-                *sum = ch[y * width + x] * sum_weights;
+                *sum = ch[y * width + x];
             }
 
             for &(dx, dy) in kernel_coords {

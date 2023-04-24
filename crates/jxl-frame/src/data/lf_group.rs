@@ -171,17 +171,18 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
                 if !block_info.get(x, y).unwrap().is_occupied() {
                     let dct_select = *block_info_raw.get(data_idx, 0).unwrap();
                     let dct_select = TransformType::try_from(dct_select as u8)?;
-                    let hf_mul = *block_info_raw.get(data_idx, 1).unwrap();
+                    let mul = *block_info_raw.get(data_idx, 1).unwrap();
+                    let hf_mul = mul + 1;
                     let (dw, dh) = dct_select.dct_select_size();
 
-                    let epf = epf.map(|(quant_mul, sharp_lut)| ((hf_mul + 1) as f32 * quant_mul, sharp_lut));
+                    let epf = epf.map(|(quant_mul, sharp_lut)| (hf_mul as f32 * quant_mul, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
                             debug_assert!(!block_info.get(x + dx, y + dy).unwrap().is_occupied());
                             block_info.set(x + dx, y + dy, if dx == 0 && dy == 0 {
                                 BlockInfo::Data {
                                     dct_select,
-                                    hf_mul: hf_mul + 1,
+                                    hf_mul,
                                 }
                             } else {
                                 BlockInfo::Occupied
