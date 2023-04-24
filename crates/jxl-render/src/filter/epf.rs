@@ -15,7 +15,7 @@ fn mirror(x: isize, size: usize) -> usize {
 }
 
 fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
-    let inv_sigma = step_multiplier * 6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma;
+    let inv_sigma = step_multiplier * 6.6 * (1.0 - std::f32::consts::FRAC_1_SQRT_2) / sigma;
     (1.0 - scaled_distance * inv_sigma).max(0.0)
 }
 
@@ -76,14 +76,17 @@ fn epf_step(
                 }
 
                 let weight = weight(
-                    dist * if is_border { border_sad_mul } else { 1.0 },
+                    dist,
                     sigma_val,
-                    step_multiplier,
+                    step_multiplier * if is_border { border_sad_mul } else { 1.0 },
                 );
                 sum_weights += weight;
+
+                let tx = mirror(tx, width);
+                let ty = mirror(ty, height);
                 for (sum, ch) in sum_channels.iter_mut().zip(input) {
                     let ch = ch.buf();
-                    *sum += ch[y * width + x] * weight;
+                    *sum += ch[ty * width + tx] * weight;
                 }
             }
 

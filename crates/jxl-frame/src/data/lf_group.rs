@@ -1,7 +1,7 @@
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
 use jxl_grid::Grid;
 use jxl_modular::{ChannelShift, ModularChannelParams, Modular, ModularParams};
-use jxl_vardct::TransformType;
+use jxl_vardct::{TransformType, Quantizer};
 
 use crate::{
     FrameHeader,
@@ -15,6 +15,7 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub struct LfGroupParams<'a> {
     frame_header: &'a FrameHeader,
+    quantizer: Option<&'a Quantizer>,
     gmodular: &'a GlobalModular,
     lf_group_idx: u32,
 }
@@ -23,6 +24,7 @@ impl<'a> LfGroupParams<'a> {
     pub fn new(frame_header: &'a FrameHeader, lf_global: &'a LfGlobal, lf_group_idx: u32) -> Self {
         Self {
             frame_header,
+            quantizer: lf_global.vardct.as_ref().map(|vardct| &vardct.quantizer),
             gmodular: &lf_global.gmodular,
             lf_group_idx,
         }
@@ -65,7 +67,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
     type Error = crate::Error;
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: LfGroupParams<'_>) -> Result<Self> {
-        let LfGroupParams { frame_header, gmodular, lf_group_idx } = params;
+        let LfGroupParams { frame_header, gmodular, lf_group_idx, .. } = params;
 
         let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
             .then(|| read_bits!(bitstream, Bundle(LfCoeff), params))
@@ -155,7 +157,8 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         let sharpness = image_iter.next().unwrap();
         let mut epf_sigma = Grid::new_similar(&sharpness);
         let epf = if let EdgePreservingFilter::Enabled { sigma, sharp_lut, .. } = &group_params.frame_header.restoration_filter.epf {
-            Some((sigma.quant_mul, sharp_lut))
+            let quantizer = group_params.quantizer.unwrap();
+            Some((sigma.quant_mul * 65536.0 / quantizer.global_scale as f32, sharp_lut))
         } else {
             None
         };
@@ -175,7 +178,7 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
                     let hf_mul = mul + 1;
                     let (dw, dh) = dct_select.dct_select_size();
 
-                    let epf = epf.map(|(quant_mul, sharp_lut)| (hf_mul as f32 * quant_mul, sharp_lut));
+                    let epf = epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
                             debug_assert!(!block_info.get(x + dx, y + dy).unwrap().is_occupied());
