@@ -508,16 +508,8 @@ impl<'f> ContextInner<'f> {
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
         ];
-        let mut buffers = {
-            let [a, b, c] = &mut fb_xyb;
-            [a, b, c]
-        };
-        if xyb_encoded {
-            // Make Y'X'B' to X'Y'B'
-            buffers.swap(0, 1);
-        }
 
-        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(buffers.iter_mut()) {
+        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.iter_mut()) {
             let buffer = buffer.buf_mut();
             let (gw, gh) = g.group_dim();
             let group_stride = g.groups_per_row();
@@ -546,7 +538,9 @@ impl<'f> ContextInner<'f> {
         }
 
         if xyb_encoded {
-            let [y, x, b] = buffers;
+            // Make Y'X'B' to X'Y'B'
+            fb_xyb.swap(0, 1);
+            let [x, y, b] = &mut fb_xyb;
             let x = x.buf_mut();
             let y = y.buf_mut();
             let b = b.buf_mut();
