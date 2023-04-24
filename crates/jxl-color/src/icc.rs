@@ -369,6 +369,8 @@ fn append_multiple_tags_with_data(
         });
     }
     data_out.extend_from_slice(data);
+    // Align to 4 bytes
+    data_out.resize((data_out.len() + 3) & (!3), 0);
 }
 
 fn create_mluc(locale: [u8; 4], strings: &[&str]) -> Vec<u8> {
@@ -376,12 +378,12 @@ fn create_mluc(locale: [u8; 4], strings: &[&str]) -> Vec<u8> {
     let mut data = Vec::new();
     out.extend_from_slice(&(strings.len() as u32).to_be_bytes());
     out.extend_from_slice(&[0, 0, 0, 0xc]);
-    out.extend_from_slice(&locale);
     for s in strings {
         let offset = data.len() as u32;
         data.extend(s.encode_utf16());
+        out.extend_from_slice(&locale);
         out.extend_from_slice(&((data.len() as u32 - offset) * 2).to_be_bytes());
-        out.extend_from_slice(&(0x14 + offset * 2).to_be_bytes());
+        out.extend_from_slice(&(0x14 + strings.len() as u32 * 12 + offset * 2).to_be_bytes());
     }
     for c in data {
         let b = c.to_be_bytes();

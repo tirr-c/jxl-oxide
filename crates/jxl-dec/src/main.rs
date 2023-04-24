@@ -238,7 +238,7 @@ fn main() {
         if let Some((icc, cicp)) = icc_cicp {
             tracing::debug!("Embedding ICC profile");
             let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&icc, 7);
-            let mut iccp_chunk_data = vec![b' ', 0, 0];
+            let mut iccp_chunk_data = vec![b'0', 0, 0];
             iccp_chunk_data.extend(compressed_icc);
             writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
 
