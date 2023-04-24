@@ -3,15 +3,12 @@ use jxl_grid::SimpleGrid;
 pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
     tracing::debug!("Running gaborish");
 
-    let mut weights_yxb = weights_xyb;
-    weights_yxb.swap(0, 1);
-
     let width = fb[0].width();
     let height = fb[0].height();
     let mut ud_sums = Vec::with_capacity(width * height);
 
     let buffers = fb.map(|g| g.buf_mut());
-    for (c, [weight1, weight2]) in buffers.into_iter().zip(weights_yxb) {
+    for (c, [weight1, weight2]) in buffers.into_iter().zip(weights_xyb) {
         ud_sums.clear();
         let rows: Vec<_> = c.chunks_exact(width).collect();
 
@@ -27,7 +24,7 @@ pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3
         for y in 0..height {
             let mut left = c[y * width];
             for x in 0..width {
-                let x_l = x.saturating_sub(0);
+                let x_l = x.saturating_sub(1);
                 let x_r = (x + 1).min(width - 1);
                 let side = left + c[y * width + x_r] + ud_sums[y * width + x];
                 let diag = ud_sums[y * width + x_l] + ud_sums[y * width + x_r];
