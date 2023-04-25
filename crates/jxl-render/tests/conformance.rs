@@ -214,7 +214,6 @@ conformance_test! {
 }
 
 conformance_test! {
-    #[ignore = "high error on some pixels"]
     bike(
         "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
         "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",

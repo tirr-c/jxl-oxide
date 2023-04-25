@@ -1,9 +1,6 @@
 use jxl_color::OpsinInverseMatrix;
-use jxl_frame::{
-    data::{LfCoeff, CoeffData},
-    FrameHeader,
-};
-use jxl_grid::{CutGrid, Grid, Subgrid, SimpleGrid};
+use jxl_frame::data::{LfCoeff, CoeffData};
+use jxl_grid::{CutGrid, Grid, SimpleGrid};
 use jxl_vardct::{
     LfChannelDequantization,
     Quantizer,
@@ -17,14 +14,10 @@ mod transform;
 pub use transform::transform;
 
 pub fn dequant_lf(
-    frame_header: &FrameHeader,
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
     lf_coeff: &LfCoeff,
 ) -> [Grid<f32>; 3] { // [x, y, b]
-    let subsampled = frame_header.jpeg_upsampling.into_iter().any(|x| x != 0);
-    let do_smoothing = !frame_header.flags.skip_adaptive_lf_smoothing();
-
     let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
@@ -32,6 +25,7 @@ pub fn dequant_lf(
 
     let precision_scale = (-(lf_coeff.extra_precision as f32)).exp2();
     let channel_data = lf_coeff.lf_quant.image().channel_data();
+    tracing::trace!(val0 = channel_data[1].get(203, 229), val1 = channel_data[0].get(203, 229), val2 = channel_data[2].get(203, 229));
 
     // the first two channels are flipped (YXB)
     let mut it = [1, 0, 2].into_iter().zip(lf)
@@ -55,35 +49,50 @@ pub fn dequant_lf(
         it.next().unwrap(),
     ];
 
-    if !do_smoothing {
-        return dq_channels;
-    }
-    if subsampled {
-        panic!();
-    }
+    tracing::trace!(val0 = dq_channels[0].get(203, 229), val1 = dq_channels[1].get(203, 229), val2 = dq_channels[2].get(203, 229));
+    dq_channels
+}
 
+pub fn adaptive_lf_smoothing(
+    lf_image: &[Grid<f32>; 3],
+    out: &mut [SimpleGrid<f32>; 3],
+    lf_dequant: &LfChannelDequantization,
+    quantizer: &Quantizer,
+) {
     // smoothing
     const SCALE_SELF: f32 = 0.052262735;
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
-    let mut out = dq_channels.clone();
+    let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
+    let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
+    let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
+
     let width = out[0].width();
     let height = out[0].height();
 
-    for y in 1..(height - 1) {
-        for x in 1..(width - 1) {
+    for y in 0..height {
+        for x in 0..width {
+            if x == 0 || y == 0 || x == width - 1 || y == height - 1 {
+                out[0].buf_mut()[y * width + x] = lf_image[0].get(x, y).copied().unwrap_or(0.0);
+                out[1].buf_mut()[y * width + x] = lf_image[1].get(x, y).copied().unwrap_or(0.0);
+                out[2].buf_mut()[y * width + x] = lf_image[2].get(x, y).copied().unwrap_or(0.0);
+                continue;
+            }
+
             let mut s_self = [0.0f32; 3];
             let mut s_side = [0.0f32; 3];
             let mut s_diag = [0.0f32; 3];
-            for (idx, g) in dq_channels.iter().enumerate() {
-                let g = g.as_simple().unwrap();
-                let stride = g.width();
-                let g = g.buf();
-                let base_idx = y * stride + x;
-                s_self[idx] = g[base_idx];
-                s_side[idx] = g[base_idx - 1] + g[base_idx - stride] + g[base_idx + 1] + g[base_idx + stride];
-                s_diag[idx] = g[base_idx - stride - 1] + g[base_idx - stride + 1] + g[base_idx + stride - 1] + g[base_idx + stride + 1];
+            for (idx, g) in lf_image.iter().enumerate() {
+                s_self[idx] = g.get(x, y).copied().unwrap_or(0.0);
+                s_side[idx] = g.get(x, y - 1).copied().unwrap_or(0.0)
+                    + g.get(x - 1, y).copied().unwrap_or(0.0)
+                    + g.get(x + 1, y).copied().unwrap_or(0.0)
+                    + g.get(x, y + 1).copied().unwrap_or(0.0);
+                s_diag[idx] = g.get(x - 1, y - 1).copied().unwrap_or(0.0)
+                    + g.get(x + 1, y - 1).copied().unwrap_or(0.0)
+                    + g.get(x - 1, y + 1).copied().unwrap_or(0.0)
+                    + g.get(x + 1, y + 1).copied().unwrap_or(0.0);
             }
             let wa = [
                 s_self[0] * SCALE_SELF + s_side[0] * SCALE_SIDE + s_diag[0] * SCALE_DIAG,
@@ -98,12 +107,10 @@ pub fn dequant_lf(
             let gap = gap_t.into_iter().fold(0.5f32, |acc, v| acc.max(v));
             let gap_scale = (3.0 - 4.0 * gap).max(0.0);
             for ((g, wa), s) in out.iter_mut().zip(wa).zip(s_self) {
-                g.set(x, y, (wa - s) * gap_scale + s);
+                g.buf_mut()[y * width + x] = (wa - s) * gap_scale + s;
             }
         }
     }
-
-    out
 }
 
 pub fn dequant_hf_varblock(
@@ -228,7 +235,9 @@ pub fn chroma_from_luma_hf(
 }
 
 pub fn llf_from_lf(
-    lf: Subgrid<'_, f32>,
+    lf: &SimpleGrid<f32>,
+    left: usize,
+    top: usize,
     dct_select: TransformType,
 ) -> SimpleGrid<f32> {
     use TransformType::*;
@@ -244,19 +253,17 @@ pub fn llf_from_lf(
     let (bw, bh) = dct_select.dct_select_size();
     let bw = bw as usize;
     let bh = bh as usize;
-    debug_assert_eq!(bw, lf.width());
-    debug_assert_eq!(bh, lf.height());
 
     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
         debug_assert_eq!(bw * bh, 1);
         let mut out = SimpleGrid::new(1, 1);
-        out.buf_mut()[0] = *lf.get(0, 0).unwrap();
+        out.buf_mut()[0] = *lf.get(left, top).unwrap();
         out
     } else {
         let mut out = SimpleGrid::new(bw, bh);
         for y in 0..bh {
             for x in 0..bw {
-                out.buf_mut()[y * bw + x] = *lf.get(x, y).unwrap();
+                out.buf_mut()[y * bw + x] = *lf.get(left + x, top + y).unwrap();
             }
         }
         dct_2d(&mut out);
