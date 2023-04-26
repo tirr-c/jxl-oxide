@@ -343,7 +343,9 @@ impl<'f> ContextInner<'f> {
             frame.transform_color(&mut ret);
         }
 
-        Ok(if frame.header().resets_canvas {
+        Ok(if !frame.header().frame_type.is_normal_frame() {
+            ret
+        } else if frame.header().resets_canvas {
             let mut cropped = Vec::with_capacity(ret.len());
             let l = (-frame.header().x0) as usize;
             let t = (-frame.header().y0) as usize;
