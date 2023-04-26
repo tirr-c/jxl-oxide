@@ -202,6 +202,20 @@ impl Bundle<&crate::FrameHeader> for Toc {
             out
         };
 
+        let (offsets, sizes, bitstream_order) = if permutated_toc {
+            let mut bitstream_order = vec![0usize; permutation.len()];
+            let mut offsets_out = Vec::with_capacity(permutation.len());
+            let mut sizes_out = Vec::with_capacity(permutation.len());
+            for (idx, perm) in permutation.into_iter().enumerate() {
+                offsets_out.push(offsets[perm]);
+                sizes_out.push(sizes[perm]);
+                bitstream_order[perm] = idx;
+            }
+            (offsets_out, sizes_out, bitstream_order)
+        } else {
+            (offsets, sizes, Vec::new())
+        };
+
         let groups = sizes
             .into_iter()
             .zip(offsets)
@@ -212,11 +226,6 @@ impl Bundle<&crate::FrameHeader> for Toc {
                 size,
             })
             .collect::<Vec<_>>();
-        let bitstream_order = if permutated_toc {
-            permutation
-        } else {
-            Vec::new()
-        };
 
         Ok(Self {
             num_lf_groups: ctx.num_lf_groups() as usize,
