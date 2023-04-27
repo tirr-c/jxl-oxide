@@ -25,7 +25,6 @@ pub fn dequant_lf(
 
     let precision_scale = (-(lf_coeff.extra_precision as f32)).exp2();
     let channel_data = lf_coeff.lf_quant.image().channel_data();
-    tracing::trace!(val0 = channel_data[1].get(203, 229), val1 = channel_data[0].get(203, 229), val2 = channel_data[2].get(203, 229));
 
     // the first two channels are flipped (YXB)
     let mut it = [1, 0, 2].into_iter().zip(lf)
@@ -49,7 +48,6 @@ pub fn dequant_lf(
         it.next().unwrap(),
     ];
 
-    tracing::trace!(val0 = dq_channels[0].get(203, 229), val1 = dq_channels[1].get(203, 229), val2 = dq_channels[2].get(203, 229));
     dq_channels
 }
 
