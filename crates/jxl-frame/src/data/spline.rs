@@ -142,7 +142,7 @@ impl QuantSpline {
         base_correlations_xb: Option<(f32, f32)>,
         estimated_area: &mut u64,
     ) -> Spline {
-        let mut manhattan_distance = 0;
+        let mut manhattan_distance = 0u64;
         let mut points = Vec::with_capacity(self.points_deltas.len() + 1);
 
         let mut cur_value = self.start_point;
@@ -151,7 +151,7 @@ impl QuantSpline {
         for delta in &self.points_deltas {
             cur_delta.0 += delta.0;
             cur_delta.1 += delta.1;
-            manhattan_distance += cur_delta.0.abs() + cur_delta.1.abs();
+            manhattan_distance += (cur_delta.0.abs() + cur_delta.1.abs()) as u64;
             cur_value.0 += cur_delta.0;
             cur_value.1 += cur_delta.1;
             points.push(Point::new(cur_value.0 as f32, cur_value.1 as f32));
@@ -159,7 +159,7 @@ impl QuantSpline {
 
         let mut xyb_dct = [[0f32; 32]; 3];
         let mut sigma_dct = [0f32; 32];
-        let mut width_estimate = 0f32;
+        let mut width_estimate = 0u64;
 
         let quant_adjust = quant_adjust as f32;
         let inverted_qa = if quant_adjust >= 0.0 {
@@ -181,13 +181,33 @@ impl QuantSpline {
             xyb_dct[2][i] += corr_b * xyb_dct[1][i];
         }
 
+        // This block is only needed to check conformance with the levels
+        let log_color = {
+            let mut color_xyb = [0u64; 3];
+            for chan_idx in 0..3 {
+                for i in 0..32 {
+                    color_xyb[chan_idx] +=
+                        (self.xyb_dct[chan_idx][i].abs() as f32 * inverted_qa).ceil() as u64;
+                }
+            }
+            color_xyb[0] += corr_x.abs().ceil() as u64 * color_xyb[1];
+            color_xyb[2] += corr_b.abs().ceil() as u64 * color_xyb[1];
+            u64::max(
+                1u64,
+                log2_ceil(1u64 + color_xyb.into_iter().max().unwrap()) as u64,
+            )
+        };
+
         for i in 0..32 {
             sigma_dct[i] = self.sigma_dct[i] as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
-            let weight = f32::ceil(self.sigma_dct[i].abs() as f32 * inverted_qa);
-            width_estimate += weight * weight;
+            let weight = u64::max(
+                1u64,
+                (self.sigma_dct[i].abs() as f32 * inverted_qa).ceil() as u64,
+            );
+            width_estimate += weight * weight * log_color;
         }
 
-        *estimated_area += (width_estimate * manhattan_distance as f32) as u64;
+        *estimated_area += width_estimate * manhattan_distance;
 
         Spline {
             points,
@@ -373,4 +393,8 @@ pub fn erf(x: f32) -> f32 {
     } else {
         result
     }
+}
+
+fn log2_ceil(x: u64) -> u32 {
+    x.next_power_of_two().trailing_zeros()
 }

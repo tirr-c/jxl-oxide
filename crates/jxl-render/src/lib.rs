@@ -424,6 +424,7 @@ impl<'f> ContextInner<'f> {
         reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
     ) -> Result<()> {
         let frame_data = frame.data();
+        let frame_header = frame.header();
         let lf_global = frame_data.lf_global.as_ref().unwrap();
 
         if let Some(patches) = &lf_global.patches {
@@ -437,6 +438,7 @@ impl<'f> ContextInner<'f> {
 
         if let Some(splines) = &lf_global.splines {
             let mut estimated_area = 0;
+            let image_size = (frame_header.width * frame_header.height) as u64;
             let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
                 (
                     x.lf_chan_corr.base_correlation_x,
@@ -449,25 +451,20 @@ impl<'f> ContextInner<'f> {
                     base_correlations_xb,
                     &mut estimated_area,
                 );
+                // Maximum total_estimated_area_reached for Level 10
+                if estimated_area > (1024 * image_size + (1u64 << 32)).min(1u64 << 42) {
+                    return Err(crate::Error::Frame(
+                        jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
+                    ));
+                }
                 // Maximum total_estimated_area_reached for Level 5
-                if estimated_area
-                    > (self.image_header.size.height * self.image_header.size.width + (1 << 18)).min(1 << 22) as u64
-                {
+                if estimated_area > (8 * image_size + (1u64 << 25)).min(1u64 << 30) {
                     tracing::warn!(
                         "Large estimated_area of splines, expect slower decoding: {}",
                         estimated_area
                     );
                 }
-                // Maximum total_estimated_area_reached for Level 10
-                if estimated_area
-                    > (64 * (self.image_header.size.height * self.image_header.size.width) as u64 + (1u64 << 34))
-                        .min(1u64 << 38)
-                {
-                    return Err(crate::Error::Frame(
-                        jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
-                    ));
-                }
-                blend::spline(self.image_header, grid, spline)?;
+                blend::spline(frame_header, grid, spline)?;
             }
         }
 
