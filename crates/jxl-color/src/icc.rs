@@ -3,7 +3,18 @@ use std::io::Cursor;
 
 use jxl_bitstream::Bitstream;
 
-use crate::{ColourEncoding, Error, Result};
+use crate::{
+    consts::*,
+    tf,
+    ColourEncoding,
+    ColourSpace,
+    Error,
+    Primaries,
+    RenderingIntent,
+    Result,
+    TransferFunction,
+    WhitePoint,
+};
 
 pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
@@ -420,20 +431,26 @@ fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
 }
 
 pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8>> {
-    use crate::{
-        consts::*,
-        tf,
-        ColourSpace,
-        Primaries,
-        RenderingIntent,
-        TransferFunction,
-        WhitePoint,
-    };
+    let ColourEncoding {
+        want_icc,
+        mut colour_space,
+        mut white_point,
+        mut primaries,
+        mut tf,
+        mut rendering_intent,
+        ..
+    } = *colour_encoding;
 
-    if colour_encoding.want_icc {
-        return Err(Error::IccProfileEmbedded);
+    if want_icc {
+        // Create absolute linear sRGB profile
+        colour_space = ColourSpace::Rgb;
+        white_point = WhitePoint::D65;
+        primaries = Primaries::Srgb;
+        tf = TransferFunction::Linear;
+        rendering_intent = RenderingIntent::Absolute;
     }
-    if colour_encoding.colour_space == ColourSpace::Xyb {
+
+    if colour_space == ColourSpace::Xyb {
         todo!("ICC profile for XYB color space is not supported yet");
     }
 
@@ -462,13 +479,13 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     ];
     header.resize(128, 0);
 
-    header[16..20].copy_from_slice(match colour_encoding.colour_space {
+    header[16..20].copy_from_slice(match colour_space {
         ColourSpace::Rgb => b"RGB ",
         ColourSpace::Grey => b"GRAY",
         ColourSpace::Xyb => b"3CLR",
         ColourSpace::Unknown => b"3CLR",
     });
-    header[0x43] = match colour_encoding.rendering_intent {
+    header[0x43] = match rendering_intent {
         RenderingIntent::Perceptual => 0,
         RenderingIntent::Relative => 1,
         RenderingIntent::Saturation => 2,
@@ -479,11 +496,11 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     let mut data = Vec::new();
     let desc = format!(
         "{:?}_{:?}_{:?}_{:?}_{:?}",
-        colour_encoding.colour_space,
-        colour_encoding.rendering_intent,
-        colour_encoding.white_point,
-        colour_encoding.primaries,
-        colour_encoding.tf,
+        colour_space,
+        rendering_intent,
+        white_point,
+        primaries,
+        tf,
     );
     append_tag_with_data(
         &mut tags,
@@ -504,7 +521,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         &create_xyz([0xf6d6, 0x10000, 0xd32d]),
     );
 
-    let from_illuminant = match &colour_encoding.white_point {
+    let from_illuminant = match white_point {
         WhitePoint::D65 => illuminant::D65,
         WhitePoint::Custom(xy) => [xy.x as f32 / 1e6, xy.y as f32 / 1e6],
         WhitePoint::E => illuminant::E,
@@ -518,7 +535,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     }
     append_tag_with_data(&mut tags, &mut data, *b"chad", &chad_data);
 
-    let trc = match colour_encoding.tf {
+    let trc = match tf {
         TransferFunction::Gamma(g) => {
             let g = g as u64;
             let adj = g / 2;
@@ -546,7 +563,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         TransferFunction::Hlg => create_curv_lut(&tf::hlg_table(4096)),
     };
 
-    let primaries = match &colour_encoding.primaries {
+    let primaries = match primaries {
         Primaries::Srgb => primaries::SRGB,
         Primaries::Custom { red, green, blue } => [
             [red.x as f32 / 1e6, red.y as f32 / 1e6],
@@ -557,7 +574,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         Primaries::P3 => primaries::P3,
     };
 
-    match colour_encoding.colour_space {
+    match colour_space {
         ColourSpace::Rgb => {
             append_multiple_tags_with_data(&mut tags, &mut data, &[*b"rTRC", *b"gTRC", *b"bTRC"], &trc);
             let p_xyz = crate::convert::primaries_to_xyz_mat(primaries, from_illuminant);

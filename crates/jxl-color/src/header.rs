@@ -22,7 +22,7 @@ define_bundle! {
         pub rendering_intent: ty(Enum(RenderingIntent)) cond(!all_default && !want_icc) default(RenderingIntent::Relative),
     }
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Customxy {
         pub x: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
         pub y: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
@@ -67,7 +67,7 @@ impl ColourEncoding {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ColourSpace {
     Rgb = 0,
@@ -113,7 +113,7 @@ impl TryFrom<u32> for WhitePointDiscriminator {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum WhitePoint {
     #[default]
@@ -164,7 +164,7 @@ impl TryFrom<u32> for PrimariesDiscriminator {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum Primaries {
     #[default]
@@ -208,7 +208,7 @@ impl Primaries {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum RenderingIntent {
     Perceptual = 0,
@@ -232,7 +232,7 @@ impl TryFrom<u32> for RenderingIntent {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum TransferFunction {
     Gamma(u32) = 0,

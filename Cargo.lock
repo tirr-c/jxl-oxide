@@ -511,6 +511,7 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-render",
+ "lcms2",
  "miniz_oxide 0.7.1",
  "png",
  "tracing",

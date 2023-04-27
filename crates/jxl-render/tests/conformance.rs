@@ -81,7 +81,7 @@ fn run_test<R: std::io::Read>(
     let fb = render.render_cropped(None).expect("failed to render");
 
     let source_profile = {
-        if headers.metadata.colour_encoding.want_icc {
+        if headers.metadata.colour_encoding.want_icc && !headers.metadata.xyb_encoded {
             Profile::new_icc(render.icc()).unwrap()
         } else {
             let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
@@ -245,7 +245,6 @@ conformance_test! {
 }
 
 conformance_test! {
-    #[ignore]
     progressive(
         "5a9d25412e2393ee11632942b4b683cda3f838dd72ab2550cfffc8f34d69c852",
         "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",

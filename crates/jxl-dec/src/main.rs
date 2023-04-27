@@ -7,6 +7,7 @@ use jxl_frame::ProgressiveResult;
 use jxl_grid::Grid;
 use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
 use jxl_render::RenderContext;
+use lcms2::Profile;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -109,12 +110,17 @@ fn main() {
     let mut render = RenderContext::new(&headers);
     tracing::debug!(colour_encoding = format_args!("{:?}", headers.metadata.colour_encoding));
     let icc = render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
+    let icc = if icc.is_empty() {
+        None
+    } else {
+        Some(icc.to_vec())
+    };
     if let Some(icc_path) = &args.icc_output {
-        if icc.is_empty() {
-            tracing::warn!("Input does not have embedded ICC profile, ignoring --icc-output");
-        } else {
+        if let Some(icc) = &icc {
             tracing::info!("Writing ICC profile");
             std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
+        } else {
+            tracing::warn!("Input does not have embedded ICC profile, ignoring --icc-output");
         }
     }
 
@@ -213,8 +219,48 @@ fn main() {
             encoder.set_animated(keyframes as u32, num_plays).unwrap();
         }
 
+        let mut transform3 = None;
+        let mut transform4 = None;
         let colour_encoding = &headers.metadata.colour_encoding;
-        let icc_cicp = if colour_encoding.is_srgb() {
+        let icc_cicp = if let Some(icc) = icc {
+            if headers.metadata.xyb_encoded {
+                let source_icc = jxl_color::icc::colour_encoding_to_icc(colour_encoding).expect("failed to build ICC profile");
+                let source_profile = Profile::new_icc(&source_icc).expect("Failed to create profile from jxl-oxide ICC profile");
+
+                let target_profile = Profile::new_icc(&icc);
+                match target_profile {
+                    Err(err) => {
+                        tracing::warn!("Embedded ICC has error: {}", err);
+                        None
+                    },
+                    Ok(target_profile) => {
+                        if has_alpha_channel {
+                            let pixfmt = lcms2::PixelFormat::RGBA_FLT;
+                            transform4 = Some(lcms2::Transform::new(
+                                &source_profile,
+                                pixfmt,
+                                &target_profile,
+                                pixfmt,
+                                lcms2::Intent::RelativeColorimetric,
+                            ).expect("failed to create transform"));
+                        } else {
+                            let pixfmt = lcms2::PixelFormat::RGB_FLT;
+                            transform3 = Some(lcms2::Transform::new(
+                                &source_profile,
+                                pixfmt,
+                                &target_profile,
+                                pixfmt,
+                                lcms2::Intent::RelativeColorimetric,
+                            ).expect("failed to create transform"));
+                        }
+
+                        Some((icc, None))
+                    },
+                }
+            } else {
+                Some((icc, None))
+            }
+        } else if colour_encoding.is_srgb() {
             encoder.set_srgb(match colour_encoding.rendering_intent {
                 RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
                 RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
@@ -235,14 +281,14 @@ fn main() {
             .write_header()
             .expect("failed to write header");
 
-        if let Some((icc, cicp)) = icc_cicp {
+        if let Some((icc, cicp)) = &icc_cicp {
             tracing::debug!("Embedding ICC profile");
-            let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&icc, 7);
+            let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(icc, 7);
             let mut iccp_chunk_data = vec![b'0', 0, 0];
             iccp_chunk_data.extend(compressed_icc);
             writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
 
-            if let Some(cicp) = cicp {
+            if let Some(cicp) = *cicp {
                 tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
                 writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp).expect("failed to write cICP");
             }
@@ -274,7 +320,12 @@ fn main() {
             let mut grids = render.render_keyframe_cropped(keyframe_idx, region).unwrap();
             filter_alpha_channel(&mut grids, &headers);
             let grids = grids.into_iter().map(Grid::from).collect::<Vec<_>>();
-            let fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
+            let mut fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
+            if let Some(transform) = &transform3 {
+                transform.transform_in_place(fb.buf_grouped_mut::<3>());
+            } else if let Some(transform) = &transform4 {
+                transform.transform_in_place(fb.buf_grouped_mut::<4>());
+            }
 
             if sixteen_bits {
                 let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];

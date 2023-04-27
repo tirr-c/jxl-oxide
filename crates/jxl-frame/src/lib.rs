@@ -242,6 +242,11 @@ impl Frame<'_> {
                 metadata.tone_mapping.intensity_target,
             );
 
+            if metadata.colour_encoding.want_icc {
+                // Don't convert tf, return linear sRGB as is
+                return;
+            }
+
             jxl_color::convert_in_place(
                 grid,
                 &metadata.colour_encoding,
