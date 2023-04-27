@@ -243,3 +243,14 @@ conformance_test! {
         0.0001,
     )
 }
+
+conformance_test! {
+    #[ignore]
+    progressive(
+        "5a9d25412e2393ee11632942b4b683cda3f838dd72ab2550cfffc8f34d69c852",
+        "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",
+        3,
+        0.06,
+        0.02,
+    )
+}
