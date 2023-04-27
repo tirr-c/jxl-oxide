@@ -218,8 +218,8 @@ conformance_test! {
         "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
         "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",
         3,
-        0.06,
-        0.02,
+        0.007,
+        0.0001,
     )
 }
 
@@ -249,7 +249,7 @@ conformance_test! {
         "5a9d25412e2393ee11632942b4b683cda3f838dd72ab2550cfffc8f34d69c852",
         "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",
         3,
-        0.06,
         0.02,
+        0.0001,
     )
 }
