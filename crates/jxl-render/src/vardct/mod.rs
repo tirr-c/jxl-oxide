@@ -1,5 +1,5 @@
 use jxl_color::OpsinInverseMatrix;
-use jxl_frame::data::{LfCoeff, CoeffData};
+use jxl_frame::data::CoeffData;
 use jxl_grid::{CutGrid, Grid, SimpleGrid};
 use jxl_vardct::{
     LfChannelDequantization,
@@ -14,45 +14,30 @@ mod transform;
 pub use transform::transform;
 
 pub fn dequant_lf(
+    in_out_xyb: &mut [CutGrid<'_, f32>; 3],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
-    lf_coeff: &LfCoeff,
-) -> [Grid<f32>; 3] { // [x, y, b]
+    extra_precision: u8,
+) {
     let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf = [lf_x, lf_y, lf_b];
+    let precision_scale = f32::from_bits(((0x7f - extra_precision) as u32) << 23);
 
-    let precision_scale = (-(lf_coeff.extra_precision as f32)).exp2();
-    let channel_data = lf_coeff.lf_quant.image().channel_data();
-
-    // the first two channels are flipped (YXB)
-    let mut it = [1, 0, 2].into_iter().zip(lf)
-        .map(|(c, lf)| {
-            let g = &channel_data[c];
-            let width = g.width();
-            let height = g.height();
-            let mut out = Grid::new_similar(g);
-            for y in 0..height {
-                for x in 0..width {
-                    let s = *g.get(x, y).unwrap() as f32;
-                    out.set(x, y, s * lf * precision_scale);
-                }
+    for (out, lf) in in_out_xyb.iter_mut().zip(lf) {
+        let height = out.height();
+        for y in 0..height {
+            let row = out.get_row_mut(y);
+            for out in row {
+                *out *= lf * precision_scale;
             }
-            out
-        });
-
-    let dq_channels = [
-        it.next().unwrap(),
-        it.next().unwrap(),
-        it.next().unwrap(),
-    ];
-
-    dq_channels
+        }
+    }
 }
 
 pub fn adaptive_lf_smoothing(
-    lf_image: &[Grid<f32>; 3],
+    lf_image: &[SimpleGrid<f32>; 3],
     out: &mut [SimpleGrid<f32>; 3],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
@@ -66,48 +51,55 @@ pub fn adaptive_lf_smoothing(
     let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
 
-    let width = out[0].width();
-    let height = out[0].height();
+    let [in_x, in_y, in_b] = lf_image;
+    let [out_x, out_y, out_b] = out;
+    let width = out_x.width();
+    let height = out_x.height();
 
-    for y in 0..height {
-        for x in 0..width {
-            if x == 0 || y == 0 || x == width - 1 || y == height - 1 {
-                out[0].buf_mut()[y * width + x] = lf_image[0].get(x, y).copied().unwrap_or(0.0);
-                out[1].buf_mut()[y * width + x] = lf_image[1].get(x, y).copied().unwrap_or(0.0);
-                out[2].buf_mut()[y * width + x] = lf_image[2].get(x, y).copied().unwrap_or(0.0);
-                continue;
-            }
+    let in_x = in_x.buf();
+    let in_y = in_y.buf();
+    let in_b = in_b.buf();
+    let out_x = out_x.buf_mut();
+    let out_y = out_y.buf_mut();
+    let out_b = out_b.buf_mut();
 
-            let mut s_self = [0.0f32; 3];
-            let mut s_side = [0.0f32; 3];
-            let mut s_diag = [0.0f32; 3];
-            for (idx, g) in lf_image.iter().enumerate() {
-                s_self[idx] = g.get(x, y).copied().unwrap_or(0.0);
-                s_side[idx] = g.get(x, y - 1).copied().unwrap_or(0.0)
-                    + g.get(x - 1, y).copied().unwrap_or(0.0)
-                    + g.get(x + 1, y).copied().unwrap_or(0.0)
-                    + g.get(x, y + 1).copied().unwrap_or(0.0);
-                s_diag[idx] = g.get(x - 1, y - 1).copied().unwrap_or(0.0)
-                    + g.get(x + 1, y - 1).copied().unwrap_or(0.0)
-                    + g.get(x - 1, y + 1).copied().unwrap_or(0.0)
-                    + g.get(x + 1, y + 1).copied().unwrap_or(0.0);
-            }
-            let wa = [
-                s_self[0] * SCALE_SELF + s_side[0] * SCALE_SIDE + s_diag[0] * SCALE_DIAG,
-                s_self[1] * SCALE_SELF + s_side[1] * SCALE_SIDE + s_diag[1] * SCALE_DIAG,
-                s_self[2] * SCALE_SELF + s_side[2] * SCALE_SIDE + s_diag[2] * SCALE_DIAG,
-            ];
-            let gap_t = [
-                (wa[0] - s_self[0]).abs() / lf_x,
-                (wa[1] - s_self[1]).abs() / lf_y,
-                (wa[2] - s_self[2]).abs() / lf_b,
-            ];
-            let gap = gap_t.into_iter().fold(0.5f32, |acc, v| acc.max(v));
+    let compute_self_side_diag = |g: &[f32], base_idx, width| {
+        let celf = g[base_idx];
+        let side = g[base_idx - width] + g[base_idx - 1] + g[base_idx + 1] + g[base_idx + width];
+        let diag = g[base_idx - width - 1] + g[base_idx - width + 1] + g[base_idx + width - 1] + g[base_idx + width + 1];
+        (celf, side, diag)
+    };
+
+    out_x[..width].copy_from_slice(&in_x[..width]);
+    out_y[..width].copy_from_slice(&in_y[..width]);
+    out_b[..width].copy_from_slice(&in_b[..width]);
+    for y in 1..(height - 1) {
+        out_x[y * width] = in_x[y * width];
+        out_y[y * width] = in_y[y * width];
+        out_b[y * width] = in_b[y * width];
+        for x in 1..(width - 1) {
+            let base_idx = y * width + x;
+
+            let (x_self, x_side, x_diag) = compute_self_side_diag(in_x, base_idx, width);
+            let (y_self, y_side, y_diag) = compute_self_side_diag(in_y, base_idx, width);
+            let (b_self, b_side, b_diag) = compute_self_side_diag(in_b, base_idx, width);
+            let x_wa = x_self * SCALE_SELF + x_side * SCALE_SIDE + x_diag * SCALE_DIAG;
+            let y_wa = y_self * SCALE_SELF + y_side * SCALE_SIDE + y_diag * SCALE_DIAG;
+            let b_wa = b_self * SCALE_SELF + b_side * SCALE_SIDE + b_diag * SCALE_DIAG;
+            let x_gap_t = (x_wa - x_self).abs() / lf_x;
+            let y_gap_t = (y_wa - y_self).abs() / lf_y;
+            let b_gap_t = (b_wa - b_self).abs() / lf_b;
+
+            let gap = 0.5f32.max(x_gap_t).max(y_gap_t).max(b_gap_t);
             let gap_scale = (3.0 - 4.0 * gap).max(0.0);
-            for ((g, wa), s) in out.iter_mut().zip(wa).zip(s_self) {
-                g.buf_mut()[y * width + x] = (wa - s) * gap_scale + s;
-            }
+
+            out_x[base_idx] = (x_wa - x_self) * gap_scale + x_self;
+            out_y[base_idx] = (y_wa - y_self) * gap_scale + y_self;
+            out_b[base_idx] = (b_wa - b_self) * gap_scale + b_self;
         }
+        out_x[(y + 1) * width - 1] = in_x[(y + 1) * width - 1];
+        out_y[(y + 1) * width - 1] = in_y[(y + 1) * width - 1];
+        out_b[(y + 1) * width - 1] = in_b[(y + 1) * width - 1];
     }
 }
 
@@ -167,7 +159,7 @@ pub fn dequant_hf_varblock(
 }
 
 pub fn chroma_from_luma_lf(
-    coeff_xyb: &mut [Grid<f32>; 3],
+    coeff_xyb: &mut [CutGrid<'_, f32>; 3],
     lf_chan_corr: &LfChannelCorrelation,
 ) {
     let LfChannelCorrelation {
@@ -184,15 +176,18 @@ pub fn chroma_from_luma_lf(
     let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
     let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-    let mut it = coeff_xyb.iter_mut();
-    let x = it.next().unwrap();
-    let y = it.next().unwrap();
-    let b = it.next().unwrap();
-    x.zip3_mut(y, b, |x, y, b| {
-        let y = *y;
-        *x += kx * y;
-        *b += kb * y;
-    });
+    let [x, y, b] = coeff_xyb;
+    let height = x.height();
+    for row in 0..height {
+        let x = x.get_row_mut(row);
+        let y = y.get_row(row);
+        let b = b.get_row_mut(row);
+        for ((x, y), b) in x.iter_mut().zip(y).zip(b) {
+            let y = *y;
+            *x += kx * y;
+            *b += kb * y;
+        }
+    }
 }
 
 pub fn chroma_from_luma_hf(

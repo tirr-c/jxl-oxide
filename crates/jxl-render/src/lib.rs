@@ -9,7 +9,7 @@ use jxl_frame::{
     Frame,
     ProgressiveResult,
 };
-use jxl_grid::{Grid, SimpleGrid};
+use jxl_grid::{SimpleGrid, CutGrid, Grid};
 use jxl_image::{Headers, ImageMetadata};
 use jxl_modular::ChannelShift;
 
@@ -647,51 +647,58 @@ impl<'f> ContextInner<'f> {
                 continue;
             }
 
+            let group_dim = frame_header.group_dim();
             let lf_coeff = data.lf_coeff.as_ref().unwrap();
-            let mut dequant_lf = vardct::dequant_lf(
+            let quant_channel_data = lf_coeff.lf_quant.image().channel_data();
+            let [lf_x, lf_y, lf_b] = &mut cache.dequantized_lf;
+
+            let left = (group_x * group_dim) as usize;
+            let top = (group_y * group_dim) as usize;
+            let lf_x = make_cut_grid(lf_x, left, top, shifts_cbycr[0], &quant_channel_data[1]);
+            let lf_y = make_cut_grid(lf_y, left, top, shifts_cbycr[1], &quant_channel_data[0]);
+            let lf_b = make_cut_grid(lf_b, left, top, shifts_cbycr[2], &quant_channel_data[2]);
+            let mut lf = [lf_x, lf_y, lf_b];
+
+            vardct::dequant_lf(
+                &mut lf,
                 &lf_global.lf_dequant,
                 quantizer,
-                lf_coeff,
+                lf_coeff.extra_precision,
             );
             if !subsampled {
-                vardct::chroma_from_luma_lf(&mut dequant_lf, &lf_global_vardct.lf_chan_corr);
+                vardct::chroma_from_luma_lf(
+                    &mut lf,
+                    &lf_global_vardct.lf_chan_corr,
+                );
             }
 
-            let group_dim = frame_header.group_dim();
-            for ((image, mut g), shift) in cache.dequantized_lf.iter_mut().zip(dequant_lf).zip(shifts_cbycr) {
-                let left = (group_x * group_dim) as isize >> shift.hshift();
-                let top = (group_y * group_dim) as isize >> shift.vshift();
-                image.insert_subgrid(&mut g, left, top);
-            }
             lf_image_changed = true;
         }
 
-        if lf_image_changed && lf_frame.is_none() {
-            if frame_header.flags.skip_adaptive_lf_smoothing() {
-                for (image, g) in cache.smoothed_lf.iter_mut().zip(&cache.dequantized_lf) {
-                    let width = image.width();
-                    let height = image.height();
-                    let buf = image.buf_mut();
-                    for y in 0..height {
-                        for x in 0..width {
-                            buf[y * width + x] = g.get(x, y).copied().unwrap_or(0.0);
-                        }
-                    }
-                }
-            } else {
-                vardct::adaptive_lf_smoothing(
-                    &cache.dequantized_lf,
-                    &mut cache.smoothed_lf,
-                    &lf_global.lf_dequant,
-                    quantizer,
-                );
-            }
+        if lf_image_changed && lf_frame.is_none() && !frame_header.flags.skip_adaptive_lf_smoothing() {
+            let smoothed_lf = match &mut cache.smoothed_lf {
+                Some(smoothed_lf) => smoothed_lf,
+                x => {
+                    let width = cache.dequantized_lf[0].width();
+                    let height = cache.dequantized_lf[0].height();
+                    *x = Some(std::array::from_fn(|_| SimpleGrid::new(width, height)));
+                    x.as_mut().unwrap()
+                },
+            };
+            vardct::adaptive_lf_smoothing(
+                &cache.dequantized_lf,
+                smoothed_lf,
+                &lf_global.lf_dequant,
+                quantizer,
+            );
         }
 
         let dequantized_lf = if let Some(lf_frame) = lf_frame {
             lf_frame
+        } else if let Some(smoothed_lf) = &cache.smoothed_lf {
+            smoothed_lf
         } else {
-            &cache.smoothed_lf
+            &cache.dequantized_lf
         };
 
         let group_dim = frame_header.group_dim() as usize;
@@ -772,6 +779,40 @@ impl<'f> ContextInner<'f> {
             }))
         }
     }
+}
+
+fn make_cut_grid<'g>(
+    buf: &'g mut SimpleGrid<f32>,
+    left: usize,
+    top: usize,
+    shift: ChannelShift,
+    channel_data: &Grid<i32>,
+) -> CutGrid<'g, f32> {
+    let left = left >> shift.hshift();
+    let top = top >> shift.vshift();
+    let width = channel_data.width();
+    let height = channel_data.height();
+    let stride = buf.width();
+    let buf = &mut buf.buf_mut()[top * stride + left..];
+    let mut grid = CutGrid::from_buf(buf, width, height, stride);
+    if let Some(channel_data) = channel_data.as_simple() {
+        let buf = channel_data.buf();
+        for y in 0..height {
+            let row = grid.get_row_mut(y);
+            let quant = &buf[y * width..][..width];
+            for (out, &q) in row.iter_mut().zip(quant) {
+                *out = q as f32;
+            }
+        }
+    } else {
+        for y in 0..height {
+            let row = grid.get_row_mut(y);
+            for (x, out) in row.iter_mut().enumerate() {
+                *out = *channel_data.get(x, y).unwrap() as f32;
+            }
+        }
+    }
+    grid
 }
 
 #[derive(Debug)]
@@ -989,8 +1030,8 @@ impl FrameRender {
 
 #[derive(Debug)]
 struct RenderCache {
-    dequantized_lf: [Grid<f32>; 3],
-    smoothed_lf: [SimpleGrid<f32>; 3],
+    dequantized_lf: [SimpleGrid<f32>; 3],
+    smoothed_lf: Option<[SimpleGrid<f32>; 3]>,
     inserted_lf_groups: HashSet<usize>,
     group_coeffs: HashMap<usize, HfCoeff>,
     coeff_merged: HashSet<(u32, u32)>,
@@ -1006,19 +1047,15 @@ impl RenderCache {
 
         let lf_width = (frame_header.sample_width() + 7) / 8 * 8;
         let lf_height = (frame_header.sample_height() + 7) / 8 * 8;
-        let group_dim = frame_header.lf_group_dim();
-        let mut whd = [(lf_width, lf_height, group_dim, group_dim); 3];
-        for ((w, h, dw, dh), shift) in whd.iter_mut().zip(shifts_cbycr) {
+        let mut whd = [(lf_width as usize, lf_height as usize); 3];
+        for ((w, h), shift) in whd.iter_mut().zip(shifts_cbycr) {
             *w >>= shift.hshift();
             *h >>= shift.vshift();
-            *dw >>= shift.hshift();
-            *dh >>= shift.vshift();
         }
-        let dequantized_lf = whd.map(|(w, h, dw, dh)| Grid::new(w, h, dw, dh));
-        let smoothed_lf = whd.map(|(w, h, _, _)| SimpleGrid::new(w as usize, h as usize));
+        let dequantized_lf = whd.map(|(w, h)| SimpleGrid::new(w, h));
         Self {
             dequantized_lf,
-            smoothed_lf,
+            smoothed_lf: None,
             inserted_lf_groups: HashSet::new(),
             group_coeffs: HashMap::new(),
             coeff_merged: HashSet::new(),
