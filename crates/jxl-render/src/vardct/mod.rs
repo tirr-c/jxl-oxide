@@ -19,18 +19,23 @@ pub fn dequant_lf(
     quantizer: &Quantizer,
     extra_precision: u8,
 ) {
-    let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf = [lf_x, lf_y, lf_b];
-    let precision_scale = f32::from_bits(((0x7f - extra_precision) as u32) << 23);
+    debug_assert!(extra_precision < 4);
+    let precision_scale = ((9 - extra_precision) as u32) << 23;
+    let scale_inv = quantizer.global_scale * quantizer.quant_lf;
+    let lf_x = lf_dequant.m_x_lf.to_bits() + precision_scale;
+    let lf_y = lf_dequant.m_y_lf.to_bits() + precision_scale;
+    let lf_b = lf_dequant.m_b_lf.to_bits() + precision_scale;
+    let lf_x = f32::from_bits(lf_x) / scale_inv as f32;
+    let lf_y = f32::from_bits(lf_y) / scale_inv as f32;
+    let lf_b = f32::from_bits(lf_b) / scale_inv as f32;
+    let lf_scaled = [lf_x, lf_y, lf_b];
 
-    for (out, lf) in in_out_xyb.iter_mut().zip(lf) {
+    for (out, lf_scaled) in in_out_xyb.iter_mut().zip(lf_scaled) {
         let height = out.height();
         for y in 0..height {
             let row = out.get_row_mut(y);
             for out in row {
-                *out *= lf * precision_scale;
+                *out *= lf_scaled;
             }
         }
     }
@@ -47,9 +52,10 @@ pub fn adaptive_lf_smoothing(
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
-    let lf_x = 512.0 * lf_dequant.m_x_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf_y = 512.0 * lf_dequant.m_y_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
-    let lf_b = 512.0 * lf_dequant.m_b_lf / quantizer.global_scale as f32 / quantizer.quant_lf as f32;
+    let scale_inv = quantizer.global_scale * quantizer.quant_lf;
+    let lf_x = 512.0 * lf_dequant.m_x_lf / scale_inv as f32;
+    let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
+    let lf_b = 512.0 * lf_dequant.m_b_lf / scale_inv as f32;
 
     let [in_x, in_y, in_b] = lf_image;
     let [out_x, out_y, out_b] = out;
@@ -101,6 +107,9 @@ pub fn adaptive_lf_smoothing(
         out_y[(y + 1) * width - 1] = in_y[(y + 1) * width - 1];
         out_b[(y + 1) * width - 1] = in_b[(y + 1) * width - 1];
     }
+    out_x[(height - 1) * width..][..width].copy_from_slice(&in_x[(height - 1) * width..][..width]);
+    out_y[(height - 1) * width..][..width].copy_from_slice(&in_y[(height - 1) * width..][..width]);
+    out_b[(height - 1) * width..][..width].copy_from_slice(&in_b[(height - 1) * width..][..width]);
 }
 
 pub fn dequant_hf_varblock(
