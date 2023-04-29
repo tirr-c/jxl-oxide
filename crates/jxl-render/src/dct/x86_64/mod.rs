@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{CutGrid, SimdLane, SimpleGrid};
 
 use super::consts;
 use std::arch::x86_64::*;
@@ -48,7 +48,7 @@ fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, inverse: bool) {
     }
 }
 
-unsafe fn column_dct_lane(
+fn column_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
     inverse: bool,
@@ -70,7 +70,7 @@ unsafe fn column_dct_lane(
     }
 }
 
-unsafe fn row_dct_lane(
+fn row_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
     inverse: bool,
@@ -96,61 +96,55 @@ unsafe fn row_dct_lane(
     }
 
     if width == height {
-        let mut swap = |x: usize, y: usize, dy: usize| {
-            let t = io.get(x, y * LANE_SIZE + dy);
-            *io.get_mut(x, y * LANE_SIZE + dy) = io.get(y, x * LANE_SIZE + dy);
-            *io.get_mut(y, x * LANE_SIZE + dy) = t;
-        };
-
         for y in 0..height / LANE_SIZE {
             for x in (y + 1)..width / LANE_SIZE {
-                swap(x, y, 0);
-                swap(x, y, 1);
-                swap(x, y, 2);
-                swap(x, y, 3);
+                io.swap((x, y * LANE_SIZE), (y, x * LANE_SIZE));
+                io.swap((x, y * LANE_SIZE + 1), (y, x * LANE_SIZE + 1));
+                io.swap((x, y * LANE_SIZE + 2), (y, x * LANE_SIZE + 2));
+                io.swap((x, y * LANE_SIZE + 3), (y, x * LANE_SIZE + 3));
             }
         }
     }
 }
 
-unsafe fn dct4(input: [Lane; 4], inverse: bool) -> [Lane; 4] {
-    let sec0 = _mm_set1_ps(0.5411961);
-    let sec1 = _mm_set1_ps(1.306563);
+fn dct4(input: [Lane; 4], inverse: bool) -> [Lane; 4] {
+    let sec0 = Lane::splat_f32(0.5411961);
+    let sec1 = Lane::splat_f32(1.306563);
 
-    let quarter = _mm_set1_ps(0.25);
-    let sqrt2 = _mm_set1_ps(std::f32::consts::SQRT_2);
+    let quarter = Lane::splat_f32(0.25);
+    let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
     if !inverse {
-        let sum03 = _mm_add_ps(input[0], input[3]);
-        let sum12 = _mm_add_ps(input[1], input[2]);
-        let tmp0 = _mm_mul_ps(_mm_sub_ps(input[0], input[3]), sec0);
-        let tmp1 = _mm_mul_ps(_mm_sub_ps(input[1], input[2]), sec1);
-        let out0 = _mm_mul_ps(_mm_add_ps(tmp0, tmp1), quarter);
-        let out1 = _mm_mul_ps(_mm_sub_ps(tmp0, tmp1), quarter);
+        let sum03 = input[0].add(input[3]);
+        let sum12 = input[1].add(input[2]);
+        let tmp0 = input[0].sub(input[3]).mul(sec0);
+        let tmp1 = input[1].sub(input[2]).mul(sec1);
+        let out0 = tmp0.add(tmp1).mul(quarter);
+        let out1 = tmp0.sub(tmp1).mul(quarter);
 
         [
-            _mm_mul_ps(_mm_add_ps(sum03, sum12), quarter),
-            _mm_add_ps(_mm_mul_ps(out0, sqrt2), out1),
-            _mm_mul_ps(_mm_sub_ps(sum03, sum12), quarter),
+            sum03.add(sum12).mul(quarter),
+            out0.muladd(sqrt2, out1),
+            sum03.sub(sum12).mul(quarter),
             out1,
         ]
     } else {
-        let tmp0 = _mm_mul_ps(input[1], sqrt2);
-        let tmp1 = _mm_add_ps(input[1], input[3]);
-        let out0 = _mm_mul_ps(_mm_add_ps(tmp0, tmp1), sec0);
-        let out1 = _mm_mul_ps(_mm_sub_ps(tmp0, tmp1), sec1);
-        let sum02 = _mm_add_ps(input[0], input[2]);
-        let sub02 = _mm_sub_ps(input[0], input[2]);
+        let tmp0 = input[1].mul(sqrt2);
+        let tmp1 = input[1].add(input[3]);
+        let out0 = tmp0.add(tmp1).mul(sec0);
+        let out1 = tmp0.sub(tmp1).mul(sec1);
+        let sum02 = input[0].add(input[2]);
+        let sub02 = input[0].sub(input[2]);
 
         [
-            _mm_add_ps(sum02, out0),
-            _mm_add_ps(sub02, out1),
-            _mm_sub_ps(sub02, out1),
-            _mm_sub_ps(sum02, out0),
+            sum02.add(out0),
+            sub02.add(out1),
+            sub02.sub(out1),
+            sum02.sub(out0),
         ]
     }
 }
 
-unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
+fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
     let n = io.len();
     assert!(scratch.len() == n);
 
@@ -160,16 +154,17 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
     if n == 1 {
         return;
     }
+
+    let half = Lane::splat_f32(0.5);
     if n == 2 {
-        let tmp0 = _mm_add_ps(io[0], io[1]);
-        let tmp1 = _mm_sub_ps(io[0], io[1]);
+        let tmp0 = io[0].add(io[1]);
+        let tmp1 = io[0].sub(io[1]);
         if inverse {
             io[0] = tmp0;
             io[1] = tmp1;
         } else {
-            let half = _mm_set1_ps(0.5);
-            io[0] = _mm_mul_ps(tmp0, half);
-            io[1] = _mm_mul_ps(tmp1, half);
+            io[0] = tmp0.mul(half);
+            io[1] = tmp1.mul(half);
         }
         return;
     }
@@ -179,49 +174,46 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
         return;
     }
 
-    let half = _mm_set1_ps(0.5);
-    let sqrt2 = _mm_set1_ps(std::f32::consts::SQRT_2);
+    let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
     if n == 8 {
         let sec = consts::sec_half_small(8);
         if !inverse {
             let input0 = [
-                _mm_mul_ps(_mm_add_ps(io[0], io[7]), half),
-                _mm_mul_ps(_mm_add_ps(io[1], io[6]), half),
-                _mm_mul_ps(_mm_add_ps(io[2], io[5]), half),
-                _mm_mul_ps(_mm_add_ps(io[3], io[4]), half),
+                io[0].add(io[7]).mul(half),
+                io[1].add(io[6]).mul(half),
+                io[2].add(io[5]).mul(half),
+                io[3].add(io[4]).mul(half),
             ];
             let input1 = [
-                _mm_mul_ps(_mm_sub_ps(io[0], io[7]), _mm_set1_ps(sec[0] / 2.0)),
-                _mm_mul_ps(_mm_sub_ps(io[1], io[6]), _mm_set1_ps(sec[1] / 2.0)),
-                _mm_mul_ps(_mm_sub_ps(io[2], io[5]), _mm_set1_ps(sec[2] / 2.0)),
-                _mm_mul_ps(_mm_sub_ps(io[3], io[4]), _mm_set1_ps(sec[3] / 2.0)),
+                io[0].sub(io[7]).mul(Lane::splat_f32(sec[0] / 2.0)),
+                io[1].sub(io[6]).mul(Lane::splat_f32(sec[1] / 2.0)),
+                io[2].sub(io[5]).mul(Lane::splat_f32(sec[2] / 2.0)),
+                io[3].sub(io[4]).mul(Lane::splat_f32(sec[3] / 2.0)),
             ];
             let output0 = dct4(input0, false);
-            let mut output1 = dct4(input1, false);
-            output1[0] = _mm_mul_ps(output1[0], sqrt2);
-            for idx in 0..3 {
-                output1[idx] = _mm_add_ps(output1[idx], output1[idx + 1]);
-            }
             for (idx, v) in output0.into_iter().enumerate() {
                 io[idx * 2] = v;
             }
-            for (idx, v) in output1.into_iter().enumerate() {
-                io[idx * 2 + 1] = v;
+            let mut output1 = dct4(input1, false);
+            output1[0] = output1[0].mul(sqrt2);
+            for idx in 0..3 {
+                io[idx * 2 + 1] = output1[idx].add(output1[idx + 1]);
             }
+            io[7] = output1[3];
         } else {
             let input0 = [io[0], io[2], io[4], io[6]];
             let input1 = [
-                _mm_mul_ps(io[1], sqrt2),
-                _mm_add_ps(io[3], io[1]),
-                _mm_add_ps(io[5], io[3]),
-                _mm_add_ps(io[7], io[5]),
+                io[1].mul(sqrt2),
+                io[3].add(io[1]),
+                io[5].add(io[3]),
+                io[7].add(io[5]),
             ];
             let output0 = dct4(input0, true);
             let output1 = dct4(input1, true);
             for (idx, &sec) in sec.iter().enumerate() {
-                let r = _mm_mul_ps(output1[idx], _mm_set1_ps(sec));
-                io[idx] = _mm_add_ps(output0[idx], r);
-                io[7 - idx] = _mm_sub_ps(output0[idx], r);
+                let r = output1[idx].mul(Lane::splat_f32(sec));
+                io[idx] = output0[idx].add(r);
+                io[7 - idx] = output0[idx].sub(r);
             }
         }
         return;
@@ -232,38 +224,36 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
     if !inverse {
         let (input0, input1) = scratch.split_at_mut(n / 2);
         for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
-            input0[idx] = _mm_mul_ps(_mm_add_ps(io[idx], io[n - idx - 1]), half);
-            input1[idx] = _mm_mul_ps(_mm_sub_ps(io[idx], io[n - idx - 1]), _mm_set1_ps(sec / 2.0));
+            input0[idx] = io[idx].add(io[n - idx - 1]).mul(half);
+            input1[idx] = io[idx].sub(io[n - idx - 1]).mul(Lane::splat_f32(sec / 2.0));
         }
         let (output0, output1) = io.split_at_mut(n / 2);
         dct(input0, output0, false);
         dct(input1, output1, false);
-        input1[0] = _mm_mul_ps(input1[0], sqrt2);
-        for idx in 0..(n / 2 - 1) {
-            input1[idx] = _mm_add_ps(input1[idx], input1[idx + 1]);
-        }
         for (idx, v) in input0.iter().enumerate() {
             io[idx * 2] = *v;
         }
-        for (idx, v) in input1.iter().enumerate() {
-            io[idx * 2 + 1] = *v;
+        input1[0] = input1[0].mul(sqrt2);
+        for idx in 0..(n / 2 - 1) {
+            io[idx * 2 + 1] = input1[idx].add(input1[idx + 1]);
         }
+        io[n - 1] = input1[n / 2 - 1];
     } else {
         let (input0, input1) = scratch.split_at_mut(n / 2);
         for idx in 1..(n / 2) {
             let idx = n / 2 - idx;
             input0[idx] = io[idx * 2];
-            input1[idx] = _mm_add_ps(io[idx * 2 + 1], io[idx * 2 - 1]);
+            input1[idx] = io[idx * 2 + 1].add(io[idx * 2 - 1]);
         }
         input0[0] = io[0];
-        input1[0] = _mm_mul_ps(io[1], sqrt2);
+        input1[0] = io[1].mul(sqrt2);
         let (output0, output1) = io.split_at_mut(n / 2);
         dct(input0, output0, true);
         dct(input1, output1, true);
         for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
-            let r = _mm_mul_ps(input1[idx], _mm_set1_ps(sec));
-            output0[idx] = _mm_add_ps(input0[idx], r);
-            output1[n / 2 - idx - 1] = _mm_sub_ps(input0[idx], r);
+            let r = input1[idx].mul(Lane::splat_f32(sec));
+            output0[idx] = input0[idx].add(r);
+            output1[n / 2 - idx - 1] = input0[idx].sub(r);
         }
     }
 }

@@ -76,9 +76,7 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
         for bx in (0..width).step_by(block_size) {
             for dy in 0..block_size {
                 for dx in (dy + 1)..block_size {
-                    let t = io.get(bx + dx, by + dy);
-                    *io.get_mut(bx + dx, by + dy) = io.get(bx + dy, by + dx);
-                    *io.get_mut(bx + dy, by + dx) = t;
+                    io.swap((bx + dx, by + dy), (bx + dy, by + dx));
                 }
             }
         }
@@ -112,9 +110,7 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
             for bx in (0..width).step_by(block_size) {
                 for dy in 0..block_size {
                     for dx in (dy + 1)..block_size {
-                        let t = io.get(bx + dx, by + dy);
-                        *io.get_mut(bx + dx, by + dy) = io.get(bx + dy, by + dx);
-                        *io.get_mut(bx + dy, by + dx) = t;
+                        io.swap((bx + dx, by + dy), (bx + dy, by + dx));
                     }
                 }
             }

@@ -41,6 +41,9 @@ pub trait SimdLane: Copy {
     fn sub(self, lhs: Self) -> Self;
     fn mul(self, lhs: Self) -> Self;
     fn div(self, lhs: Self) -> Self;
+
+    fn muladd(self, mul: Self, add: Self) -> Self;
+    fn mulsub(self, mul: Self, sub: Self) -> Self;
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -108,5 +111,29 @@ impl SimdLane for std::arch::x86_64::__m128 {
     #[inline]
     fn div(self, lhs: Self) -> Self {
         unsafe { std::arch::x86_64::_mm_div_ps(self, lhs) }
+    }
+
+    #[inline]
+    #[cfg(target_feature = "fma")]
+    fn muladd(self, mul: Self, add: Self) -> Self {
+        unsafe { std::arch::x86_64::_mm_fmadd_ps(self, mul, add) }
+    }
+
+    #[inline]
+    #[cfg(target_feature = "fma")]
+    fn mulsub(self, mul: Self, sub: Self) -> Self {
+        unsafe { std::arch::x86_64::_mm_fmadd_ps(self, mul, sub) }
+    }
+
+    #[inline]
+    #[cfg(not(target_feature = "fma"))]
+    fn muladd(self, mul: Self, add: Self) -> Self {
+        self.mul(mul).add(add)
+    }
+
+    #[inline]
+    #[cfg(not(target_feature = "fma"))]
+    fn mulsub(self, mul: Self, sub: Self) -> Self {
+        self.mul(mul).sub(sub)
     }
 }
