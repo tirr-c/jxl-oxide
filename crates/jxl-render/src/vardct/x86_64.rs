@@ -1,4 +1,4 @@
-use super::generic::adaptive_lf_smoothing_core;
+use super::generic;
 
 pub fn adaptive_lf_smoothing_impl(
     width: usize,
@@ -14,7 +14,7 @@ pub fn adaptive_lf_smoothing_impl(
         };
     }
 
-    adaptive_lf_smoothing_core(width, height, lf_image, out, lf_scale)
+    generic::adaptive_lf_smoothing_impl(width, height, lf_image, out, lf_scale)
 }
 
 #[target_feature(enable = "avx2")]
@@ -26,5 +26,5 @@ unsafe fn adaptive_lf_smoothing_core_avx2(
     out: [&mut [f32]; 3],
     lf_scale: [f32; 3],
 ) {
-    adaptive_lf_smoothing_core(width, height, lf_image, out, lf_scale)
+    generic::adaptive_lf_smoothing_impl(width, height, lf_image, out, lf_scale)
 }

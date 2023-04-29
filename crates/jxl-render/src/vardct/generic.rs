@@ -1,5 +1,5 @@
 #[inline(always)]
-pub fn adaptive_lf_smoothing_core(
+pub fn adaptive_lf_smoothing_impl(
     width: usize,
     height: usize,
     [in_x, in_y, in_b]: [&[f32]; 3],

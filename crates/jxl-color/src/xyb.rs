@@ -26,6 +26,7 @@ pub fn perform_inverse_xyb(
     run_generic(xyb, ob, inv_mat, itscale)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
 unsafe fn run_x86_64_avx2(
