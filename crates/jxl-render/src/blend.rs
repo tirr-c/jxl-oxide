@@ -420,6 +420,10 @@ pub fn spline(
     Ok(())
 }
 
+pub fn noise(header: &jxl_frame::FrameHeader, grid: &mut [SimpleGrid<f32>], noise: &jxl_frame::data::NoiseParameters) -> crate::Result<()> {
+    todo!()
+}
+
 fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {
     tracing::trace!(blend_params = format_args!("{:?}", blend_params));
     let &BlendParams {

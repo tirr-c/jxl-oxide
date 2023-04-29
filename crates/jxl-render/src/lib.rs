@@ -1,4 +1,8 @@
-use std::{io::Read, collections::{HashSet, HashMap}};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    io::Read,
+};
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::ColourSpace;
@@ -467,8 +471,19 @@ impl<'f> ContextInner<'f> {
                 blend::spline(frame_header, grid, spline)?;
             }
         }
-
         if let Some(_noise) = &lf_global.noise {
+            if frame.header().frame_type.is_normal_frame() {
+                self.visible_frames.set(self.visible_frames.get() + 1);
+                self.invisible_frames.set(0);
+            } else {
+                self.invisible_frames.set(self.invisible_frames.get() + 1);
+            }
+            jxl_frame::data::init_noise(
+                self.visible_frames.get(),
+                self.invisible_frames.get(),
+                frame.header(),
+            );
+            blend::noise(frame.header(), grid, _noise)?;
             tracing::warn!("Noise is not supported");
         }
 
@@ -823,6 +838,8 @@ struct ContextInner<'a> {
     lf_frame: [usize; 4],
     reference: [usize; 4],
     loading_frame: Option<Frame<'a>>,
+    invisible_frames: Cell<u64>,
+    visible_frames: Cell<u64>,
 }
 
 impl<'a> ContextInner<'a> {
@@ -837,6 +854,8 @@ impl<'a> ContextInner<'a> {
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
             loading_frame: None,
+            invisible_frames: Cell::new(0),
+            visible_frames: Cell::new(0),
         }
     }
 }
