@@ -13,6 +13,15 @@ use crate::dct::dct_2d;
 mod transform;
 pub use transform::transform;
 
+#[cfg(target_arch = "x86_64")]
+mod x86_64;
+#[cfg(target_arch = "x86_64")]
+use x86_64 as impls;
+
+mod generic;
+#[cfg(not(target_arch = "x86_64"))]
+use generic as impls;
+
 pub fn dequant_lf(
     in_out_xyb: &mut [CutGrid<'_, f32>; 3],
     lf_dequant: &LfChannelDequantization,
@@ -47,11 +56,6 @@ pub fn adaptive_lf_smoothing(
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
 ) {
-    // smoothing
-    const SCALE_SELF: f32 = 0.052262735;
-    const SCALE_SIDE: f32 = 0.2034514;
-    const SCALE_DIAG: f32 = 0.03348292;
-
     let scale_inv = quantizer.global_scale * quantizer.quant_lf;
     let lf_x = 512.0 * lf_dequant.m_x_lf / scale_inv as f32;
     let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
@@ -69,47 +73,13 @@ pub fn adaptive_lf_smoothing(
     let out_y = out_y.buf_mut();
     let out_b = out_b.buf_mut();
 
-    let compute_self_side_diag = |g: &[f32], base_idx, width| {
-        let celf = g[base_idx];
-        let side = g[base_idx - width] + g[base_idx - 1] + g[base_idx + 1] + g[base_idx + width];
-        let diag = g[base_idx - width - 1] + g[base_idx - width + 1] + g[base_idx + width - 1] + g[base_idx + width + 1];
-        (celf, side, diag)
-    };
-
-    out_x[..width].copy_from_slice(&in_x[..width]);
-    out_y[..width].copy_from_slice(&in_y[..width]);
-    out_b[..width].copy_from_slice(&in_b[..width]);
-    for y in 1..(height - 1) {
-        out_x[y * width] = in_x[y * width];
-        out_y[y * width] = in_y[y * width];
-        out_b[y * width] = in_b[y * width];
-        for x in 1..(width - 1) {
-            let base_idx = y * width + x;
-
-            let (x_self, x_side, x_diag) = compute_self_side_diag(in_x, base_idx, width);
-            let (y_self, y_side, y_diag) = compute_self_side_diag(in_y, base_idx, width);
-            let (b_self, b_side, b_diag) = compute_self_side_diag(in_b, base_idx, width);
-            let x_wa = x_self * SCALE_SELF + x_side * SCALE_SIDE + x_diag * SCALE_DIAG;
-            let y_wa = y_self * SCALE_SELF + y_side * SCALE_SIDE + y_diag * SCALE_DIAG;
-            let b_wa = b_self * SCALE_SELF + b_side * SCALE_SIDE + b_diag * SCALE_DIAG;
-            let x_gap_t = (x_wa - x_self).abs() / lf_x;
-            let y_gap_t = (y_wa - y_self).abs() / lf_y;
-            let b_gap_t = (b_wa - b_self).abs() / lf_b;
-
-            let gap = 0.5f32.max(x_gap_t).max(y_gap_t).max(b_gap_t);
-            let gap_scale = (3.0 - 4.0 * gap).max(0.0);
-
-            out_x[base_idx] = (x_wa - x_self) * gap_scale + x_self;
-            out_y[base_idx] = (y_wa - y_self) * gap_scale + y_self;
-            out_b[base_idx] = (b_wa - b_self) * gap_scale + b_self;
-        }
-        out_x[(y + 1) * width - 1] = in_x[(y + 1) * width - 1];
-        out_y[(y + 1) * width - 1] = in_y[(y + 1) * width - 1];
-        out_b[(y + 1) * width - 1] = in_b[(y + 1) * width - 1];
-    }
-    out_x[(height - 1) * width..][..width].copy_from_slice(&in_x[(height - 1) * width..][..width]);
-    out_y[(height - 1) * width..][..width].copy_from_slice(&in_y[(height - 1) * width..][..width]);
-    out_b[(height - 1) * width..][..width].copy_from_slice(&in_b[(height - 1) * width..][..width]);
+    impls::adaptive_lf_smoothing_impl(
+        width,
+        height,
+        [in_x, in_y, in_b],
+        [out_x, out_y, out_b],
+        [lf_x, lf_y, lf_b],
+    );
 }
 
 pub fn dequant_hf_varblock(
