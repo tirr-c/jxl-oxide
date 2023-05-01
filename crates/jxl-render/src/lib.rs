@@ -1042,14 +1042,15 @@ impl RenderCache {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
 
-        let lf_width = (frame_header.sample_width() + 7) / 8 * 8;
-        let lf_height = (frame_header.sample_height() + 7) / 8 * 8;
-        let mut whd = [(lf_width as usize, lf_height as usize); 3];
+        let lf_width = (frame_header.sample_width() + 7) / 8;
+        let lf_height = (frame_header.sample_height() + 7) / 8;
+        let mut whd = [(lf_width, lf_height); 3];
         for ((w, h), shift) in whd.iter_mut().zip(shifts_cbycr) {
-            *w >>= shift.hshift();
-            *h >>= shift.vshift();
+            let (shift_w, shift_h) = shift.shift_size((lf_width, lf_height));
+            *w = shift_w;
+            *h = shift_h;
         }
-        let dequantized_lf = whd.map(|(w, h)| SimpleGrid::new(w, h));
+        let dequantized_lf = whd.map(|(w, h)| SimpleGrid::new(w as usize, h as usize));
         Self {
             dequantized_lf,
             smoothed_lf: None,
