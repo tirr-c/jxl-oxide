@@ -430,6 +430,12 @@ impl<'f> ContextInner<'f> {
         let frame_data = frame.data();
         let frame_header = frame.header();
         let lf_global = frame_data.lf_global.as_ref().unwrap();
+        let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
+            (
+                x.lf_chan_corr.base_correlation_x,
+                x.lf_chan_corr.base_correlation_b,
+            )
+        });
 
         if let Some(patches) = &lf_global.patches {
             for patch in &patches.patches {
@@ -443,12 +449,6 @@ impl<'f> ContextInner<'f> {
         if let Some(splines) = &lf_global.splines {
             let mut estimated_area = 0;
             let image_size = (frame_header.width * frame_header.height) as u64;
-            let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
-                (
-                    x.lf_chan_corr.base_correlation_x,
-                    x.lf_chan_corr.base_correlation_b,
-                )
-            });
             for quant_spline in &splines.quant_splines {
                 let spline = quant_spline.dequant(
                     splines.quant_adjust,
@@ -471,20 +471,19 @@ impl<'f> ContextInner<'f> {
                 blend::spline(frame_header, grid, spline)?;
             }
         }
-        if let Some(_noise) = &lf_global.noise {
+        if let Some(noise) = &lf_global.noise {
             if frame.header().frame_type.is_normal_frame() {
                 self.visible_frames.set(self.visible_frames.get() + 1);
                 self.invisible_frames.set(0);
             } else {
                 self.invisible_frames.set(self.invisible_frames.get() + 1);
             }
-            jxl_frame::data::init_noise(
+            let noise_buffer = jxl_frame::data::init_noise(
                 self.visible_frames.get(),
                 self.invisible_frames.get(),
                 frame.header(),
             );
-            blend::noise(frame.header(), grid, _noise)?;
-            tracing::warn!("Noise is not supported");
+            blend::noise(frame.header(), base_correlations_xb, grid, &noise_buffer, noise)?;
         }
 
         Ok(())

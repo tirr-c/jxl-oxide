@@ -1,5 +1,8 @@
 use jxl_frame::{
-    data::{BlendingModeInformation, PatchRef, continuous_idct, Spline, erf},
+    data::{
+        continuous_idct, erf, BlendingModeInformation, NoiseParameters, PatchRef,
+        Spline,
+    },
     header::{BlendMode as FrameBlendMode, BlendingInfo},
     Frame, FrameHeader,
 };
@@ -420,8 +423,59 @@ pub fn spline(
     Ok(())
 }
 
-pub fn noise(header: &jxl_frame::FrameHeader, grid: &mut [SimpleGrid<f32>], noise: &jxl_frame::data::NoiseParameters) -> crate::Result<()> {
-    todo!()
+pub fn noise(
+    header: &jxl_frame::FrameHeader,
+    base_correlations_xb: Option<(f32, f32)>,
+    grid: &mut [SimpleGrid<f32>],
+    noise_buffer: &[SimpleGrid<f32>],
+    params: &NoiseParameters,
+) -> crate::Result<()> {
+    let width = header.width as usize;
+    let height = header.height as usize;
+    let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
+
+    for y in 0..height {
+        for x in 0..width {
+            let grid_x = grid[0].get(x, y).unwrap();
+            let grid_y = grid[1].get(x, y).unwrap();
+            let noise_r = noise_buffer[0].get(x, y).unwrap();
+            let noise_g = noise_buffer[1].get(x, y).unwrap();
+            let noise_b = noise_buffer[2].get(x, y).unwrap();
+
+            let in_g = grid_y - grid_x;
+            let in_r = grid_x + grid_y;
+            let in_scaled_r = f32::max(0.0, in_r * 3.0);
+            let in_scaled_g = f32::max(0.0, in_g * 3.0);
+
+            let (in_int_r, in_frac_r) = if in_scaled_r >= 7.0 {
+                (6, 1.0)
+            } else {
+                (
+                    in_scaled_r.floor() as usize,
+                    in_scaled_r - in_scaled_r.floor(),
+                )
+            };
+            let (in_int_g, in_frac_g) = if in_scaled_g >= 7.0 {
+                (6, 1.0)
+            } else {
+                (
+                    in_scaled_g.floor() as usize,
+                    in_scaled_g - in_scaled_g.floor(),
+                )
+            };
+
+            let lut = params.lut;
+            let sr = (lut[in_int_r + 1] - lut[in_int_r]) * in_frac_r + lut[in_int_r];
+            let sg = (lut[in_int_g + 1] - lut[in_int_g]) * in_frac_g + lut[in_int_g];
+            let nr = 0.22 * sr * (0.0078125 * noise_r + 0.9921875 * noise_b);
+            let ng = 0.22 * sg * (0.0078125 * noise_g + 0.9921875 * noise_b);
+            *grid[0].get_mut(x, y).unwrap() += corr_x * (nr + ng) + nr - ng;
+            *grid[1].get_mut(x, y).unwrap() += nr + ng;
+            *grid[2].get_mut(x, y).unwrap() += corr_b * (nr + ng);
+        }
+    }
+
+    Ok(())
 }
 
 fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {

@@ -28,12 +28,12 @@ impl<Ctx> jxl_bitstream::Bundle<Ctx> for NoiseParameters {
 }
 
 #[inline]
-pub fn rng_seed0(visible_frames: u64, invisible_frames: u64) -> u64 {
+fn rng_seed0(visible_frames: u64, invisible_frames: u64) -> u64 {
     (visible_frames << 32) + invisible_frames
 }
 
 #[inline]
-pub fn rng_seed1(x0: usize, y0: usize) -> u64 {
+fn rng_seed1(x0: usize, y0: usize) -> u64 {
     ((x0 as u64) << 32) + y0 as u64
 }
 
@@ -106,7 +106,7 @@ fn mirror(val: i32, size: i32) -> usize {
     val as usize
 }
 
-pub fn init_noise_group(
+fn init_noise_group(
     seed0: u64,
     noise_buffer: &mut [SimpleGrid<f32>; 3],
     // Group start coordinates
