@@ -10,7 +10,7 @@ mod predictor;
 mod transform;
 pub use error::{Error, Result};
 pub use image::Image;
-pub use ma::{MaConfig, MaContext};
+pub use ma::MaConfig;
 pub use param::*;
 
 #[derive(Debug, Default)]
@@ -22,7 +22,7 @@ pub struct Modular {
 struct ModularData {
     group_dim: u32,
     header: ModularHeader,
-    ma_ctx: ma::MaContext,
+    ma_ctx: MaConfig,
     channels: ModularChannels,
     subimage_channel_mapping: Option<Vec<SubimageChannelInfo>>,
     image: Image,
@@ -233,9 +233,9 @@ impl Bundle<ModularParams<'_>> for ModularData {
     ) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         let ma_ctx = if header.use_global_tree {
-            params.ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.make_context()
+            params.ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.clone()
         } else {
-            read_bits!(bitstream, Bundle(ma::MaConfig))?.into()
+            read_bits!(bitstream, Bundle(ma::MaConfig))?
         };
 
         let mut channels = ModularChannels::from_params(&params);

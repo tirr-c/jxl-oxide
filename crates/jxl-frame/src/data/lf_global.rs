@@ -1,6 +1,6 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_image::Headers;
-use jxl_modular::{ChannelShift, Modular, ModularParams, MaConfig, MaContext};
+use jxl_modular::{ChannelShift, Modular, ModularParams, MaConfig};
 use jxl_vardct::{
     LfChannelDequantization,
     LfChannelCorrelation,
@@ -83,8 +83,8 @@ pub struct GlobalModular {
 }
 
 impl GlobalModular {
-    pub fn make_context(&self) -> Option<MaContext> {
-        Some(self.ma_config.as_ref()?.make_context())
+    pub fn ma_config(&self) -> Option<&MaConfig> {
+        self.ma_config.as_ref()
     }
 
     pub fn extra_channel_from(&self) -> usize {

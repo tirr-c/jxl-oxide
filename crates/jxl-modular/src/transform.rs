@@ -268,7 +268,7 @@ impl Palette {
 
             let d_pred = self.d_pred;
             let wp_header = if d_pred == Predictor::SelfCorrecting {
-                self.wp_header.clone()
+                self.wp_header.as_ref()
             } else {
                 None
             };

@@ -5,10 +5,9 @@ use jxl_grid::Grid;
 
 use crate::{
     ModularChannels,
-    MaContext,
     predictor::{WpHeader, PredictorState},
     Result,
-    SubimageChannelInfo,
+    SubimageChannelInfo, MaConfig,
 };
 
 #[derive(Debug)]
@@ -70,17 +69,16 @@ impl Image {
         bitstream: &mut Bitstream<R>,
         stream_index: u32,
         wp_header: &WpHeader,
-        ma_ctx: &mut MaContext,
+        ma_ctx: &MaConfig,
     ) -> Result<()> {
-        ma_ctx.begin(bitstream)?;
+        let mut decoder = ma_ctx.decoder().clone();
+        decoder.begin(bitstream)?;
 
         let dist_multiplier = self.channels.info.iter()
             .skip(self.channels.nb_meta_channels as usize)
             .map(|info| info.width)
             .max()
             .unwrap_or(0);
-
-        let wp_header = ma_ctx.need_self_correcting().then(|| wp_header.clone());
 
         let mut channels: Vec<_> = self.channels.info.iter()
             .zip(self.data.iter_mut())
@@ -101,6 +99,9 @@ impl Image {
                 })
                 .collect::<Vec<_>>();
 
+            let ma_tree = ma_ctx.make_flat_tree(i as u32, stream_index);
+            let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
+
             let width = grid.width();
             let height = grid.height();
             let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev.len(), wp_header.clone());
@@ -113,7 +114,7 @@ impl Image {
                     }
 
                     let properties = predictor.properties(&prev_channel_samples);
-                    let (diff, predictor) = ma_ctx.decode_sample(bitstream, &properties, dist_multiplier)?;
+                    let (diff, predictor) = ma_tree.decode_sample(bitstream, &mut decoder, &properties, dist_multiplier)?;
                     let sample_prediction = predictor.predict(&properties);
                     let true_value = diff + sample_prediction;
                     grid.set(x, y, true_value);
@@ -122,7 +123,7 @@ impl Image {
             }
         }
 
-        ma_ctx.finalize()?;
+        decoder.finalize()?;
         Ok(())
     }
 }

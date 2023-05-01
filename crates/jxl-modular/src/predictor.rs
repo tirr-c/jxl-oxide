@@ -203,8 +203,8 @@ impl PredictorState {
         out
     }
 
-    pub fn new(width: u32, channel_index: u32, stream_index: u32, prev_channels: usize, wp_header: Option<WpHeader>) -> Self {
-        let self_correcting = wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header));
+    pub fn new(width: u32, channel_index: u32, stream_index: u32, prev_channels: usize, wp_header: Option<&WpHeader>) -> Self {
+        let self_correcting = wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header.clone()));
         Self {
             width,
             channel_index,
