@@ -257,3 +257,20 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
         }
     }
 }
+
+mod tests {
+    #[test]
+    #[ignore]
+    fn idct_8() {
+        unsafe {
+            let layout = std::alloc::Layout::from_size_align(std::mem::size_of::<f32>() * 64, 32).unwrap();
+            let ptr = std::alloc::alloc_zeroed(layout);
+            let io = std::slice::from_raw_parts_mut(ptr as *mut f32, 64);
+            io[0] = 0.01;
+            super::dct_2d_generic(io, 8, 8, true);
+            dbg!(io);
+            std::alloc::dealloc(ptr, layout);
+        }
+        panic!();
+    }
+}
