@@ -1,7 +1,7 @@
 use jxl_frame::{
     data::{BlendingModeInformation, PatchRef, continuous_idct, Spline, erf},
     header::{BlendMode as FrameBlendMode, BlendingInfo},
-    Frame,
+    Frame, FrameHeader,
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::Headers;
@@ -365,7 +365,7 @@ pub fn patch(
 }
 
 pub fn spline(
-    image_header: &Headers,
+    frame_header: &FrameHeader,
     base_grid: &mut [SimpleGrid<f32>],
     spline: Spline,
 ) -> crate::Result<()> {
@@ -390,12 +390,12 @@ pub fn spline(
 
         let xbegin = i32::max(0, (arc.point.x - max_distance + 0.5).floor() as i32);
         let xend = i32::min(
-            (image_header.size.width) as i32,
+            (frame_header.width) as i32,
             (arc.point.x + max_distance + 1.5).floor() as i32,
         );
         let ybegin = i32::max(0, (arc.point.y - max_distance + 0.5).floor() as i32);
         let yend = i32::min(
-            (image_header.size.height) as i32,
+            (frame_header.height) as i32,
             (arc.point.y + max_distance + 1.5).floor() as i32,
         );
 
