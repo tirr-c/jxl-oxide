@@ -29,14 +29,11 @@ pub fn dequant_lf(
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
-    let precision_scale = ((9 - extra_precision) as u32) << 23;
+    let precision_scale = (1 << (9 - extra_precision)) as f32;
     let scale_inv = quantizer.global_scale * quantizer.quant_lf;
-    let lf_x = lf_dequant.m_x_lf.to_bits() + precision_scale;
-    let lf_y = lf_dequant.m_y_lf.to_bits() + precision_scale;
-    let lf_b = lf_dequant.m_b_lf.to_bits() + precision_scale;
-    let lf_x = f32::from_bits(lf_x) / scale_inv as f32;
-    let lf_y = f32::from_bits(lf_y) / scale_inv as f32;
-    let lf_b = f32::from_bits(lf_b) / scale_inv as f32;
+    let lf_x = lf_dequant.m_x_lf * precision_scale / scale_inv as f32;
+    let lf_y = lf_dequant.m_y_lf * precision_scale / scale_inv as f32;
+    let lf_b = lf_dequant.m_b_lf * precision_scale / scale_inv as f32;
     let lf_scaled = [lf_x, lf_y, lf_b];
 
     for (out, lf_scaled) in in_out_xyb.iter_mut().zip(lf_scaled) {
