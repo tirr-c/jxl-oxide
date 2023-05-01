@@ -274,15 +274,26 @@ impl<R: Read> Bitstream<R> {
     /// Returns `Error::InvalidFloat` if the value is `NaN` or `Infinity`.
     pub fn read_f16_as_f32(&mut self) -> Result<f32> {
         let v = self.read_bits(16)?;
+        let neg_bit = (v & 0x8000) << 16;
+
+        if v & 0x7fff == 0 {
+            // Zero
+            return Ok(f32::from_bits(neg_bit));
+        }
         let mantissa = v & 0x3ff; // 10 bits
         let exponent = (v >> 10) & 0x1f; // 5 bits
-        let is_neg = v & 0x8000 != 0;
         if exponent == 0x1f {
+            // NaN, Infinity
             Err(Error::InvalidFloat)
+        } else if exponent == 0 {
+            // Subnormal
+            let val = (1.0 / 16384.0) * (mantissa as f32 / 1024.0);
+            Ok(if neg_bit != 0 { -val } else { val })
         } else {
+            // Normal
             let mantissa = mantissa << 13; // 23 bits
             let exponent = exponent + 112;
-            let bitpattern = mantissa | (exponent << 23) | if is_neg { 0x80000000 } else { 0 };
+            let bitpattern = mantissa | (exponent << 23) | neg_bit;
             Ok(f32::from_bits(bitpattern))
         }
     }
