@@ -187,7 +187,11 @@ pub fn chroma_from_luma_hf(
 
     for cy in 0..height {
         for cx in 0..width {
-            let (x, y) = (lf_left + cx, lf_top + cy);
+            let (x, y) = if width == height {
+                (lf_left + cy, lf_top + cx)
+            } else {
+                (lf_left + cx, lf_top + cy)
+            };
             let cfactor_x = x / 64;
             let cfactor_y = y / 64;
 
