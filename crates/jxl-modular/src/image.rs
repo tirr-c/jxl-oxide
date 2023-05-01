@@ -104,7 +104,7 @@ impl Image {
 
             let width = grid.width();
             let height = grid.height();
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev.len(), wp_header.clone());
+            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev.len(), wp_header);
             let mut prev_channel_samples = vec![0i32; prev.len()];
 
             for y in 0..height {
