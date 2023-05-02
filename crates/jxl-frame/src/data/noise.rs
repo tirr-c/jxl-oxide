@@ -2,7 +2,7 @@
 
 use std::num::Wrapping;
 
-use jxl_grid::SimpleGrid;
+use jxl_grid::{PaddedGrid, SimpleGrid};
 
 use crate::FrameHeader;
 
@@ -44,32 +44,34 @@ pub fn init_noise(
 ) -> [SimpleGrid<f32>; 3] {
     let width = header.width as usize;
     let height = header.height as usize;
-    let group_dim = header.group_dim() as usize;
     let seed0 = rng_seed0(visible_frames, invisible_frames);
 
-    let mut noise_buffer: [SimpleGrid<f32>; 3] = [
-        SimpleGrid::new(width, height),
-        SimpleGrid::new(width, height),
-        SimpleGrid::new(width, height),
+    // NOTE: It may be necessary to multiply group_dim by `upsampling`
+    let group_dim = header.group_dim() as usize;
+
+    // Padding for 5x5 kernel convolution step
+    const PADDING: usize = 2;
+
+    let mut noise_buffer: [PaddedGrid<f32>; 3] = [
+        PaddedGrid::new(width, height, PADDING),
+        PaddedGrid::new(width, height, PADDING),
+        PaddedGrid::new(width, height, PADDING),
     ];
 
     let groups_per_row = (width + group_dim - 1) / group_dim;
     let groups_num = groups_per_row * ((height + group_dim - 1) / group_dim);
 
     for group_idx in 0..groups_num {
-        // TODO: It may be necessary to multiply by `upsamping`
         let group_x = group_idx % groups_per_row;
         let group_y = group_idx / groups_per_row;
-        // TODO: additional groups for upsampling may be needed
         let x0 = group_x * group_dim;
         let y0 = group_y * group_dim;
         init_noise_group(seed0, &mut noise_buffer, x0, y0, width, height, group_dim);
     }
 
-    let mut laplacian = [[0f32; 5]; 5];
-    (0..5).for_each(|y| {
-        (0..5).for_each(|x| laplacian[y][x] = if x == 2 && y == 2 { -3.84 } else { 0.16 });
-    });
+    for channel in &mut noise_buffer {
+        channel.mirror_edges_padding();
+    }
 
     let mut convolved: [SimpleGrid<f32>; 3] = [
         SimpleGrid::new(width, height),
@@ -77,16 +79,20 @@ pub fn init_noise(
         SimpleGrid::new(width, height),
     ];
 
-    for c in 0..3 {
-        let cbuffer = convolved[c].buf_mut();
-        let nbuffer = noise_buffer[c].buf();
+    let mut laplacian = [[0.16f32; 5]; 5];
+    laplacian[2][2] = -3.84;
+
+    // Each channel is convolved by the 5×5 kernel
+    for (cchannel, nchannel) in convolved.iter_mut().zip(noise_buffer) {
+        let cbuffer = cchannel.buf_mut();
         (0..height).for_each(|y| {
             (0..width).for_each(|x| {
                 (0..5).for_each(|iy| {
                     (0..5).for_each(|ix| {
-                        let cy = mirror((y + iy) as i32 - 2, height as i32);
-                        let cx = mirror((x + ix) as i32 - 2, width as i32);
-                        cbuffer[y * width + x] += nbuffer[cy * width + cx] * laplacian[iy][ix];
+                        let cy = (y + iy) as i32 - 2;
+                        let cx = (x + ix) as i32 - 2;
+                        cbuffer[y * width + x] +=
+                            nchannel.get_unchecked(cx, cy) * laplacian[iy][ix];
                     });
                 });
             });
@@ -96,19 +102,9 @@ pub fn init_noise(
     convolved
 }
 
-fn mirror(val: i32, size: i32) -> usize {
-    if val < 0 {
-        return mirror(-val - 1, size);
-    }
-    if val >= size {
-        return mirror(2 * size - val - 1, size);
-    }
-    val as usize
-}
-
 fn init_noise_group(
     seed0: u64,
-    noise_buffer: &mut [SimpleGrid<f32>; 3],
+    noise_buffer: &mut [PaddedGrid<f32>; 3],
     // Group start coordinates
     x0: usize,
     y0: usize,
@@ -123,25 +119,22 @@ fn init_noise_group(
     let seed1 = rng_seed1(x0, y0);
     let mut rng = XorShift128Plus::new(seed0, seed1);
 
-    dbg!((width, height, xsize, ysize));
-
-    (0..3).for_each(|c| {
-        let channel = &mut noise_buffer[c];
-        let buffer = channel.buf_mut();
-
+    for channel in noise_buffer {
         for y in 0..ysize {
             for x in (0..xsize).step_by(N * 2) {
                 let bits = rng.get_u32_bits();
+
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..(N * 2) {
                     if x + i >= xsize {
                         break;
                     }
-                    let random = u32bits_to_f32(bits[i] >> 9 | 0x3F_80_00_00);
-                    buffer[(y0 + y) * width + x0 + x + i] = random;
+                    let random = f32::from_bits(bits[i] >> 9 | 0x3F_80_00_00);
+                    *channel.get_unchecked_mut_usize(x0 + x + i, y0 + y) = random;
                 }
             }
         }
-    });
+    }
 }
 
 const N: usize = 8;
@@ -149,7 +142,6 @@ struct XorShift128Plus {
     s0: [Wrapping<u64>; N],
     s1: [Wrapping<u64>; N],
     pub batch: [u64; N],
-    pub batch_pos: usize,
 }
 
 impl XorShift128Plus {
@@ -168,7 +160,6 @@ impl XorShift128Plus {
             s0,
             s1,
             batch: [0u64; N],
-            batch_pos: 0,
         }
     }
 
@@ -195,17 +186,11 @@ impl XorShift128Plus {
     }
 }
 
-
 #[inline]
 fn reinterpret_cast_u64_to_u32(val: u64) -> [u32; 2] {
     let lo = (val & 0xFF_FF_FF_FF) as u32;
     let hi = (val >> 32) as u32;
     [lo, hi]
-}
-
-#[inline]
-fn u32bits_to_f32(val: u32) -> f32 {
-    f32::from_le_bytes(u32::to_le_bytes(val))
 }
 
 fn split_mix_64(z: Wrapping<u64>) -> Wrapping<u64> {
