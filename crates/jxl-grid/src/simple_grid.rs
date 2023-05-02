@@ -314,7 +314,7 @@ impl<S: Clone> PaddedGrid<S> {
 #[inline]
 /// Mirror operator
 ///
-/// `2 * abs(val)` must be less than or equal to `size`
+/// `abs(val)` must be less than or equal to `size`
 fn mirror(val: i32, size: i32) -> usize {
     if val < 0 {
         return (-val - 1) as usize;

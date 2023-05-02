@@ -38,13 +38,13 @@ fn rng_seed1(x0: usize, y0: usize) -> u64 {
 }
 
 pub fn init_noise(
-    visible_frames: u64,
-    invisible_frames: u64,
+    visible_frames: usize,
+    invisible_frames: usize,
     header: &FrameHeader,
 ) -> [SimpleGrid<f32>; 3] {
     let width = header.width as usize;
     let height = header.height as usize;
-    let seed0 = rng_seed0(visible_frames, invisible_frames);
+    let seed0 = rng_seed0(visible_frames as u64, invisible_frames as u64);
 
     // NOTE: It may be necessary to multiply group_dim by `upsampling`
     let group_dim = header.group_dim() as usize;
@@ -152,7 +152,7 @@ impl XorShift128Plus {
         let mut s1 = [Wrapping(0u64); N];
         s0[0] = split_mix_64(seed0 + Wrapping(0x9E3779B97F4A7C15));
         s1[0] = split_mix_64(seed1 + Wrapping(0x9E3779B97F4A7C15));
-        for i in 1..8 {
+        for i in 1..N {
             s0[i] = split_mix_64(s0[i - 1]);
             s1[i] = split_mix_64(s1[i - 1]);
         }
