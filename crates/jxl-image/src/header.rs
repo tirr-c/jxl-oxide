@@ -187,24 +187,27 @@ impl BitDepth {
                 (sample as f64 / div as f64) as f32
             },
             Self::FloatSample { bits_per_sample, exp_bits } => {
+                let sample = sample as u32;
                 let mantissa_bits = bits_per_sample - exp_bits - 1;
-                let mantissa_mask = (1i32 << mantissa_bits) - 1;
-                let exp_mask = ((1i32 << (bits_per_sample - 1)) - 1) ^ mantissa_mask;
+                let mantissa_mask = (1u32 << mantissa_bits) - 1;
+                let exp_mask = ((1u32 << (bits_per_sample - 1)) - 1) ^ mantissa_mask;
 
-                let is_signed = (sample & (1i32 << (bits_per_sample - 1))) != 0;
+                let is_signed = (sample & (1u32 << (bits_per_sample - 1))) != 0;
                 let mantissa = sample & mantissa_mask;
-                let exp = (sample & exp_mask) >> mantissa_bits;
-                let exp = exp - (1 << (exp_bits - 1)) + 1;
+                let exp = ((sample & exp_mask) >> mantissa_bits) as i32;
+                let exp = exp - ((1 << (exp_bits - 1)) - 1);
 
-                let mantissa = match mantissa_bits.cmp(&f32::MANTISSA_DIGITS) {
-                    std::cmp::Ordering::Less => mantissa << (f32::MANTISSA_DIGITS - mantissa_bits),
-                    std::cmp::Ordering::Greater => mantissa >> (mantissa_bits - f32::MANTISSA_DIGITS),
+                // TODO: handle subnormal values.
+                let f32_mantissa_bits = f32::MANTISSA_DIGITS - 1;
+                let mantissa = match mantissa_bits.cmp(&f32_mantissa_bits) {
+                    std::cmp::Ordering::Less => mantissa << (f32_mantissa_bits - mantissa_bits),
+                    std::cmp::Ordering::Greater => mantissa >> (mantissa_bits - f32_mantissa_bits),
                     _ => mantissa,
-                } as u32;
-                let exp = exp as u32 + 127;
+                };
+                let exp = (exp + 127) as u32;
                 let sign = is_signed as u32;
 
-                let bits = (sign << 31) | (exp << f32::MANTISSA_DIGITS) | mantissa;
+                let bits = (sign << 31) | (exp << f32_mantissa_bits) | mantissa;
                 f32::from_bits(bits)
             },
         }
