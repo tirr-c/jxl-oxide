@@ -87,6 +87,11 @@ pub fn convert_in_place(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, i
             tf::linear_to_gamma(b, gamma);
         },
         TransferFunction::Hlg => {
+            let luminances = {
+                let xyz = primaries_to_xyz_mat(target_primaries, target_wp);
+                [xyz[3], xyz[4], xyz[5]]
+            };
+            tf::hlg_inverse_oo([r, g, b], luminances, intensity_target);
             tf::linear_to_hlg(r);
             tf::linear_to_hlg(g);
             tf::linear_to_hlg(b);

@@ -63,6 +63,23 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     out
 }
 
+pub fn hlg_inverse_oo(
+    [samples_r, samples_g, samples_b]: [&mut [f32]; 3],
+    [lr, lg, lb]: [f32; 3],
+    intensity_target: f32,
+) {
+    let gamma = 1.2f32 * 1.111f32.powf((intensity_target / 1e3).log2());
+    let exp = (1.0 - gamma) / gamma;
+
+    for ((r, g), b) in samples_r.iter_mut().zip(samples_g).zip(samples_b) {
+        let mixed = lr * *r + lg * *g + lb * *b;
+        let mult = mixed.powf(exp);
+        *r *= mult;
+        *g *= mult;
+        *b *= mult;
+    }
+}
+
 pub fn linear_to_hlg(samples: &mut [f32]) {
     const A: f32 = 0.17883277;
     const B: f32 = 0.28466892;
@@ -79,19 +96,19 @@ pub fn linear_to_hlg(samples: &mut [f32]) {
 }
 
 pub(crate) fn hlg_table(n: usize) -> Vec<u16> {
-    const A_RECIP: f64 = 1.0 / 0.17883277;
+    const A: f64 = 0.17883277;
     const B: f64 = 0.28466892;
     const C: f64 = 0.5599107;
 
     let mut out = vec![0u16; n];
-    for (idx, out) in out[..(n + 1) / 2].iter_mut().enumerate() {
+    for (idx, out) in out[..=(n - 1) / 2].iter_mut().enumerate() {
         let d = (idx * idx) as f64 / (3 * (n - 1) * (n - 1)) as f64;
         *out = (d * 65535.0) as u16; // clamped
     }
-    for (idx, out) in out[(n + 1) / 2..].iter_mut().enumerate() {
-        let idx = idx + (n + 1) / 2;
+    for (idx, out) in out[(n - 1) / 2 + 1..].iter_mut().enumerate() {
+        let idx = idx + (n - 1) / 2 + 1;
         let e = idx as f64 / (n - 1) as f64;
-        let d = (((e - C) / A_RECIP).exp() + B) / 12.0;
+        let d = (((e - C) / A).exp() + B) / 12.0;
         *out = (d * 65535.0) as u16; // clamped
     }
     out

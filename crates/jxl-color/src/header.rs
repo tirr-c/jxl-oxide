@@ -51,16 +51,11 @@ impl ColourEncoding {
             self.primaries == Primaries::Srgb
     }
 
-    pub fn png_cicp(&self) -> Option<[u8; 4]> {
+    pub fn cicp(&self) -> Option<[u8; 4]> {
         let primaries_cicp = self.primaries.cicp();
         let tf_cicp = self.tf.cicp();
         if let (Some(primaries), Some(tf)) = (primaries_cicp, tf_cicp) {
-            let valid = matches!(
-                (primaries, &self.white_point),
-                | (1 | 9, WhitePoint::D65)
-                | (11, WhitePoint::Dci)
-            );
-            valid.then_some([primaries, tf, 0, 1])
+            Some([primaries, tf, 0, 1])
         } else {
             None
         }

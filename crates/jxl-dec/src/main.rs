@@ -271,7 +271,7 @@ fn main() {
             None
         } else {
             let icc = jxl_color::icc::colour_encoding_to_icc(colour_encoding).expect("failed to build ICC profile");
-            let cicp = colour_encoding.png_cicp();
+            let cicp = colour_encoding.cicp();
             // TODO: emit gAMA and cHRM
             Some((icc, cicp))
         };

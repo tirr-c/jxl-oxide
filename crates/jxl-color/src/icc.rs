@@ -418,7 +418,11 @@ fn create_curv_lut(lut: &[u16]) -> Vec<u8> {
     assert!(len >= 2);
     let mut trc = vec![b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0];
     trc[8..12].copy_from_slice(&len.to_be_bytes());
-    todo!()
+    trc.resize(trc.len() + lut.len() * 2, 0);
+    for (buf, &v) in trc[12..].chunks_exact_mut(2).zip(lut) {
+        buf.copy_from_slice(&v.to_be_bytes());
+    }
+    trc
 }
 
 fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
@@ -573,6 +577,12 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         Primaries::Bt2100 => primaries::BT2100,
         Primaries::P3 => primaries::P3,
     };
+
+    if matches!(tf, TransferFunction::Pq | TransferFunction::Hlg) {
+        if let Some(cicp) = colour_encoding.cicp() {
+            append_tag_with_data(&mut tags, &mut data, *b"cicp", &cicp);
+        }
+    }
 
     match colour_space {
         ColourSpace::Rgb => {
