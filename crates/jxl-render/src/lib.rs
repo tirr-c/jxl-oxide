@@ -1,4 +1,7 @@
-use std::{io::Read, collections::{HashSet, HashMap}};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Read,
+};
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::ColourSpace;
@@ -134,7 +137,7 @@ impl RenderContext<'_> {
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&Frame<'a>> {
+    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame<'a>> {
         if keyframe_idx == self.inner.keyframes.len() {
             if let Some(idx) = self.inner.keyframe_in_progress {
                 Some(&self.inner.frames[idx])
@@ -306,7 +309,7 @@ impl RenderContext<'_> {
 impl<'f> ContextInner<'f> {
     fn render_frame<'a>(
         &'a self,
-        frame: &'a Frame<'f>,
+        frame: &'a IndexedFrame<'f>,
         reference_frames: ReferenceFrames<'a>,
         cache: &mut RenderCache,
         mut region: Option<(u32, u32, u32, u32)>,
@@ -373,7 +376,7 @@ impl<'f> ContextInner<'f> {
 
     fn append_extra_channels<'a>(
         &'a self,
-        frame: &'a Frame<'f>,
+        frame: &'a IndexedFrame<'f>,
         fb: &mut Vec<SimpleGrid<f32>>,
     ) {
         tracing::debug!("Attaching extra channels");
@@ -419,13 +422,19 @@ impl<'f> ContextInner<'f> {
 
     fn render_features<'a>(
         &'a self,
-        frame: &'a Frame<'f>,
+        frame: &'a IndexedFrame<'f>,
         grid: &mut [SimpleGrid<f32>],
         reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
     ) -> Result<()> {
         let frame_data = frame.data();
         let frame_header = frame.header();
         let lf_global = frame_data.lf_global.as_ref().unwrap();
+        let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
+            (
+                x.lf_chan_corr.base_correlation_x,
+                x.lf_chan_corr.base_correlation_b,
+            )
+        });
 
         if let Some(patches) = &lf_global.patches {
             for patch in &patches.patches {
@@ -439,12 +448,6 @@ impl<'f> ContextInner<'f> {
         if let Some(splines) = &lf_global.splines {
             let mut estimated_area = 0;
             let image_size = (frame_header.width * frame_header.height) as u64;
-            let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
-                (
-                    x.lf_chan_corr.base_correlation_x,
-                    x.lf_chan_corr.base_correlation_b,
-                )
-            });
             for quant_spline in &splines.quant_splines {
                 let spline = quant_spline.dequant(
                     splines.quant_adjust,
@@ -467,17 +470,52 @@ impl<'f> ContextInner<'f> {
                 blend::spline(frame_header, grid, spline)?;
             }
         }
+        if let Some(noise) = &lf_global.noise {
+            let (visible_frames_num, invisible_frames_num) =
+                self.get_previous_frames_visibility(frame);
 
-        if let Some(_noise) = &lf_global.noise {
-            tracing::warn!("Noise is not supported");
+            let noise_buffer = jxl_frame::data::init_noise(
+                visible_frames_num,
+                invisible_frames_num,
+                frame.header(),
+            );
+            blend::noise(
+                frame.header(),
+                base_correlations_xb,
+                grid,
+                &noise_buffer,
+                noise,
+            )?;
         }
 
         Ok(())
     }
 
+    fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {
+        let frame_idx = frame.idx();
+        let (is_keyframe, keyframe_idx) = match self.keyframes.binary_search(&frame_idx) {
+            Ok(val) => (true, val),
+            Err(val) => (false, val),
+        };
+        let prev_keyframes = &self.keyframes[..keyframe_idx];
+
+        let visible_frames_num = keyframe_idx + is_keyframe as usize;
+
+        let invisible_frames_num = if is_keyframe {
+            0
+        } else if prev_keyframes.is_empty() {
+            1 + frame_idx
+        } else {
+            let last_visible_frame = prev_keyframes[keyframe_idx];
+            frame_idx - last_visible_frame
+        };
+
+        (visible_frames_num, invisible_frames_num)
+    }
+
     fn render_modular<'a>(
         &'a self,
-        frame: &'a Frame<'f>,
+        frame: &'a IndexedFrame<'f>,
         _cache: &mut RenderCache,
         _region: Option<(u32, u32, u32, u32)>,
     ) -> Result<[SimpleGrid<f32>; 3]> {
@@ -556,7 +594,7 @@ impl<'f> ContextInner<'f> {
 
     fn render_vardct<'a>(
         &'a self,
-        frame: &'a Frame<'f>,
+        frame: &'a IndexedFrame<'f>,
         lf_frame: Option<&'a [SimpleGrid<f32>]>,
         cache: &mut RenderCache,
         region: Option<(u32, u32, u32, u32)>,
@@ -815,14 +853,14 @@ fn make_cut_grid<'g>(
 #[derive(Debug)]
 struct ContextInner<'a> {
     image_header: &'a Headers,
-    frames: Vec<Frame<'a>>,
+    frames: Vec<IndexedFrame<'a>>,
     keyframes: Vec<usize>,
     keyframe_in_progress: Option<usize>,
     refcounts: Vec<usize>,
     frame_deps: Vec<FrameDependence>,
     lf_frame: [usize; 4],
     reference: [usize; 4],
-    loading_frame: Option<Frame<'a>>,
+    loading_frame: Option<IndexedFrame<'a>>,
 }
 
 impl<'a> ContextInner<'a> {
@@ -917,14 +955,14 @@ impl ContextInner<'_> {
         bitstream: &mut Bitstream<R>,
         progressive: bool,
         mut region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<(ProgressiveResult, &Frame)> {
+    ) -> Result<(ProgressiveResult, &IndexedFrame)> {
         let image_header = self.image_header;
 
         let frame = match &mut self.loading_frame {
             Some(frame) => frame,
             slot => {
                 let frame = Frame::parse(bitstream, image_header)?;
-                *slot = Some(frame);
+                *slot = Some(IndexedFrame::new(frame, self.frames.len()));
                 slot.as_mut().unwrap()
             },
         };
@@ -1035,7 +1073,7 @@ struct RenderCache {
 }
 
 impl RenderCache {
-    fn new(frame: &Frame<'_>) -> Self {
+    fn new(frame: &IndexedFrame<'_>) -> Self {
         let frame_header = frame.header();
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
@@ -1058,5 +1096,35 @@ impl RenderCache {
             group_coeffs: HashMap::new(),
             coeff_merged: HashSet::new(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct IndexedFrame<'a> {
+    f: Frame<'a>,
+    idx: usize,
+}
+
+impl<'a> IndexedFrame<'a> {
+    pub fn new(frame: Frame<'a>, idx: usize) -> Self {
+        IndexedFrame { f: frame, idx }
+    }
+
+    pub fn idx(&self) -> usize {
+        self.idx
+    }
+}
+
+impl<'a> std::ops::Deref for IndexedFrame<'a> {
+    type Target = Frame<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.f
+    }
+}
+
+impl<'a> std::ops::DerefMut for IndexedFrame<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.f
     }
 }
