@@ -1,3 +1,5 @@
+use std::num::Wrapping;
+
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::Grid;
 
@@ -137,9 +139,9 @@ impl Rct {
 
         a.zip3_mut(b, c, |a, b, c| {
             let samples = [a, b, c];
-            let a = *samples[0];
-            let b = *samples[1];
-            let c = *samples[2];
+            let a = Wrapping(*samples[0]);
+            let b = Wrapping(*samples[1]);
+            let c = Wrapping(*samples[2]);
             let d;
             let e;
             let f;
@@ -163,9 +165,9 @@ impl Rct {
                     b
                 };
             }
-            *samples[permutation % 3] = d;
-            *samples[(permutation + 1 + (permutation / 3)) % 3] = e;
-            *samples[(permutation + 2 - (permutation / 3)) % 3] = f;
+            *samples[permutation % 3] = d.0;
+            *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
+            *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
         });
     }
 }
@@ -283,7 +285,7 @@ impl Palette {
                     let diff = d_pred.predict(&properties);
                     let sample = grid.get_mut(x, y).unwrap();
                     if need_delta[idx] == (x, y) {
-                        *sample += diff;
+                        *sample = (*sample as i64 + diff) as i32;
                         idx += 1;
                         if idx >= need_delta.len() {
                             break 'outer;

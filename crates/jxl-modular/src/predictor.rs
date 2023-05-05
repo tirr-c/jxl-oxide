@@ -66,29 +66,30 @@ impl TryFrom<u32> for Predictor {
 }
 
 impl Predictor {
-    pub(super) fn predict(self, properties: &Properties<'_, '_>) -> i32 {
+    pub(super) fn predict(self, properties: &Properties<'_, '_>) -> i64 {
         use Predictor::*;
         let predictor = &*properties.predictor;
 
         match self {
             Zero => 0,
-            West => predictor.w,
-            North => predictor.n,
-            AvgWestAndNorth => (predictor.w + predictor.n) / 2,
+            West => predictor.w as i64,
+            North => predictor.n as i64,
+            AvgWestAndNorth => (predictor.w as i64 + predictor.n as i64) / 2,
             Select => {
                 let n = predictor.n;
                 let w = predictor.w;
                 let nw = predictor.nw;
                 if n.abs_diff(nw) < w.abs_diff(nw) {
-                    w
+                    w as i64
                 } else {
-                    n
+                    n as i64
                 }
             },
             Gradient => {
-                let n = predictor.n;
-                let w = predictor.w;
-                properties.grad.clamp(w.min(n), w.max(n))
+                let n = predictor.n as i64;
+                let w = predictor.w as i64;
+                let nw = predictor.nw as i64;
+                (n + w - nw).clamp(w.min(n), w.max(n))
             },
             SelfCorrecting => {
                 let prediction = properties
@@ -96,19 +97,19 @@ impl Predictor {
                     .expect("predict_non_sc called with SelfCorrecting predictor");
                 (prediction + 3) >> 3
             },
-            NorthEast => predictor.ne(),
-            NorthWest => predictor.nw,
-            WestWest => predictor.ww(),
-            AvgWestAndNorthWest => (predictor.w + predictor.nw) / 2,
-            AvgNorthAndNorthWest => (predictor.n + predictor.nw) / 2,
-            AvgNorthAndNorthEast => (predictor.n + predictor.ne()) / 2,
+            NorthEast => predictor.ne() as i64,
+            NorthWest => predictor.nw as i64,
+            WestWest => predictor.ww() as i64,
+            AvgWestAndNorthWest => (predictor.w as i64 + predictor.nw as i64) / 2,
+            AvgNorthAndNorthWest => (predictor.n as i64 + predictor.nw as i64) / 2,
+            AvgNorthAndNorthEast => (predictor.n as i64 + predictor.ne() as i64) / 2,
             AvgAll => {
-                let n = predictor.n;
-                let w = predictor.w;
-                let nn = predictor.nn();
-                let ww = predictor.ww();
-                let nee = predictor.nee();
-                let ne = predictor.ne();
+                let n = predictor.n as i64;
+                let w = predictor.w as i64;
+                let nn = predictor.nn() as i64;
+                let ww = predictor.ww() as i64;
+                let nee = predictor.nee() as i64;
+                let ne = predictor.ne() as i64;
                 (6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16
             },
         }
@@ -117,9 +118,9 @@ impl Predictor {
 
 #[derive(Debug, Clone)]
 pub struct PredictionResult {
-    pub(crate) prediction: i32,
+    pub(crate) prediction: i64,
     pub(crate) max_error: i32,
-    pub(crate) subpred: [i32; 4],
+    pub(crate) subpred: [i64; 4],
 }
 
 #[derive(Debug)]
@@ -239,27 +240,31 @@ impl PredictorState {
             subpred_err_ne,
             ..
         } = *self.self_correcting.as_ref()?;
+        let true_err_w = true_err_w as i64;
+        let true_err_nw = true_err_nw as i64;
+        let true_err_n = true_err_n as i64;
+        let true_err_ne = true_err_ne as i64;
 
-        let n3 = self.n << 3;
-        let nw3 = self.nw << 3;
-        let ne3 = self.ne() << 3;
-        let w3 = self.w << 3;
-        let nn3 = self.nn() << 3;
+        let n3 = (self.n as i64) << 3;
+        let nw3 = (self.nw as i64) << 3;
+        let ne3 = (self.ne() as i64) << 3;
+        let w3 = (self.w as i64) << 3;
+        let nn3 = (self.nn() as i64) << 3;
 
         let subpred = [
             w3 + ne3 - n3,
-            n3 - (((true_err_w + true_err_n + true_err_ne) * wp.wp_p1 as i32) >> 5),
-            w3 - (((true_err_w + true_err_n + true_err_nw) * wp.wp_p2 as i32) >> 5),
-            n3 - ((true_err_nw * wp.wp_p3a as i32 +
-                    true_err_n * wp.wp_p3b as i32 +
-                    true_err_ne * wp.wp_p3c as i32 +
-                    (nn3 - n3) * wp.wp_p3d as i32 +
-                    (nw3 - w3) * wp.wp_p3e as i32) >> 5),
+            n3 - (((true_err_w + true_err_n + true_err_ne) * wp.wp_p1 as i64) >> 5),
+            w3 - (((true_err_w + true_err_n + true_err_nw) * wp.wp_p2 as i64) >> 5),
+            n3 - ((true_err_nw * wp.wp_p3a as i64 +
+                    true_err_n * wp.wp_p3b as i64 +
+                    true_err_ne * wp.wp_p3c as i64 +
+                    (nn3 - n3) * wp.wp_p3d as i64 +
+                    (nw3 - w3) * wp.wp_p3e as i64) >> 5),
         ];
 
         let mut subpred_err_sum = [0u32; 4];
         for (i, sum) in subpred_err_sum.iter_mut().enumerate() {
-            *sum = subpred_err_nw_ww[i] + subpred_err_n_w[i] + subpred_err_ne[i];
+            *sum = subpred_err_nw_ww[i].wrapping_add(subpred_err_n_w[i]).wrapping_add(subpred_err_ne[i]);
         }
 
         let wp_wn = [
@@ -270,21 +275,21 @@ impl PredictorState {
         ];
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
-            let shift = floor_log2(err_sum + 1).saturating_sub(5);
-            *w = 4 + ((maxweight * (Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1])) >> shift);
+            let shift = floor_log2(err_sum as u64 + 1).saturating_sub(5);
+            *w = 4 + ((maxweight * Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1]) >> shift);
         }
 
         let sum_weights: u32 = weight.iter().copied().sum();
-        let log_weight = floor_log2(sum_weights) - 4;
+        let log_weight = floor_log2(sum_weights as u64) - 4;
         for w in &mut weight {
             *w >>= log_weight;
         }
         let sum_weights: u32 = weight.iter().copied().sum();
-        let mut s = (sum_weights as i32 >> 1) - 1;
+        let mut s = (sum_weights as i64 >> 1) - 1;
         for (subpred, weight) in subpred.into_iter().zip(weight) {
-            s += subpred * weight as i32;
+            s += subpred * weight as i64;
         }
-        let mut prediction = ((s as i64 * Self::DIV_LOOKUP[sum_weights as usize] as i64) >> 24) as i32;
+        let mut prediction = (s * Self::DIV_LOOKUP[sum_weights as usize] as i64) >> 24;
         if (true_err_n ^ true_err_w) | (true_err_n ^ true_err_nw) <= 0 {
             let min = n3.min(w3).min(ne3);
             let max = n3.max(w3).max(ne3);
@@ -299,7 +304,7 @@ impl PredictorState {
             }
         }
 
-        Some(PredictionResult { prediction, max_error, subpred })
+        Some(PredictionResult { prediction, max_error: max_error as i32, subpred })
     }
 }
 
@@ -377,13 +382,14 @@ impl SelfCorrectingPredictor {
     }
 
     fn record(&mut self, pred: PredictionResult, sample: i32) {
+        let sample = sample as i64;
         let true_err = pred.prediction - (sample << 3);
         let mut subpred_err = [0u32; 4];
         for (err, subpred) in subpred_err.iter_mut().zip(pred.subpred) {
-            *err = (subpred.abs_diff(sample << 3) + 3) >> 3;
+            *err = ((subpred.abs_diff(sample << 3) + 3) >> 3) as u32;
         }
 
-        self.true_err_curr_row.push(true_err);
+        self.true_err_curr_row.push(true_err as i32);
         self.subpred_err_curr_row.push(subpred_err);
 
         let x = self.true_err_curr_row.len();
@@ -406,13 +412,13 @@ impl SelfCorrectingPredictor {
                 self.subpred_err_ne = self.subpred_err_prev_row[1];
             }
         } else {
-            self.true_err_w = true_err;
+            self.true_err_w = true_err as i32;
             self.true_err_nw = self.true_err_n;
             self.true_err_n = self.true_err_ne;
             self.subpred_err_nw_ww = self.subpred_err_n_w;
             self.subpred_err_n_w = self.subpred_err_ne;
             for (w0, w1) in self.subpred_err_n_w.iter_mut().zip(subpred_err) {
-                *w0 += w1;
+                *w0 = w0.wrapping_add(w1);
             }
 
             if x + 1 >= self.width as usize {
@@ -436,7 +442,7 @@ pub struct Properties<'p, 's> {
 
 impl<'p, 's> Properties<'p, 's> {
     fn new(predictor: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
-        let grad = predictor.w + predictor.n - predictor.nw;
+        let grad = (predictor.w as i64 + predictor.n as i64 - predictor.nw as i64) as i32;
         Self {
             predictor,
             prev_channel_samples,
@@ -447,7 +453,7 @@ impl<'p, 's> Properties<'p, 's> {
 }
 
 impl Properties<'_, '_> {
-    fn prediction(&self) -> Option<i32> {
+    fn prediction(&self) -> Option<i64> {
         self.sc_prediction.as_ref().map(|pred| pred.prediction)
     }
 
@@ -468,14 +474,14 @@ impl Properties<'_, '_> {
             } else if prop_idx == 1 {
                 c
             } else {
-                let w = prev_channel.w();
-                let n = prev_channel.n();
-                let nw = prev_channel.nw();
-                let g = (w + n - nw).clamp(w.min(n), w.max(n));
+                let w = prev_channel.w() as i64;
+                let n = prev_channel.n() as i64;
+                let nw = prev_channel.nw() as i64;
+                let g = (w + n - nw).clamp(w.min(n), w.max(n)) as i32;
                 if prop_idx == 2 {
-                    (c - g).abs()
+                    c.abs_diff(g) as i32
                 } else {
-                    c - g
+                    c.wrapping_sub(g)
                 }
             }
         } else {
@@ -489,13 +495,13 @@ impl Properties<'_, '_> {
                 5 => pred.w.abs(),
                 6 => pred.n,
                 7 => pred.w,
-                8 => pred.w - pred.prev_grad,
+                8 => pred.w.wrapping_sub(pred.prev_grad),
                 9 => self.grad,
-                10 => pred.w - pred.nw,
-                11 => pred.nw - pred.n,
-                12 => pred.n - pred.ne(),
-                13 => pred.n - pred.nn(),
-                14 => pred.w - pred.ww(),
+                10 => pred.w.wrapping_sub(pred.nw),
+                11 => pred.nw.wrapping_sub(pred.n),
+                12 => pred.n.wrapping_sub(pred.ne()),
+                13 => pred.n.wrapping_sub(pred.nn()),
+                14 => pred.w.wrapping_sub(pred.ww()),
                 15 => {
                     if let Some(prediction) = &self.sc_prediction {
                         prediction.max_error
@@ -548,6 +554,6 @@ impl Properties<'_, '_> {
     }
 }
 
-fn floor_log2(x: u32) -> u32 {
-    u32::BITS - 1 - x.leading_zeros()
+fn floor_log2(x: u64) -> u32 {
+    u64::BITS - 1 - x.leading_zeros()
 }

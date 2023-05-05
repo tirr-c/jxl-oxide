@@ -71,6 +71,9 @@ impl Image {
         wp_header: &WpHeader,
         ma_ctx: &MaConfig,
     ) -> Result<()> {
+        let span = tracing::span!(tracing::Level::DEBUG, "decode channels", stream_index);
+        let _guard = span.enter();
+
         let mut decoder = ma_ctx.decoder().clone();
         decoder.begin(bitstream)?;
 
@@ -90,7 +93,7 @@ impl Image {
             let (prev, left) = channels.split_at_mut(idx);
             let (i, (info, ref mut grid)) = left[0];
             let prev = prev
-                .iter_mut()
+                .iter()
                 .filter(|(_, (prev_info, _))| {
                     info.width == prev_info.width &&
                         info.height == prev_info.height &&
@@ -116,7 +119,7 @@ impl Image {
                     let properties = predictor.properties(&prev_channel_samples);
                     let (diff, predictor) = ma_tree.decode_sample(bitstream, &mut decoder, &properties, dist_multiplier)?;
                     let sample_prediction = predictor.predict(&properties);
-                    let true_value = diff + sample_prediction;
+                    let true_value = (diff as i64 + sample_prediction) as i32;
                     grid.set(x, y, true_value);
                     properties.record(true_value);
                 }
