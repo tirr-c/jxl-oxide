@@ -321,13 +321,13 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     }
                     let p = match order {
                         0 => prev[0],
-                        1 => 2 * prev[0] - prev[1],
-                        2 => 3 * prev[0] - 3 * prev[1] + prev[2],
+                        1 => (2 * prev[0]).wrapping_sub(prev[1]),
+                        2 => (3 * prev[0]).wrapping_sub(3 * prev[1]).wrapping_add(prev[2]),
                         _ => unreachable!(),
                     };
 
                     for j in 0..width.min(num - i) {
-                        let val = (bytes[i + j] as u32 + (p >> (8 * (width - 1 - j)))) as u8;
+                        let val = (bytes[i + j] as u32).wrapping_add(p >> (8 * (width - 1 - j))) as u8;
                         out.push(val);
                     }
                 }
