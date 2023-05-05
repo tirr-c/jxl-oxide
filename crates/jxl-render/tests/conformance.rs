@@ -54,37 +54,37 @@ fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
 
 fn run_test<R: std::io::Read>(
     mut bitstream: jxl_bitstream::Bitstream<R>,
-    target_icc: Vec<u8>,
+    target_icc: Option<Vec<u8>>,
     expected: Vec<Vec<f32>>,
     expected_peak_error: f32,
     expected_max_rmse: f32,
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
-    let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
-
     let headers = Headers::parse(&mut bitstream, ()).expect("Failed to read headers");
-
     let mut render = RenderContext::new(&headers);
     render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
 
-    let source_profile = {
-        if headers.metadata.colour_encoding.want_icc && !headers.metadata.xyb_encoded {
-            Profile::new_icc(render.icc()).unwrap()
-        } else {
-            let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
-            Profile::new_icc(&icc).unwrap()
-        }
-    };
+    let transform = target_icc.map(|target_icc| {
+        let source_profile = {
+            if headers.metadata.colour_encoding.want_icc && !headers.metadata.xyb_encoded {
+                Profile::new_icc(render.icc()).unwrap()
+            } else {
+                let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
+                Profile::new_icc(&icc).unwrap()
+            }
+        };
+        let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
+        let pixfmt = lcms2::PixelFormat::RGB_FLT;
 
-    let pixfmt = lcms2::PixelFormat::RGB_FLT;
-    let transform = lcms2::Transform::new(
-        &source_profile,
-        pixfmt,
-        &target_profile,
-        pixfmt,
-        lcms2::Intent::RelativeColorimetric,
-    ).expect("failed to create transform");
+        lcms2::Transform::new(
+            &source_profile,
+            pixfmt,
+            &target_profile,
+            pixfmt,
+            lcms2::Intent::RelativeColorimetric,
+        ).expect("failed to create transform")
+    });
 
     if headers.metadata.have_preview {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
@@ -109,20 +109,27 @@ fn run_test<R: std::io::Read>(
         let fb = render.render_keyframe_cropped(keyframe_idx, None).expect("failed to render");
 
         let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
-        let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3], 1).unwrap();
-        let width = fb.width();
-        let height = fb.height();
-        transform.transform_in_place(fb.buf_grouped_mut::<3>());
-        let fb = fb.buf();
-        for y in 0..height {
-            for x in 0..width {
-                for c in 0..3 {
-                    grids[c].set(x, y, fb[c + (x + y * width) * 3]);
+        if let Some(transform) = &transform {
+            let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3], 1).unwrap();
+            let width = fb.width();
+            let height = fb.height();
+            transform.transform_in_place(fb.buf_grouped_mut::<3>());
+            let fb = fb.buf();
+            for y in 0..height {
+                for x in 0..width {
+                    for c in 0..3 {
+                        if *grids[c].get(x, y).unwrap() != fb[c + (x + y * width) * 3] {
+                            eprintln!("Sample is different: {} != {}", grids[c].get(x, y).unwrap(), fb[c + (x + y * width) * 3]);
+                        }
+                        grids[c].set(x, y, fb[c + (x + y * width) * 3]);
+                    }
                 }
             }
         }
 
         let fb = jxl_image::FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
+        let width = fb.width();
+        let height = fb.height();
         let channels = fb.channels();
 
         let interleaved_buffer = fb.buf();
@@ -156,8 +163,8 @@ fn run_test<R: std::io::Read>(
         eprintln!("peak_error = {}", peak_error);
         eprintln!("max_rmse = {}", max_rmse);
 
-        assert!(peak_error < expected_peak_error);
-        assert!(max_rmse < expected_max_rmse);
+        assert!(peak_error <= expected_peak_error);
+        assert!(max_rmse <= expected_max_rmse);
     }
 }
 
@@ -166,8 +173,10 @@ macro_rules! conformance_test {
         #[test]
         $(#[$attr])*
         fn $name() {
+            let perform_ct = $icc_hash != "skip";
+
             let buf = download_object_with_cache($npy_hash, "npy");
-            let target_icc = download_object_with_cache($icc_hash, "icc");
+            let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
 
             let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
 
@@ -280,5 +289,49 @@ conformance_test! {
         4,
         0.005,
         0.0001,
+    )
+}
+
+conformance_test! {
+    animation_spline(
+        "a571c5cbba58affeeb43c44c13f81e2b1962727eb9d4e017e4f25d95c7388f10",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        60,
+        3,
+        0.004,
+        0.0001,
+    )
+}
+
+conformance_test! {
+    animation_newtons_cradle(
+        "4309286cd22fa4008db3dcceee6a72a806c9291bd7e035cf555f3b470d0693d8",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        36,
+        4,
+        0.000976562,
+        0.000976562,
+    )
+}
+
+conformance_test! {
+    alpha_triangles(
+        "1d8471e3b7f0768f408b5e5bf5fee0de49ad6886d846712b1aaa702379722e2b",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        1,
+        4,
+        0.001953125,
+        0.001953125,
+    )
+}
+
+conformance_test! {
+    lossless_pfm(
+        "1eac3ced5c60ef8a3a602f54c6a9d28162dfee51cd85b8dd7e52f6e3212bbb52",
+        "skip",
+        1,
+        3,
+        0.0,
+        0.0,
     )
 }
