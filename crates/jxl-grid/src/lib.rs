@@ -50,27 +50,6 @@ impl<S: Default + Clone> Grid<S> {
             }
         }
     }
-
-    pub fn new_similar<S2>(grid: &Grid<S2>) -> Self {
-        match *grid {
-            Grid::Simple(Some(ref g)) => {
-                Self::Simple(Some(SimpleGrid::new(g.width(), g.height())))
-            },
-            Grid::Grouped { width, height, group_width, group_height, .. } => {
-                let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
-                let mut groups = Vec::with_capacity(num_groups);
-                groups.resize_with(num_groups, || None);
-                Self::Grouped {
-                    width,
-                    height,
-                    group_width,
-                    group_height,
-                    groups,
-                }
-            },
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl<S> Grid<S> {
