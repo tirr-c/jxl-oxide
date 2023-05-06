@@ -118,9 +118,6 @@ fn run_test<R: std::io::Read>(
             for y in 0..height {
                 for x in 0..width {
                     for c in 0..3 {
-                        if *grids[c].get(x, y).unwrap() != fb[c + (x + y * width) * 3] {
-                            eprintln!("Sample is different: {} != {}", grids[c].get(x, y).unwrap(), fb[c + (x + y * width) * 3]);
-                        }
                         grids[c].set(x, y, fb[c + (x + y * width) * 3]);
                     }
                 }
