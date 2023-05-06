@@ -1,8 +1,11 @@
+//! This crate provides [`Grid`], [`SimpleGrid`], [`CutGrid`] and [`PaddedGrid`], used in various
+//! places involving images.
 mod simd;
 mod simple_grid;
 pub use simd::SimdVector;
 pub use simple_grid::*;
 
+/// A sample grid, possibly divided into smaller groups.
 #[derive(Debug, Clone)]
 pub enum Grid<S> {
     Simple(Option<SimpleGrid<S>>),
@@ -22,6 +25,9 @@ impl<S> From<SimpleGrid<S>> for Grid<S> {
 }
 
 impl<S: Default + Clone> Grid<S> {
+    /// Create a new grid with given dimension.
+    ///
+    /// This method accepts `u32` for the convenience.
     pub fn new(width: u32, height: u32, group_width: u32, group_height: u32) -> Self {
         let width = width as usize;
         let height = height as usize;
@@ -30,6 +36,7 @@ impl<S: Default + Clone> Grid<S> {
         Self::new_usize(width, height, group_width, group_height)
     }
 
+    /// Create a new grid with given dimension.
     pub fn new_usize(width: usize, height: usize, group_width: usize, group_height: usize) -> Self {
         if group_width == 0 || group_height == 0 {
             return Self::Simple(Some(SimpleGrid::new(width, height)));
@@ -80,6 +87,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Get the number of groups in a single row.
     #[inline]
     pub fn groups_per_row(&self) -> usize {
         match *self {
@@ -128,6 +136,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Get the reference to the [`SimpleGrid`] if the grid consists of a single group.
     #[inline]
     pub fn as_simple(&self) -> Option<&SimpleGrid<S>> {
         if let Self::Simple(Some(g)) = self {
@@ -137,6 +146,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Get the mutable reference to the [`SimpleGrid`] if the grid consists of a single group.
     #[inline]
     pub fn as_simple_mut(&mut self) -> Option<&mut SimpleGrid<S>> {
         if let Self::Simple(Some(g)) = self {
@@ -146,6 +156,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Make this grid into a [`SimpleGrid`] if the grid consists of a single group.
     #[inline]
     pub fn into_simple(self) -> Result<SimpleGrid<S>, Self> {
         if let Self::Simple(Some(g)) = self {
@@ -188,18 +199,21 @@ impl<S: Default + Clone> Grid<S> {
 }
 
 impl<S> Grid<S> {
+    /// Iterate over the initialized groups of the grid.
     #[inline]
     pub fn groups(&self) -> impl Iterator<Item = (usize, &SimpleGrid<S>)> + '_ {
         let groups = self.all_groups();
         groups.iter().enumerate().filter_map(|(idx, g)| g.as_ref().map(|g| (idx, g)))
     }
 
+    /// Iterate over the initialized groups of the grid mutably.
     #[inline]
     pub fn groups_mut(&mut self) -> impl Iterator<Item = (usize, &mut SimpleGrid<S>)> + '_ {
         let groups = self.all_groups_mut();
         groups.iter_mut().enumerate().filter_map(|(idx, g)| g.as_mut().map(|g| (idx, g)))
     }
 
+    /// Get all groups of the grid in raster order.
     #[inline]
     pub fn all_groups(&self) -> &[Option<SimpleGrid<S>>] {
         match self {
@@ -208,6 +222,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Get all groups of the grid in raster order mutably.
     #[inline]
     pub fn all_groups_mut(&mut self) -> &mut [Option<SimpleGrid<S>>] {
         match self {
@@ -240,6 +255,7 @@ impl<S> Grid<S> {
 }
 
 impl<S> Grid<S> {
+    /// Iterate over initialized samples using the callback function.
     pub fn iter_init_mut(&mut self, mut f: impl FnMut(usize, usize, &mut S)) {
         let groups_per_row = self.groups_per_row();
         match *self {
@@ -272,6 +288,7 @@ impl<S> Grid<S> {
         }
     }
 
+    /// Zip three grids, and iterate over initialized samples using the callback function.
     pub fn zip3_mut(&mut self, b: &mut Grid<S>, c: &mut Grid<S>, mut f: impl FnMut(&mut S, &mut S, &mut S)) {
         assert!(self.width() == b.width() && b.width() == c.width());
         assert!(self.height() == b.height() && b.height() == c.height());
@@ -300,6 +317,7 @@ impl<S> Grid<S> {
 }
 
 impl<S: Default + Clone> Grid<S> {
+    /// Insert the grid into the given position.
     pub fn insert_subgrid(&mut self, subgrid: &mut Grid<S>, left: isize, top: isize) {
         let width = self.width();
         let height = self.height();
