@@ -58,11 +58,23 @@ impl<R: Read> ContainerDetectingReader<R> {
                         "jxlp box found after jxlc box",
                     ));
                 }
+                if self.next_jxlp_index >= 0x80000000 {
+                    tracing::error!(
+                        "jxlp box #{} should be the last one, found the next one",
+                        self.next_jxlp_index ^ 0x80000000,
+                    );
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "another jxlp box found after the signalled last one",
+                    ));
+                }
 
                 let mut index = [0u8; 4];
                 self.inner.read_exact(&mut index)?;
                 let index = u32::from_be_bytes(index);
-                tracing::trace!(index = index & 0x7fffffff, is_last = index & 0x80000000 != 0);
+                let is_last = index & 0x80000000 != 0;
+                let index = index & 0x7fffffff;
+                tracing::trace!(index, is_last);
                 if index != self.next_jxlp_index {
                     tracing::error!(
                         "Out-of-order jxlp box found: expected {}, got {}",
@@ -75,7 +87,11 @@ impl<R: Read> ContainerDetectingReader<R> {
                     ));
                 }
 
-                self.next_jxlp_index += 1;
+                if is_last {
+                    self.next_jxlp_index = index | 0x80000000;
+                } else {
+                    self.next_jxlp_index += 1;
+                }
                 self.box_header = Some((header, 4));
                 return Ok(true);
             }
