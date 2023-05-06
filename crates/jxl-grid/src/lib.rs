@@ -70,7 +70,7 @@ impl<S> Grid<S> {
 
     #[inline]
     pub fn height(&self) -> usize {
-        self.0.width()
+        self.0.height()
     }
 
     #[inline]
