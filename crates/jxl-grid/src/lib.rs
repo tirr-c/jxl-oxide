@@ -7,7 +7,10 @@ pub use simple_grid::*;
 
 /// A sample grid, possibly divided into smaller groups.
 #[derive(Debug, Clone)]
-pub enum Grid<S> {
+pub struct Grid<S>(GridInner<S>);
+
+#[derive(Debug, Clone)]
+enum GridInner<S> {
     Simple(Option<SimpleGrid<S>>),
     Grouped {
         width: usize,
@@ -20,7 +23,7 @@ pub enum Grid<S> {
 
 impl<S> From<SimpleGrid<S>> for Grid<S> {
     fn from(value: SimpleGrid<S>) -> Self {
-        Self::Simple(Some(value))
+        Self(GridInner::Simple(Some(value)))
     }
 }
 
@@ -39,27 +42,82 @@ impl<S: Default + Clone> Grid<S> {
     /// Create a new grid with given dimension.
     pub fn new_usize(width: usize, height: usize, group_width: usize, group_height: usize) -> Self {
         if group_width == 0 || group_height == 0 {
-            return Self::Simple(Some(SimpleGrid::new(width, height)));
+            return Self(GridInner::Simple(Some(SimpleGrid::new(width, height))));
         }
 
         let num_groups = ((width + group_width - 1) / group_width) * ((height + group_height - 1) / group_height);
         if num_groups == 1 {
-            Self::Simple(Some(SimpleGrid::new(width, height)))
+            Self(GridInner::Simple(Some(SimpleGrid::new(width, height))))
         } else {
             let mut groups = Vec::with_capacity(num_groups);
             groups.resize_with(num_groups, || None);
-            Self::Grouped {
+            Self(GridInner::Grouped {
                 width,
                 height,
                 group_width,
                 group_height,
                 groups,
-            }
+            })
         }
     }
 }
 
 impl<S> Grid<S> {
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.0.width()
+    }
+
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.0.width()
+    }
+
+    #[inline]
+    pub fn group_dim(&self) -> (usize, usize) {
+        self.0.group_dim()
+    }
+
+    /// Get the number of groups in a single row.
+    #[inline]
+    pub fn groups_per_row(&self) -> usize {
+        self.0.groups_per_row()
+    }
+
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+        self.0.get(x, y)
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
+        self.0.get_mut(x, y)
+    }
+
+    /// Get the reference to the [`SimpleGrid`] if the grid consists of a single group.
+    #[inline]
+    pub fn as_simple(&self) -> Option<&SimpleGrid<S>> {
+        self.0.as_simple()
+    }
+
+    /// Get the mutable reference to the [`SimpleGrid`] if the grid consists of a single group.
+    #[inline]
+    pub fn as_simple_mut(&mut self) -> Option<&mut SimpleGrid<S>> {
+        self.0.as_simple_mut()
+    }
+
+    /// Make this grid into a [`SimpleGrid`] if the grid consists of a single group.
+    #[inline]
+    pub fn into_simple(self) -> Result<SimpleGrid<S>, Self> {
+        if let Self(GridInner::Simple(Some(g))) = self {
+            Ok(g)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl<S> GridInner<S> {
     #[inline]
     pub fn width(&self) -> usize {
         match *self {
@@ -87,7 +145,6 @@ impl<S> Grid<S> {
         }
     }
 
-    /// Get the number of groups in a single row.
     #[inline]
     pub fn groups_per_row(&self) -> usize {
         match *self {
@@ -136,7 +193,6 @@ impl<S> Grid<S> {
         }
     }
 
-    /// Get the reference to the [`SimpleGrid`] if the grid consists of a single group.
     #[inline]
     pub fn as_simple(&self) -> Option<&SimpleGrid<S>> {
         if let Self::Simple(Some(g)) = self {
@@ -146,7 +202,6 @@ impl<S> Grid<S> {
         }
     }
 
-    /// Get the mutable reference to the [`SimpleGrid`] if the grid consists of a single group.
     #[inline]
     pub fn as_simple_mut(&mut self) -> Option<&mut SimpleGrid<S>> {
         if let Self::Simple(Some(g)) = self {
@@ -155,19 +210,16 @@ impl<S> Grid<S> {
             None
         }
     }
-
-    /// Make this grid into a [`SimpleGrid`] if the grid consists of a single group.
-    #[inline]
-    pub fn into_simple(self) -> Result<SimpleGrid<S>, Self> {
-        if let Self::Simple(Some(g)) = self {
-            Ok(g)
-        } else {
-            Err(self)
-        }
-    }
 }
 
 impl<S: Default + Clone> Grid<S> {
+    #[inline]
+    pub fn set(&mut self, x: usize, y: usize, sample: S) -> Option<S> {
+        self.0.set(x, y, sample)
+    }
+}
+
+impl<S: Default + Clone> GridInner<S> {
     pub fn set(&mut self, x: usize, y: usize, sample: S) -> Option<S> {
         let groups_per_row = self.groups_per_row();
         match *self {
@@ -202,18 +254,51 @@ impl<S> Grid<S> {
     /// Iterate over the initialized groups of the grid.
     #[inline]
     pub fn groups(&self) -> impl Iterator<Item = (usize, &SimpleGrid<S>)> + '_ {
+        self.0.groups()
+    }
+
+    /// Iterate over the initialized groups of the grid mutably.
+    #[inline]
+    pub fn groups_mut(&mut self) -> impl Iterator<Item = (usize, &mut SimpleGrid<S>)> + '_ {
+        self.0.groups_mut()
+    }
+
+    /// Get all groups of the grid in raster order.
+    #[inline]
+    pub fn all_groups(&self) -> &[Option<SimpleGrid<S>>] {
+        self.0.all_groups()
+    }
+
+    /// Get all groups of the grid in raster order mutably.
+    #[inline]
+    pub fn all_groups_mut(&mut self) -> &mut [Option<SimpleGrid<S>>] {
+        self.0.all_groups_mut()
+    }
+
+    #[inline]
+    pub fn subgrid(&self, left: usize, top: usize, width: usize, height: usize) -> Subgrid<'_, S> {
+        self.0.subgrid(left, top, width, height)
+    }
+
+    #[inline]
+    pub fn as_subgrid(&self) -> Subgrid<'_, S> {
+        self.0.as_subgrid()
+    }
+}
+
+impl<S> GridInner<S> {
+    #[inline]
+    pub fn groups(&self) -> impl Iterator<Item = (usize, &SimpleGrid<S>)> + '_ {
         let groups = self.all_groups();
         groups.iter().enumerate().filter_map(|(idx, g)| g.as_ref().map(|g| (idx, g)))
     }
 
-    /// Iterate over the initialized groups of the grid mutably.
     #[inline]
     pub fn groups_mut(&mut self) -> impl Iterator<Item = (usize, &mut SimpleGrid<S>)> + '_ {
         let groups = self.all_groups_mut();
         groups.iter_mut().enumerate().filter_map(|(idx, g)| g.as_mut().map(|g| (idx, g)))
     }
 
-    /// Get all groups of the grid in raster order.
     #[inline]
     pub fn all_groups(&self) -> &[Option<SimpleGrid<S>>] {
         match self {
@@ -222,7 +307,6 @@ impl<S> Grid<S> {
         }
     }
 
-    /// Get all groups of the grid in raster order mutably.
     #[inline]
     pub fn all_groups_mut(&mut self) -> &mut [Option<SimpleGrid<S>>] {
         match self {
@@ -256,6 +340,17 @@ impl<S> Grid<S> {
 
 impl<S> Grid<S> {
     /// Iterate over initialized samples using the callback function.
+    pub fn iter_init_mut(&mut self, f: impl FnMut(usize, usize, &mut S)) {
+        self.0.iter_init_mut(f)
+    }
+
+    /// Zip three grids, and iterate over initialized samples using the callback function.
+    pub fn zip3_mut(&mut self, b: &mut Grid<S>, c: &mut Grid<S>, f: impl FnMut(&mut S, &mut S, &mut S)) {
+        self.0.zip3_mut(&mut b.0, &mut c.0, f)
+    }
+}
+
+impl<S> GridInner<S> {
     pub fn iter_init_mut(&mut self, mut f: impl FnMut(usize, usize, &mut S)) {
         let groups_per_row = self.groups_per_row();
         match *self {
@@ -288,8 +383,7 @@ impl<S> Grid<S> {
         }
     }
 
-    /// Zip three grids, and iterate over initialized samples using the callback function.
-    pub fn zip3_mut(&mut self, b: &mut Grid<S>, c: &mut Grid<S>, mut f: impl FnMut(&mut S, &mut S, &mut S)) {
+    pub fn zip3_mut(&mut self, b: &mut GridInner<S>, c: &mut GridInner<S>, mut f: impl FnMut(&mut S, &mut S, &mut S)) {
         assert!(self.width() == b.width() && b.width() == c.width());
         assert!(self.height() == b.height() && b.height() == c.height());
         assert!(self.group_dim() == b.group_dim() && b.group_dim() == c.group_dim());
@@ -319,6 +413,12 @@ impl<S> Grid<S> {
 impl<S: Default + Clone> Grid<S> {
     /// Insert the grid into the given position.
     pub fn insert_subgrid(&mut self, subgrid: &mut Grid<S>, left: isize, top: isize) {
+        self.0.insert_subgrid(&mut subgrid.0, left, top)
+    }
+}
+
+impl<S: Default + Clone> GridInner<S> {
+    pub fn insert_subgrid(&mut self, subgrid: &mut GridInner<S>, left: isize, top: isize) {
         let width = self.width();
         let height = self.height();
         let subgrid_width = subgrid.width();
@@ -420,7 +520,7 @@ impl<S: Default + Clone> Grid<S> {
 
 #[derive(Debug, Clone)]
 pub struct Subgrid<'g, S> {
-    grid: &'g Grid<S>,
+    grid: &'g GridInner<S>,
     left: usize,
     top: usize,
     width: usize,
