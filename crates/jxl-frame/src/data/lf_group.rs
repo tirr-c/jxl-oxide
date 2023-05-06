@@ -1,5 +1,5 @@
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
-use jxl_grid::Grid;
+use jxl_grid::{Grid, SimpleGrid};
 use jxl_modular::{ChannelShift, ModularChannelParams, Modular, ModularParams};
 use jxl_vardct::{TransformType, Quantizer};
 
@@ -46,10 +46,10 @@ pub struct LfCoeff {
 
 #[derive(Debug)]
 pub struct HfMetadata {
-    pub x_from_y: Grid<i32>,
-    pub b_from_y: Grid<i32>,
+    pub x_from_y: SimpleGrid<i32>,
+    pub b_from_y: SimpleGrid<i32>,
     pub block_info: Grid<BlockInfo>,
-    pub epf_sigma: Grid<f32>,
+    pub epf_sigma: SimpleGrid<f32>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -140,7 +140,7 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
             ModularChannelParams::new(bw as u32, bh as u32),
         ];
         let params = ModularParams::with_channels(
-            128,
+            0,
             group_params.frame_header.bit_depth.bits_per_sample(),
             channels,
             group_params.gmodular.ma_config.as_ref(),
@@ -150,12 +150,16 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
         modular.inverse_transform();
 
         let image = modular.into_image().into_channel_data();
-        let mut image_iter = image.into_iter();
+        let mut image_iter = image.into_iter().map(|g| g.into_simple().unwrap());
         let x_from_y = image_iter.next().unwrap();
         let b_from_y = image_iter.next().unwrap();
         let block_info_raw = image_iter.next().unwrap();
         let sharpness = image_iter.next().unwrap();
-        let mut epf_sigma = Grid::new_similar(&sharpness);
+
+        let sharpness = sharpness.buf();
+
+        let mut epf_sigma = SimpleGrid::new(bw, bh);
+        let epf_sigma_buf = epf_sigma.buf_mut();
         let epf = if let EdgePreservingFilter::Enabled { sigma, sharp_lut, .. } = &group_params.frame_header.restoration_filter.epf {
             let quantizer = group_params.quantizer.unwrap();
             Some((sigma.quant_mul * 65536.0 / quantizer.global_scale as f32, sharp_lut))
@@ -163,7 +167,7 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
             None
         };
 
-        let mut block_info = Grid::<BlockInfo>::new_usize(bw, bh, bw, bh);
+        let mut block_info = Grid::<BlockInfo>::new_usize(bw, bh, 0, 0);
         let mut x;
         let mut y = 0usize;
         let mut data_idx = 0usize;
@@ -192,9 +196,9 @@ impl Bundle<LfGroupParams<'_>> for HfMetadata {
                             });
 
                             if let Some((sigma, sharp_lut)) = epf {
-                                let sharpness = sharpness.get(x + dx, y + dy).unwrap();
-                                let sigma = sigma * sharp_lut[*sharpness as usize];
-                                epf_sigma.set(x + dx, y + dy, sigma);
+                                let sharpness = sharpness[(y + dy) * bw + (x + dx)];
+                                let sigma = sigma * sharp_lut[sharpness as usize];
+                                epf_sigma_buf[(y + dy) * bw + (x + dx)] = sigma;
                             }
                         }
                     }

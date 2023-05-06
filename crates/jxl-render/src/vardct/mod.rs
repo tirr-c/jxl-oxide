@@ -1,6 +1,6 @@
 use jxl_color::OpsinInverseMatrix;
 use jxl_frame::data::CoeffData;
-use jxl_grid::{CutGrid, Grid, SimpleGrid};
+use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_vardct::{
     LfChannelDequantization,
     Quantizer,
@@ -170,8 +170,8 @@ pub fn chroma_from_luma_hf(
     coeff_xyb: &mut [&mut CutGrid<'_>; 3],
     lf_left: usize,
     lf_top: usize,
-    x_from_y: &Grid<i32>,
-    b_from_y: &Grid<i32>,
+    x_from_y: &SimpleGrid<i32>,
+    b_from_y: &SimpleGrid<i32>,
     lf_chan_corr: &LfChannelCorrelation,
 ) {
     let LfChannelCorrelation {
