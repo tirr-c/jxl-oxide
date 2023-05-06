@@ -24,7 +24,7 @@ pub fn dct_2d(io: &mut SimpleGrid<f32>) {
 
 pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
     let mut io = CutGrid::from_buf(io_buf, width, height, width);
-    let Some(mut io) = CutGrid::<'_, Lane>::convert_grid(&mut io) else {
+    let Some(mut io) = io.as_vectored() else {
         tracing::debug!("Input buffer is not aligned");
         return super::generic::dct_2d_generic(io_buf, width, height, inverse);
     };
@@ -32,7 +32,7 @@ pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: 
 }
 
 pub fn idct_2d(io: &mut CutGrid<'_>) {
-    let Some(mut io) = CutGrid::<'_, Lane>::convert_grid(io) else {
+    let Some(mut io) = io.as_vectored() else {
         tracing::debug!("Input buffer is not aligned");
         return super::generic::idct_2d(io);
     };

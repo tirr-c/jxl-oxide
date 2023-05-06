@@ -97,21 +97,21 @@ impl<S> SimpleGrid<S> {
 
 /// A mutable subgrid of the underlying buffer.
 #[derive(Debug)]
-pub struct CutGrid<'g, Lane: Copy = f32> {
-    ptr: NonNull<Lane>,
+pub struct CutGrid<'g, V: Copy = f32> {
+    ptr: NonNull<V>,
     width: usize,
     height: usize,
     stride: usize,
-    _marker: std::marker::PhantomData<&'g mut [Lane]>,
+    _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
-impl<'g, Lane: Copy> CutGrid<'g, Lane> {
+impl<'g, V: Copy> CutGrid<'g, V> {
     /// Create a `CutGrid` from raw pointer to the buffer, width, height and stride.
     ///
     /// # Safety
     /// The area specified by `width`, `height` and `stride` must not overlap with other instances
     /// of `CutGrid`, and the memory region in the area must be valid.
-    pub unsafe fn new(ptr: NonNull<Lane>, width: usize, height: usize, stride: usize) -> Self {
+    pub unsafe fn new(ptr: NonNull<V>, width: usize, height: usize, stride: usize) -> Self {
         Self {
             ptr,
             width,
@@ -128,7 +128,7 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     /// - either `width` or `height` is zero,
     /// - `width` is greater than `stride`,
     /// - or the area specified by `width`, `height` and `stride` is larger than `buf`.
-    pub fn from_buf(buf: &'g mut [Lane], width: usize, height: usize, stride: usize) -> Self {
+    pub fn from_buf(buf: &'g mut [V], width: usize, height: usize, stride: usize) -> Self {
         assert!(width > 0);
         assert!(height > 0);
         assert!(width <= stride);
@@ -155,7 +155,7 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     }
 
     #[inline]
-    fn get_ptr(&self, x: usize, y: usize) -> *mut Lane {
+    fn get_ptr(&self, x: usize, y: usize) -> *mut V {
         if x >= self.width || y >= self.height {
             panic!(
                 "Coordinate out of range: ({}, {}) not in {}x{}",
@@ -171,20 +171,20 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     }
 
     #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Lane {
+    pub fn get(&self, x: usize, y: usize) -> V {
         let ptr = self.get_ptr(x, y);
         // SAFETY: get_ptr returns a valid pointer.
         unsafe { *ptr }
     }
 
     #[inline]
-    pub fn get_row(&self, row: usize) -> &[Lane] {
+    pub fn get_row(&self, row: usize) -> &[V] {
         let ptr = self.get_ptr(0, row);
         unsafe { std::slice::from_raw_parts(ptr as *const _, self.width) }
     }
 
     #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> &mut Lane {
+    pub fn get_mut(&mut self, x: usize, y: usize) -> &mut V {
         let ptr = self.get_ptr(x, y);
         // SAFETY: get_ptr returns a valid pointer, and mutable borrow of `self` makes sure that
         // the access is exclusive.
@@ -192,7 +192,7 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     }
 
     #[inline]
-    pub fn get_row_mut(&mut self, row: usize) -> &mut [Lane] {
+    pub fn get_row_mut(&mut self, row: usize) -> &mut [V] {
         let ptr = self.get_ptr(0, row);
         unsafe { std::slice::from_raw_parts_mut(ptr, self.width) }
     }
@@ -212,19 +212,19 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     }
 }
 
-impl<'g, Lane: SimdVector> CutGrid<'g, Lane> {
-    pub fn convert_grid(grid: &'g mut CutGrid<'_, f32>) -> Option<Self> {
-        let mask = Lane::SIZE - 1;
-        let align_mask = std::mem::align_of::<Lane>() - 1;
+impl<'g> CutGrid<'g, f32> {
+    pub fn as_vectored<V: SimdVector>(&mut self) -> Option<CutGrid<'_, V>> {
+        let mask = V::SIZE - 1;
+        let align_mask = std::mem::align_of::<V>() - 1;
 
-        (grid.ptr.as_ptr() as usize & align_mask == 0
-            && grid.width & mask == 0
-            && grid.stride & mask == 0)
-            .then(|| Self {
-                ptr: grid.ptr.cast::<Lane>(),
-                width: grid.width / Lane::SIZE,
-                height: grid.height,
-                stride: grid.stride / Lane::SIZE,
+        (self.ptr.as_ptr() as usize & align_mask == 0
+            && self.width & mask == 0
+            && self.stride & mask == 0)
+            .then(|| CutGrid {
+                ptr: self.ptr.cast::<V>(),
+                width: self.width / V::SIZE,
+                height: self.height,
+                stride: self.stride / V::SIZE,
                 _marker: Default::default(),
             })
     }
