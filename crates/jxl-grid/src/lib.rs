@@ -1,6 +1,6 @@
 mod simd;
 mod simple_grid;
-pub use simd::SimdLane;
+pub use simd::SimdVector;
 pub use simple_grid::*;
 
 #[derive(Debug, Clone)]

@@ -1,37 +1,37 @@
-/// Trait representing SIMD lane.
-pub trait SimdLane: Copy {
-    /// The number of `f32` elements in a single SIMD lane.
+/// Trait representing a SIMD vector.
+pub trait SimdVector: Copy {
+    /// The number of `f32` lanes in a single SIMD vector.
     const SIZE: usize;
 
-    /// Initialize a SIMD lane with zeroes.
+    /// Initialize a SIMD vector with zeroes.
     fn zero() -> Self;
-    /// Initialize a SIMD lane with given floats.
+    /// Initialize a SIMD vector with given floats.
     fn set<const N: usize>(val: [f32; N]) -> Self;
-    /// Initialize a SIMD lane filled with given float.
+    /// Initialize a SIMD vector filled with given float.
     fn splat_f32(val: f32) -> Self;
-    /// Load a SIMD lane from memory.
+    /// Load a SIMD vector from memory.
     ///
     /// The pointer doesn't need to be aligned.
     ///
     /// # Safety
     /// The given pointer must be valid.
     unsafe fn load(ptr: *const f32) -> Self;
-    /// Load a SIMD lane from memory with aligned pointer.
+    /// Load a SIMD vector from memory with aligned pointer.
     ///
     /// # Safety
     /// The given pointer must be valid and properly aligned.
     unsafe fn load_aligned(ptr: *const f32) -> Self;
 
-    /// Extract a single element from the SIMD lane.
+    /// Extract a single element from the SIMD vector.
     fn extract_f32<const N: i32>(self) -> f32;
-    /// Store the SIMD lane to memory.
+    /// Store the SIMD vector to memory.
     ///
     /// The pointer doesn't need to be aligned.
     ///
     /// # Safety
     /// The given pointer must be valid.
     unsafe fn store(self, ptr: *mut f32);
-    /// Store the SIMD lane to memory with aligned pointer.
+    /// Store the SIMD vector to memory with aligned pointer.
     ///
     /// # Safety
     /// The given pointer must be valid and properly aligned.
@@ -47,7 +47,7 @@ pub trait SimdLane: Copy {
 }
 
 #[cfg(target_arch = "x86_64")]
-impl SimdLane for std::arch::x86_64::__m128 {
+impl SimdVector for std::arch::x86_64::__m128 {
     const SIZE: usize = 4;
 
     #[inline]

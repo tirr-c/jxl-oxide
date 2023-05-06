@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-use crate::SimdLane;
+use crate::SimdVector;
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -212,7 +212,7 @@ impl<'g, Lane: Copy> CutGrid<'g, Lane> {
     }
 }
 
-impl<'g, Lane: SimdLane> CutGrid<'g, Lane> {
+impl<'g, Lane: SimdVector> CutGrid<'g, Lane> {
     pub fn convert_grid(grid: &'g mut CutGrid<'_, f32>) -> Option<Self> {
         let mask = Lane::SIZE - 1;
         let align_mask = std::mem::align_of::<Lane>() - 1;

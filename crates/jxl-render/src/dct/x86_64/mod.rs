@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SimdLane, SimpleGrid};
+use jxl_grid::{CutGrid, SimdVector, SimpleGrid};
 
 use super::consts;
 use std::arch::x86_64::*;
