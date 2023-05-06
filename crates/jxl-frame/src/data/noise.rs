@@ -83,14 +83,16 @@ pub fn init_noise(
     // Each channel is convolved by the 5×5 kernel
     for (cchannel, nchannel) in convolved.iter_mut().zip(noise_buffer) {
         let cbuffer = cchannel.buf_mut();
+        let noise_width = nchannel.width() + nchannel.padding() * 2;
+        let nbuffer = nchannel.buf_padded();
         (0..height).for_each(|y| {
             (0..width).for_each(|x| {
                 (0..5).for_each(|iy| {
                     (0..5).for_each(|ix| {
-                        let cy = (y + iy) as i32 - 2;
-                        let cx = (x + ix) as i32 - 2;
+                        let cy = y + iy;
+                        let cx = x + ix;
                         cbuffer[y * width + x] +=
-                            nchannel.get_unchecked(cx, cy) * laplacian[iy][ix];
+                            nbuffer[cy * noise_width + cx] * laplacian[iy][ix];
                     });
                 });
             });
@@ -118,17 +120,20 @@ fn init_noise_group(
     let mut rng = XorShift128Plus::new(seed0, seed1);
 
     for channel in noise_buffer {
+        let buf_padding = channel.padding();
+        let buf_width = channel.width() + channel.padding() * 2;
+        let buf = channel.buf_padded_mut();
         for y in 0..ysize {
+            let y = y0 + y + buf_padding;
             for x in (0..xsize).step_by(N * 2) {
                 let bits = rng.get_u32_bits();
+                let iters = (xsize - x).min(N * 2);
 
                 #[allow(clippy::needless_range_loop)]
-                for i in 0..(N * 2) {
-                    if x + i >= xsize {
-                        break;
-                    }
+                for i in 0..iters {
+                    let x = x0 + x + i + buf_padding;
                     let random = f32::from_bits(bits[i] >> 9 | 0x3F_80_00_00);
-                    *channel.get_unchecked_mut_usize(x0 + x + i, y0 + y) = random;
+                    buf[y * buf_width + x] = random;
                 }
             }
         }

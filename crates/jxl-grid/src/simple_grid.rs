@@ -264,63 +264,40 @@ impl<S: Clone> PaddedGrid<S> {
     }
 
     #[inline]
-    pub fn get_unchecked(&self, x: i32, y: i32) -> &S {
-        let x = (self.padding as i32 + x) as usize;
-        let y = (self.padding as i32 + y) as usize;
-        &self.grid.buf[y * self.grid.width + x + self.grid.offset]
+    pub fn buf_padded(&self) -> &[S] {
+        self.grid.buf()
     }
 
     #[inline]
-    pub fn get_unchecked_usize(&self, x: usize, y: usize) -> &S {
-        let x = self.padding + x;
-        let y = self.padding + y;
-        &self.grid.buf[y * self.grid.width + x + self.grid.offset]
-    }
-
-    #[inline]
-    pub fn get_unchecked_mut(&mut self, x: i32, y: i32) -> &mut S {
-        let x = (self.padding as i32 + x) as usize;
-        let y = (self.padding as i32 + y) as usize;
-        &mut self.grid.buf[y * self.grid.width + x + self.grid.offset]
-    }
-
-    #[inline]
-    pub fn get_unchecked_mut_usize(&mut self, x: usize, y: usize) -> &mut S {
-        let x = self.padding + x;
-        let y = self.padding + y;
-        &mut self.grid.buf[y * self.grid.width + x + self.grid.offset]
+    pub fn buf_padded_mut(&mut self) -> &mut [S] {
+        self.grid.buf_mut()
     }
 
     /// Use mirror operator on padding
     pub fn mirror_edges_padding(&mut self) {
-        let width = self.width() as i32;
-        let height = self.height() as i32;
-        let padding = self.padding as i32;
-        for y in -padding..(height + padding) {
-            for x in -padding..(width + padding) {
-                if y >= 0 && x >= 0 && y < height && x < width {
-                    continue;
-                }
-                let mx = mirror(x, width);
-                let my = mirror(y, height);
-                let val = self.get_unchecked_usize(mx, my);
+        let padding = self.padding;
+        let stride = self.grid.width();
+        let height = self.grid.height() - padding * 2;
 
-                *self.get_unchecked_mut(x, y) = val.clone();
+        // Mirror horizontally.
+        let buf = self.grid.buf_mut();
+        for y in padding..height + padding {
+            for x in 0..padding {
+                buf[y * stride + x] = buf[y * stride + padding * 2 - x - 1].clone();
+                buf[(y + 1) * stride - x - 1] = buf[(y + 1) * stride - padding * 2 + x].clone();
             }
         }
-    }
-}
 
-#[inline]
-/// Mirror operator
-///
-/// `abs(val)` must be less than or equal to `size`
-fn mirror(val: i32, size: i32) -> usize {
-    if val < 0 {
-        return (-val - 1) as usize;
+        // Mirror vertically.
+        let (out_chunk, in_chunk) = buf.split_at_mut(stride * padding);
+        let in_chunk = &in_chunk[..stride * padding];
+        for (out_row, in_row) in out_chunk.chunks_exact_mut(stride).zip(in_chunk.chunks_exact(stride).rev()) {
+            out_row.clone_from_slice(in_row);
+        }
+
+        let (in_chunk, out_chunk) = buf.split_at_mut(stride * (height + padding));
+        for (out_row, in_row) in out_chunk.chunks_exact_mut(stride).zip(in_chunk.chunks_exact(stride).rev()) {
+            out_row.clone_from_slice(in_row);
+        }
     }
-    if val >= size {
-        return (2 * size - val - 1) as usize;
-    }
-    val as usize
 }
