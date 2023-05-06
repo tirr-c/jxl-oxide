@@ -1,5 +1,3 @@
-#![allow(unused_variables, unused_mut, dead_code)]
-
 use std::num::Wrapping;
 
 use jxl_grid::{PaddedGrid, SimpleGrid};
@@ -28,8 +26,8 @@ impl<Ctx> jxl_bitstream::Bundle<Ctx> for NoiseParameters {
 }
 
 #[inline]
-fn rng_seed0(visible_frames: u64, invisible_frames: u64) -> u64 {
-    (visible_frames << 32) + invisible_frames
+fn rng_seed0(visible_frames: usize, invisible_frames: usize) -> u64 {
+    ((visible_frames as u64) << 32) + invisible_frames as u64
 }
 
 #[inline]
@@ -44,7 +42,7 @@ pub fn init_noise(
 ) -> [SimpleGrid<f32>; 3] {
     let width = header.width as usize;
     let height = header.height as usize;
-    let seed0 = rng_seed0(visible_frames as u64, invisible_frames as u64);
+    let seed0 = rng_seed0(visible_frames, invisible_frames);
 
     // NOTE: It may be necessary to multiply group_dim by `upsampling`
     let group_dim = header.group_dim() as usize;
@@ -187,12 +185,6 @@ impl XorShift128Plus {
 }
 
 #[inline]
-fn reinterpret_cast_u64_to_u32(val: u64) -> [u32; 2] {
-    let lo = (val & 0xFF_FF_FF_FF) as u32;
-    let hi = (val >> 32) as u32;
-    [lo, hi]
-}
-
 fn split_mix_64(z: Wrapping<u64>) -> Wrapping<u64> {
     let z = (z ^ (z >> 30)) * Wrapping(0xBF58476D1CE4E5B9);
     let z = (z ^ (z >> 27)) * Wrapping(0x94D049BB133111EB);
