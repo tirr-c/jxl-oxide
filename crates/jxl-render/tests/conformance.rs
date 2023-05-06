@@ -335,3 +335,14 @@ conformance_test! {
         0.0,
     )
 }
+
+conformance_test! {
+    noise(
+        "b7bb25b911ab5f4b9a6a6da9c220c9ea738de685f9df25eb860e6bbe1302237d",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        1,
+        3,
+        0.004,
+        0.0001,
+    )
+}
