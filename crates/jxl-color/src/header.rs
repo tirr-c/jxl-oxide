@@ -39,6 +39,7 @@ define_bundle! {
 }
 
 impl ColourEncoding {
+    /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
     #[inline]
     pub fn is_srgb(&self) -> bool {
         self.is_srgb_gamut() && self.tf == TransferFunction::Srgb
@@ -51,6 +52,7 @@ impl ColourEncoding {
             self.primaries == Primaries::Srgb
     }
 
+    /// Returns the CICP tag which represents this `ColourEncoding`.
     pub fn cicp(&self) -> Option<[u8; 4]> {
         let primaries_cicp = self.primaries.cicp();
         let tf_cicp = self.tf.cicp();

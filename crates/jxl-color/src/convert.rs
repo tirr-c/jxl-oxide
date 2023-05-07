@@ -15,29 +15,29 @@ use crate::{
 /// Assumes that input framebuffer is in linear sRGB.
 pub fn from_linear_srgb(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, intensity_target: f32) {
     let target_wp = match &encoding.white_point {
-        WhitePoint::D65 => illuminant::D65,
+        WhitePoint::D65 => ILLUMINANT_D65,
         WhitePoint::Custom(xy) => [xy.x as f32 / 1e6, xy.y as f32 / 1e6],
-        WhitePoint::E => illuminant::E,
-        WhitePoint::Dci => illuminant::DCI,
+        WhitePoint::E => ILLUMINANT_E,
+        WhitePoint::Dci => ILLUMINANT_DCI,
     };
     let target_primaries = match &encoding.primaries {
-        Primaries::Srgb => primaries::SRGB,
+        Primaries::Srgb => PRIMARIES_SRGB,
         Primaries::Custom { red, green, blue } => [
             [red.x as f32 / 1e6, red.y as f32 / 1e6],
             [green.x as f32 / 1e6, green.y as f32 / 1e6],
             [blue.x as f32 / 1e6, blue.y as f32 / 1e6],
         ],
-        Primaries::Bt2100 => primaries::BT2100,
-        Primaries::P3 => primaries::P3,
+        Primaries::Bt2100 => PRIMARIES_BT2100,
+        Primaries::P3 => PRIMARIES_P3,
     };
 
-    let merged = (target_primaries != primaries::SRGB || target_wp != illuminant::D65).then(|| {
-        let srgb_xyz = primaries_to_xyz_mat(primaries::SRGB, illuminant::D65);
+    let merged = (target_primaries != PRIMARIES_SRGB || target_wp != ILLUMINANT_D65).then(|| {
+        let srgb_xyz = primaries_to_xyz_mat(PRIMARIES_SRGB, ILLUMINANT_D65);
         let xyz_target = xyz_to_primaries_mat(target_primaries, target_wp);
 
         let mut merged = srgb_xyz;
-        if target_wp != illuminant::D65 {
-            let adapt = adapt_mat(illuminant::D65, target_wp);
+        if target_wp != ILLUMINANT_D65 {
+            let adapt = adapt_mat(ILLUMINANT_D65, target_wp);
             merged = matmul3(&adapt, &merged);
         }
         matmul3(&xyz_target, &merged)

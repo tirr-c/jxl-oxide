@@ -1,5 +1,8 @@
 use jxl_grid::SimpleGrid;
 
+/// Converts samples in XYB colorspace to the linear sRGB.
+///
+/// Channels are expected to be in XYB order.
 pub fn xyb_to_linear_srgb(
     fb_xyb: [&mut SimpleGrid<f32>; 3],
     oim: &crate::OpsinInverseMatrix,

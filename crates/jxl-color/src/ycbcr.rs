@@ -1,5 +1,8 @@
 use jxl_grid::SimpleGrid;
 
+/// Applies transform from YCbCr to RGB.
+///
+/// Channels are expected to be in CbYCr order.
 pub fn ycbcr_to_rgb(fb_cbycr: [&mut SimpleGrid<f32>; 3]) {
     let [cb, y, cr] = fb_cbycr;
     let cb = cb.buf_mut();

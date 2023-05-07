@@ -1,3 +1,9 @@
+//! Functions related to ICC profiles.
+//!
+//! - [`read_icc`] and [`decode_icc`] can be used to read embedded ICC profile from the bitstream.
+//! - [`colour_encoding_to_icc`] can be used to create an ICC profile to embed into the decoded
+//!   image file, or to be used by the color management system for various purposes.
+
 use std::io::prelude::*;
 use std::io::Cursor;
 
@@ -17,6 +23,7 @@ use crate::{
     WhitePoint,
 };
 
+/// Reads the encoded ICC profile stream from the given bitstream.
 pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
     let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)?;
@@ -153,6 +160,7 @@ fn shuffle4(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Decodes the given ICC profile stream.
 pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     const COMMON_TAGS: [&[u8]; 19] = [
         b"rTRC", b"rXYZ",
@@ -435,6 +443,7 @@ fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
     out
 }
 
+/// Creates an ICCv4 profile from the given [`ColourEncoding`].
 pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8>> {
     let ColourEncoding {
         want_icc,
@@ -527,12 +536,12 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     );
 
     let from_illuminant = match white_point {
-        WhitePoint::D65 => illuminant::D65,
+        WhitePoint::D65 => ILLUMINANT_D65,
         WhitePoint::Custom(xy) => [xy.x as f32 / 1e6, xy.y as f32 / 1e6],
-        WhitePoint::E => illuminant::E,
-        WhitePoint::Dci => illuminant::DCI,
+        WhitePoint::E => ILLUMINANT_E,
+        WhitePoint::Dci => ILLUMINANT_DCI,
     };
-    let chad = adapt_mat(from_illuminant, illuminant::D50);
+    let chad = adapt_mat(from_illuminant, ILLUMINANT_D50);
     let chad_q = chad.map(|f| (f * 65536.0 + 0.5) as i32);
     let mut chad_data = vec![b's', b'f', b'3', b'2', 0, 0, 0, 0];
     for val in chad_q {
@@ -569,14 +578,14 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     };
 
     let primaries = match primaries {
-        Primaries::Srgb => primaries::SRGB,
+        Primaries::Srgb => PRIMARIES_SRGB,
         Primaries::Custom { red, green, blue } => [
             [red.x as f32 / 1e6, red.y as f32 / 1e6],
             [green.x as f32 / 1e6, green.y as f32 / 1e6],
             [blue.x as f32 / 1e6, blue.y as f32 / 1e6],
         ],
-        Primaries::Bt2100 => primaries::BT2100,
-        Primaries::P3 => primaries::P3,
+        Primaries::Bt2100 => PRIMARIES_BT2100,
+        Primaries::P3 => PRIMARIES_P3,
     };
 
     if matches!(tf, TransferFunction::Pq | TransferFunction::Hlg) {

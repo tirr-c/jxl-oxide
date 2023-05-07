@@ -1,3 +1,4 @@
+/// Converts the linear samples with the given gamma.
 pub fn linear_to_gamma(samples: &mut [f32], gamma: f32) {
     for s in samples {
         let a = s.abs();
@@ -5,6 +6,7 @@ pub fn linear_to_gamma(samples: &mut [f32], gamma: f32) {
     }
 }
 
+/// Converts the linear samples with the sRGB transfer curve.
 pub fn linear_to_srgb(samples: &mut [f32]) {
     for s in samples {
         let a = s.abs();
@@ -16,6 +18,7 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
     }
 }
 
+/// Converts the linear samples with the BT.709 transfer curve.
 pub fn linear_to_bt709(samples: &mut [f32]) {
     for s in samples {
         let a = *s;
@@ -27,6 +30,8 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
     }
 }
 
+/// Converts the linear samples with the PQ transfer function, where linear sample value of 1.0
+/// represents `intensity_target` nits.
 pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     const M1: f32 = 1305.0 / 8192.0;
     const M2: f32 = 2523.0 / 32.0;
@@ -63,6 +68,8 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     out
 }
 
+/// Converts the display-referred samples to scene-referred signals using the hybrid log-gamma
+/// transfer function.
 pub fn hlg_inverse_oo(
     [samples_r, samples_g, samples_b]: [&mut [f32]; 3],
     [lr, lg, lb]: [f32; 3],
@@ -80,6 +87,7 @@ pub fn hlg_inverse_oo(
     }
 }
 
+/// Converts the scene-referred linear samples with the hybrid log-gamma transfer function.
 pub fn linear_to_hlg(samples: &mut [f32]) {
     const A: f32 = 0.17883277;
     const B: f32 = 0.28466892;
