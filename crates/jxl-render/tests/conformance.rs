@@ -343,3 +343,14 @@ conformance_test! {
         0.0001,
     )
 }
+
+conformance_test! {
+    cafe(
+        "4aaea4e1bda3771e62643fcdf2003ffe6048ee2870c93f67d34d6cc16cb7da4b",
+        "bef95ce5cdb139325f2a299b943158e00e39a7ca3cf597ab3dfa3098e42fc707",
+        1,
+        3,
+        0.004,
+        1e-5,
+    )
+}
