@@ -29,15 +29,16 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
                     let curr_sample = buf[idx_base + x];
                     let left_x = x.saturating_sub(1);
 
-                    let (me, next) = interpolate(
+                    // We're interpolating right-to-left.
+                    let (right, left) = interpolate(
                         prev_sample,
                         curr_sample,
                         buf[idx_base + left_x],
                     );
 
-                    buf[idx_base + x * 2] = me;
+                    buf[idx_base + x * 2] = left;
                     if x * 2 + 1 < orig_width {
-                        buf[idx_base + x * 2 + 1] = next;
+                        buf[idx_base + x * 2 + 1] = right;
                     }
 
                     prev_sample = curr_sample;
@@ -53,18 +54,19 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
             let mut prev_row = buf[(height - 1) * width..][..width].to_vec();
             for y in (0..height).rev() {
                 let idx_base = y * width;
-                let bottom_base = if y == height - 1 { idx_base } else { idx_base + width };
+                let top_base = idx_base.saturating_sub(width);
                 for x in 0..width {
                     let curr_sample = buf[idx_base + x];
 
-                    let (me, next) = interpolate(
+                    // We're interpolating bottom-to-top.
+                    let (bottom, top) = interpolate(
                         prev_row[x],
                         curr_sample,
-                        buf[bottom_base + x],
+                        buf[top_base + x],
                     );
-                    buf[idx_base * 2 + x] = me;
+                    buf[idx_base * 2 + x] = top;
                     if y * 2 + 1 < orig_height {
-                        buf[idx_base * 2 + width + x] = next;
+                        buf[idx_base * 2 + width + x] = bottom;
                     }
 
                     prev_row[x] = curr_sample;
