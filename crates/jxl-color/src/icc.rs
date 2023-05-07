@@ -4,6 +4,7 @@ use std::io::Cursor;
 use jxl_bitstream::Bitstream;
 
 use crate::{
+    ciexyz::*,
     consts::*,
     tf,
     ColourEncoding,
@@ -531,7 +532,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
         WhitePoint::E => illuminant::E,
         WhitePoint::Dci => illuminant::DCI,
     };
-    let chad = crate::convert::adapt_mat(from_illuminant, illuminant::D50);
+    let chad = adapt_mat(from_illuminant, illuminant::D50);
     let chad_q = chad.map(|f| (f * 65536.0 + 0.5) as i32);
     let mut chad_data = vec![b's', b'f', b'3', b'2', 0, 0, 0, 0];
     for val in chad_q {
@@ -587,8 +588,8 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     match colour_space {
         ColourSpace::Rgb => {
             append_multiple_tags_with_data(&mut tags, &mut data, &[*b"rTRC", *b"gTRC", *b"bTRC"], &trc);
-            let p_xyz = crate::convert::primaries_to_xyz_mat(primaries, from_illuminant);
-            let p_pcs = crate::convert::matmul3(&chad, &p_xyz);
+            let p_xyz = primaries_to_xyz_mat(primaries, from_illuminant);
+            let p_pcs = matmul3(&chad, &p_xyz);
             let p_pcs_q = p_pcs.map(|f| (f * 65536.0 + 0.5) as i32);
             let p_data = [
                 [p_pcs_q[0], p_pcs_q[3], p_pcs_q[6]],

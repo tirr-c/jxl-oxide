@@ -1,6 +1,6 @@
 use jxl_grid::SimpleGrid;
 
-pub fn perform_inverse_xyb(
+pub fn xyb_to_linear_srgb(
     fb_xyb: [&mut SimpleGrid<f32>; 3],
     oim: &crate::OpsinInverseMatrix,
     intensity_target: f32,

@@ -1,13 +1,15 @@
+mod ciexyz;
 pub mod consts;
 mod convert;
 mod error;
-mod gamut_mapping;
 pub mod header;
 pub mod icc;
 pub mod tf;
-pub mod xyb;
-pub mod ycbcr;
+mod xyb;
+mod ycbcr;
 
 pub use error::*;
-pub use gamut_mapping::convert_in_place;
+pub use convert::from_linear_srgb;
 pub use header::*;
+pub use xyb::xyb_to_linear_srgb;
+pub use ycbcr::ycbcr_to_rgb;

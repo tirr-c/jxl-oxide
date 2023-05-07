@@ -236,7 +236,7 @@ impl Frame<'_> {
         let metadata = &self.image_header.metadata;
         if metadata.xyb_encoded {
             let [x, y, b, ..] = grid else { panic!() };
-            jxl_color::xyb::perform_inverse_xyb(
+            jxl_color::xyb_to_linear_srgb(
                 [x, y, b],
                 &metadata.opsin_inverse_matrix,
                 metadata.tone_mapping.intensity_target,
@@ -247,14 +247,14 @@ impl Frame<'_> {
                 return;
             }
 
-            jxl_color::convert_in_place(
+            jxl_color::from_linear_srgb(
                 grid,
                 &metadata.colour_encoding,
                 metadata.tone_mapping.intensity_target,
             );
         } else if self.header.do_ycbcr {
             let [cb, y, cr, ..] = &mut *grid else { panic!() };
-            jxl_color::ycbcr::perform_inverse_ycbcr([cb, y, cr]);
+            jxl_color::ycbcr_to_rgb([cb, y, cr]);
         }
     }
 }
