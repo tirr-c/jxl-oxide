@@ -973,6 +973,7 @@ impl ContextInner<'_> {
             height = header.sample_height(),
             frame_type = format_args!("{:?}", header.frame_type),
             encoding = format_args!("{:?}", header.encoding),
+            jpeg_upsampling = format_args!("{:?}", header.do_ycbcr.then_some(header.jpeg_upsampling)),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
             "Decoding {}x{} frame", header.sample_width(), header.sample_height()
