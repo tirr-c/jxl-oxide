@@ -292,7 +292,7 @@ impl DequantMatrixParams {
                                 (1, 1) => params[4],
                                 (x, y) => interpolate(
                                     FREQS[y * 4 + x] - FREQ_LO,
-                                    FREQ_HI + FREQ_LO + 1e-6,
+                                    FREQ_HI - FREQ_LO + 1e-6,
                                     &bands,
                                 )
                             };
