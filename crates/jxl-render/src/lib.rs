@@ -20,6 +20,7 @@ mod blend;
 mod cut_grid;
 mod dct;
 mod error;
+mod features;
 mod filter;
 mod vardct;
 pub use error::{Error, Result};
@@ -474,16 +475,12 @@ impl<'f> ContextInner<'f> {
             let (visible_frames_num, invisible_frames_num) =
                 self.get_previous_frames_visibility(frame);
 
-            let noise_buffer = jxl_frame::data::init_noise(
+            features::render_noise(
+                frame.header(),
                 visible_frames_num,
                 invisible_frames_num,
-                frame.header(),
-            );
-            blend::noise(
-                frame.header(),
                 base_correlations_xb,
                 grid,
-                &noise_buffer,
                 noise,
             )?;
         }
