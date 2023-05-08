@@ -119,6 +119,16 @@ define_bundle! {
     }
 }
 
+impl ImageMetadata {
+    pub fn encoded_color_channels(&self) -> usize {
+        if !self.xyb_encoded && self.colour_encoding.colour_space == ColourSpace::Grey {
+            1
+        } else {
+            3
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum ExtraChannelType {
@@ -236,7 +246,7 @@ impl ImageMetadata {
         0.03777607, -0.01986694, -0.03144731, -0.01185068, -0.00213539,
     ];
     const D_UP4: [f32; 55] = [
-        0.02419067, -0.03491987, -0.03693351, -0.03094285, -0.00529785,
+        -0.02419067, -0.03491987, -0.03693351, -0.03094285, -0.00529785,
         -0.01663432, -0.03556863, -0.03888905, -0.03516850, -0.00989469,
         0.23651958, 0.33392945, -0.01073543, -0.01313181, -0.03556694,
         0.13048175, 0.40103025, 0.03951150, -0.02077584, 0.46914198,

@@ -121,11 +121,6 @@ impl ChannelShift {
         Self::Shifts(shift)
     }
 
-    #[inline]
-    pub fn from_upsampling_factor_and_shift(upsampling: u32, dim_shift: u32) -> ChannelShift {
-        Self::Shifts(upsampling.next_power_of_two().trailing_zeros() + dim_shift)
-    }
-
     pub fn from_jpeg_upsampling(jpeg_upsampling: [u32; 3], idx: usize) -> Self {
         let upsampling = jpeg_upsampling[idx];
         let hscale = jpeg_upsampling.into_iter().any(|v| v == 1 || v == 2);

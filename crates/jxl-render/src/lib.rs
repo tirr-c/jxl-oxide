@@ -389,8 +389,8 @@ impl<'f> ContextInner<'f> {
 
         let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
 
-        let width = frame.header().sample_width() as usize;
-        let height = frame.header().sample_height() as usize;
+        let width = frame.header().color_sample_width() as usize;
+        let height = frame.header().color_sample_height() as usize;
 
         for (g, ec_info) in channel_data.iter().zip(&self.image_header.metadata.ec_info) {
             let bit_depth = ec_info.bit_depth;
@@ -436,6 +436,10 @@ impl<'f> ContextInner<'f> {
                 x.lf_chan_corr.base_correlation_b,
             )
         });
+
+        for (idx, g) in grid.iter_mut().enumerate() {
+            features::upsample(g, self.image_header, frame_header, idx);
+        }
 
         if let Some(patches) = &lf_global.patches {
             for patch in &patches.patches {
@@ -534,8 +538,8 @@ impl<'f> ContextInner<'f> {
             return Err(Error::NotSupported("Single-channel modular image is not supported"));
         }
 
-        let width = frame_header.sample_width() as usize;
-        let height = frame_header.sample_height() as usize;
+        let width = frame_header.color_sample_width() as usize;
+        let height = frame_header.color_sample_height() as usize;
         let bit_depth = metadata.bit_depth;
         let mut fb_xyb = [
             SimpleGrid::new(width, height),
@@ -637,8 +641,8 @@ impl<'f> ContextInner<'f> {
         let dequant_matrices = &hf_global.dequant_matrices;
         let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 
-        let width = frame_header.sample_width() as usize;
-        let height = frame_header.sample_height() as usize;
+        let width = frame_header.color_sample_width() as usize;
+        let height = frame_header.color_sample_height() as usize;
         let width_rounded = ((width + 7) / 8) * 8;
         let height_rounded = ((height + 7) / 8) * 8;
         let mut fb_xyb = [
@@ -966,14 +970,14 @@ impl ContextInner<'_> {
 
         let header = frame.header();
         tracing::debug!(
-            width = header.sample_width(),
-            height = header.sample_height(),
+            width = header.color_sample_width(),
+            height = header.color_sample_height(),
             frame_type = format_args!("{:?}", header.frame_type),
             encoding = format_args!("{:?}", header.encoding),
             jpeg_upsampling = format_args!("{:?}", header.do_ycbcr.then_some(header.jpeg_upsampling)),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
-            "Decoding {}x{} frame", header.sample_width(), header.sample_height()
+            "Decoding {}x{} frame", header.color_sample_width(), header.color_sample_height()
         );
 
         if let Some(region) = &mut region {
@@ -1078,8 +1082,8 @@ impl RenderCache {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
 
-        let lf_width = (frame_header.sample_width() + 7) / 8;
-        let lf_height = (frame_header.sample_height() + 7) / 8;
+        let lf_width = (frame_header.color_sample_width() + 7) / 8;
+        let lf_height = (frame_header.color_sample_height() + 7) / 8;
         let mut whd = [(lf_width, lf_height); 3];
         for ((w, h), shift) in whd.iter_mut().zip(shifts_cbycr) {
             let (shift_w, shift_h) = shift.shift_size((lf_width, lf_height));

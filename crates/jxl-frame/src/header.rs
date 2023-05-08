@@ -217,8 +217,8 @@ impl FrameHeader {
         (h_upscale, v_upscale)
     }
 
-    pub fn sample_width(&self) -> u32 {
-        let &Self { mut width, upsampling, lf_level, .. } = self;
+    pub fn sample_width(&self, upsampling: u32) -> u32 {
+        let &Self { mut width, lf_level, .. } = self;
 
         if upsampling > 1 {
             width = (width + upsampling - 1) / upsampling;
@@ -231,8 +231,8 @@ impl FrameHeader {
         width
     }
 
-    pub fn sample_height(&self) -> u32 {
-        let &Self { mut height, upsampling, lf_level, .. } = self;
+    pub fn sample_height(&self, upsampling: u32) -> u32 {
+        let &Self { mut height, lf_level, .. } = self;
 
         if upsampling > 1 {
             height = (height + upsampling - 1) / upsampling;
@@ -245,9 +245,17 @@ impl FrameHeader {
         height
     }
 
+    pub fn color_sample_width(&self) -> u32 {
+        self.sample_width(self.upsampling)
+    }
+
+    pub fn color_sample_height(&self) -> u32 {
+        self.sample_height(self.upsampling)
+    }
+
     pub fn num_groups(&self) -> u32 {
-        let width = self.sample_width();
-        let height = self.sample_height();
+        let width = self.color_sample_width();
+        let height = self.color_sample_height();
         let group_dim = self.group_dim();
 
         let hgroups = (width + group_dim - 1) / group_dim;
@@ -257,8 +265,8 @@ impl FrameHeader {
     }
 
     pub fn num_lf_groups(&self) -> u32 {
-        let width = self.sample_width();
-        let height = self.sample_height();
+        let width = self.color_sample_width();
+        let height = self.color_sample_height();
         let lf_group_dim = self.lf_group_dim();
 
         let hgroups = (width + lf_group_dim - 1) / lf_group_dim;
@@ -273,7 +281,7 @@ impl FrameHeader {
 
     pub fn groups_per_row(&self) -> u32 {
         let group_dim = self.group_dim();
-        (self.sample_width() + group_dim - 1) / group_dim
+        (self.color_sample_width() + group_dim - 1) / group_dim
     }
 
     pub fn lf_group_dim(&self) -> u32 {
@@ -282,7 +290,7 @@ impl FrameHeader {
 
     pub fn lf_groups_per_row(&self) -> u32 {
         let lf_group_dim = self.lf_group_dim();
-        (self.sample_width() + lf_group_dim - 1) / lf_group_dim
+        (self.color_sample_width() + lf_group_dim - 1) / lf_group_dim
     }
 
     pub fn group_size_for(&self, group_idx: u32) -> (u32, u32) {
@@ -294,8 +302,8 @@ impl FrameHeader {
     }
 
     fn size_for(&self, group_dim: u32, group_idx: u32) -> (u32, u32) {
-        let width = self.sample_width();
-        let height = self.sample_height();
+        let width = self.color_sample_width();
+        let height = self.color_sample_height();
         let full_rows = height / group_dim;
         let rows_remainder = height % group_dim;
         let full_cols = width / group_dim;
