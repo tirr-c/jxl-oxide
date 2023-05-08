@@ -365,3 +365,14 @@ conformance_test! {
         0.0001,
     )
 }
+
+conformance_test! {
+    spot(
+        "82de72e756db992792b8e3eb5eac5194ef83e9ab4dc03e846492fbedde7b58da",
+        "ce0caee9506116ea94d7367d646f7fd6d0b7e82feb8d1f3de4edb3ba57bae07e",
+        1,
+        6,
+        3.815e-6,
+        3.815e-6,
+    )
+}
