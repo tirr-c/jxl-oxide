@@ -166,26 +166,28 @@ fn run_test<R: std::io::Read>(
 }
 
 macro_rules! conformance_test {
-    ($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:expr, $max_rmse:expr $(,)? )) => {
-        #[test]
-        $(#[$attr])*
-        fn $name() {
-            let perform_ct = $icc_hash != "skip";
+    ($($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:expr, $max_rmse:expr $(,)? )),* $(,)?) => {
+        $(
+            #[test]
+            $(#[$attr])*
+            fn $name() {
+                let perform_ct = $icc_hash != "skip";
 
-            let buf = download_object_with_cache($npy_hash, "npy");
-            let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
+                let buf = download_object_with_cache($npy_hash, "npy");
+                let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
 
-            let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
+                let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
 
-            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            path.push("tests/conformance/testcases");
-            path.push(stringify!($name));
-            path.push("input.jxl");
-            let file = std::fs::File::open(path).expect("Failed to open file");
-            let bitstream = jxl_bitstream::Bitstream::new_detect(file);
+                let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                path.push("tests/conformance/testcases");
+                path.push(stringify!($name));
+                path.push("input.jxl");
+                let file = std::fs::File::open(path).expect("Failed to open file");
+                let bitstream = jxl_bitstream::Bitstream::new_detect(file);
 
-            run_test(bitstream, target_icc, expected, $peak_error, $max_rmse);
-        }
+                run_test(bitstream, target_icc, expected, $peak_error, $max_rmse);
+            }
+        )*
     };
 }
 
@@ -197,10 +199,7 @@ conformance_test! {
         3,
         0.000976562,
         0.000976562,
-    )
-}
-
-conformance_test! {
+    ),
     delta_palette(
         "952b9e16aa0ae23df38c6b358cb4835b5f9479838f6855b96845ea54b0528c1f",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -208,10 +207,7 @@ conformance_test! {
         3,
         0.000976562,
         0.000976562,
-    )
-}
-
-conformance_test! {
+    ),
     lz77_flower(
         "953d3ada476e3218653834c9addc9c16bb6f9f03b18be1be8a85c07a596ea32d",
         "793cb9df4e4ce93ce8fe827fde34e7fb925b7079fcb68fba1e56fc4b35508ccb",
@@ -219,10 +215,7 @@ conformance_test! {
         3,
         0.000976562,
         0.000976562,
-    )
-}
-
-conformance_test! {
+    ),
     patches_lossless(
         "806201a2c99d27a54c400134b3db7bfc57476f9bc0775e59eea802d28aba75de",
         "3a10bcd8e4c39d12053ebf66d18075c7ded4fd6cf78d26d9c47bdc0cde215115",
@@ -230,10 +223,7 @@ conformance_test! {
         4,
         0.000976562,
         0.000976562,
-    )
-}
-
-conformance_test! {
+    ),
     bike(
         "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
         "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",
@@ -241,10 +231,7 @@ conformance_test! {
         3,
         0.007,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     sunset_logo(
         "bf1c1d5626ced3746df867cf3e3a25f3d17512c2e837b5e3a04743660e42ad81",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -252,10 +239,7 @@ conformance_test! {
         4,
         0.000244141,
         0.000244141,
-    )
-}
-
-conformance_test! {
+    ),
     #[ignore = "conformance test is not updated yet"]
     blendmodes(
         "dfb94f997c30984cb6ccdc66be353a18b34f1bd98268d6419b8ecf28917d8cb5",
@@ -264,10 +248,7 @@ conformance_test! {
         4,
         0.004,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     progressive(
         "5a9d25412e2393ee11632942b4b683cda3f838dd72ab2550cfffc8f34d69c852",
         "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",
@@ -275,10 +256,7 @@ conformance_test! {
         3,
         0.02,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     animation_icos4d(
         "77a060cfa0d4df183255424e13e4f41a90b3edcea1248e3f22a3b7fcafe89e49",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -286,10 +264,7 @@ conformance_test! {
         4,
         0.005,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     animation_spline(
         "a571c5cbba58affeeb43c44c13f81e2b1962727eb9d4e017e4f25d95c7388f10",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -297,10 +272,7 @@ conformance_test! {
         3,
         0.004,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     animation_newtons_cradle(
         "4309286cd22fa4008db3dcceee6a72a806c9291bd7e035cf555f3b470d0693d8",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -308,10 +280,7 @@ conformance_test! {
         4,
         0.000976562,
         0.000976562,
-    )
-}
-
-conformance_test! {
+    ),
     alpha_triangles(
         "1d8471e3b7f0768f408b5e5bf5fee0de49ad6886d846712b1aaa702379722e2b",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -319,10 +288,7 @@ conformance_test! {
         4,
         0.001953125,
         0.001953125,
-    )
-}
-
-conformance_test! {
+    ),
     lossless_pfm(
         "1eac3ced5c60ef8a3a602f54c6a9d28162dfee51cd85b8dd7e52f6e3212bbb52",
         "skip",
@@ -330,10 +296,7 @@ conformance_test! {
         3,
         0.0,
         0.0,
-    )
-}
-
-conformance_test! {
+    ),
     noise(
         "b7bb25b911ab5f4b9a6a6da9c220c9ea738de685f9df25eb860e6bbe1302237d",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -341,10 +304,7 @@ conformance_test! {
         3,
         0.004,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     cafe(
         "4aaea4e1bda3771e62643fcdf2003ffe6048ee2870c93f67d34d6cc16cb7da4b",
         "bef95ce5cdb139325f2a299b943158e00e39a7ca3cf597ab3dfa3098e42fc707",
@@ -352,10 +312,7 @@ conformance_test! {
         3,
         0.004,
         1e-5,
-    )
-}
-
-conformance_test! {
+    ),
     upsampling(
         "9b83952c4bba9dc93fd5c5c49e27eab29301e848bf70dceccfec96b48d3ab975",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -363,10 +320,7 @@ conformance_test! {
         4,
         0.004,
         0.0001,
-    )
-}
-
-conformance_test! {
+    ),
     spot(
         "82de72e756db992792b8e3eb5eac5194ef83e9ab4dc03e846492fbedde7b58da",
         "ce0caee9506116ea94d7367d646f7fd6d0b7e82feb8d1f3de4edb3ba57bae07e",
