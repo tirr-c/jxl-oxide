@@ -25,7 +25,7 @@ pub fn dct_2d(io: &mut SimpleGrid<f32>) {
 pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
     let mut io = CutGrid::from_buf(io_buf, width, height, width);
     let Some(mut io) = io.as_vectored() else {
-        tracing::debug!("Input buffer is not aligned");
+        tracing::trace!("Input buffer is not aligned");
         return super::generic::dct_2d_generic(io_buf, width, height, inverse);
     };
     dct_2d_lane(&mut io, inverse);
@@ -33,7 +33,7 @@ pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: 
 
 pub fn idct_2d(io: &mut CutGrid<'_>) {
     let Some(mut io) = io.as_vectored() else {
-        tracing::debug!("Input buffer is not aligned");
+        tracing::trace!("Input buffer is not aligned");
         return super::generic::idct_2d(io);
     };
     dct_2d_lane(&mut io, true);
@@ -255,22 +255,5 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
             output0[idx] = input0[idx].add(r);
             output1[n / 2 - idx - 1] = input0[idx].sub(r);
         }
-    }
-}
-
-mod tests {
-    #[test]
-    #[ignore]
-    fn idct_8() {
-        unsafe {
-            let layout = std::alloc::Layout::from_size_align(std::mem::size_of::<f32>() * 64, 32).unwrap();
-            let ptr = std::alloc::alloc_zeroed(layout);
-            let io = std::slice::from_raw_parts_mut(ptr as *mut f32, 64);
-            io[0] = 0.01;
-            super::dct_2d_generic(io, 8, 8, true);
-            dbg!(io);
-            std::alloc::dealloc(ptr, layout);
-        }
-        panic!();
     }
 }
