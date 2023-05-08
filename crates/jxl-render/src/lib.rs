@@ -468,7 +468,7 @@ impl<'f> ContextInner<'f> {
                         estimated_area
                     );
                 }
-                blend::spline(frame_header, grid, spline)?;
+                features::render_spline(frame_header, grid, spline)?;
             }
         }
         if let Some(noise) = &lf_global.noise {

@@ -22,6 +22,17 @@ pub struct Splines {
     pub quant_adjust: i32,
 }
 
+/// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
+///
+/// Use [`QuantSpline::dequant`] to get normal [Spline]
+#[derive(Debug, Default, Clone)]
+pub struct QuantSpline {
+    start_point: (i32, i32),
+    points_deltas: Vec<(i32, i32)>,
+    xyb_dct: [[i32; 32]; 3],
+    sigma_dct: [i32; 32],
+}
+
 /// 2D Point in f32 coordinates
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Point {
@@ -40,17 +51,6 @@ pub struct Spline {
 pub struct SplineArc {
     pub point: Point,
     pub length: f32,
-}
-
-/// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
-///
-/// Use [`QuantSpline::dequant`] to get normal [Spline]
-#[derive(Debug, Default, Clone)]
-pub struct QuantSpline {
-    start_point: (i32, i32),
-    points_deltas: Vec<(i32, i32)>,
-    xyb_dct: [[i32; 32]; 3],
-    sigma_dct: [i32; 32],
 }
 
 impl Bundle<&FrameHeader> for Splines {
