@@ -356,7 +356,6 @@ conformance_test! {
 }
 
 conformance_test! {
-    #[ignore = "small errors"]
     upsampling(
         "9b83952c4bba9dc93fd5c5c49e27eab29301e848bf70dceccfec96b48d3ab975",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
