@@ -13,7 +13,7 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
         *s = if a <= 0.0031308f32 {
             12.92 * a
         } else {
-            1.055 * a.powf(1.0 / 2.4) - 0.055
+            a.powf(1.0 / 2.4).mul_add(1.055, -0.055)
         }.copysign(*s);
     }
 }
@@ -25,7 +25,7 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
         *s = if a <= 0.018f32 {
             4.5 * a
         } else {
-            1.099 * a.powf(0.45) - 0.099
+            a.powf(0.45).mul_add(1.099, -0.099)
         };
     }
 }
@@ -44,7 +44,7 @@ pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     for s in samples {
         let a = s.abs();
         let y_m1 = (a * y_mult).powf(M1);
-        *s = ((C1 + C2 * y_m1) / (1.0 + C3 * y_m1)).powf(M2).copysign(*s);
+        *s = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0))).powf(M2).copysign(*s);
     }
 }
 
@@ -61,7 +61,7 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
 
         let e_pow = e.powf(M2_RECIP);
         let numerator = (e_pow - C1).max(0.0);
-        let denominator = C2 - C3 * e_pow;
+        let denominator = e_pow.mul_add(-C3, C2);
         let d = (numerator / denominator).powf(M1_RECIP);
         *out = (d * 65535.0) as u16; // clamped
     }
@@ -79,7 +79,7 @@ pub fn hlg_inverse_oo(
     let exp = (1.0 - gamma) / gamma;
 
     for ((r, g), b) in samples_r.iter_mut().zip(samples_g).zip(samples_b) {
-        let mixed = lr * *r + lg * *g + lb * *b;
+        let mixed = r.mul_add(lr, g.mul_add(lg, *b * lb));
         let mult = mixed.powf(exp);
         *r *= mult;
         *g *= mult;
@@ -98,7 +98,7 @@ pub fn linear_to_hlg(samples: &mut [f32]) {
         *s = if a <= 1.0 / 12.0 {
             (3.0 * a).sqrt()
         } else {
-            A * (12.0 * a - B).ln() + C
+            A * a.mul_add(12.0, -B).ln() + C
         }.copysign(*s);
     }
 }
