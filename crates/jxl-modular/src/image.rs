@@ -71,7 +71,7 @@ impl Image {
         wp_header: &WpHeader,
         ma_ctx: &MaConfig,
     ) -> Result<()> {
-        let span = tracing::span!(tracing::Level::DEBUG, "decode channels", stream_index);
+        let span = tracing::span!(tracing::Level::TRACE, "decode channels", stream_index);
         let _guard = span.enter();
 
         let mut decoder = ma_ctx.decoder().clone();
