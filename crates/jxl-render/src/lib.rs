@@ -754,11 +754,13 @@ impl<'f> ContextInner<'f> {
             let group_row = group_idx / groups_per_row;
             let group_col = group_idx % groups_per_row;
 
-            for (coord, coeff_data) in &hf_coeff.data {
-                let &(bx, by) = coord;
-                let mut x = x.get_mut(coord);
-                let mut y = y.get_mut(coord);
-                let mut b = b.get_mut(coord);
+            for coeff_data in &hf_coeff.data {
+                let bx = coeff_data.bx;
+                let by = coeff_data.by;
+                let coord = (bx, by);
+                let mut x = x.get_mut(&coord);
+                let mut y = y.get_mut(&coord);
+                let mut b = b.get_mut(&coord);
                 let dct_select = coeff_data.dct_select;
 
                 if let Some(x) = &mut x {

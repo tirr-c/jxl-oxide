@@ -29,7 +29,9 @@ pub fn cut_with_block_info<'g>(
             let mut check_flags = vec![false; group_dim * group_dim];
 
             let mut subgrids = HashMap::new();
-            for (&(x, y), coeff) in &group.data {
+            for coeff in &group.data {
+                let x = coeff.bx;
+                let y = coeff.by;
                 let sx = x >> hshift;
                 let sy = y >> hshift;
                 if (sx << hshift) != x || (sy << vshift) != y {

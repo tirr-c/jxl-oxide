@@ -88,7 +88,7 @@ pub fn dequant_hf_varblock(
     dequant_matrices: &DequantMatrixSet,
     qm_scale: Option<u32>,
 ) {
-    let CoeffData { dct_select, hf_mul, ref coeff } = *coeff_data;
+    let CoeffData { dct_select, hf_mul, ref coeff, .. } = *coeff_data;
     let need_transpose = dct_select.need_transpose();
 
     let mut mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32;

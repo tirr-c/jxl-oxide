@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
 use jxl_grid::{Grid, Subgrid, SimpleGrid};
 use jxl_modular::{ChannelShift, Modular};
@@ -151,36 +149,43 @@ impl Bundle<PassGroupParams<'_>> for PassGroup {
 
 #[derive(Debug, Clone)]
 pub struct HfCoeff {
-    pub data: HashMap<(usize, usize), CoeffData>,
+    pub data: Vec<CoeffData>,
 }
 
 impl HfCoeff {
     pub fn empty() -> Self {
         Self {
-            data: HashMap::new(),
+            data: Vec::new(),
         }
     }
 
     pub fn merge(&mut self, other: &HfCoeff) {
-        for (coord, other_data) in &other.data {
-            if let Some(target_data) = self.data.get_mut(coord) {
-                assert_eq!(target_data.dct_select, other_data.dct_select);
-                for (target, v) in target_data.coeff.iter_mut().zip(other_data.coeff.iter()) {
-                    assert_eq!(target.width(), v.width());
-                    assert_eq!(target.height(), v.height());
-                    for (target, v) in target.buf_mut().iter_mut().zip(v.buf()) {
-                        *target += *v;
-                    }
+        let reserve_size = other.data.len().saturating_sub(self.data.len());
+        self.data.reserve_exact(reserve_size);
+
+        for (target_data, other_data) in self.data.iter_mut().zip(&other.data) {
+            assert_eq!(target_data.bx, other_data.bx);
+            assert_eq!(target_data.by, other_data.by);
+            assert_eq!(target_data.dct_select, other_data.dct_select);
+            for (target, v) in target_data.coeff.iter_mut().zip(other_data.coeff.iter()) {
+                assert_eq!(target.width(), v.width());
+                assert_eq!(target.height(), v.height());
+                for (target, v) in target.buf_mut().iter_mut().zip(v.buf()) {
+                    *target += *v;
                 }
-            } else {
-                self.data.insert(*coord, other_data.clone());
             }
+        }
+
+        if reserve_size > 0 {
+            self.data.extend_from_slice(&other.data[self.data.len()..]);
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CoeffData {
+    pub bx: usize,
+    pub by: usize,
     pub dct_select: TransformType,
     pub hf_mul: i32,
     pub coeff: [SimpleGrid<i32>; 3], // x, y, b
@@ -204,7 +209,7 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
             206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
         ];
 
-        let mut data = HashMap::new();
+        let mut data = Vec::new();
 
         let HfCoeffParams {
             num_hf_presets,
@@ -365,7 +370,9 @@ impl Bundle<HfCoeffParams<'_>> for HfCoeff {
                     }
                 }
 
-                data.insert((x, y), CoeffData {
+                data.push(CoeffData {
+                    bx: x,
+                    by: y,
                     dct_select,
                     hf_mul: qf,
                     coeff,
