@@ -63,12 +63,12 @@ fn run_generic(
         let g_m = g_m - cbrt_ob[1];
         let g_s = g_s - cbrt_ob[2];
 
-        let mix_l = (g_l * g_l * g_l + ob[0]) * itscale;
-        let mix_m = (g_m * g_m * g_m + ob[1]) * itscale;
-        let mix_s = (g_s * g_s * g_s + ob[2]) * itscale;
+        let mix_l = (g_l * g_l).mul_add(g_l, ob[0]) * itscale;
+        let mix_m = (g_m * g_m).mul_add(g_m, ob[1]) * itscale;
+        let mix_s = (g_s * g_s).mul_add(g_s, ob[2]) * itscale;
 
-        *x = inv_mat[0][0] * mix_l + inv_mat[0][1] * mix_m + inv_mat[0][2] * mix_s;
-        *y = inv_mat[1][0] * mix_l + inv_mat[1][1] * mix_m + inv_mat[1][2] * mix_s;
-        *b = inv_mat[2][0] * mix_l + inv_mat[2][1] * mix_m + inv_mat[2][2] * mix_s;
+        *x = mix_l.mul_add(inv_mat[0][0], mix_m.mul_add(inv_mat[0][1], mix_s * inv_mat[0][2]));
+        *y = mix_l.mul_add(inv_mat[1][0], mix_m.mul_add(inv_mat[1][1], mix_s * inv_mat[1][2]));
+        *b = mix_l.mul_add(inv_mat[2][0], mix_m.mul_add(inv_mat[2][1], mix_s * inv_mat[2][2]));
     }
 }
