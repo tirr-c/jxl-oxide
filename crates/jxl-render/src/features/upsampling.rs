@@ -11,14 +11,8 @@ pub fn upsample(
     let frame_width = frame_header.width;
     let frame_height = frame_header.height;
 
-    let color_channels = if frame_header.do_ycbcr {
-        3
-    } else {
-        image_header.metadata.encoded_color_channels()
-    };
     let factor;
-
-    if let Some(ec_idx) = channel_idx.checked_sub(color_channels) {
+    if let Some(ec_idx) = channel_idx.checked_sub(3) {
         let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
         if dim_shift > 0 {
             tracing::debug!(channel_idx, dim_shift, "Applying non-separable upsampling for extra channel");

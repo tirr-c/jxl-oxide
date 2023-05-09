@@ -120,8 +120,12 @@ define_bundle! {
 }
 
 impl ImageMetadata {
+    pub fn grayscale(&self) -> bool {
+        self.colour_encoding.colour_space == ColourSpace::Grey
+    }
+
     pub fn encoded_color_channels(&self) -> usize {
-        if !self.xyb_encoded && self.colour_encoding.colour_space == ColourSpace::Grey {
+        if !self.xyb_encoded && self.grayscale() {
             1
         } else {
             3

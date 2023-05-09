@@ -9,6 +9,26 @@ use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
 use jxl_render::RenderContext;
 use lcms2::Profile;
 
+enum LcmsTransform {
+    Grayscale(lcms2::Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
+    GrayscaleAlpha(lcms2::Transform<[f32; 2], [f32; 2], lcms2::GlobalContext, lcms2::AllowCache>),
+    Rgb(lcms2::Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
+    Rgba(lcms2::Transform<[f32; 4], [f32; 4], lcms2::GlobalContext, lcms2::AllowCache>),
+}
+
+impl LcmsTransform {
+    fn transform_in_place(&self, fb: &mut FrameBuffer) {
+        use LcmsTransform::*;
+
+        match self {
+            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
+            GrayscaleAlpha(t) => t.transform_in_place(fb.buf_grouped_mut()),
+            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
+            Rgba(t) => t.transform_in_place(fb.buf_grouped_mut()),
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Args {
@@ -204,7 +224,13 @@ fn main() {
         if has_alpha_channel {
             tracing::debug!("Image has alpha channel");
         }
-        encoder.set_color(if has_alpha_channel { png::ColorType::Rgba } else { png::ColorType::Rgb });
+        let color_type = match (headers.metadata.grayscale(), has_alpha_channel) {
+            (false, false) => png::ColorType::Rgb,
+            (false, true) => png::ColorType::Rgba,
+            (true, false) => png::ColorType::Grayscale,
+            (true, true) => png::ColorType::GrayscaleAlpha,
+        };
+        encoder.set_color(color_type);
 
         let sixteen_bits = headers.metadata.bit_depth.bits_per_sample() > 8;
         if sixteen_bits {
@@ -219,8 +245,7 @@ fn main() {
             encoder.set_animated(keyframes as u32, num_plays).unwrap();
         }
 
-        let mut transform3 = None;
-        let mut transform4 = None;
+        let mut transform = None;
         let colour_encoding = &headers.metadata.colour_encoding;
         let icc_cicp = if let Some(icc) = icc {
             if headers.metadata.xyb_encoded {
@@ -234,25 +259,37 @@ fn main() {
                         None
                     },
                     Ok(target_profile) => {
-                        if has_alpha_channel {
-                            let pixfmt = lcms2::PixelFormat::RGBA_FLT;
-                            transform4 = Some(lcms2::Transform::new(
+                        transform = Some(match color_type {
+                            png::ColorType::Grayscale => LcmsTransform::Grayscale(lcms2::Transform::new(
                                 &source_profile,
-                                pixfmt,
+                                lcms2::PixelFormat::GRAY_FLT,
                                 &target_profile,
-                                pixfmt,
+                                lcms2::PixelFormat::GRAY_FLT,
                                 lcms2::Intent::RelativeColorimetric,
-                            ).expect("failed to create transform"));
-                        } else {
-                            let pixfmt = lcms2::PixelFormat::RGB_FLT;
-                            transform3 = Some(lcms2::Transform::new(
+                            ).expect("Failed to create transform")),
+                            png::ColorType::GrayscaleAlpha => LcmsTransform::GrayscaleAlpha(lcms2::Transform::new(
                                 &source_profile,
-                                pixfmt,
+                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
                                 &target_profile,
-                                pixfmt,
+                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
                                 lcms2::Intent::RelativeColorimetric,
-                            ).expect("failed to create transform"));
-                        }
+                            ).expect("Failed to create transform")),
+                            png::ColorType::Rgb => LcmsTransform::Rgb(lcms2::Transform::new(
+                                &source_profile,
+                                lcms2::PixelFormat::RGB_FLT,
+                                &target_profile,
+                                lcms2::PixelFormat::RGB_FLT,
+                                lcms2::Intent::RelativeColorimetric,
+                            ).expect("Failed to create transform")),
+                            png::ColorType::Rgba => LcmsTransform::Rgba(lcms2::Transform::new(
+                                &source_profile,
+                                lcms2::PixelFormat::RGBA_FLT,
+                                &target_profile,
+                                lcms2::PixelFormat::RGBA_FLT,
+                                lcms2::Intent::RelativeColorimetric,
+                            ).expect("Failed to create transform")),
+                            _ => unreachable!(),
+                        });
 
                         Some((icc, None))
                     },
@@ -321,10 +358,8 @@ fn main() {
             filter_alpha_channel(&mut grids, &headers);
             let grids = grids.into_iter().map(Grid::from).collect::<Vec<_>>();
             let mut fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
-            if let Some(transform) = &transform3 {
-                transform.transform_in_place(fb.buf_grouped_mut::<3>());
-            } else if let Some(transform) = &transform4 {
-                transform.transform_in_place(fb.buf_grouped_mut::<4>());
+            if let Some(transform) = &transform {
+                transform.transform_in_place(&mut fb);
             }
 
             if sixteen_bits {
@@ -369,6 +404,7 @@ fn run<R: std::io::Read>(
 }
 
 fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &Headers) {
+    let color_channels = if headers.metadata.grayscale() { 1 } else { 3 };
     let alpha_channel = headers.metadata.ec_info.iter().position(|ec| ec.ty == ExtraChannelType::Alpha);
     if let Some(idx) = alpha_channel {
         let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated;
@@ -376,9 +412,9 @@ fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &He
             tracing::warn!("Premultiplied alpha is not supported for output");
         }
 
-        let alpha = grids.drain(3..).nth(idx).unwrap();
+        let alpha = grids.drain(color_channels..).nth(idx).unwrap();
         grids.push(alpha);
     } else {
-        grids.drain(3..);
+        grids.drain(color_channels..);
     }
 }

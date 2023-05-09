@@ -1,8 +1,24 @@
-use lcms2::Profile;
+use lcms2::{Profile, Transform};
 
 use jxl_bitstream::Bundle;
 use jxl_render::RenderContext;
-use jxl_image::Headers;
+use jxl_image::{Headers, FrameBuffer};
+
+enum LcmsTransform {
+    Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
+    Rgb(Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
+}
+
+impl LcmsTransform {
+    fn transform_in_place(&self, fb: &mut FrameBuffer) {
+        use LcmsTransform::*;
+
+        match self {
+            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
+            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
+        }
+    }
+}
 
 fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<Vec<f32>> {
     let mut magic = [0u8; 6];
@@ -75,15 +91,24 @@ fn run_test<R: std::io::Read>(
             }
         };
         let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
-        let pixfmt = lcms2::PixelFormat::RGB_FLT;
 
-        lcms2::Transform::new(
-            &source_profile,
-            pixfmt,
-            &target_profile,
-            pixfmt,
-            lcms2::Intent::RelativeColorimetric,
-        ).expect("failed to create transform")
+        if headers.metadata.grayscale() {
+            LcmsTransform::Grayscale(Transform::new(
+                &source_profile,
+                lcms2::PixelFormat::GRAY_FLT,
+                &target_profile,
+                lcms2::PixelFormat::GRAY_FLT,
+                lcms2::Intent::RelativeColorimetric,
+            ).expect("failed to create transform"))
+        } else {
+            LcmsTransform::Rgb(Transform::new(
+                &source_profile,
+                lcms2::PixelFormat::RGB_FLT,
+                &target_profile,
+                lcms2::PixelFormat::RGB_FLT,
+                lcms2::Intent::RelativeColorimetric,
+            ).expect("failed to create transform"))
+        }
     });
 
     if headers.metadata.have_preview {
@@ -110,15 +135,16 @@ fn run_test<R: std::io::Read>(
 
         let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
         if let Some(transform) = &transform {
-            let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..3], 1).unwrap();
+            let channels = if headers.metadata.grayscale() { 1 } else { 3 };
+            let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..channels], 1).unwrap();
             let width = fb.width();
             let height = fb.height();
-            transform.transform_in_place(fb.buf_grouped_mut::<3>());
+            transform.transform_in_place(&mut fb);
             let fb = fb.buf();
             for y in 0..height {
                 for x in 0..width {
-                    for c in 0..3 {
-                        grids[c].set(x, y, fb[c + (x + y * width) * 3]);
+                    for c in 0..channels {
+                        grids[c].set(x, y, fb[c + (x + y * width) * channels]);
                     }
                 }
             }
@@ -327,5 +353,29 @@ conformance_test! {
         6,
         3.815e-6,
         3.815e-6,
-    )
+    ),
+    grayscale(
+        "59162e158e042dc44710eb4d334cea78135399613461079582d963fe79251b68",
+        "57363d9ec00043fe6e3f40b1c3e0cc4676773011fd0818710fb26545002ac27d",
+        1,
+        1,
+        0.004,
+        0.0001,
+    ),
+    grayscale_jpeg(
+        "c0b86989e287649b944f1734ce182d1c1ac0caebf12cec7d487d9793f51f5b8f",
+        "skip", // lcms2 clamps the samples
+        1,
+        1,
+        0.004,
+        1e-5,
+    ),
+    grayscale_public_university(
+        "851abd36b93948cfaeabeb65c8bb8727ebca4bb1d2697bce73461e05ccf24c1e",
+        "48d006762d583f6e354a3223c0a5aeaff7f45a324e229d237d69630bcc170241",
+        1,
+        1,
+        0.000976562,
+        0.000976562,
+    ),
 }

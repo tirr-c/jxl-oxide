@@ -456,12 +456,15 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     } = *colour_encoding;
 
     if want_icc {
-        // Create absolute linear sRGB profile
-        colour_space = ColourSpace::Rgb;
         white_point = WhitePoint::D65;
-        primaries = Primaries::Srgb;
         tf = TransferFunction::Linear;
         rendering_intent = RenderingIntent::Absolute;
+
+        if colour_space != ColourSpace::Grey {
+            // Create absolute linear sRGB profile
+            colour_space = ColourSpace::Rgb;
+            primaries = Primaries::Srgb;
+        }
     }
 
     if colour_space == ColourSpace::Xyb {

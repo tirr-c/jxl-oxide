@@ -4,7 +4,6 @@ use std::{
 };
 
 use jxl_bitstream::{Bitstream, Bundle};
-use jxl_color::ColourSpace;
 use jxl_frame::{
     data::HfCoeff,
     filter::Gabor,
@@ -274,6 +273,9 @@ impl RenderContext<'_> {
         if frame.header().save_before_ct {
             frame.transform_color(&mut cropped);
         }
+
+        let channels = if self.inner.metadata().grayscale() { 1 } else { 3 };
+        cropped.drain(channels..3);
         Ok(cropped)
     }
 
@@ -530,13 +532,9 @@ impl<'f> ContextInner<'f> {
         let shifts_cbycr = [0, 1, 2].map(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
-        let is_single_channel = !xyb_encoded && metadata.colour_encoding.colour_space == ColourSpace::Grey;
+        let channels = metadata.encoded_color_channels();
 
-        let channel_data = gmodular.image().channel_data();
-        if is_single_channel {
-            tracing::error!("Single-channel modular image is not supported");
-            return Err(Error::NotSupported("Single-channel modular image is not supported"));
-        }
+        let channel_data = &gmodular.image().channel_data()[..channels];
 
         let width = frame_header.color_sample_width() as usize;
         let height = frame_header.color_sample_height() as usize;
@@ -575,6 +573,10 @@ impl<'f> ContextInner<'f> {
             }
         }
 
+        if channels == 1 {
+            fb_xyb[1] = fb_xyb[0].clone();
+            fb_xyb[2] = fb_xyb[0].clone();
+        }
         if xyb_encoded {
             // Make Y'X'B' to X'Y'B'
             fb_xyb.swap(0, 1);
