@@ -1,9 +1,13 @@
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
+    /// Decoded MA tree is invalid.
     InvalidMaTree,
+    /// Global MA tree is requested but not available.
     GlobalMaTreeNotAvailable,
+    /// Decoded Palette transform parameters are invalid.
     InvalidPaletteParams,
+    /// Decoded Squeeze transform parameters are invalid.
     InvalidSqueezeParams,
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),

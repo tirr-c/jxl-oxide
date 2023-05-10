@@ -10,6 +10,10 @@ use crate::{
     SubimageChannelInfo, MaConfig,
 };
 
+/// Decoded Modular image.
+///
+/// A decoded Modular image consists of multiple channels. Those channels may not be in the same
+/// size.
 #[derive(Debug)]
 pub struct Image {
     group_dim: u32,
@@ -64,7 +68,7 @@ impl Image {
         }
     }
 
-    pub fn decode_channels<R: Read>(
+    pub(super) fn decode_channels<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
         stream_index: u32,
@@ -168,14 +172,16 @@ impl Image {
         self
     }
 
+    /// Returns a reference to the list of channels.
     pub fn channel_data(&self) -> &[Grid<i32>] {
         &self.data
     }
 
-    pub fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
+    pub(crate) fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
         &mut self.data
     }
 
+    /// Make this `Image` into a [Vec] of channels.
     pub fn into_channel_data(self) -> Vec<Grid<i32>> {
         self.data
     }

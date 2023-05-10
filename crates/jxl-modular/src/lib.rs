@@ -1,3 +1,8 @@
+//! JPEG XL Modular image decoder.
+//!
+//! A Modular image represents a set of grids (two-dimensional arrays) of integer values. Modular
+//! images are used mainly for lossless images, but lossy VarDCT images also use them to store
+//! various information, such as quantized LF images and varblock configurations.
 use std::io::Read;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
@@ -13,6 +18,14 @@ pub use image::Image;
 pub use ma::MaConfig;
 pub use param::*;
 
+/// A Modular encoded image.
+///
+/// Modular image decoding is done in two steps:
+/// 1. Construct a value of `Modular` by either:
+///    - reading a Modular header from the bitstream, or
+///    - creating a subimage of existing image by calling [self.make_subimage_params_lf_group] or
+///      [self.make_subimage_params_pass_group].
+/// 2. Decode pixels by calling [self.decode_image] or [self.decode_image_gmodular].
 #[derive(Debug, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
@@ -45,6 +58,7 @@ impl Bundle<ModularParams<'_>> for Modular {
 }
 
 impl Modular {
+    /// Creates an empty Modular image.
     pub fn empty() -> Self {
         Self::default()
     }
@@ -80,6 +94,7 @@ impl Modular {
         image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx)
     }
 
+    /// Apply inverse transforms to the decoded image.
     pub fn inverse_transform(&mut self) {
         let Some(image) = &mut self.inner else { return; };
         for transform in image.header.transform.iter().rev() {
@@ -87,7 +102,11 @@ impl Modular {
         }
     }
 
-    pub fn make_subimage_params_lf_group<'a>(&self, global_ma_config: Option<&'a MaConfig>, lf_group_idx: u32) -> ModularParams<'a> {
+    pub fn make_subimage_params_lf_group<'a>(
+        &self,
+        global_ma_config: Option<&'a MaConfig>,
+        lf_group_idx: u32,
+    ) -> ModularParams<'a> {
         let Some(image) = &self.inner else {
             return ModularParams {
                 group_dim: 128,
@@ -146,7 +165,13 @@ impl Modular {
         params
     }
 
-    pub fn make_subimage_params_pass_group<'a>(&self, global_ma_config: Option<&'a MaConfig>, group_idx: u32, minshift: i32, maxshift: i32) -> ModularParams<'a> {
+    pub fn make_subimage_params_pass_group<'a>(
+        &self,
+        global_ma_config: Option<&'a MaConfig>,
+        group_idx: u32,
+        minshift: i32,
+        maxshift: i32,
+    ) -> ModularParams<'a> {
         let Some(image) = &self.inner else {
             return ModularParams {
                 group_dim: 128,
@@ -205,6 +230,7 @@ impl Modular {
         params
     }
 
+    /// Insert the decoded Modular subimage.
     pub fn copy_from_modular(&mut self, other: Modular) -> &mut Self {
         let Some(image) = &mut self.inner else { return self; };
         let Some(other) = other.inner else { return self; };
@@ -259,7 +285,7 @@ impl Bundle<ModularParams<'_>> for ModularData {
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct ModularHeader error(crate::Error) {
+    struct ModularHeader error(crate::Error) {
         use_global_tree: ty(Bool),
         wp_params: ty(Bundle(predictor::WpHeader)),
         nb_transforms: ty(U32(0, 1, 2 + u(4), 18 + u(8))),

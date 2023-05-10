@@ -7,6 +7,11 @@ use jxl_coding::Decoder;
 use crate::Result;
 use super::predictor::{Predictor, Properties};
 
+/// Meta-adaptive tree configuration.
+///
+/// Meta-adaptive (MA) tree is a decision tree that controls how the sample is decoded in the given
+/// context. The configuration consists of two components: the MA tree itself, and the distribution
+/// information of an entropy decoder. These components are read from the bitstream.
 #[derive(Debug, Clone)]
 pub struct MaConfig {
     tree: Arc<MaTreeNode>,
@@ -14,10 +19,18 @@ pub struct MaConfig {
 }
 
 impl MaConfig {
+    /// Returns the entropy decoder.
+    ///
+    /// The decoder should be cloned to be used for decoding.
     pub fn decoder(&self) -> &Decoder {
         &self.decoder
     }
 
+    /// Creates a simplified MA tree with given channel index and stream index, which then can be
+    /// used to decode samples.
+    ///
+    /// The method will evaluate the tree with the given information and prune branches which are
+    /// always not taken.
     pub fn make_flat_tree(&self, channel: u32, stream_idx: u32) -> FlatMaTree {
         let mut nodes = Vec::new();
         self.tree.flatten(channel, stream_idx, &mut nodes);
@@ -107,6 +120,9 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
     }
 }
 
+/// A "flat" meta-adaptive tree suitable for decoding samples.
+///
+/// This is constructed from [MaConfig::make_flat_tree].
 #[derive(Debug)]
 pub struct FlatMaTree {
     nodes: Vec<FlatMaTreeNode>,
@@ -158,10 +174,15 @@ impl FlatMaTree {
 }
 
 impl FlatMaTree {
+    /// Returns whether self-correcting predictor should be initialized.
+    ///
+    /// The return value of this method can be used to optimize the decoding process, since
+    /// self-correcting predictors are computationally heavy.
     pub fn need_self_correcting(&self) -> bool {
         self.need_self_correcting
     }
 
+    /// Decode a sample with the given state.
     pub fn decode_sample<R: Read>(
         &self,
         bitstream: &mut Bitstream<R>,
