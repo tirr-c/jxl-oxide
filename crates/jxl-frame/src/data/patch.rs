@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
-use jxl_image::{Headers, ExtraChannelType};
+use jxl_image::Headers;
 
 use crate::Result;
 
@@ -74,7 +74,7 @@ impl Bundle<&Headers> for Patches {
         let num_extra = image_header.metadata.num_extra as usize;
         let alpha_channel_indices = image_header.metadata.ec_info.iter()
             .enumerate()
-            .filter_map(|(idx, info)| (info.ty == ExtraChannelType::Alpha).then_some(idx as u32))
+            .filter_map(|(idx, info)| info.is_alpha().then_some(idx as u32))
             .collect::<Vec<_>>();
 
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 10)?;

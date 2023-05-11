@@ -214,12 +214,12 @@ pub fn blend(
             base_grid = &grid[idx];
             let base_alpha = alpha_idx.map(|idx| &grid[idx + 3]);
             let new_alpha = alpha_idx.map(|idx| &new_grid[idx + 3]);
-            let premultiplied = alpha_idx.map(|idx| image_header.metadata.ec_info[idx].alpha_associated);
+            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             blend_params = BlendParams::from_blending_info(blending_info, base_alpha, new_alpha, premultiplied);
         } else {
             base_grid = &empty_grid;
             let new_alpha = alpha_idx.map(|idx| &new_grid[idx + 3]);
-            let premultiplied = alpha_idx.map(|idx| image_header.metadata.ec_info[idx].alpha_associated);
+            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             blend_params = BlendParams::from_blending_info(blending_info, None, new_alpha, premultiplied);
         }
         blend_params.base_topleft = (base_x, base_y);
@@ -339,7 +339,7 @@ pub fn patch(
                 };
                 base_alpha = Some(alpha);
                 new_alpha = Some(&patch_ref_grid[alpha_idx + 3]);
-                premultiplied = Some(image_header.metadata.ec_info[alpha_idx].alpha_associated);
+                premultiplied = image_header.metadata.ec_info[alpha_idx].alpha_associated();
                 base
             } else {
                 base_alpha = None;

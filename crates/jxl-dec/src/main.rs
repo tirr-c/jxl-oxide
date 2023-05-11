@@ -5,7 +5,7 @@ use jxl_bitstream::read_bits;
 use jxl_color::RenderingIntent;
 use jxl_frame::ProgressiveResult;
 use jxl_grid::Grid;
-use jxl_image::{FrameBuffer, Headers, ExtraChannelType};
+use jxl_image::{FrameBuffer, Headers};
 use jxl_render::RenderContext;
 use lcms2::Profile;
 
@@ -220,7 +220,7 @@ fn main() {
         let (width, height, _, _) = headers.metadata.apply_orientation(width, height, 0, 0, false);
         let mut encoder = png::Encoder::new(output, width, height);
 
-        let has_alpha_channel = headers.metadata.ec_info.iter().any(|ec| ec.ty == ExtraChannelType::Alpha);
+        let has_alpha_channel = headers.metadata.alpha().is_some();
         if has_alpha_channel {
             tracing::debug!("Image has alpha channel");
         }
@@ -405,9 +405,9 @@ fn run<R: std::io::Read>(
 
 fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &Headers) {
     let color_channels = if headers.metadata.grayscale() { 1 } else { 3 };
-    let alpha_channel = headers.metadata.ec_info.iter().position(|ec| ec.ty == ExtraChannelType::Alpha);
+    let alpha_channel = headers.metadata.alpha();
     if let Some(idx) = alpha_channel {
-        let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated;
+        let alpha_premultiplied = headers.metadata.ec_info[idx].alpha_associated().unwrap();
         if alpha_premultiplied {
             tracing::warn!("Premultiplied alpha is not supported for output");
         }

@@ -95,27 +95,94 @@ define_bundle! {
     }
 
     #[derive(Debug)]
-    pub struct ExtraChannelInfo {
-        pub d_alpha: ty(Bool) default(true),
-        pub ty: ty(Enum(ExtraChannelType)) cond(!d_alpha) default(ExtraChannelType::Alpha),
-        pub bit_depth: ty(Bundle(BitDepth)) cond(!d_alpha),
-        pub dim_shift: ty(U32(0, 3, 4, 1 + u(3))) cond(!d_alpha) default(0),
-        pub name_len: ty(U32(0, u(4), 16 + u(5), 48 + u(10))) cond(!d_alpha) default(0),
-        pub name: ty(Vec[u(8)]; name_len) default(vec![0; name_len as usize]),
-        pub alpha_associated: ty(Bool) cond(!d_alpha && ty == ExtraChannelType::Alpha) default(false),
-        pub red: ty(F16) cond(ty == ExtraChannelType::SpotColour) default(0.0),
-        pub green: ty(F16) cond(ty == ExtraChannelType::SpotColour) default(0.0),
-        pub blue: ty(F16) cond(ty == ExtraChannelType::SpotColour) default(0.0),
-        pub solidity: ty(F16) cond(ty == ExtraChannelType::SpotColour) default(0.0),
-        pub cfa_channel: ty(U32(1, u(2), 3 + u(4), 19 + u(8))) cond(ty == ExtraChannelType::Cfa) default(1),
-    }
-
-    #[derive(Debug)]
     pub struct Extensions {
         extensions: ty(U64) default(0),
         extension_bits:
             ty(Vec[U64]; (extensions + 7) / 8) cond(extensions != 0)
             default(vec![0; ((extensions + 7) / 8) as usize]),
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ExtraChannelInfo {
+    pub ty: ExtraChannelType,
+    pub bit_depth: BitDepth,
+    pub dim_shift: u32,
+    pub name: Vec<u8>,
+}
+
+impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
+    type Error = jxl_bitstream::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
+        let default_alpha_channel = bitstream.read_bool()?;
+        if default_alpha_channel {
+            return Ok(Self::default());
+        }
+
+        let ty_id = read_bits!(bitstream, Enum(ExtraChannelTypeRaw))?;
+        let bit_depth = BitDepth::parse(bitstream, ())?;
+        let dim_shift = read_bits!(bitstream, U32(0, 3, 4, 1 + u(3)))?;
+        let name_len = read_bits!(bitstream, U32(0, u(4), 16 + u(5), 48 + u(10)))? as usize;
+        let mut name = vec![0u8; name_len];
+        for b in &mut name {
+            *b = bitstream.read_bits(8)? as u8;
+        }
+
+        let ty = match ty_id {
+            ExtraChannelTypeRaw::Alpha => {
+                ExtraChannelType::Alpha {
+                    alpha_associated: bitstream.read_bool()?,
+                }
+            },
+            ExtraChannelTypeRaw::Depth => ExtraChannelType::Depth,
+            ExtraChannelTypeRaw::SpotColour => {
+                ExtraChannelType::SpotColour {
+                    red: bitstream.read_f16_as_f32()?,
+                    green: bitstream.read_f16_as_f32()?,
+                    blue: bitstream.read_f16_as_f32()?,
+                    solidity: bitstream.read_f16_as_f32()?,
+                }
+            },
+            ExtraChannelTypeRaw::SelectionMask => ExtraChannelType::SelectionMask,
+            ExtraChannelTypeRaw::Black => ExtraChannelType::Black,
+            ExtraChannelTypeRaw::Cfa => {
+                ExtraChannelType::Cfa {
+                    cfa_channel: read_bits!(bitstream, U32(1, u(2), 3 + u(4), 19 + u(8)))?,
+                }
+            },
+            ExtraChannelTypeRaw::Thermal => ExtraChannelType::Thermal,
+            ExtraChannelTypeRaw::NonOptional => ExtraChannelType::NonOptional,
+            ExtraChannelTypeRaw::Optional => ExtraChannelType::Optional,
+        };
+
+        Ok(Self {
+            ty,
+            bit_depth,
+            dim_shift,
+            name,
+        })
+    }
+}
+
+impl ExtraChannelInfo {
+    #[inline]
+    pub fn is_alpha(&self) -> bool {
+        matches!(self.ty, ExtraChannelType::Alpha { .. })
+    }
+
+    #[inline]
+    pub fn alpha_associated(&self) -> Option<bool> {
+        if let ExtraChannelType::Alpha { alpha_associated } = self.ty {
+            Some(alpha_associated)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn is_black(&self) -> bool {
+        self.ty == ExtraChannelType::Black
     }
 }
 
@@ -133,10 +200,38 @@ impl ImageMetadata {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, PartialEq)]
 #[repr(u8)]
 pub enum ExtraChannelType {
-    #[default]
+    Alpha {
+        alpha_associated: bool,
+    } = 0,
+    Depth,
+    SpotColour {
+        red: f32,
+        green: f32,
+        blue: f32,
+        solidity: f32,
+    },
+    SelectionMask,
+    Black,
+    Cfa {
+        cfa_channel: u32,
+    },
+    Thermal,
+    NonOptional = 15,
+    Optional,
+}
+
+impl Default for ExtraChannelType {
+    fn default() -> Self {
+        Self::Alpha { alpha_associated: false }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+enum ExtraChannelTypeRaw {
     Alpha = 0,
     Depth,
     SpotColour,
@@ -148,7 +243,7 @@ pub enum ExtraChannelType {
     Optional,
 }
 
-impl TryFrom<u32> for ExtraChannelType {
+impl TryFrom<u32> for ExtraChannelTypeRaw {
     type Error = ();
 
     fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
@@ -311,7 +406,7 @@ impl ImageMetadata {
 impl ImageMetadata {
     pub fn alpha(&self) -> Option<usize> {
         self.ec_info.iter()
-            .position(|info| info.d_alpha)
+            .position(|info| matches!(info.ty, ExtraChannelType::Alpha { .. }))
     }
 
     #[inline]
