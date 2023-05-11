@@ -33,7 +33,8 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
         let pow = pow * v_adj + 0.107963754;
         let pow = pow * v_adj + 0.018092343;
 
-        let idx = ((v >> 23) - 118) as usize;
+        // `mul` won't be used when `v` is small.
+        let idx = (v >> 23).saturating_sub(118) as usize & 15;
         let mul = 0x4000_0000 | (u32::from(POWTABLE_UPPER[idx]) << 18) | (u32::from(POWTABLE_LOWER[idx]) << 10);
 
         let v = f32::from_bits(v);
