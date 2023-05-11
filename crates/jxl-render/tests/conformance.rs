@@ -111,7 +111,7 @@ fn run_test<R: std::io::Read>(
         }
     });
 
-    if headers.metadata.have_preview {
+    if headers.metadata.preview.is_some() {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
         let frame = jxl_frame::Frame::parse(&mut bitstream, &headers)
