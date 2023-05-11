@@ -5,7 +5,7 @@ use jxl_bitstream::{
     Bitstream,
     Bundle,
 };
-use jxl_image::*;
+use jxl_image::{Headers, Extensions, BitDepth, SizeHeader};
 use crate::Result;
 
 define_bundle! {
@@ -123,20 +123,6 @@ define_bundle! {
         pub restoration_filter: ty(Bundle(RestorationFilter)) ctx(encoding) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
         pub bit_depth: ty(Bundle(BitDepth)) cond(false) default(headers.metadata.bit_depth),
-        pub gmodular_extra_channel_from:
-            ty(u(0))
-            cond(false)
-            default(if encoding == Encoding::Modular {
-                if do_ycbcr {
-                    3
-                } else if !headers.metadata.xyb_encoded && headers.metadata.colour_encoding.colour_space == jxl_color::ColourSpace::Grey {
-                    1
-                } else {
-                    3
-                }
-            } else {
-                0
-            }),
     }
 
     #[derive(Debug)]
@@ -208,13 +194,6 @@ impl FrameHeader {
     #[inline]
     pub fn is_keyframe(&self) -> bool {
         self.frame_type.is_normal_frame() && (self.is_last || self.duration != 0)
-    }
-
-    // (h, v)
-    pub fn need_jpeg_upscale(&self) -> (bool, bool) {
-        let h_upscale = self.jpeg_upsampling.into_iter().any(|j| j == 1 || j == 2);
-        let v_upscale = self.jpeg_upsampling.into_iter().any(|j| j == 1 || j == 3);
-        (h_upscale, v_upscale)
     }
 
     pub fn sample_width(&self, upsampling: u32) -> u32 {

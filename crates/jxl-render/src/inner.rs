@@ -184,18 +184,14 @@ impl ContextInner<'_> {
             Box::new(|_: &_, _: &_, _| true)
         };
 
-        if header.frame_type == FrameType::RegularFrame {
-            let result = frame.load_with_filter(bitstream, progressive, filter)?;
-            match result {
-                ProgressiveResult::FrameComplete => frame.complete()?,
-                result => return Ok((result, frame)),
-            }
+        let result = if header.frame_type == FrameType::RegularFrame {
+            frame.load_with_filter(bitstream, progressive, filter)?
         } else {
             frame.load_all(bitstream)?;
-            frame.complete()?;
-        }
+            ProgressiveResult::FrameComplete
+        };
 
-        Ok((ProgressiveResult::FrameComplete, frame))
+        Ok((result, frame))
     }
 }
 

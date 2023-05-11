@@ -341,21 +341,6 @@ impl Frame<'_> {
         }
     }
 
-    pub fn load_progressive<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-        filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
-    ) -> Result<ProgressiveResult> {
-        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_progressive");
-        let _guard = span.enter();
-
-        let result = self.load_with_filter(bitstream, true, filter_fn);
-        match result {
-            Err(e) if e.unexpected_eof() => Ok(ProgressiveResult::NeedMoreData),
-            result => result,
-        }
-    }
-
     pub fn load_with_filter<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -366,7 +351,12 @@ impl Frame<'_> {
         let _guard = span.enter();
 
         while let Some(&instr) = self.plan.get(self.next_instr) {
-            self.process_instr(bitstream, instr, &mut filter_fn)?;
+            let result = self.process_instr(bitstream, instr, &mut filter_fn);
+            match result {
+                Err(e) if e.unexpected_eof() => return Ok(ProgressiveResult::NeedMoreData),
+                result => result?,
+            }
+
             self.next_instr += 1;
             if progressive {
                 if let GroupInstr::ProgressiveScan { pass_idx, downsample_factor, done } = instr {
@@ -379,15 +369,23 @@ impl Frame<'_> {
             }
         }
 
+        self.data.complete()?;
         Ok(ProgressiveResult::FrameComplete)
     }
 
-    #[inline]
-    pub fn load<R: Read> (
+    pub fn load_cropped<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
+        region: Option<(u32, u32, u32, u32)>,
     ) -> Result<()> {
-        self.load_with_filter(bitstream, false, |_, _, _| true).map(drop)
+        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
+        let _guard = span.enter();
+
+        self.load_with_filter(bitstream, false, self.crop_filter_fn(region)).map(drop)
+    }
+
+    pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+        self.load_cropped(bitstream, None)
     }
 
     fn process_instr<R: Read>(
@@ -468,31 +466,16 @@ impl Frame<'_> {
         Ok(())
     }
 
-    pub fn load_cropped<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-        region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<()> {
-        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
-        let _guard = span.enter();
-
-        self.load_with_filter(bitstream, false, self.crop_filter_fn(region)).map(drop)
-    }
-
-    pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        self.load_cropped(bitstream, None)
-    }
-
-    pub fn read_lf_global<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<LfGlobal> {
+    fn read_lf_global<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<LfGlobal> {
         read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))
     }
 
-    pub fn read_lf_group<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal, lf_group_idx: u32) -> Result<LfGroup> {
+    fn read_lf_group<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal, lf_group_idx: u32) -> Result<LfGroup> {
         let lf_group_params = LfGroupParams::new(&self.header, lf_global, lf_group_idx);
         read_bits!(bitstream, Bundle(LfGroup), lf_group_params)
     }
 
-    pub fn read_hf_global<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal) -> Result<Option<HfGlobal>> {
+    fn read_hf_global<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal) -> Result<Option<HfGlobal>> {
         let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
         let hf_global = if has_hf_global {
             let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global);
@@ -503,7 +486,7 @@ impl Frame<'_> {
         Ok(hf_global)
     }
 
-    pub fn read_group_pass<R: Read>(
+    fn read_group_pass<R: Read>(
         &self,
         bitstream: &mut Bitstream<R>,
         lf_global: &LfGlobal,
@@ -525,7 +508,7 @@ impl Frame<'_> {
         read_bits!(bitstream, Bundle(PassGroup), params)
     }
 
-    pub fn read_merged_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    fn read_merged_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         let lf_global = self.read_lf_global(bitstream)?;
         let lf_group = self.read_lf_group(bitstream, &lf_global, 0)?;
         let hf_global = self.read_hf_global(bitstream, &lf_global)?;
@@ -536,11 +519,6 @@ impl Frame<'_> {
         self.data.hf_global = Some(hf_global);
         self.data.group_pass.insert((0, 0), group_pass);
 
-        Ok(())
-    }
-
-    pub fn complete(&mut self) -> Result<()> {
-        self.data.complete()?;
         Ok(())
     }
 }
