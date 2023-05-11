@@ -139,6 +139,7 @@ fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
         Vec::new(),
     ];
 
+    // TODO: Replace this with `OnceLock` when it is available in stable.
     INITIALIZER[idx].call_once(|| {
         // SAFETY: this is the only thread accessing LARGE_NATURAL_ORDER[idx],
         // as we're in call_once

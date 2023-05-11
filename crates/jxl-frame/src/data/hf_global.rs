@@ -1,7 +1,13 @@
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_image::ImageMetadata;
 use jxl_modular::MaConfig;
-use jxl_vardct::{HfBlockContext, HfPass};
+use jxl_vardct::{
+    DequantMatrixSet,
+    DequantMatrixSetParams,
+    HfBlockContext,
+    HfPass,
+    HfPassParams,
+};
 
 use crate::{FrameHeader, Result};
 use super::LfGlobal;
@@ -28,7 +34,7 @@ impl<'a> HfGlobalParams<'a> {
 
 #[derive(Debug)]
 pub struct HfGlobal {
-    pub dequant_matrices: jxl_vardct::DequantMatrixSet,
+    pub dequant_matrices: DequantMatrixSet,
     pub num_hf_presets: u32,
     pub hf_passes: Vec<HfPass>,
 }
@@ -38,17 +44,17 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: HfGlobalParams<'_>) -> Result<Self> {
         let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx } = params;
-        let dequant_matrix_params = jxl_vardct::DequantMatrixSetParams::new(
+        let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
             1 + frame_header.num_lf_groups() * 3,
             ma_config,
         );
-        let dequant_matrices = jxl_vardct::DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
+        let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
 
         let num_groups = frame_header.num_groups();
         let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros())? + 1;
 
-        let hf_pass_params = jxl_vardct::HfPassParams::new(hf_block_ctx, num_hf_presets);
+        let hf_pass_params = HfPassParams::new(hf_block_ctx, num_hf_presets);
         let hf_passes = std::iter::repeat_with(|| HfPass::parse(bitstream, hf_pass_params))
             .take(frame_header.passes.num_passes as usize)
             .collect::<std::result::Result<Vec<_>, _>>()?;

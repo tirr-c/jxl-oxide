@@ -5,7 +5,6 @@ use std::{
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
-    data::HfCoeff,
     filter::Gabor,
     header::{Encoding, FrameType},
     Frame,
@@ -14,6 +13,7 @@ use jxl_frame::{
 use jxl_grid::SimpleGrid;
 use jxl_image::{Headers, ImageMetadata};
 use jxl_modular::ChannelShift;
+use jxl_vardct::HfCoeff;
 
 use crate::{
     blend,

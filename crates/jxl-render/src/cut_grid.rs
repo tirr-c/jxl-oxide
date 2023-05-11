@@ -1,8 +1,8 @@
 use std::{ptr::NonNull, collections::HashMap};
 
-use jxl_frame::data::HfCoeff;
 use jxl_grid::{CutGrid, Grid, SimpleGrid};
 use jxl_modular::ChannelShift;
+use jxl_vardct::HfCoeff;
 
 pub fn make_quant_cut_grid<'g>(
     buf: &'g mut SimpleGrid<f32>,

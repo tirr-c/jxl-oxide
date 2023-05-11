@@ -1,11 +1,12 @@
 use jxl_color::OpsinInverseMatrix;
-use jxl_frame::data::CoeffData;
 use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_vardct::{
+    CoeffData,
+    DequantMatrixSet,
+    LfChannelCorrelation,
     LfChannelDequantization,
     Quantizer,
-    DequantMatrixSet,
-    LfChannelCorrelation, TransformType,
+    TransformType,
 };
 
 use crate::dct::dct_2d;
