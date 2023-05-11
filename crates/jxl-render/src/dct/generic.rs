@@ -118,6 +118,41 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
     }
 }
 
+fn dct4(input: [f32; 4], inverse: bool) -> [f32; 4] {
+    let sec0 = 0.5411961;
+    let sec1 = 1.306563;
+
+    if !inverse {
+        let sum03 = input[0] + input[3];
+        let sum12 = input[1] + input[2];
+        let tmp0 = (input[0] - input[3]) * sec0;
+        let tmp1 = (input[1] - input[2]) * sec1;
+        let out0 = (tmp0 + tmp1) / 4.0;
+        let out1 = (tmp0 - tmp1) / 4.0;
+
+        [
+            (sum03 + sum12) / 4.0,
+            out0 * std::f32::consts::SQRT_2 + out1,
+            (sum03 - sum12) / 4.0,
+            out1,
+        ]
+    } else {
+        let tmp0 = input[1] * std::f32::consts::SQRT_2;
+        let tmp1 = input[1] + input[3];
+        let out0 = (tmp0 + tmp1) * sec0;
+        let out1 = (tmp0 - tmp1) * sec1;
+        let sum02 = input[0] + input[2];
+        let sub02 = input[0] - input[2];
+
+        [
+            sum02 + out0,
+            sub02 + out1,
+            sub02 - out1,
+            sum02 - out0,
+        ]
+    }
+}
+
 fn dct(input_output: &mut [f32], scratch: &mut [f32], inverse: bool) {
     let n = input_output.len();
     assert!(scratch.len() == n);
@@ -142,37 +177,56 @@ fn dct(input_output: &mut [f32], scratch: &mut [f32], inverse: bool) {
     }
 
     if n == 4 {
-        let sec0 = 0.5411961;
-        let sec1 = 1.306563;
+        let io = input_output;
+        io.copy_from_slice(&dct4([io[0], io[1], io[2], io[3]], inverse));
+        return;
+    }
 
-        let input = input_output;
+    if n == 8 {
+        let io = input_output;
+        let sec = consts::sec_half_small(8);
         if !inverse {
-            let sum03 = input[0] + input[3];
-            let sum12 = input[1] + input[2];
-            let tmp0 = (input[0] - input[3]) * sec0;
-            let tmp1 = (input[1] - input[2]) * sec1;
-            let out0 = (tmp0 + tmp1) / 4.0;
-            let out1 = (tmp0 - tmp1) / 4.0;
-
-            input[0] = (sum03 + sum12) / 4.0;
-            input[1] = out0 * std::f32::consts::SQRT_2 + out1;
-            input[2] = (sum03 - sum12) / 4.0;
-            input[3] = out1;
+            let input0 = [
+                (io[0] + io[7]) / 2.0,
+                (io[1] + io[6]) / 2.0,
+                (io[2] + io[5]) / 2.0,
+                (io[3] + io[4]) / 2.0,
+            ];
+            let input1 = [
+                (io[0] - io[7]) * sec[0] / 2.0,
+                (io[1] - io[6]) * sec[1] / 2.0,
+                (io[2] - io[5]) * sec[2] / 2.0,
+                (io[3] - io[4]) * sec[3] / 2.0,
+            ];
+            let output0 = dct4(input0, false);
+            for (idx, v) in output0.into_iter().enumerate() {
+                io[idx * 2] = v;
+            }
+            let mut output1 = dct4(input1, false);
+            output1[0] *= std::f32::consts::SQRT_2;
+            for idx in 0..3 {
+                io[idx * 2 + 1] = output1[idx] + output1[idx + 1];
+            }
+            io[7] = output1[3];
         } else {
-            let tmp0 = input[1] * std::f32::consts::SQRT_2;
-            let tmp1 = input[1] + input[3];
-            let out0 = (tmp0 + tmp1) * sec0;
-            let out1 = (tmp0 - tmp1) * sec1;
-            let sum02 = input[0] + input[2];
-            let sub02 = input[0] - input[2];
-
-            input[0] = sum02 + out0;
-            input[1] = sub02 + out1;
-            input[2] = sub02 - out1;
-            input[3] = sum02 - out0;
+            let input0 = [io[0], io[2], io[4], io[6]];
+            let input1 = [
+                io[1] * std::f32::consts::SQRT_2,
+                io[3] + io[1],
+                io[5] + io[3],
+                io[7] + io[5],
+            ];
+            let output0 = dct4(input0, true);
+            let output1 = dct4(input1, true);
+            for (idx, &sec) in sec.iter().enumerate() {
+                let r = output1[idx] * sec;
+                io[idx] = output0[idx] + r;
+                io[7 - idx] = output0[idx] - r;
+            }
         }
         return;
     }
+
     assert!(n.is_power_of_two());
 
     if !inverse {
