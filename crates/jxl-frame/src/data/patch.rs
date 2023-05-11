@@ -71,7 +71,7 @@ impl Bundle<&Headers> for Patches {
     type Error = crate::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &Headers) -> Result<Self> {
-        let num_extra = image_header.metadata.num_extra as usize;
+        let num_extra = image_header.metadata.ec_info.len();
         let alpha_channel_indices = image_header.metadata.ec_info.iter()
             .enumerate()
             .filter_map(|(idx, info)| info.is_alpha().then_some(idx as u32))

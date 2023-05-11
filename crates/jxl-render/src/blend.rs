@@ -170,7 +170,7 @@ pub fn blend(
         height = (base_height - base_y).min(new_height - new_y);
     }
 
-    let mut used_as_alpha = vec![false; 3 + image_header.metadata.num_extra as usize];
+    let mut used_as_alpha = vec![false; 3 + image_header.metadata.ec_info.len()];
     for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
         if let (_, Some(alpha)) = source_and_alpha_from_blending_info(blending_info) {
             used_as_alpha[alpha + 3] = true;
@@ -178,7 +178,7 @@ pub fn blend(
     }
 
     let empty_grid = SimpleGrid::new(base_width, base_height);
-    let mut output_grid = Vec::with_capacity(3 + image_header.metadata.num_extra as usize);
+    let mut output_grid = Vec::with_capacity(3 + image_header.metadata.ec_info.len());
     for (idx, blending_info) in [&header.blending_info; 3].into_iter().chain(&header.ec_blending_info).enumerate() {
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
         let ref_grid = reference_grids[ref_idx];
@@ -278,7 +278,7 @@ pub fn patch(
             height = (base_height - base_y).min(new_height);
         }
 
-        let mut used_as_alpha = vec![false; 3 + image_header.metadata.num_extra as usize];
+        let mut used_as_alpha = vec![false; 3 + image_header.metadata.ec_info.len()];
         for blending_info in &target.blending {
             if matches!(
                 blending_info.mode,

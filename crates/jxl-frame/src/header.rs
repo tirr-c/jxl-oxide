@@ -19,9 +19,9 @@ define_bundle! {
         pub jpeg_upsampling: ty(Array[u(2)]; 3) cond(do_ycbcr && !flags.use_lf_frame()),
         pub upsampling: ty(U32(1, 2, 4, 8)) cond(!all_default && !flags.use_lf_frame()) default(1),
         pub ec_upsampling:
-            ty(Vec[U32(1, 2, 4, 8)]; headers.metadata.num_extra)
+            ty(Vec[U32(1, 2, 4, 8)]; headers.metadata.ec_info.len())
             cond(!all_default && !flags.use_lf_frame())
-            default(vec![1; headers.metadata.num_extra as usize]),
+            default(vec![1; headers.metadata.ec_info.len()]),
         pub group_size_shift: ty(u(2)) cond(encoding == Encoding::Modular) default(1),
         pub x_qm_scale:
             ty(u(3))
@@ -53,7 +53,7 @@ define_bundle! {
         pub blending_info:
             ty(Bundle(BlendingInfo))
             ctx((
-                headers.metadata.num_extra > 0,
+                !headers.metadata.ec_info.is_empty(),
                 None,
                 Self::resets_canvas(
                     None,
@@ -65,9 +65,9 @@ define_bundle! {
             ))
             cond(!all_default && frame_type.is_normal_frame()),
         pub ec_blending_info:
-            ty(Vec[Bundle(BlendingInfo)]; headers.metadata.num_extra)
+            ty(Vec[Bundle(BlendingInfo)]; headers.metadata.ec_info.len())
             ctx((
-                headers.metadata.num_extra > 0,
+                !headers.metadata.ec_info.is_empty(),
                 Some(blending_info.mode),
                 Self::resets_canvas(
                     Some(blending_info.mode),
@@ -80,11 +80,11 @@ define_bundle! {
             cond(!all_default && frame_type.is_normal_frame()),
         pub duration:
             ty(U32(0, 1, u(8), u(32)))
-            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.have_animation)
+            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.animation.is_some())
             default(0),
         pub timecode:
             ty(u(32))
-            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.animation.have_timecodes)
+            cond(!all_default && frame_type.is_normal_frame() && headers.metadata.animation.as_ref().map(|a| a.have_timecodes).unwrap_or(false))
             default(0),
         pub is_last:
             ty(Bool)

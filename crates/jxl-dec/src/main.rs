@@ -144,7 +144,7 @@ fn main() {
         }
     }
 
-    if headers.metadata.have_preview {
+    if headers.metadata.preview.is_some() {
         bitstream.zero_pad_to_byte().expect("Zero-padding failed");
 
         let frame = read_bits!(bitstream, Bundle(jxl_frame::Frame), &headers).expect("Failed to read frame header");
@@ -240,8 +240,8 @@ fn main() {
         }
 
         let keyframes = render.loaded_keyframes();
-        if headers.metadata.have_animation {
-            let num_plays = headers.metadata.animation.num_loops;
+        if let Some(animation) = &headers.metadata.animation {
+            let num_plays = animation.num_loops;
             encoder.set_animated(keyframes as u32, num_plays).unwrap();
         }
 
@@ -335,11 +335,11 @@ fn main() {
 
         tracing::debug!("Writing image data");
         for keyframe_idx in 0..keyframes {
-            if headers.metadata.have_animation {
+            if let Some(animation) = &headers.metadata.animation {
                 let frame = render.keyframe(keyframe_idx).unwrap();
                 let duration = frame.header().duration;
-                let numer = headers.metadata.animation.tps_denominator * duration;
-                let denom = headers.metadata.animation.tps_numerator;
+                let numer = animation.tps_denominator * duration;
+                let denom = animation.tps_numerator;
                 let (numer, denom) = if numer >= 0x10000 || denom >= 0x10000 {
                     if duration == 0xffffffff {
                         tracing::warn!(numer, denom, "Writing multi-page image in APNG");
