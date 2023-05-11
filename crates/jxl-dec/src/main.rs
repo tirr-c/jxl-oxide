@@ -5,8 +5,8 @@ use jxl_bitstream::read_bits;
 use jxl_color::RenderingIntent;
 use jxl_frame::ProgressiveResult;
 use jxl_grid::Grid;
-use jxl_image::{FrameBuffer, Headers};
-use jxl_render::RenderContext;
+use jxl_image::Headers;
+use jxl_render::{FrameBuffer, RenderContext};
 use lcms2::Profile;
 
 enum LcmsTransform {

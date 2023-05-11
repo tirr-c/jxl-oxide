@@ -1,8 +1,8 @@
 use lcms2::{Profile, Transform};
 
 use jxl_bitstream::Bundle;
-use jxl_render::RenderContext;
-use jxl_image::{Headers, FrameBuffer};
+use jxl_image::Headers;
+use jxl_render::{FrameBuffer, RenderContext};
 
 enum LcmsTransform {
     Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
@@ -136,7 +136,7 @@ fn run_test<R: std::io::Read>(
         let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
         if let Some(transform) = &transform {
             let channels = if headers.metadata.grayscale() { 1 } else { 3 };
-            let mut fb = jxl_image::FrameBuffer::from_grids(&grids[..channels], 1).unwrap();
+            let mut fb = FrameBuffer::from_grids(&grids[..channels], 1).unwrap();
             let width = fb.width();
             let height = fb.height();
             transform.transform_in_place(&mut fb);
@@ -150,7 +150,7 @@ fn run_test<R: std::io::Read>(
             }
         }
 
-        let fb = jxl_image::FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
+        let fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();
