@@ -1,14 +1,21 @@
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
+    /// Container box size was invalid.
     InvalidBoxSize,
+    /// `PadZeroToByte` read non-zero bits.
     NonZeroPadding,
+    /// Parsed floating point value was Infinity or NaN.
     InvalidFloat,
+    /// Parsed value couldn't be represented with the given enum.
     InvalidEnum {
         name: &'static str,
         value: u32,
     },
+    /// The bitstream couldn't be skipped to the given position, mainly due to the direction being
+    /// backwards.
     CannotSkip,
+    /// The bistream offsed was not aligned to read byte-aligned data.
     NotAligned,
 }
 

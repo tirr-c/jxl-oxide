@@ -18,12 +18,12 @@ pub use reader::ContainerDetectingReader;
 pub trait Bundle<Ctx = ()>: Sized {
     type Error;
 
-    /// Parse from the bitstream with the given context.
+    /// Parses a value from the bitstream with the given context.
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: Ctx) -> std::result::Result<Self, Self::Error>;
 }
 
 pub trait BundleDefault<Ctx = ()>: Sized {
-    /// Create a default value with the given context.
+    /// Creates a default value with the given context.
     fn default_with_context(ctx: Ctx) -> Self;
 }
 
@@ -83,7 +83,7 @@ impl<R> std::fmt::Debug for Bitstream<R> {
 }
 
 impl<R> Bitstream<ContainerDetectingReader<R>> {
-    /// Create a bitstream reader which detects the container format automatically.
+    /// Creates a bitstream reader which detects the container format automatically.
     pub fn new_detect(reader: R) -> Self {
         Self {
             global_pos: 0,
@@ -98,7 +98,7 @@ impl<R> Bitstream<ContainerDetectingReader<R>> {
 }
 
 impl<R> Bitstream<R> {
-    /// Create a bitstream reader which reads bare codestream.
+    /// Creates a bitstream reader which reads bare codestream.
     pub fn new(reader: R) -> Self {
         Self {
             global_pos: 0,
@@ -260,7 +260,7 @@ impl<R: Read> Bitstream<R> {
         })
     }
 
-    /// Read a `Bool` as defined in the JPEG XL specification.
+    /// Reads a `Bool` as defined in the JPEG XL specification.
     pub fn read_bool(&mut self) -> Result<bool> {
         if self.bits_left == 0 {
             self.fill()?;
@@ -268,7 +268,7 @@ impl<R: Read> Bitstream<R> {
         Ok(self.read_single_bit_inner() != 0)
     }
 
-    /// Read an `F16` as defined in the JPEG XL specification, and convert it to `f32`.
+    /// Reads an `F16` as defined in the JPEG XL specification, and convert it to `f32`.
     ///
     /// # Errors
     /// Returns `Error::InvalidFloat` if the value is `NaN` or `Infinity`.
@@ -298,7 +298,7 @@ impl<R: Read> Bitstream<R> {
         }
     }
 
-    /// Perform `ZeroPadToByte` as defined in the JPEG XL specification.
+    /// Performs `ZeroPadToByte` as defined in the JPEG XL specification.
     pub fn zero_pad_to_byte(&mut self) -> Result<()> {
         let bits = self.bits_left % 8;
         let data = self.read_bits_inner(bits);
