@@ -4,6 +4,7 @@ use jxl_modular::{MaConfig, Modular, ChannelShift, ModularParams};
 use crate::Result;
 
 define_bundle! {
+    /// Dequantization information for each channel.
     #[derive(Debug)]
     pub struct LfChannelDequantization error(crate::Error) {
         all_default: ty(Bool) default(true),
@@ -12,16 +13,18 @@ define_bundle! {
         pub m_b_lf: ty(F16) cond(!all_default) default(1.0 / 2.0),
     }
 
+    /// Global quantizer multipliers.
     #[derive(Debug)]
     pub struct Quantizer error(crate::Error) {
         pub global_scale: ty(U32(1 + u(11), 2049 + u(11), 4097 + u(12), 8193 + u(16))),
         pub quant_lf: ty(U32(16, 1 + u(5), 1 + u(8), 1 + u(16))),
     }
 
+    /// Channel correlation data, used by chroma-from-luma procedure.
     #[derive(Debug)]
     pub struct LfChannelCorrelation error(crate::Error) {
         all_default: ty(Bool) default(true),
-        pub colour_factor: ty(U32(84,256, 2 + u(8), 258 + u(16))) cond(!all_default) default(84),
+        pub colour_factor: ty(U32(84, 256, 2 + u(8), 258 + u(16))) cond(!all_default) default(84),
         pub base_correlation_x: ty(F16) cond(!all_default) default(0.0),
         pub base_correlation_b: ty(F16) cond(!all_default) default(1.0),
         pub x_factor_lf: ty(u(8)) cond(!all_default) default(128),
@@ -46,6 +49,7 @@ impl LfChannelDequantization {
     }
 }
 
+/// Context information for the entropy decoder of HF coefficients.
 #[derive(Debug, Default)]
 pub struct HfBlockContext {
     pub qf_thresholds: Vec<u32>,
@@ -107,6 +111,7 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
     }
 }
 
+/// Paramters for decoding `LfCoeff`.
 #[derive(Debug)]
 pub struct LfCoeffParams<'ma> {
     pub lf_group_idx: u32,
@@ -117,6 +122,7 @@ pub struct LfCoeffParams<'ma> {
     pub global_ma_config: Option<&'ma MaConfig>,
 }
 
+/// Quantized LF image.
 #[derive(Debug)]
 pub struct LfCoeff {
     pub extra_precision: u8,

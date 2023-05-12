@@ -1,3 +1,4 @@
+/// Varblock transform types.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum TransformType {
@@ -47,6 +48,7 @@ impl TryFrom<u8> for TransformType {
 }
 
 impl TransformType {
+    /// Returns the size of the transform type, in 8x8 blocks.
     pub fn dct_select_size(self) -> (u32, u32) {
         use TransformType::*;
 
@@ -72,7 +74,7 @@ impl TransformType {
         }
     }
 
-    pub fn dequant_matrix_size(self) -> (u32, u32) {
+    pub(crate) fn dequant_matrix_size(self) -> (u32, u32) {
         use TransformType::*;
 
         match self {
@@ -91,7 +93,7 @@ impl TransformType {
         }
     }
 
-    pub fn order_id(self) -> u32 {
+    pub(crate) fn order_id(self) -> u32 {
         use TransformType::*;
 
         match self {
@@ -111,6 +113,7 @@ impl TransformType {
         }
     }
 
+    /// Returns whether DCT coefficients should be transposed.
     #[inline]
     pub fn need_transpose(&self) -> bool {
         let (w, h) = self.dct_select_size();

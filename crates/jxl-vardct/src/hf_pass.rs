@@ -1,6 +1,7 @@
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
 use jxl_coding::Decoder;
 
+/// Parameters for decoding `HfPass`.
 #[derive(Debug, Copy, Clone)]
 pub struct HfPassParams<'a> {
     hf_block_ctx: &'a crate::HfBlockContext,
@@ -13,6 +14,10 @@ impl<'a> HfPassParams<'a> {
     }
 }
 
+/// HF coefficient decoder configuration.
+///
+/// Includes distribution for the entropy decoder and the order of HF coefficients. This struct is
+/// passed as a parameter when decoding [`HfCoeff`][crate::HfCoeff].
 #[derive(Debug)]
 pub struct HfPass {
     permutation: [[Vec<usize>; 3]; 13],
@@ -58,11 +63,11 @@ impl Bundle<HfPassParams<'_>> for HfPass {
 }
 
 impl HfPass {
-    pub fn clone_decoder(&self) -> Decoder {
+    pub(crate) fn clone_decoder(&self) -> Decoder {
         self.hf_dist.clone()
     }
 
-    pub fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
+    pub(crate) fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
         struct OrderIter<'a> {
             permutation: &'a [usize],
             natural_order: &'static [(u8, u8)],

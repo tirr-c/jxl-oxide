@@ -10,6 +10,7 @@ use crate::{
     TransformType,
 };
 
+/// Parameters for decoding `HfCoeff`.
 #[derive(Debug)]
 pub struct HfCoeffParams<'a> {
     pub num_hf_presets: u32,
@@ -21,18 +22,29 @@ pub struct HfCoeffParams<'a> {
     pub coeff_shift: u32,
 }
 
+/// HF coefficient data in a group.
 #[derive(Debug, Clone)]
 pub struct HfCoeff {
-    pub data: Vec<CoeffData>,
+    data: Vec<CoeffData>,
 }
 
 impl HfCoeff {
+    /// Creates an empty `HfCoeff`.
+    #[inline]
     pub fn empty() -> Self {
-        Self {
-            data: Vec::new(),
-        }
+        Self { data: Vec::new() }
     }
 
+    /// Returns the HF coefficient data in raster order.
+    #[inline]
+    pub fn data(&self) -> &[CoeffData] {
+        &self.data
+    }
+
+    /// Merge coefficients from another `HfCoeff`.
+    ///
+    /// # Panics
+    /// Panics if `other` is not from the same group.
     pub fn merge(&mut self, other: &HfCoeff) {
         let reserve_size = other.data.len().saturating_sub(self.data.len());
         self.data.reserve_exact(reserve_size);
@@ -56,12 +68,18 @@ impl HfCoeff {
     }
 }
 
+/// Data for a single varblock.
 #[derive(Debug, Clone)]
 pub struct CoeffData {
+    /// X coordinate within a group, in 8x8 blocks.
     pub bx: usize,
+    /// Y coordinate within a group, in 8x8 blocks.
     pub by: usize,
+    /// Transform type for the varblock.
     pub dct_select: TransformType,
+    /// Quantization multiplier for the varblock.
     pub hf_mul: i32,
+    /// Quantized coefficients in XYB order.
     pub coeff: [SimpleGrid<i32>; 3], // x, y, b
 }
 

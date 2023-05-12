@@ -345,6 +345,7 @@ impl DequantMatrixParams {
     }
 }
 
+/// Parameters for decoding `DequantMatrixSet`.
 #[derive(Debug, Copy, Clone)]
 pub struct DequantMatrixSetParams<'a> {
     dct_select: TransformType,
@@ -354,15 +355,18 @@ pub struct DequantMatrixSetParams<'a> {
 }
 
 impl<'a> DequantMatrixSetParams<'a> {
+    /// Create a new `DequantMatrixSetParams` with the given information.
+    ///
+    /// `num_lf_groups` is used to compute the stream index for Modular images.
     pub fn new(
         bit_depth: u32,
-        stream_index_base: u32,
+        num_lf_groups: u32,
         global_ma_config: Option<&'a jxl_modular::MaConfig>,
     ) -> Self {
         Self {
             dct_select: TransformType::Dct8,
             bit_depth,
-            stream_index: stream_index_base,
+            stream_index: 1 + num_lf_groups * 3,
             global_ma_config,
         }
     }
@@ -480,6 +484,7 @@ impl BundleDefault<TransformType> for DequantMatrixParams {
     }
 }
 
+/// A set of dequantization matrices.
 #[derive(Debug)]
 pub struct DequantMatrixSet {
     matrices: Vec<[Vec<f32>; 3]>,
@@ -531,6 +536,9 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
 }
 
 impl DequantMatrixSet {
+    /// Returns the dequantization matrix for the given channel and transform type.
+    ///
+    /// The coefficients is in the raster order.
     pub fn get(&self, channel: usize, dct_select: TransformType) -> &[f32] {
         use TransformType::*;
 

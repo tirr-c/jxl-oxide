@@ -46,7 +46,7 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
         let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx } = params;
         let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
-            1 + frame_header.num_lf_groups() * 3,
+            frame_header.num_lf_groups(),
             ma_config,
         );
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;

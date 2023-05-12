@@ -636,7 +636,7 @@ impl<'f> ContextInner<'f> {
             let group_row = group_idx / groups_per_row;
             let group_col = group_idx % groups_per_row;
 
-            for coeff_data in &hf_coeff.data {
+            for coeff_data in hf_coeff.data() {
                 let bx = coeff_data.bx;
                 let by = coeff_data.by;
                 let coord = (bx, by);

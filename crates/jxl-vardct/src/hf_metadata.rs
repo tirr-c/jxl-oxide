@@ -4,6 +4,7 @@ use jxl_modular::{MaConfig, ModularChannelParams, ModularParams, Modular};
 
 use crate::{Result, TransformType};
 
+/// Parameters for decoding `HfMetadata`.
 #[derive(Debug)]
 pub struct HfMetadataParams<'ma> {
     pub num_lf_groups: u32,
@@ -17,19 +18,28 @@ pub struct HfMetadataParams<'ma> {
     pub quantizer_global_scale: u32,
 }
 
+/// Data for decoding and rendering varblocks within an LF group.
 #[derive(Debug)]
 pub struct HfMetadata {
+    /// Chroma-from-luma correlation grid for X channel.
     pub x_from_y: SimpleGrid<i32>,
+    /// Chroma-from-luma correlation grid for B channel.
     pub b_from_y: SimpleGrid<i32>,
+    /// Varblock information in an LF group.
     pub block_info: Grid<BlockInfo>,
+    /// Sigma parameter grid for edge-preserving filter.
     pub epf_sigma: SimpleGrid<f32>,
 }
 
+/// Varblock grid information.
 #[derive(Debug, Default, Clone, Copy)]
 pub enum BlockInfo {
+    /// The block is not initialized yet.
     #[default]
     Uninit,
+    /// The block is occupied by a varblock.
     Occupied,
+    /// The block is the top-left block of a varblock.
     Data {
         dct_select: TransformType,
         hf_mul: i32,
