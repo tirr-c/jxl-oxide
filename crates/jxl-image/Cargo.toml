@@ -1,19 +1,28 @@
 [package]
 name = "jxl-image"
-version = "0.1.0"
+description = "JPEG XL image header representaion, part of jxl-oxide"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
+repository = "https://github.com/tirr-c/jxl-oxide.git"
+readme = "README.md"
+keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
+categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
+
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 
 [dependencies.jxl-bitstream]
+version = "0.1.3"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
+version = "0.1.2"
 path = "../jxl-color"
 
 [dependencies.jxl-grid]
+version = "0.1.1"
 path = "../jxl-grid"
 
 [dependencies.tracing]
