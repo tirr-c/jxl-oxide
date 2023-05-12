@@ -5,7 +5,7 @@ use std::io::Read;
 use header::Encoding;
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
 use jxl_grid::SimpleGrid;
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 
 mod error;
 pub mod filter;
@@ -31,7 +31,7 @@ enum GroupInstr {
 
 #[derive(Debug)]
 pub struct Frame<'a> {
-    image_header: &'a Headers,
+    image_header: &'a ImageHeader,
     header: FrameHeader,
     toc: Toc,
     plan: Vec<GroupInstr>,
@@ -52,10 +52,10 @@ pub enum ProgressiveResult {
     FrameComplete,
 }
 
-impl<'a> Bundle<&'a Headers> for Frame<'a> {
+impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &'a Headers) -> Result<Self> {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &'a ImageHeader) -> Result<Self> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;

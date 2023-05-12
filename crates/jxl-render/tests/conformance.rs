@@ -1,7 +1,7 @@
 use lcms2::{Profile, Transform};
 
 use jxl_bitstream::Bundle;
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 use jxl_render::{FrameBuffer, RenderContext};
 
 enum LcmsTransform {
@@ -77,7 +77,7 @@ fn run_test<R: std::io::Read>(
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
-    let headers = Headers::parse(&mut bitstream, ()).expect("Failed to read headers");
+    let headers = ImageHeader::parse(&mut bitstream, ()).expect("Failed to read headers");
     let mut render = RenderContext::new(&headers);
     render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
 

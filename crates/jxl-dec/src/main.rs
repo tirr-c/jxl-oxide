@@ -5,7 +5,7 @@ use jxl_bitstream::read_bits;
 use jxl_color::RenderingIntent;
 use jxl_frame::ProgressiveResult;
 use jxl_grid::Grid;
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 use jxl_render::{FrameBuffer, RenderContext};
 use lcms2::Profile;
 
@@ -124,7 +124,7 @@ fn main() {
 
     let file = std::fs::File::open(&args.input).expect("Failed to open file");
     let mut bitstream = jxl_bitstream::Bitstream::new_detect(file);
-    let headers = read_bits!(bitstream, Bundle(Headers)).expect("Failed to read headers");
+    let headers = read_bits!(bitstream, Bundle(ImageHeader)).expect("Failed to read headers");
     tracing::info!("Image dimension: {}x{}", headers.size.width, headers.size.height);
 
     let mut render = RenderContext::new(&headers);
@@ -403,7 +403,7 @@ fn run<R: std::io::Read>(
     result
 }
 
-fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &Headers) {
+fn filter_alpha_channel(grids: &mut Vec<jxl_grid::SimpleGrid<f32>>, headers: &ImageHeader) {
     let color_channels = if headers.metadata.grayscale() { 1 } else { 3 };
     let alpha_channel = headers.metadata.alpha();
     if let Some(idx) = alpha_channel {

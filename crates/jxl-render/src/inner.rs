@@ -11,7 +11,7 @@ use jxl_frame::{
     ProgressiveResult,
 };
 use jxl_grid::SimpleGrid;
-use jxl_image::{Headers, ImageMetadata};
+use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::ChannelShift;
 use jxl_vardct::HfCoeff;
 
@@ -28,7 +28,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ContextInner<'a> {
-    image_header: &'a Headers,
+    image_header: &'a ImageHeader,
     pub(crate) frames: Vec<IndexedFrame<'a>>,
     pub(crate) keyframes: Vec<usize>,
     pub(crate) keyframe_in_progress: Option<usize>,
@@ -40,7 +40,7 @@ pub struct ContextInner<'a> {
 }
 
 impl<'a> ContextInner<'a> {
-    pub fn new(image_header: &'a Headers) -> Self {
+    pub fn new(image_header: &'a ImageHeader) -> Self {
         Self {
             image_header,
             frames: Vec::new(),

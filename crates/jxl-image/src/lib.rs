@@ -5,7 +5,7 @@ use jxl_color::header::*;
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct Headers {
+    pub struct ImageHeader {
         pub signature: ty(u(16)),
         pub size: ty(Bundle(SizeHeader)),
         pub metadata: ty(Bundle(ImageMetadata)),

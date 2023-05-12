@@ -3,7 +3,7 @@ use std::io::Read;
 use jxl_bitstream::Bitstream;
 use jxl_frame::{Frame, ProgressiveResult};
 use jxl_grid::SimpleGrid;
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 
 mod blend;
 mod cut_grid;
@@ -27,7 +27,7 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(image_header: &'a Headers) -> Self {
+    pub fn new(image_header: &'a ImageHeader) -> Self {
         Self {
             inner: ContextInner::new(image_header),
             state: RenderState::new(),

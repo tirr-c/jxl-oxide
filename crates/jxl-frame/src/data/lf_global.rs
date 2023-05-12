@@ -1,5 +1,5 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 use jxl_modular::{ChannelShift, Modular, ModularParams, MaConfig, ModularChannelParams};
 use jxl_vardct::{
     LfChannelDequantization,
@@ -30,10 +30,10 @@ pub struct LfGlobal {
     pub gmodular: GlobalModular,
 }
 
-impl Bundle<(&Headers, &FrameHeader)> for LfGlobal {
+impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&Headers, &FrameHeader)) -> Result<Self> {
+    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
         let patches = header.flags.patches().then(|| {
             Patches::parse(bitstream, image_header)
         }).transpose()?;
@@ -92,10 +92,10 @@ impl GlobalModular {
     }
 }
 
-impl Bundle<(&Headers, &FrameHeader)> for GlobalModular {
+impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&Headers, &FrameHeader)) -> Result<Self> {
+    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
         let ma_config = bitstream.read_bool()?
             .then(|| read_bits!(bitstream, Bundle(MaConfig)))
             .transpose()?;

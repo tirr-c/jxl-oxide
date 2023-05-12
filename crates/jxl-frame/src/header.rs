@@ -5,12 +5,12 @@ use jxl_bitstream::{
     Bitstream,
     Bundle,
 };
-use jxl_image::{Headers, Extensions, BitDepth, SizeHeader};
+use jxl_image::{ImageHeader, Extensions, BitDepth, SizeHeader};
 use crate::Result;
 
 define_bundle! {
     #[derive(Debug)]
-    pub struct FrameHeader ctx(headers: &Headers) error(crate::Error) {
+    pub struct FrameHeader ctx(headers: &ImageHeader) error(crate::Error) {
         all_default: ty(Bool) default(true),
         pub frame_type: ty(Bundle(FrameType)) cond(!all_default) default(FrameType::RegularFrame),
         pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),

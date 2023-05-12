@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 
 use crate::Result;
 
@@ -67,10 +67,10 @@ impl TryFrom<u32> for PatchBlendMode {
     }
 }
 
-impl Bundle<&Headers> for Patches {
+impl Bundle<&ImageHeader> for Patches {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &Headers) -> Result<Self> {
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &ImageHeader) -> Result<Self> {
         let num_extra = image_header.metadata.ec_info.len();
         let alpha_channel_indices = image_header.metadata.ec_info.iter()
             .enumerate()

@@ -4,7 +4,7 @@ use jxl_frame::{
     Frame,
 };
 use jxl_grid::SimpleGrid;
-use jxl_image::Headers;
+use jxl_image::ImageHeader;
 
 #[derive(Debug)]
 enum BlendMode<'a> {
@@ -139,7 +139,7 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
 }
 
 pub fn blend(
-    image_header: &Headers,
+    image_header: &ImageHeader,
     reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
     new_frame: &Frame<'_>,
     new_grid: &[SimpleGrid<f32>],
@@ -236,7 +236,7 @@ pub fn blend(
 }
 
 pub fn patch(
-    image_header: &Headers,
+    image_header: &ImageHeader,
     base_grid: &mut [SimpleGrid<f32>],
     patch_ref_grid: &[SimpleGrid<f32>],
     patch_ref: &PatchRef,

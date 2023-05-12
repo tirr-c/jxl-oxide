@@ -3,7 +3,7 @@ use jxl_grid::{SimpleGrid, PaddedGrid};
 
 pub fn upsample(
     grid: &mut SimpleGrid<f32>,
-    image_header: &jxl_image::Headers,
+    image_header: &jxl_image::ImageHeader,
     frame_header: &FrameHeader,
     channel_idx: usize,
 ) {
