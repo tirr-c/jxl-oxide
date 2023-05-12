@@ -124,11 +124,11 @@ macro_rules! make_def {
     (@ty; Vec[$($inner:tt)*]; $count:expr) => { Vec<$crate::make_def!(@ty; $($inner)*)> };
     (@ty; Array[$($inner:tt)*]; $count:expr) => { [$crate::make_def!(@ty; $($inner)*); $count] };
     ($(#[$attrs:meta])* $v:vis struct $bundle_name:ident {
-        $($vfield:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($(#[$fieldattrs:meta])* $vfield:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         $(#[$attrs])*
         $v struct $bundle_name {
-            $($vfield $field: $crate::make_def!(@ty; $($expr)*),)*
+            $($(#[$fieldattrs])* $vfield $field: $crate::make_def!(@ty; $($expr)*),)*
         }
     };
 }
@@ -171,7 +171,7 @@ macro_rules! make_parse {
         $err
     };
     ($bundle_name:ident $(error($err:ty))? {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($(#[$fieldattrs:meta])* $v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         impl<Ctx: Copy> $crate::Bundle<Ctx> for $bundle_name {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
@@ -206,7 +206,7 @@ macro_rules! make_parse {
         }
     };
     ($bundle_name:ident ctx($ctx_id:ident : $ctx:ty) $(error($err:ty))? {
-        $($v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
+        $($(#[$fieldattrs:meta])* $v:vis $field:ident: ty($($expr:tt)*) $(ctx($ctx_for_field:expr))? $(cond($cond:expr))? $(default($def_expr:expr))? ,)*
     }) => {
         impl $crate::Bundle<$ctx> for $bundle_name {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
