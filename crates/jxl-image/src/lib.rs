@@ -1,27 +1,42 @@
-#![allow(clippy::excessive_precision)]
+//! This crate provides types related to JPEG XL image headers, such as
+//! [image size information][SizeHeader], [color encoding][ColourEncoding] and
+//! [animation TPS (ticks per second) information][AnimationHeader]. Most of the information is in
+//! the [`ImageMetadata`] struct.
+//!
+//! Image header is at the beginning of the bitstream. One can parse [`ImageHeader`] from the
+//! bitstream to retrieve information about the image.
 use std::io::Read;
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result};
 use jxl_color::header::*;
 
 define_bundle! {
+    /// JPEG XL image header.
+    ///
+    /// Use [`Bundle::parse`] to parse the header.
     #[derive(Debug)]
     pub struct ImageHeader {
+        /// JPEG XL bitstream signature (`0x0aff`).
         pub signature: ty(u(16)),
+        /// Image size information.
         pub size: ty(Bundle(SizeHeader)),
+        /// Image metadata.
         pub metadata: ty(Bundle(ImageMetadata)),
     }
 }
 
 define_bundle! {
+    /// Image size information.
     #[derive(Debug)]
     pub struct SizeHeader {
         div8: ty(Bool) default(false),
         h_div8: ty(1 + u(5)) cond(div8) default(0),
+        /// Image height.
         pub height:
             ty(U32(1 + u(9), 1 + u(13), 1 + u(18), 1 + u(30))) cond(!div8)
             default(8 * h_div8),
         ratio: ty(u(3)) default(0),
         w_div8: ty(1 + u(5)) cond(div8 && ratio == 0) default(0),
+        /// Image width.
         pub width:
             ty(U32(1 + u(9), 1 + u(13), 1 + u(18), 1 + u(30))) cond(!div8 && ratio == 0)
             default(SizeHeader::compute_default_width(ratio, w_div8, height)),
@@ -45,30 +60,49 @@ impl SizeHeader {
 }
 
 define_bundle! {
+    /// Image metadata.
     #[derive(Debug)]
     pub struct ImageMetadata {
         all_default: ty(Bool) default(true),
         extra_fields: ty(Bool) cond(!all_default) default(false),
+        /// Value representing image orientation.
         pub orientation: ty(1 + u(3)) cond(extra_fields) default(1),
         have_intr_size: ty(Bool) cond(extra_fields) default(false),
+        /// Recommended size to display the image.
         pub intrinsic_size: ty(Bundle(Option<SizeHeader>)) cond(have_intr_size),
         have_preview: ty(Bool) cond(extra_fields) default(false),
+        /// Size information of the preview frame, if there is any.
         pub preview: ty(Bundle(Option<PreviewHeader>)) cond(have_preview),
         have_animation: ty(Bool) cond(extra_fields) default(false),
+        /// Information about the animation such as TPS, if the image is animated.
         pub animation: ty(Bundle(Option<AnimationHeader>)) cond(have_animation),
+        /// Bit depth information, which is used to parse Modular image samples.
         pub bit_depth: ty(Bundle(BitDepth)) cond(!all_default),
+        /// Whether 16-bit buffer is sufficient to correctly parse Modular images.
         pub modular_16bit_buffers: ty(Bool) cond(!all_default) default(true),
         num_extra: ty(U32(0, 1, 2 + u(4), 1 + u(12))) cond(!all_default) default(0),
+        /// Information about extra channels, such as alpha and black channels.
         pub ec_info: ty(Vec[Bundle(ExtraChannelInfo)]; num_extra) cond(!all_default),
+        /// Whether the image is encoded in XYB color space.
         pub xyb_encoded: ty(Bool) cond(!all_default) default(true),
+        /// Color encoding of the image.
+        ///
+        /// If `xyb_encoded` is `true`, this is a suggestion of the color space to present the
+        /// decoded image. If it's not, the decoded image is in the color space represented by this
+        /// field.
         pub colour_encoding: ty(Bundle(ColourEncoding)) cond(!all_default),
+        /// Tone mapping information, which is used to map HDR images to SDR.
         pub tone_mapping: ty(Bundle(ToneMapping)) cond(extra_fields),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
         default_m: ty(Bool),
+        /// Opsin inverse matrix, which is used to transform XYB encoded image to sRGB color space.
         pub opsin_inverse_matrix: ty(Bundle(OpsinInverseMatrix)) cond(!default_m && xyb_encoded),
         cw_mask: ty(u(3)) cond(!default_m) default(0),
+        /// 2x upsampling weights.
         pub up2_weight: ty(Array[F16]; 15) cond(cw_mask & 1 != 0) default(Self::D_UP2),
+        /// 4x upsampling weights.
         pub up4_weight: ty(Array[F16]; 55) cond(cw_mask & 2 != 0) default(Self::D_UP4),
+        /// 8x upsampling weights.
         pub up8_weight: ty(Array[F16]; 210) cond(cw_mask & 4 != 0) default(Self::D_UP8),
     }
 
@@ -76,21 +110,31 @@ define_bundle! {
     pub struct PreviewHeader {
         div8: ty(Bool),
         h_div8: ty(U32(16, 32, 1 + u(5), 33 + u(9))) cond(div8) default(1),
+        /// Height of the preview image.
         pub height:
             ty(U32(1 + u(6), 65 + u(8), 321 + u(10), 1345 + u(12))) cond(!div8)
             default(8 * h_div8),
         ratio: ty(u(3)),
         w_div8: ty(U32(16, 32, 1 + u(5), 33 + u(9))) cond(div8) default(1),
+        /// Width of the preview image.
         pub width:
             ty(U32(1 + u(6), 65 + u(8), 321 + u(10), 1345 + u(12))) cond(!div8)
             default(SizeHeader::compute_default_width(ratio, w_div8, height)),
     }
 
+    /// Animation information.
+    ///
+    /// TPS (ticks per second) is computed as `tps_numerator / tps_denominator`, which means
+    /// `tps_denominator / tps_numerator` seconds per tick.
     #[derive(Debug)]
     pub struct AnimationHeader {
+        /// TPS numerator.
         pub tps_numerator: ty(U32(100, 1000, 1 + u(10), 1 + u(30))) default(0),
+        /// TPS denominator.
         pub tps_denominator: ty(U32(1, 1001, 1 + u(8), 1 + u(10))) default(0),
+        /// Number of loops, where 0 means it loops forever.
         pub num_loops: ty(U32(0, u(3), u(16), u(32))) default(0),
+        /// Whether keyframes in the image has their timecodes embedded.
         pub have_timecodes: ty(Bool) default(false),
     }
 
@@ -103,11 +147,64 @@ define_bundle! {
     }
 }
 
+impl ImageMetadata {
+    /// Returns whether the image is grayscale.
+    #[inline]
+    pub fn grayscale(&self) -> bool {
+        self.colour_encoding.colour_space == ColourSpace::Grey
+    }
+
+    /// Returns the number of channels actually encoded in the image.
+    #[inline]
+    pub fn encoded_color_channels(&self) -> usize {
+        if !self.xyb_encoded && self.grayscale() {
+            1
+        } else {
+            3
+        }
+    }
+
+    /// Returns the index of the first alpha channel in the image.
+    pub fn alpha(&self) -> Option<usize> {
+        self.ec_info.iter()
+            .position(|info| matches!(info.ty, ExtraChannelType::Alpha { .. }))
+    }
+
+    /// Returns where the given coordinate will be placed after the orientation is applied.
+    #[inline]
+    pub fn apply_orientation(&self, width: u32, height: u32, left: u32, top: u32, inverse: bool) -> (u32, u32, u32, u32) {
+        let (left, top) = match self.orientation {
+            1 => (left, top),
+            2 => (width - left - 1, top),
+            3 => (width - left - 1, height - top - 1),
+            4 => (left, height - top - 1),
+            5 => (top, left),
+            6 if inverse => (top, width - left - 1),
+            6 => (height - top - 1, left),
+            7 => (height - top - 1, width - left - 1),
+            8 if inverse => (height - top - 1, left),
+            8 => (top, width - left - 1),
+            _ => unreachable!(),
+        };
+        let (width, height) = match self.orientation {
+            1..=4 => (width, height),
+            5..=8 => (height, width),
+            _ => unreachable!(),
+        };
+        (width, height, left, top)
+    }
+}
+
+/// Information about an extra channel.
 #[derive(Debug, Default)]
 pub struct ExtraChannelInfo {
+    /// Type and associated parameters of the channel.
     pub ty: ExtraChannelType,
+    /// Bit depth information about the channel.
     pub bit_depth: BitDepth,
+    /// `dim_shift` used to decode Modular image.
     pub dim_shift: u32,
+    /// Name of the channel.
     pub name: Vec<u8>,
 }
 
@@ -166,11 +263,13 @@ impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
 }
 
 impl ExtraChannelInfo {
+    /// Returns whether this is an alpha channel.
     #[inline]
     pub fn is_alpha(&self) -> bool {
         matches!(self.ty, ExtraChannelType::Alpha { .. })
     }
 
+    /// Returns whether the alpha channel has premultiplied semantics.
     #[inline]
     pub fn alpha_associated(&self) -> Option<bool> {
         if let ExtraChannelType::Alpha { alpha_associated } = self.ty {
@@ -180,26 +279,14 @@ impl ExtraChannelInfo {
         }
     }
 
+    /// Returns whether this is a black channel of a CMYK image.
     #[inline]
     pub fn is_black(&self) -> bool {
         self.ty == ExtraChannelType::Black
     }
 }
 
-impl ImageMetadata {
-    pub fn grayscale(&self) -> bool {
-        self.colour_encoding.colour_space == ColourSpace::Grey
-    }
-
-    pub fn encoded_color_channels(&self) -> usize {
-        if !self.xyb_encoded && self.grayscale() {
-            1
-        } else {
-            3
-        }
-    }
-}
-
+/// Type of an extra channel.
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
 pub enum ExtraChannelType {
@@ -262,11 +349,18 @@ impl TryFrom<u32> for ExtraChannelTypeRaw {
     }
 }
 
+/// Bit depth information.
 #[derive(Debug, Copy, Clone)]
 pub enum BitDepth {
+    /// Modular image samples represent integer values, where the range
+    /// `0..=(1 << bits_per_sample) - 1` corresponds to \[0.0, 1.0\], scaled linearly.
+    ///
+    /// The value outside of the \[0.0, 1.0\] range is *not* clamped.
     IntegerSample {
         bits_per_sample: u32,
     },
+    /// Modular image samples represent bitcast of floating point values with a sign bit,
+    /// `exp_bits` exponential bits, and the remaining mantissa bits.
     FloatSample {
         bits_per_sample: u32,
         exp_bits: u32,
@@ -288,6 +382,7 @@ impl BitDepth {
         }
     }
 
+    /// Parses the given Modular image sample to an `f32`.
     #[inline]
     pub fn parse_integer_sample(self, sample: i32) -> f32 {
         match self {
@@ -338,6 +433,7 @@ impl<Ctx> Bundle<Ctx> for BitDepth {
     }
 }
 
+#[allow(clippy::excessive_precision)]
 impl ImageMetadata {
     const D_UP2: [f32; 15] = [
         -0.01716200, -0.03452303, -0.04022174, -0.02921014, -0.00624645,
@@ -401,34 +497,4 @@ impl ImageMetadata {
         0.02727416, 0.19446600, 0.00159832, -0.02232473, 0.74982506,
         0.11452620, -0.03348048, -0.01605681, -0.02070339, -0.00458223,
     ];
-}
-
-impl ImageMetadata {
-    pub fn alpha(&self) -> Option<usize> {
-        self.ec_info.iter()
-            .position(|info| matches!(info.ty, ExtraChannelType::Alpha { .. }))
-    }
-
-    #[inline]
-    pub fn apply_orientation(&self, width: u32, height: u32, left: u32, top: u32, inverse: bool) -> (u32, u32, u32, u32) {
-        let (left, top) = match self.orientation {
-            1 => (left, top),
-            2 => (width - left - 1, top),
-            3 => (width - left - 1, height - top - 1),
-            4 => (left, height - top - 1),
-            5 => (top, left),
-            6 if inverse => (top, width - left - 1),
-            6 => (height - top - 1, left),
-            7 => (height - top - 1, width - left - 1),
-            8 if inverse => (height - top - 1, left),
-            8 => (top, width - left - 1),
-            _ => unreachable!(),
-        };
-        let (width, height) = match self.orientation {
-            1..=4 => (width, height),
-            5..=8 => (height, width),
-            _ => unreachable!(),
-        };
-        (width, height, left, top)
-    }
 }
