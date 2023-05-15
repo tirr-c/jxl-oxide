@@ -524,7 +524,6 @@ version = "0.1.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
- "jxl-color",
  "jxl-grid",
  "jxl-image",
  "jxl-modular",
