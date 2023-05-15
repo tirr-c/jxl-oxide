@@ -6,7 +6,7 @@
 //! Image header is at the beginning of the bitstream. One can parse [`ImageHeader`] from the
 //! bitstream to retrieve information about the image.
 use std::io::Read;
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result};
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result, Name};
 use jxl_color::header::*;
 
 define_bundle! {
@@ -205,7 +205,7 @@ pub struct ExtraChannelInfo {
     /// `dim_shift` used to decode Modular image.
     pub dim_shift: u32,
     /// Name of the channel.
-    pub name: Vec<u8>,
+    pub name: Name,
 }
 
 impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
@@ -220,11 +220,7 @@ impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
         let ty_id = read_bits!(bitstream, Enum(ExtraChannelTypeRaw))?;
         let bit_depth = BitDepth::parse(bitstream, ())?;
         let dim_shift = read_bits!(bitstream, U32(0, 3, 4, 1 + u(3)))?;
-        let name_len = read_bits!(bitstream, U32(0, u(4), 16 + u(5), 48 + u(10)))? as usize;
-        let mut name = vec![0u8; name_len];
-        for b in &mut name {
-            *b = bitstream.read_bits(8)? as u8;
-        }
+        let name = Name::parse(bitstream, ())?;
 
         let ty = match ty_id {
             ExtraChannelTypeRaw::Alpha => {
