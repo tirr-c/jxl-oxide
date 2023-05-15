@@ -7,6 +7,10 @@ use jxl_bitstream::{
 };
 use crate::Result;
 
+/// Table of contents of a frame.
+///
+/// Frame data are organized in groups. TOC specified the size and order of each group, and it is
+/// decoded after the frame header.
 pub struct Toc {
     num_lf_groups: usize,
     num_groups: usize,
@@ -41,10 +45,14 @@ impl std::fmt::Debug for Toc {
     }
 }
 
+/// Information about a group in TOC.
 #[derive(Debug, Copy, Clone)]
 pub struct TocGroup {
+    /// Kind of the group.
     pub kind: TocGroupKind,
+    /// Offset within the bitstream.
     pub offset: Bookmark,
+    /// Size of the group.
     pub size: u32,
 }
 
@@ -87,25 +95,19 @@ impl PartialOrd for TocGroupKind {
 }
 
 impl Toc {
+    /// Returns the offset to the beginning of the data.
     pub fn bookmark(&self) -> Bookmark {
-        self.groups[0].offset
+        let idx = self.bitstream_order.first().copied().unwrap_or(0);
+        self.groups[idx].offset
     }
 
+    /// Returns whether the frame has only one group.
     pub fn is_single_entry(&self) -> bool {
         self.groups.len() <= 1
     }
 
-    fn group(&self, idx: usize) -> TocGroup {
-        let idx = if self.bitstream_order.is_empty() {
-            idx
-        } else {
-            self.bitstream_order[idx]
-        };
-        self.groups[idx]
-    }
-
     pub fn lf_global(&self) -> TocGroup {
-        self.group(0)
+        self.groups[0]
     }
 
     pub fn lf_group(&self, idx: u32) -> TocGroup {
@@ -114,12 +116,12 @@ impl Toc {
         } else if (idx as usize) >= self.num_lf_groups {
             panic!("index out of range: {} >= {} (num_lf_groups)", idx, self.num_lf_groups);
         } else {
-            self.group(idx as usize + 1)
+            self.groups[idx as usize + 1]
         }
     }
 
     pub fn hf_global(&self) -> TocGroup {
-        self.group(self.num_lf_groups + 1)
+        self.groups[self.num_lf_groups + 1]
     }
 
     pub fn pass_group(&self, pass_idx: u32, group_idx: u32) -> TocGroup {
@@ -128,10 +130,11 @@ impl Toc {
         } else {
             let mut idx = 1 + self.num_lf_groups + 1;
             idx += (pass_idx as usize * self.num_groups) + group_idx as usize;
-            self.group(idx)
+            self.groups[idx]
         }
     }
 
+    /// Returns the total size of the frame data in bytes.
     pub fn total_byte_size(&self) -> u64 {
         self.total_size
     }

@@ -333,8 +333,8 @@ impl Frame<'_> {
 
     /// Loads the data of the frame with the given cropping region of the frame.
     ///
-    /// The region is expected in the frame coordinate. Use [`adjust_region`] to convert from the
-    /// region of the image.
+    /// The region is expected in the frame coordinate. Use [`adjust_region`][Self::adjust_region]
+    /// to convert from the region of the image.
     pub fn load_cropped<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
