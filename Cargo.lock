@@ -556,6 +556,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-oxide"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
+ "jxl-color",
+ "jxl-frame",
+ "jxl-grid",
+ "jxl-image",
+ "jxl-render",
+ "tracing",
+]
+
+[[package]]
 name = "jxl-render"
 version = "0.1.0"
 dependencies = [
