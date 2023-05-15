@@ -22,38 +22,38 @@ fn epf_step(
 ) {
     let width = input[0].width();
     let height = input[0].height();
-    for y in 0..height - 6 {
+    for y in 3..height - 3 {
         let y8 = y / 8;
         let is_y_border = (y % 8) == 0 || (y % 8) == 7;
-        let y = y + 3;
 
-        for x in 0..width - 6 {
+        for x in 3..width - 3 {
             let x8 = x / 8;
-            let is_border = is_y_border || (x % 8) == 0 || (x % 8) == 7;
-            let x = x + 3;
+            let is_x_border = (x % 8) == 0 || (x % 8) == 7;
+            let is_border = is_y_border || is_x_border;
 
             let sigma_val = *sigma_grid.get(x8, y8).unwrap();
             if sigma_val < 0.3 {
-                for (input, ch) in input.iter().zip(output.iter_mut()) {
-                    let input_ch = input.buf();
-                    let output_ch = ch.buf_mut();
-                    output_ch[y * width + x] = input_ch[y * width + x];
-                }
+                input.iter().zip(output.iter_mut()).for_each(|(input_ch, output_ch)| {
+                    let input_buf = input_ch.buf();
+                    let output_buf = output_ch.buf_mut();
+                    let index = y * width + x;
+                    output_buf[index] = input_buf[index];
+                });
                 continue;
             }
 
             let mut sum_weights = 1.0f32;
             let mut sum_channels = [0.0f32; 3];
-            for (sum, ch) in sum_channels.iter_mut().zip(input) {
+            sum_channels.iter_mut().zip(input.iter()).for_each(|(sum, ch)| {
                 let ch = ch.buf();
                 *sum = ch[y * width + x];
-            }
+            });
 
             for &(dx, dy) in kernel_coords {
                 let tx = x as isize + dx;
                 let ty = y as isize + dy;
                 let mut dist = 0.0f32;
-                for (ch, scale) in input.iter().zip(channel_scale) {
+                input.iter().zip(channel_scale.iter()).for_each(|(ch, scale)| {
                     let ch = ch.buf();
                     for &(dx, dy) in dist_coords {
                         let x = x as isize + dx;
@@ -64,7 +64,7 @@ fn epf_step(
                         let y = y as usize;
                         dist += (ch[y * width + x] - ch[ty * width + tx]).abs() * scale;
                     }
-                }
+                });
 
                 let weight = weight(
                     dist,
@@ -75,16 +75,16 @@ fn epf_step(
 
                 let tx = tx as usize;
                 let ty = ty as usize;
-                for (sum, ch) in sum_channels.iter_mut().zip(input) {
+                sum_channels.iter_mut().zip(input.iter()).for_each(|(sum, ch)| {
                     let ch = ch.buf();
                     *sum += ch[ty * width + tx] * weight;
-                }
+                });
             }
 
-            for (sum, ch) in sum_channels.into_iter().zip(output.iter_mut()) {
+            sum_channels.into_iter().zip(output.iter_mut()).for_each(|(sum, ch)| {
                 let ch = ch.buf_mut();
                 ch[y * width + x] = sum / sum_weights;
-            }
+            });
         }
     }
 }
