@@ -64,6 +64,7 @@ impl std::error::Error for Error {
 }
 
 impl Error {
+    /// Returns whether the error is caused by the unexpected EOF of the bitstream.
     pub fn unexpected_eof(&self) -> bool {
         let bitstream_err = match self {
             | Self::Bitstream(b)
