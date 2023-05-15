@@ -13,7 +13,6 @@ pub mod header;
 
 pub use error::{Error, Result};
 pub use header::FrameHeader;
-pub use data::Toc;
 
 use crate::data::*;
 
@@ -486,7 +485,7 @@ impl Frame<'_> {
     }
 }
 
-/// Data of a `Frame`.
+/// Data of a frame.
 #[derive(Debug)]
 pub struct FrameData {
     pub lf_global: Option<LfGlobal>,
