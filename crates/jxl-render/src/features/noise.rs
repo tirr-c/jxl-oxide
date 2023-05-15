@@ -1,9 +1,6 @@
 use std::num::Wrapping;
 
-use jxl_frame::{
-    data::NoiseParameters,
-    FrameHeader,
-};
+use jxl_frame::{data::NoiseParameters, FrameHeader};
 use jxl_grid::{PaddedGrid, SimpleGrid};
 
 pub fn render_noise(
@@ -69,12 +66,17 @@ fn init_noise(
     invisible_frames: usize,
     header: &FrameHeader,
 ) -> [SimpleGrid<f32>; 3] {
-    let width = header.width as usize;
-    let height = header.height as usize;
     let seed0 = rng_seed0(visible_frames, invisible_frames);
 
-    // NOTE: It may be necessary to multiply group_dim by `upsampling`
+    // We use header.width and header.height because
+    // these are the dimensions after upsampling (the "actual" frame size),
+    // and noise synthesis is done after upsampling.
+    let width = header.width as usize;
+    let height = header.height as usize;
+
     let group_dim = header.group_dim() as usize;
+    let groups_per_row = (width + group_dim - 1) / group_dim;
+    let groups_num = groups_per_row * ((height + group_dim - 1) / group_dim);
 
     // Padding for 5x5 kernel convolution step
     const PADDING: usize = 2;
@@ -84,9 +86,6 @@ fn init_noise(
         PaddedGrid::new(width, height, PADDING),
         PaddedGrid::new(width, height, PADDING),
     ];
-
-    let groups_per_row = (width + group_dim - 1) / group_dim;
-    let groups_num = groups_per_row * ((height + group_dim - 1) / group_dim);
 
     for group_idx in 0..groups_num {
         let group_x = group_idx % groups_per_row;
@@ -132,15 +131,20 @@ fn init_noise(
 }
 
 #[inline]
+/// Seed for [`XorShift128Plus`] from the number of ‘visible’ frames decoded so far
+/// and the number of ‘invisible’ frames since the previous visible frame.
 fn rng_seed0(visible_frames: usize, invisible_frames: usize) -> u64 {
     ((visible_frames as u64) << 32) + invisible_frames as u64
 }
 
 #[inline]
+/// Seed for [`XorShift128Plus`] from the coordinates of the top-left pixel of the
+/// group within the frame.
 fn rng_seed1(x0: usize, y0: usize) -> u64 {
     ((x0 as u64) << 32) + y0 as u64
 }
 
+/// Initializes `noise_buffer` for group
 fn init_noise_group(
     seed0: u64,
     noise_buffer: &mut [PaddedGrid<f32>; 3],
@@ -152,11 +156,11 @@ fn init_noise_group(
     height: usize,
     group_dim: usize,
 ) {
-    let xsize = usize::min(group_dim, width.wrapping_sub(x0));
-    let ysize = usize::min(group_dim, height.wrapping_sub(y0));
-
     let seed1 = rng_seed1(x0, y0);
     let mut rng = XorShift128Plus::new(seed0, seed1);
+
+    let xsize = usize::min(group_dim, width.wrapping_sub(x0));
+    let ysize = usize::min(group_dim, height.wrapping_sub(y0));
 
     for channel in noise_buffer {
         let buf_padding = channel.padding();
@@ -180,6 +184,8 @@ fn init_noise_group(
 }
 
 const N: usize = 8;
+
+/// Shift-register pseudo-random number generator
 struct XorShift128Plus {
     s0: [Wrapping<u64>; N],
     s1: [Wrapping<u64>; N],
@@ -187,6 +193,7 @@ struct XorShift128Plus {
 }
 
 impl XorShift128Plus {
+    /// Initialize a new XorShift128+ PRNG.
     fn new(seed0: u64, seed1: u64) -> Self {
         let seed0 = Wrapping(seed0);
         let seed1 = Wrapping(seed1);
@@ -205,6 +212,7 @@ impl XorShift128Plus {
         }
     }
 
+    /// Returns N * 2 [`u32`] pseudorandom numbers
     pub fn get_u32_bits(&mut self) -> [u32; N * 2] {
         let mut bits = [0; N * 2];
         self.fill_batch();
@@ -229,6 +237,7 @@ impl XorShift128Plus {
 }
 
 #[inline]
+/// Pseudo-random number generator used to calculate initial state of [`XorShift128Plus`]
 fn split_mix_64(z: Wrapping<u64>) -> Wrapping<u64> {
     let z = (z ^ (z >> 30)) * Wrapping(0xBF58476D1CE4E5B9);
     let z = (z ^ (z >> 27)) * Wrapping(0x94D049BB133111EB);
