@@ -1,4 +1,5 @@
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     Io(std::io::Error),
     /// Container box size was invalid.
@@ -12,6 +13,8 @@ pub enum Error {
         name: &'static str,
         value: u32,
     },
+    /// The name couldn't be parsed as UTF-8 string.
+    NonUtf8Name,
     /// The bitstream couldn't be skipped to the given position, mainly due to the direction being
     /// backwards.
     CannotSkip,
@@ -43,6 +46,9 @@ impl std::fmt::Display for Error {
             },
             Self::InvalidEnum { name, value } => {
                 write!(f, "Enum({}) read invalid enum value of {}", name, value)
+            },
+            Self::NonUtf8Name => {
+                write!(f, "read non-UTF-8 name")
             },
             Self::CannotSkip => {
                 write!(f, "target bookmark already passed")

@@ -179,7 +179,7 @@ impl ContextInner<'_> {
             frame.adjust_region(region);
         };
         let filter = if region.is_some() {
-            Box::new(frame.crop_filter_fn(region)) as Box<dyn FnMut(&_, &_, _) -> bool>
+            Box::new(jxl_frame::crop_filter(region)) as Box<dyn FnMut(&_, &_, _) -> bool>
         } else {
             Box::new(|_: &_, _: &_, _| true)
         };
@@ -203,23 +203,24 @@ impl<'f> ContextInner<'f> {
         cache: &mut RenderCache,
         mut region: Option<(u32, u32, u32, u32)>,
     ) -> Result<Vec<SimpleGrid<f32>>> {
+        let frame_header = frame.header();
         if let Some(region) = &mut region {
             frame.adjust_region(region);
         }
 
-        let mut fb = match frame.header().encoding {
+        let mut fb = match frame_header.encoding {
             Encoding::Modular => self.render_modular(frame, cache, region),
             Encoding::VarDct => self.render_vardct(frame, reference_frames.lf, cache, region),
         }?;
 
         let [a, b, c] = &mut fb;
         if frame.header().do_ycbcr {
-            filter::apply_jpeg_upsampling([a, b, c], frame.header().jpeg_upsampling);
+            filter::apply_jpeg_upsampling([a, b, c], frame_header.jpeg_upsampling);
         }
-        if let Gabor::Enabled(weights) = frame.header().restoration_filter.gab {
+        if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf([a, b, c], &frame.data().lf_group, frame.header());
+        filter::apply_epf([a, b, c], &frame.data().lf_group, frame_header);
 
         let [a, b, c] = fb;
         let mut ret = vec![a, b, c];
@@ -227,16 +228,20 @@ impl<'f> ContextInner<'f> {
 
         self.render_features(frame, &mut ret, reference_frames.refs)?;
 
-        if !frame.header().save_before_ct {
-            frame.transform_color(&mut ret);
+        if !frame_header.save_before_ct {
+            if frame_header.do_ycbcr {
+                let [cb, y, cr, ..] = &mut *ret else { panic!() };
+                jxl_color::ycbcr_to_rgb([cb, y, cr]);
+            }
+            self.convert_color(&mut ret);
         }
 
-        Ok(if !frame.header().frame_type.is_normal_frame() {
+        Ok(if !frame_header.frame_type.is_normal_frame() {
             ret
-        } else if frame.header().resets_canvas {
+        } else if frame_header.resets_canvas {
             let mut cropped = Vec::with_capacity(ret.len());
-            let l = (-frame.header().x0) as usize;
-            let t = (-frame.header().y0) as usize;
+            let l = (-frame_header.x0) as usize;
+            let t = (-frame_header.y0) as usize;
             let w = self.width() as usize;
             let h = self.height() as usize;
             for g in ret {
@@ -374,6 +379,29 @@ impl<'f> ContextInner<'f> {
         }
 
         Ok(())
+    }
+
+    pub fn convert_color(&self, grid: &mut [SimpleGrid<f32>]) {
+        let metadata = &self.image_header.metadata;
+        if metadata.xyb_encoded {
+            let [x, y, b, ..] = grid else { panic!() };
+            jxl_color::xyb_to_linear_srgb(
+                [x, y, b],
+                &metadata.opsin_inverse_matrix,
+                metadata.tone_mapping.intensity_target,
+            );
+
+            if metadata.colour_encoding.want_icc {
+                // Don't convert tf, return linear sRGB as is
+                return;
+            }
+
+            jxl_color::from_linear_srgb(
+                grid,
+                &metadata.colour_encoding,
+                metadata.tone_mapping.intensity_target,
+            );
+        }
     }
 
     fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {

@@ -4,11 +4,13 @@ use jxl_bitstream::{
     read_bits,
     Bitstream,
     Bundle,
+    Name,
 };
 use jxl_image::{ImageHeader, Extensions, BitDepth, SizeHeader};
 use crate::Result;
 
 define_bundle! {
+    /// Frame header.
     #[derive(Debug)]
     pub struct FrameHeader ctx(headers: &ImageHeader) error(crate::Error) {
         all_default: ty(Bool) default(true),
@@ -115,11 +117,7 @@ define_bundle! {
                 )
             )
             default(!frame_type.is_normal_frame()),
-        name_len:
-            ty(U32(0, u(4), 16 + u(5), 48 + u(10)))
-            cond(!all_default)
-            default(0),
-        pub name: ty(Vec[u(8)]; name_len) default(vec![0; name_len as usize]),
+        pub name: ty(Bundle(Name)) cond(!all_default),
         pub restoration_filter: ty(Bundle(RestorationFilter)) ctx(encoding) cond(!all_default),
         pub extensions: ty(Bundle(Extensions)) cond(!all_default),
         pub bit_depth: ty(Bundle(BitDepth)) cond(false) default(headers.metadata.bit_depth),
@@ -191,6 +189,7 @@ impl FrameHeader {
         }
     }
 
+    /// Returns whether this frame is a keyframe that should be displayed.
     #[inline]
     pub fn is_keyframe(&self) -> bool {
         self.frame_type.is_normal_frame() && (self.is_last || self.duration != 0)

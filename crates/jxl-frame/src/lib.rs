@@ -4,7 +4,6 @@ use std::io::Read;
 
 use header::Encoding;
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
-use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 
 mod error;
@@ -18,17 +17,9 @@ pub use data::Toc;
 
 use crate::data::*;
 
-#[derive(Debug, Copy, Clone)]
-enum GroupInstr {
-    Read(usize, TocGroup),
-    Decode(usize),
-    ProgressiveScan {
-        pass_idx: Option<u32>,
-        downsample_factor: u32,
-        done: bool,
-    },
-}
-
+/// JPEG XL frame.
+///
+/// A frame represents a single image that can be displayed or referenced by other frames.
 #[derive(Debug)]
 pub struct Frame<'a> {
     image_header: &'a ImageHeader,
@@ -41,14 +32,32 @@ pub struct Frame<'a> {
     pass_shifts: BTreeMap<u32, (i32, i32)>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum ProgressiveResult {
-    NeedMoreData,
-    SingleScan {
+#[derive(Debug, Copy, Clone)]
+enum GroupInstr {
+    Read(usize, TocGroup),
+    Decode(usize),
+    ProgressiveScan {
         pass_idx: Option<u32>,
         downsample_factor: u32,
         done: bool,
     },
+}
+
+/// Result of progressive loading of a frame.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ProgressiveResult {
+    /// More data is needed to complete a frame or a progressive scan.
+    NeedMoreData,
+    /// A progressive scan is ready to be rendered.
+    SingleScan {
+        /// Pass index, `None` if the scan is from the LF image.
+        pass_idx: Option<u32>,
+        /// Downsample factor of the scan.
+        downsample_factor: u32,
+        /// Whether the scan completes an image with the given downsample factor.
+        done: bool,
+    },
+    /// A frame is fully loaded.
     FrameComplete,
 }
 
@@ -232,48 +241,34 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
 }
 
 impl Frame<'_> {
-    pub fn transform_color(&self, grid: &mut [SimpleGrid<f32>]) {
-        let metadata = &self.image_header.metadata;
-        if metadata.xyb_encoded {
-            let [x, y, b, ..] = grid else { panic!() };
-            jxl_color::xyb_to_linear_srgb(
-                [x, y, b],
-                &metadata.opsin_inverse_matrix,
-                metadata.tone_mapping.intensity_target,
-            );
-
-            if metadata.colour_encoding.want_icc {
-                // Don't convert tf, return linear sRGB as is
-                return;
-            }
-
-            jxl_color::from_linear_srgb(
-                grid,
-                &metadata.colour_encoding,
-                metadata.tone_mapping.intensity_target,
-            );
-        } else if self.header.do_ycbcr {
-            let [cb, y, cr, ..] = &mut *grid else { panic!() };
-            jxl_color::ycbcr_to_rgb([cb, y, cr]);
-        }
-    }
-}
-
-impl Frame<'_> {
+    /// Returns the frame header.
     pub fn header(&self) -> &FrameHeader {
         &self.header
     }
 
+    /// Returns the TOC.
+    ///
+    /// See the documentation of [`Toc`] for details.
     pub fn toc(&self) -> &Toc {
         &self.toc
     }
 
+    /// Returns the frame data.
     pub fn data(&self) -> &FrameData {
         &self.data
     }
 }
 
 impl Frame<'_> {
+    /// Adjusts the cropping region of the image to the actual decoding region of the frame.
+    ///
+    /// The cropping region of the *image* needs to be adjusted to be used in a *frame*, for a few
+    /// reasons:
+    /// - A frame may be blended to the canvas with offset, which makes the image and the frame
+    ///   have different coordinates.
+    /// - Some filters reference other samples, which requires padding to the region.
+    ///
+    /// This method takes care of those and adjusts the given region appropriately.
     pub fn adjust_region(&self, (left, top, width, height): &mut (u32, u32, u32, u32)) {
         if self.header.have_crop {
             *left = left.saturating_add_signed(-self.header.x0);
@@ -299,48 +294,11 @@ impl Frame<'_> {
         }
     }
 
-    pub fn crop_filter_fn(&self, adjusted_region: Option<(u32, u32, u32, u32)>) -> impl for<'a, 'b> FnMut(&'a FrameHeader, &'b FrameData, TocGroupKind) -> bool {
-        let mut region = adjusted_region;
-        let mut region_adjust_done = false;
-
-        move |frame_header: &FrameHeader, frame_data: &FrameData, kind| {
-            if !region_adjust_done {
-                let Some(lf_global) = frame_data.lf_global.as_ref() else {
-                    return true;
-                };
-                if lf_global.gmodular.modular.has_delta_palette() {
-                    if region.take().is_some() {
-                        tracing::debug!("GlobalModular has delta palette, forcing full decode");
-                    }
-                } else if lf_global.gmodular.modular.has_squeeze() {
-                    if let Some((left, top, width, height)) = &mut region {
-                        *width += *left;
-                        *height += *top;
-                        *left = 0;
-                        *top = 0;
-                        tracing::debug!("GlobalModular has squeeze, decoding from top-left");
-                    }
-                }
-                if let Some(region) = &region {
-                    tracing::debug!("Cropped decoding: {:?}", region);
-                }
-                region_adjust_done = true;
-            }
-
-            let Some(region) = region else { return true; };
-
-            match kind {
-                TocGroupKind::LfGroup(lf_group_idx) => {
-                    frame_header.is_lf_group_collides_region(lf_group_idx, region)
-                },
-                TocGroupKind::GroupPass { group_idx, .. } => {
-                    frame_header.is_group_collides_region(group_idx, region)
-                },
-                _ => true,
-            }
-        }
-    }
-
+    /// Loads the data of the frame with the given TOC filter. A group is loaded if the filter
+    /// returns `true` for a given TOC group.
+    ///
+    /// If `progressive` is true, then the method pauses loading the data at the next progressive
+    /// scan marker.
     pub fn load_with_filter<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -373,6 +331,10 @@ impl Frame<'_> {
         Ok(ProgressiveResult::FrameComplete)
     }
 
+    /// Loads the data of the frame with the given cropping region of the frame.
+    ///
+    /// The region is expected in the frame coordinate. Use [`adjust_region`] to convert from the
+    /// region of the image.
     pub fn load_cropped<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -381,9 +343,10 @@ impl Frame<'_> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
         let _guard = span.enter();
 
-        self.load_with_filter(bitstream, false, self.crop_filter_fn(region)).map(drop)
+        self.load_with_filter(bitstream, false, crop_filter(region)).map(drop)
     }
 
+    /// Loads all data of the frame.
     pub fn load_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         self.load_cropped(bitstream, None)
     }
@@ -523,6 +486,7 @@ impl Frame<'_> {
     }
 }
 
+/// Data of a `Frame`.
 #[derive(Debug)]
 pub struct FrameData {
     pub lf_global: Option<LfGlobal>,
@@ -569,5 +533,51 @@ impl FrameData {
         }
         lf_global.apply_modular_inverse_transform();
         Ok(self)
+    }
+}
+
+/// Creates a filter that loads only groups within the given cropping region of the frame.
+///
+/// The region is expected in the frame coordinate. Use [`Frame::adjust_region`] to convert from
+/// the region of the image.
+pub fn crop_filter(adjusted_region: Option<(u32, u32, u32, u32)>) -> impl for<'a, 'b> FnMut(&'a FrameHeader, &'b FrameData, TocGroupKind) -> bool {
+    let mut region = adjusted_region;
+    let mut region_adjust_done = false;
+
+    move |frame_header: &FrameHeader, frame_data: &FrameData, kind| {
+        if !region_adjust_done {
+            let Some(lf_global) = frame_data.lf_global.as_ref() else {
+                return true;
+            };
+            if lf_global.gmodular.modular.has_delta_palette() {
+                if region.take().is_some() {
+                    tracing::debug!("GlobalModular has delta palette, forcing full decode");
+                }
+            } else if lf_global.gmodular.modular.has_squeeze() {
+                if let Some((left, top, width, height)) = &mut region {
+                    *width += *left;
+                    *height += *top;
+                    *left = 0;
+                    *top = 0;
+                    tracing::debug!("GlobalModular has squeeze, decoding from top-left");
+                }
+            }
+            if let Some(region) = &region {
+                tracing::debug!("Cropped decoding: {:?}", region);
+            }
+            region_adjust_done = true;
+        }
+
+        let Some(region) = region else { return true; };
+
+        match kind {
+            TocGroupKind::LfGroup(lf_group_idx) => {
+                frame_header.is_lf_group_collides_region(lf_group_idx, region)
+            },
+            TocGroupKind::GroupPass { group_idx, .. } => {
+                frame_header.is_group_collides_region(group_idx, region)
+            },
+            _ => true,
+        }
     }
 }

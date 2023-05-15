@@ -239,6 +239,8 @@ impl RenderContext<'_> {
             }
         };
 
+        let frame_header = frame.header();
+
         let mut cropped = if let Some((l, t, w, h)) = region {
             let mut cropped = Vec::with_capacity(grid.len());
             for g in grid {
@@ -255,8 +257,12 @@ impl RenderContext<'_> {
             grid
         };
 
-        if frame.header().save_before_ct {
-            frame.transform_color(&mut cropped);
+        if frame_header.save_before_ct {
+            if frame_header.do_ycbcr {
+                let [cb, y, cr, ..] = &mut *cropped else { panic!() };
+                jxl_color::ycbcr_to_rgb([cb, y, cr]);
+            }
+            self.inner.convert_color(&mut cropped);
         }
 
         let channels = if self.inner.metadata().grayscale() { 1 } else { 3 };
