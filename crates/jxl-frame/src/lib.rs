@@ -1,3 +1,21 @@
+//! This crate provides types related to JPEG XL frames.
+//!
+//! A JPEG XL image contains one or more frames. A frame represents single unit of image that can
+//! be displayed or referenced by other frames.
+//!
+//! A frame consists of a few components:
+//! - [Frame header][FrameHeader].
+//! - [Table of contents (TOC)][data::Toc].
+//! - [Actual frame data][FrameData], in the following order, potentially permuted as specified in
+//!   the TOC:
+//!   - one [`LfGlobal`][data::LfGlobal],
+//!   - [`num_lf_groups`] [`LfGroup`][data::LfGroup]'s, in raster order,
+//!   - one [`HfGlobal`][data::HfGlobal], potentially empty for Modular frames, and
+//!   - [`num_passes`] times [`num_groups`] [`PassGroup`][data::PassGroup]'s, in raster order.
+//!
+//! [`num_lf_groups`]: FrameHeader::num_lf_groups
+//! [`num_groups`]: FrameHeader::num_groups
+//! [`num_passes`]: header::Passes::num_passes
 use std::collections::{HashMap, HashSet};
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -18,7 +36,7 @@ use crate::data::*;
 
 /// JPEG XL frame.
 ///
-/// A frame represents a single image that can be displayed or referenced by other frames.
+/// A frame represents a single unit of image that can be displayed or referenced by other frames.
 #[derive(Debug)]
 pub struct Frame<'a> {
     image_header: &'a ImageHeader,
