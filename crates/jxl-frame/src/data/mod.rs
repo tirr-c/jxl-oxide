@@ -13,6 +13,6 @@ pub use pass_group::*;
 mod noise;
 mod patch;
 mod spline;
-pub use noise::NoiseParameters;
+pub use noise::*;
 pub use patch::*;
-pub use spline::{Splines, Spline, continuous_idct, erf};
+pub use spline::*;

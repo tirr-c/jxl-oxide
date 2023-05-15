@@ -11,7 +11,6 @@ pub enum Error {
     },
     TooManySplines(usize),
     TooManySplinePoints(usize),
-    TooLargeEstimatedArea(u64),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -49,7 +48,6 @@ impl std::fmt::Display for Error {
             Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
             Self::TooManySplines(num) => write!(f, "Too many splines: {}", num),
             Self::TooManySplinePoints(num) => write!(f, "Too many spline control points: {}", num),
-            Self::TooLargeEstimatedArea(area) => write!(f, "Too large estimated area for splines: {}", area),
         }
     }
 }

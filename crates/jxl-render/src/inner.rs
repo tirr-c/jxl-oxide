@@ -340,29 +340,7 @@ impl<'f> ContextInner<'f> {
         }
 
         if let Some(splines) = &lf_global.splines {
-            let mut estimated_area = 0;
-            let image_size = (frame_header.width * frame_header.height) as u64;
-            for quant_spline in &splines.quant_splines {
-                let spline = quant_spline.dequant(
-                    splines.quant_adjust,
-                    base_correlations_xb,
-                    &mut estimated_area,
-                );
-                // Maximum total_estimated_area_reached for Level 10
-                if estimated_area > (1024 * image_size + (1u64 << 32)).min(1u64 << 42) {
-                    return Err(crate::Error::Frame(
-                        jxl_frame::Error::TooLargeEstimatedArea(estimated_area),
-                    ));
-                }
-                // Maximum total_estimated_area_reached for Level 5
-                if estimated_area > (8 * image_size + (1u64 << 25)).min(1u64 << 30) {
-                    tracing::warn!(
-                        "Large estimated_area of splines, expect slower decoding: {}",
-                        estimated_area
-                    );
-                }
-                features::render_spline(frame_header, grid, spline)?;
-            }
+            features::render_spline(frame_header, grid, splines, base_correlations_xb)?;
         }
         if let Some(noise) = &lf_global.noise {
             let (visible_frames_num, invisible_frames_num) =
