@@ -14,8 +14,8 @@ struct Spline {
     sigma_dct: [f32; 32],
 }
 
-// Done in jxl_from_tree syntax
 impl std::fmt::Display for Spline {
+    /// Formats the value using the given formatter in jxl_from_tree syntax
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Spline")?;
         for i in self.xyb_dct.iter().chain(&[self.sigma_dct]) {
@@ -76,7 +76,10 @@ impl Spline {
         let log_color = {
             let mut color_xyb = [0u64; 3];
             for (color_xyb, xyb_dct) in color_xyb.iter_mut().zip(quant_spline.xyb_dct) {
-                *color_xyb = xyb_dct.into_iter().map(|xyb_dct| (xyb_dct.abs() as f32 * inverted_qa).ceil() as u64).sum();
+                *color_xyb = xyb_dct
+                    .into_iter()
+                    .map(|xyb_dct| (xyb_dct.abs() as f32 * inverted_qa).ceil() as u64)
+                    .sum();
             }
 
             color_xyb[0] += corr_x.abs().ceil() as u64 * color_xyb[1];
@@ -147,6 +150,7 @@ impl Spline {
         all_samples
     }
 
+    /// Returns the points for Cetripetal Catmull-Rom spline segments
     fn get_upsampled_points(&self) -> Vec<Point> {
         let s = &self.points;
         if s.len() == 1 {
@@ -164,25 +168,30 @@ impl Spline {
         for i in 0..extended.len() - 3 {
             let mut p: [Point; 4] = Default::default();
             let mut t: [f32; 4] = Default::default();
-            let mut a: [Point; 4] = Default::default();
-            let mut b: [Point; 3] = Default::default();
+            let mut a: [Point; 3] = Default::default();
+            let mut b: [Point; 2] = Default::default();
 
             p.clone_from_slice(&extended[i..i + 4]);
             upsampled.push(p[1]);
             t[0] = 0f32;
 
             for k in 1..4 {
+                // knot sequence with α = 0.25
                 t[k] = t[k - 1] + (p[k] - p[k - 1]).norm_squared().powf(0.25);
             }
 
             for step in 1..16 {
+                // knot t from t1 to t2
                 let knot = t[1] + (step as f32 / 16.0) * (t[2] - t[1]);
+
                 for k in 0..3 {
                     a[k] = p[k] + ((p[k + 1] - p[k]) * ((knot - t[k]) / (t[k + 1] - t[k])));
                 }
                 for k in 0..2 {
                     b[k] = a[k] + ((a[k + 1] - a[k]) * ((knot - t[k]) / (t[k + 2] - t[k])));
                 }
+
+                // C = ((t2 - t) * B1 + (t - t1) * B2) / (t2 - t1)
                 upsampled.push(b[0] + ((b[1] - b[0]) * ((knot - t[1]) / (t[2] - t[1]))));
             }
         }
