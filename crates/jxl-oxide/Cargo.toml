@@ -14,11 +14,11 @@ edition = "2021"
 [dependencies]
 
 [dependencies.jxl-bitstream]
-version = "0.2.0"
+version = "0.2.1"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
-version = "0.2.0"
+version = "0.3.0"
 path = "../jxl-color"
 
 [dependencies.jxl-frame]
