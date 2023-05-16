@@ -26,7 +26,8 @@
 //! ```
 //!
 //! `JxlImage` parses the image header and embedded ICC profile (if there's any). Use
-//! [`JxlImage::renderer`] to start rendering the image.
+//! [`JxlImage::renderer`] to start rendering the image. You might need to use
+//! [`JxlRenderer::rendered_icc`] to do color management correctly.
 //!
 //! ```no_run
 //! # use jxl_oxide::Render;
