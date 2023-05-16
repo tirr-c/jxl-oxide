@@ -1,25 +1,23 @@
 # jxl-oxide
 JPEG XL decoder written in pure Rust.
 
-## Supported features
-- Simple Modular and VarDCT images
-- Progressive LF (LF frames)
-- XYB
-- HDR images
-- Chroma subsampled YCbCr
-- Restoration filters
-- Image features
-  - Non-separable upsampling
-  - Patches
-  - Splines
-  - Noise
-- Frame composition
-- Animation
-- Cropped decoding (sort of)
+jxl-oxide consists of small library crates (`jxl-bitstream`, `jxl-coding`, ...), a blanket library
+crate `jxl-oxide`, and a binary crate `jxl-oxide-cli`. If you want to use jxl-oxide in a terminal,
+install it using `cargo install`. Cargo will install two binaries, `jxl-dec` and `jxl-info`.
 
-## TODO
-- Rendering spot color channels
-- Multithreading
+```
+cargo install jxl-oxide-cli
+```
+
+If you want to use it as a library, specify it in `Cargo.toml`:
+
+```toml
+[dependencies]
+jxl-oxide = "0.1.0"
+```
+
+Note that you'll need a color management system to correctly display some JXL images. (`jxl-dec`
+uses `lcms2` for the color management.)
 
 ---
 
