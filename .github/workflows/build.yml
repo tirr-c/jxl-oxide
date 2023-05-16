@@ -36,10 +36,12 @@ jobs:
       - run: cargo build --release
       - uses: actions/upload-artifact@v3
         with:
-          name: jxl-dec-${{ steps.detect-host.outputs.host }}
+          name: jxl-oxide-cli-${{ steps.detect-host.outputs.host }}
           path: |
             target/release/jxl-dec
             target/release/jxl-dec.exe
+            target/release/jxl-info
+            target/release/jxl-info.exe
   cross:
     name: Cross-compile
     runs-on: ubuntu-latest
@@ -73,6 +75,7 @@ jobs:
       - run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v3
         with:
-          name: jxl-dec-${{ matrix.target }}
+          name: jxl-oxide-cli-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/jxl-dec
+            target/${{ matrix.target }}/release/jxl-info
