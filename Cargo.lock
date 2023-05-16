@@ -500,25 +500,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jxl-dec"
-version = "0.1.0"
-dependencies = [
- "clap",
- "jxl-bitstream",
- "jxl-coding",
- "jxl-color",
- "jxl-frame",
- "jxl-grid",
- "jxl-image",
- "jxl-render",
- "lcms2",
- "miniz_oxide 0.7.1",
- "png",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "jxl-frame"
 version = "0.1.0"
 dependencies = [
@@ -565,7 +546,22 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-render",
+ "lcms2",
+ "reqwest",
  "tracing",
+]
+
+[[package]]
+name = "jxl-oxide-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "jxl-oxide",
+ "lcms2",
+ "miniz_oxide 0.7.1",
+ "png",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -580,8 +576,6 @@ dependencies = [
  "jxl-image",
  "jxl-modular",
  "jxl-vardct",
- "lcms2",
- "reqwest",
  "tracing",
 ]
 

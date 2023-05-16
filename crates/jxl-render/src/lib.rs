@@ -75,7 +75,12 @@ impl RenderContext<'_> {
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<ProgressiveResult> {
         loop {
-            let (result, frame) = self.inner.load_cropped_single(bitstream, progressive, region)?;
+            let result = self.inner.load_cropped_single(bitstream, progressive, region);
+            let (result, frame) = match result {
+                Ok(val) => val,
+                Err(Error::Frame(e)) if e.unexpected_eof() => return Ok(ProgressiveResult::NeedMoreData),
+                Err(e) => return Err(e),
+            };
             if result != ProgressiveResult::FrameComplete {
                 return Ok(result);
             }
@@ -102,7 +107,12 @@ impl RenderContext<'_> {
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<ProgressiveResult> {
         loop {
-            let (result, frame) = self.inner.load_cropped_single(bitstream, progressive, region)?;
+            let result = self.inner.load_cropped_single(bitstream, progressive, region);
+            let (result, frame) = match result {
+                Ok(val) => val,
+                Err(Error::Frame(e)) if e.unexpected_eof() => return Ok(ProgressiveResult::NeedMoreData),
+                Err(e) => return Err(e),
+            };
             if result != ProgressiveResult::FrameComplete {
                 return Ok(result);
             }

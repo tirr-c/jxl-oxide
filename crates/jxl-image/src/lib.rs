@@ -196,7 +196,7 @@ impl ImageMetadata {
 }
 
 /// Information about an extra channel.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExtraChannelInfo {
     /// Type and associated parameters of the channel.
     pub ty: ExtraChannelType,
@@ -283,7 +283,7 @@ impl ExtraChannelInfo {
 }
 
 /// Type of an extra channel.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum ExtraChannelType {
     Alpha {
@@ -312,7 +312,7 @@ impl Default for ExtraChannelType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum ExtraChannelTypeRaw {
     Alpha = 0,

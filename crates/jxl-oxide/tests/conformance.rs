@@ -1,8 +1,6 @@
 use lcms2::{Profile, Transform};
 
-use jxl_bitstream::Bundle;
-use jxl_image::ImageHeader;
-use jxl_render::{FrameBuffer, RenderContext};
+use jxl_oxide::{JxlImage, FrameBuffer};
 
 enum LcmsTransform {
     Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
@@ -69,7 +67,7 @@ fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
 }
 
 fn run_test<R: std::io::Read>(
-    mut bitstream: jxl_bitstream::Bitstream<R>,
+    mut image: JxlImage<R>,
     target_icc: Option<Vec<u8>>,
     expected: Vec<Vec<f32>>,
     expected_peak_error: f32,
@@ -77,22 +75,13 @@ fn run_test<R: std::io::Read>(
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
-    let headers = ImageHeader::parse(&mut bitstream, ()).expect("Failed to read headers");
-    let mut render = RenderContext::new(&headers);
-    render.read_icc_if_exists(&mut bitstream).expect("failed to decode ICC");
+    let mut renderer = image.renderer();
 
     let transform = target_icc.map(|target_icc| {
-        let source_profile = {
-            if headers.metadata.colour_encoding.want_icc && !headers.metadata.xyb_encoded {
-                Profile::new_icc(render.icc()).unwrap()
-            } else {
-                let icc = jxl_color::icc::colour_encoding_to_icc(&headers.metadata.colour_encoding).unwrap();
-                Profile::new_icc(&icc).unwrap()
-            }
-        };
+        let source_profile = Profile::new_icc(&renderer.rendered_icc()).expect("failed to parse ICC profile");
         let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
 
-        if headers.metadata.grayscale() {
+        if renderer.image_header().metadata.grayscale() {
             LcmsTransform::Grayscale(Transform::new(
                 &source_profile,
                 lcms2::PixelFormat::GRAY_FLT,
@@ -111,32 +100,25 @@ fn run_test<R: std::io::Read>(
         }
     });
 
-    if headers.metadata.preview.is_some() {
-        bitstream.zero_pad_to_byte().expect("Zero-padding failed");
+    let mut num_keyframes = 0usize;
+    loop {
+        let result = renderer.render_next_frame().expect("failed to render frame");
+        let render = match result {
+            jxl_oxide::RenderResult::Done(render) => render,
+            jxl_oxide::RenderResult::NeedMoreData => panic!("unexpected end of file"),
+            jxl_oxide::RenderResult::NoMoreFrames => break,
+        };
+        let keyframe_idx = render.keyframe_index();
+        let expected = &expected[keyframe_idx];
+        num_keyframes += 1;
 
-        let frame = jxl_frame::Frame::parse(&mut bitstream, &headers)
-            .expect("Failed to read frame header");
-
-        let toc = frame.toc();
-        let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-        bitstream.skip_to_bookmark(bookmark).expect("Failed to skip");
-    }
-
-    render
-        .load_all_frames(&mut bitstream, false)
-        .expect("failed to load frames");
-
-    let keyframes = render.loaded_keyframes();
-    assert_eq!(expected.len(), keyframes);
-
-    for (keyframe_idx, expected) in expected.into_iter().enumerate() {
         eprintln!("Testing keyframe #{keyframe_idx}");
-        let fb = render.render_keyframe_cropped(keyframe_idx, None).expect("failed to render");
 
-        let mut grids = fb.into_iter().map(From::from).collect::<Vec<_>>();
+        let mut grids = render.color_channels().to_vec();
         if let Some(transform) = &transform {
-            let channels = if headers.metadata.grayscale() { 1 } else { 3 };
-            let mut fb = FrameBuffer::from_grids(&grids[..channels], 1).unwrap();
+            let channels = grids.len();
+
+            let mut fb = FrameBuffer::from_grids(&grids, 1).unwrap();
             let width = fb.width();
             let height = fb.height();
             transform.transform_in_place(&mut fb);
@@ -144,13 +126,14 @@ fn run_test<R: std::io::Read>(
             for y in 0..height {
                 for x in 0..width {
                     for c in 0..channels {
-                        grids[c].set(x, y, fb[c + (x + y * width) * channels]);
+                        grids[c].buf_mut()[y * width + x] = fb[c + (x + y * width) * channels];
                     }
                 }
             }
         }
+        grids.extend(render.extra_channels().iter().map(|ec| ec.grid().clone()));
 
-        let fb = FrameBuffer::from_grids(&grids, headers.metadata.orientation).unwrap();
+        let fb = FrameBuffer::from_grids(&grids, render.orientation()).unwrap();
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();
@@ -189,6 +172,8 @@ fn run_test<R: std::io::Read>(
         assert!(peak_error <= expected_peak_error);
         assert!(max_rmse <= expected_max_rmse);
     }
+
+    assert_eq!(expected.len(), num_keyframes);
 }
 
 macro_rules! conformance_test {
@@ -208,10 +193,9 @@ macro_rules! conformance_test {
                 path.push("tests/conformance/testcases");
                 path.push(stringify!($name));
                 path.push("input.jxl");
-                let file = std::fs::File::open(path).expect("Failed to open file");
-                let bitstream = jxl_bitstream::Bitstream::new_detect(file);
+                let image = JxlImage::open(path).expect("Failed to open file");
 
-                run_test(bitstream, target_icc, expected, $peak_error, $max_rmse);
+                run_test(image, target_icc, expected, $peak_error, $max_rmse);
             }
         )*
     };

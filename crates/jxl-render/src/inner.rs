@@ -157,7 +157,9 @@ impl ContextInner<'_> {
         let frame = match &mut self.loading_frame {
             Some(frame) => frame,
             slot => {
-                let frame = Frame::parse(bitstream, image_header)?;
+                let mut bitstream = bitstream.rewindable();
+                let frame = Frame::parse(&mut bitstream, image_header)?;
+                bitstream.commit();
                 *slot = Some(IndexedFrame::new(frame, self.frames.len()));
                 slot.as_mut().unwrap()
             },

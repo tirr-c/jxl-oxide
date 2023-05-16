@@ -444,7 +444,7 @@ fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
 }
 
 /// Creates an ICCv4 profile from the given [`ColourEncoding`].
-pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8>> {
+pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
     let ColourEncoding {
         want_icc,
         mut colour_space,
@@ -633,5 +633,5 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Result<Vec<u8
     out.extend(data);
     let total_len = out.len() as u32;
     out[..4].copy_from_slice(&total_len.to_be_bytes());
-    Ok(out)
+    out
 }

@@ -441,7 +441,7 @@ impl<R> Bitstream<RewindMarker<'_, R>> {
 }
 
 /// Name type which is read by some JPEG XL headers.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Name(String);
 
 impl<Ctx> Bundle<Ctx> for Name {

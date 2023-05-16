@@ -1,0 +1,29 @@
+[package]
+name = "jxl-oxide-cli"
+description = "CLI tools of jxl-oxide"
+authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
+license = "MIT OR Apache-2.0"
+
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lcms2 = "5.5.0"
+miniz_oxide = "0.7.1"
+png = "0.17.8"
+
+[dependencies.clap]
+version = "4.0.32"
+features = ["derive"]
+
+[dependencies.jxl-oxide]
+path = "../jxl-oxide"
+
+[dependencies.tracing]
+version = "0.1.37"
+default_features = false
+features = ["std"]
+
+[dependencies.tracing-subscriber]
+version = "0.3.16"
+features = ["env-filter"]

@@ -1,4 +1,4 @@
-use jxl_grid::Grid;
+use jxl_grid::SimpleGrid;
 
 use crate::{Error, Result};
 
@@ -20,7 +20,7 @@ impl FrameBuffer {
         }
     }
 
-    pub fn from_grids(grids: &[Grid<f32>], orientation: u32) -> Result<Self> {
+    pub fn from_grids(grids: &[SimpleGrid<f32>], orientation: u32) -> Result<Self> {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");

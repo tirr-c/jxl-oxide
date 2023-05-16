@@ -1,36 +1,36 @@
 [package]
-name = "jxl-dec"
-description = "JPEG XL decoder"
-version = "0.1.0"
+name = "jxl-oxide"
+description = ""
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
+repository = "https://github.com/tirr-c/jxl-oxide.git"
+readme = "README.md"
+keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
+categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
+
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lcms2 = "5.5.0"
-miniz_oxide = "0.7.1"
-png = "0.17.8"
-
-[dependencies.clap]
-version = "4.0.32"
-features = ["derive"]
 
 [dependencies.jxl-bitstream]
+version = "0.2.0"
 path = "../jxl-bitstream"
 
-[dependencies.jxl-coding]
-path = "../jxl-coding"
-
 [dependencies.jxl-color]
+version = "0.2.0"
 path = "../jxl-color"
 
 [dependencies.jxl-frame]
+version = "0.1.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
+version = "0.1.1"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
+version = "0.2.0"
 path = "../jxl-image"
 
 [dependencies.jxl-render]
@@ -41,6 +41,9 @@ version = "0.1.37"
 default_features = false
 features = ["std"]
 
-[dependencies.tracing-subscriber]
-version = "0.3.16"
-features = ["env-filter"]
+[dev-dependencies]
+lcms2 = "5.5.0"
+
+[dev-dependencies.reqwest]
+version = "0.11.14"
+features = ["blocking"]
