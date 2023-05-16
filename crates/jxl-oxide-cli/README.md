@@ -2,4 +2,5 @@
 
 This binary crate provides useful programs that makes use of jxl-oxide.
 
-- `jxl-dec`: JPEG XL image decoder.
+- `jxl-dec`: Decodes JPEG XL image.
+- `jxl-info`: Prints information about JPEG XL image.

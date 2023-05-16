@@ -247,6 +247,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
             jxl_frame::ProgressiveResult::NeedMoreData => Ok(LoadResult::NeedMoreData),
             jxl_frame::ProgressiveResult::FrameComplete => {
                 let keyframe_index = self.ctx.loaded_keyframes() - 1;
+                self.end_of_image = self.frame_header(keyframe_index).unwrap().is_last;
                 Ok(LoadResult::Done(keyframe_index))
             },
             _ => unreachable!(),

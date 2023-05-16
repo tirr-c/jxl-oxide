@@ -24,8 +24,9 @@ impl LcmsTransform {
     }
 }
 
+/// Decodes JPEG XL image.
 #[derive(Debug, Parser)]
-#[command(version, about)]
+#[command(version)]
 struct Args {
     /// Output file
     #[arg(short, long)]
@@ -37,8 +38,6 @@ struct Args {
     input: PathBuf,
     #[arg(long, value_parser = parse_crop_info)]
     crop: Option<CropInfo>,
-    #[arg(long)]
-    experimental_progressive: bool,
     #[arg(short, long)]
     verbose: bool,
 }
@@ -102,7 +101,7 @@ fn main() {
         .with_env_filter(env_filter)
         .init();
 
-    let span = tracing::span!(tracing::Level::TRACE, "jxl_dec (main)");
+    let span = tracing::span!(tracing::Level::TRACE, "jxl-dec");
     let _guard = span.enter();
 
     let mut image = JxlImage::open(&args.input).expect("Failed to open file");
@@ -151,12 +150,6 @@ fn main() {
         crop.height = h;
         crop.left = x;
         crop.top = y
-    }
-
-    if args.experimental_progressive {
-        if let Some(path) = &args.output {
-            std::fs::create_dir_all(path).expect("cannot create directory");
-        }
     }
 
     let (width, height) = if let Some(crop) = crop {
