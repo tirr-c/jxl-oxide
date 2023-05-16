@@ -30,7 +30,7 @@ version = "0.1.1"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
-version = "0.2.0"
+version = "0.3.0"
 path = "../jxl-image"
 
 [dependencies.jxl-render]
