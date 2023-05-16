@@ -1,7 +1,5 @@
 use jxl_grid::SimpleGrid;
 
-use crate::{Error, Result};
-
 #[derive(Debug, Clone)]
 pub struct FrameBuffer {
     width: usize,
@@ -20,7 +18,7 @@ impl FrameBuffer {
         }
     }
 
-    pub fn from_grids(grids: &[SimpleGrid<f32>], orientation: u32) -> Result<Self> {
+    pub fn from_grids(grids: &[SimpleGrid<f32>], orientation: u32) -> Self {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
@@ -29,10 +27,11 @@ impl FrameBuffer {
             panic!("Invalid orientation {orientation}");
         }
 
-        let width = grids[0].width();
-        let height = grids[0].height();
-        if !grids.iter().all(|g| g.width() >= width && g.height() >= height) {
-            return Err(Error::GridSizeMismatch);
+        let mut width = grids[0].width();
+        let mut height = grids[0].height();
+        for g in grids {
+            width = width.min(g.width());
+            height = height.min(g.height());
         }
 
         let (outw, outh) = match orientation {
@@ -60,12 +59,12 @@ impl FrameBuffer {
             }
         }
 
-        Ok(Self {
+        Self {
             width: outw,
             height: outh,
             channels,
             buf,
-        })
+        }
     }
 
     #[inline]

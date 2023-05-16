@@ -118,7 +118,7 @@ fn run_test<R: std::io::Read>(
         if let Some(transform) = &transform {
             let channels = grids.len();
 
-            let mut fb = FrameBuffer::from_grids(&grids, 1).unwrap();
+            let mut fb = FrameBuffer::from_grids(&grids, 1);
             let width = fb.width();
             let height = fb.height();
             transform.transform_in_place(&mut fb);
@@ -133,7 +133,7 @@ fn run_test<R: std::io::Read>(
         }
         grids.extend(render.extra_channels().iter().map(|ec| ec.grid().clone()));
 
-        let fb = FrameBuffer::from_grids(&grids, render.orientation()).unwrap();
+        let fb = FrameBuffer::from_grids(&grids, render.orientation());
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();

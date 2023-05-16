@@ -4,6 +4,8 @@ use std::{
     path::Path,
 };
 
+mod fb;
+
 pub use jxl_bitstream as bitstream;
 pub use jxl_color::header as color;
 pub use jxl_image as image;
@@ -14,8 +16,9 @@ use jxl_bitstream::{ContainerDetectingReader, Name};
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::SimpleGrid;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
-pub use jxl_render::FrameBuffer;
 use jxl_render::RenderContext;
+
+pub use fb::FrameBuffer;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -308,7 +311,7 @@ impl Render {
             }
         }
 
-        FrameBuffer::from_grids(&fb, self.orientation).unwrap()
+        FrameBuffer::from_grids(&fb, self.orientation)
     }
 
     #[inline]

@@ -9,7 +9,6 @@ pub enum Error {
     InvalidReference(u32),
     NotReady,
     NotSupported(&'static str),
-    GridSizeMismatch,
     TooLargeEstimatedArea(u64),
 }
 
@@ -50,7 +49,6 @@ impl std::fmt::Display for Error {
             InvalidReference(idx) => write!(f, "invalid reference {idx}"),
             NotReady => write!(f, "image is not ready to be rendered"),
             NotSupported(msg) => write!(f, "not supported: {}", msg),
-            GridSizeMismatch => write!(f, "grid size mismatch"),
             TooLargeEstimatedArea(area) => write!(f, "Too large estimated area for splines: {}", area),
         }
     }

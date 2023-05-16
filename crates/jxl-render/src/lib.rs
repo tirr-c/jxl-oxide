@@ -9,13 +9,11 @@ mod blend;
 mod cut_grid;
 mod dct;
 mod error;
-mod fb;
 mod features;
 mod filter;
 mod inner;
 mod vardct;
 pub use error::{Error, Result};
-pub use fb::FrameBuffer;
 
 use inner::*;
 
