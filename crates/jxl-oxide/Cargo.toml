@@ -34,6 +34,7 @@ version = "0.3.0"
 path = "../jxl-image"
 
 [dependencies.jxl-render]
+version = "0.1.0"
 path = "../jxl-render"
 
 [dependencies.tracing]
