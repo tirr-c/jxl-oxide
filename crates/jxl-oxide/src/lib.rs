@@ -1,3 +1,57 @@
+//! jxl-oxide is a JPEG XL decoder written in pure Rust. It's internally organized into a few
+//! small crates. This crate acts as a blanket and provides a simple interface made from those
+//! crates to decode the actual image.
+//!
+//! # Decoding an image
+//!
+//! Decoding a JPEG XL image starts with constructing [`JxlImage`]. If you're reading a file, you
+//! can use [`JxlImage::open`]:
+//!
+//! ```no_run
+//! use jxl_oxide::JxlImage;
+//!
+//! let image = JxlImage::open("input.jxl").expect("Failed to read image header");
+//! println!("{:?}", image.image_header()); // Prints the image header
+//! ```
+//!
+//! Or, if you're reading from a reader that implements [`Read`][std::io::Read], you can use
+//! [`JxlImage::from_reader`]:
+//!
+//! ```no_run
+//! use jxl_oxide::JxlImage;
+//!
+//! # let reader = std::io::empty();
+//! let image = JxlImage::from_reader(reader).expect("Failed to read image header");
+//! println!("{:?}", image.image_header()); // Prints the image header
+//! ```
+//!
+//! `JxlImage` parses the image header and embedded ICC profile (if there's any). Use
+//! [`JxlImage::renderer`] to start rendering the image.
+//!
+//! ```no_run
+//! # use jxl_oxide::Render;
+//! use jxl_oxide::{JxlImage, RenderResult};
+//!
+//! # fn present_image(_: Render) {}
+//! # fn wait_for_data() {}
+//! # fn main() -> jxl_oxide::Result<()> {
+//! # let mut image = JxlImage::open("input.jxl").unwrap();
+//! let mut renderer = image.renderer();
+//! loop {
+//!     let result = renderer.render_next_frame()?;
+//!     match result {
+//!         RenderResult::Done(render) => {
+//!             present_image(render);
+//!         },
+//!         RenderResult::NeedMoreData => {
+//!             wait_for_data();
+//!         },
+//!         RenderResult::NoMoreFrames => break,
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 use std::{
     fs::File,
     io::Read,
@@ -22,6 +76,7 @@ pub use fb::FrameBuffer;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
+/// JPEG XL image.
 #[derive(Debug)]
 pub struct JxlImage<R> {
     bitstream: Bitstream<ContainerDetectingReader<R>>,
@@ -94,6 +149,7 @@ impl JxlImage<File> {
     }
 }
 
+/// Renderer for the initialized JPEG XL image.
 #[derive(Debug)]
 pub struct JxlRenderer<'img, R> {
     bitstream: &'img mut Bitstream<ContainerDetectingReader<R>>,
@@ -175,47 +231,81 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         }
     }
 
-    /// Renders the next keyframe.
-    pub fn render_next_frame(&mut self) -> Result<RenderResult> {
+    /// Loads the next keyframe, and returns the result with the keyframe index.
+    ///
+    /// Unlike [`render_next_frame`][Self::render_next_frame], this method does not render the
+    /// loaded frame. Use [`render_frame`][Self::render_frame] to render the loaded frame.
+    pub fn load_next_frame(&mut self) -> Result<LoadResult> {
         if self.end_of_image {
-            return Ok(RenderResult::NoMoreFrames);
+            return Ok(LoadResult::NoMoreFrames);
         }
 
         let region = self.crop_region_flattened();
         let result = self.ctx.load_until_keyframe(self.bitstream, false, region)?;
         match result {
-            jxl_frame::ProgressiveResult::NeedMoreData => Ok(RenderResult::NeedMoreData),
+            jxl_frame::ProgressiveResult::NeedMoreData => Ok(LoadResult::NeedMoreData),
             jxl_frame::ProgressiveResult::FrameComplete => {
                 let keyframe_index = self.ctx.loaded_keyframes() - 1;
-                let mut grids = self.ctx.render_keyframe_cropped(keyframe_index, region)?;
-
-                let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
-                let color_channels: Vec<_> = grids.drain(..color_channels).collect();
-                let extra_channels: Vec<_> = grids
-                    .into_iter()
-                    .zip(&self.image_header.metadata.ec_info)
-                    .map(|(grid, ec_info)| ExtraChannel {
-                        ty: ec_info.ty,
-                        name: ec_info.name.clone(),
-                        grid,
-                    })
-                    .collect();
-
-                let frame = self.ctx.keyframe(keyframe_index).unwrap();
-                let frame_header = frame.header();
-                let result = Render {
-                    keyframe_index,
-                    name: frame_header.name.clone(),
-                    duration: frame_header.duration,
-                    orientation: self.image_header.metadata.orientation,
-                    color_channels,
-                    extra_channels,
-                };
-
-                self.end_of_image = frame_header.is_last;
-                Ok(RenderResult::Done(result))
+                Ok(LoadResult::Done(keyframe_index))
             },
             _ => unreachable!(),
+        }
+    }
+
+    /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
+    /// exist.
+    pub fn frame_header(&self, keyframe_index: usize) -> Option<&FrameHeader> {
+        let frame = self.ctx.keyframe(keyframe_index)?;
+        Some(frame.header())
+    }
+
+    /// Returns the number of currently loaded keyframes.
+    pub fn num_loaded_keyframes(&self) -> usize {
+        self.ctx.loaded_keyframes()
+    }
+
+    /// Renders the given keyframe.
+    pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
+        let region = self.crop_region_flattened();
+        let mut grids = self.ctx.render_keyframe_cropped(keyframe_index, region)?;
+
+        let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
+        let color_channels: Vec<_> = grids.drain(..color_channels).collect();
+        let extra_channels: Vec<_> = grids
+            .into_iter()
+            .zip(&self.image_header.metadata.ec_info)
+            .map(|(grid, ec_info)| ExtraChannel {
+                ty: ec_info.ty,
+                name: ec_info.name.clone(),
+                grid,
+            })
+        .collect();
+
+        let frame = self.ctx.keyframe(keyframe_index).unwrap();
+        let frame_header = frame.header();
+        let result = Render {
+            keyframe_index,
+            name: frame_header.name.clone(),
+            duration: frame_header.duration,
+            orientation: self.image_header.metadata.orientation,
+            color_channels,
+            extra_channels,
+        };
+
+        self.end_of_image = frame_header.is_last;
+        Ok(result)
+    }
+
+    /// Loads and renders the next keyframe.
+    pub fn render_next_frame(&mut self) -> Result<RenderResult> {
+        let load_result = self.load_next_frame()?;
+        match load_result {
+            LoadResult::Done(keyframe_index) => {
+                let render = self.render_frame(keyframe_index)?;
+                Ok(RenderResult::Done(render))
+            },
+            LoadResult::NeedMoreData => Ok(RenderResult::NeedMoreData),
+            LoadResult::NoMoreFrames => Ok(RenderResult::NoMoreFrames),
         }
     }
 }
@@ -254,13 +344,29 @@ impl PixelFormat {
     }
 }
 
+/// The result of loading the keyframe.
 #[derive(Debug)]
-pub enum RenderResult {
-    Done(Render),
+pub enum LoadResult {
+    /// The frame is loaded with the given keyframe index.
+    Done(usize),
+    /// More data is needed to fully load the frame.
     NeedMoreData,
+    /// No more frames are present.
     NoMoreFrames,
 }
 
+/// The result of loading and rendering the keyframe.
+#[derive(Debug)]
+pub enum RenderResult {
+    /// The frame is rendered.
+    Done(Render),
+    /// More data is needed to fully render the frame.
+    NeedMoreData,
+    /// No more frames are present.
+    NoMoreFrames,
+}
+
+/// The result of rendering a keyframe.
 #[derive(Debug)]
 pub struct Render {
     keyframe_index: usize,
@@ -272,26 +378,31 @@ pub struct Render {
 }
 
 impl Render {
+    /// Returns the keyframe index.
     #[inline]
     pub fn keyframe_index(&self) -> usize {
         self.keyframe_index
     }
 
+    /// Returns the name of the frame.
     #[inline]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Returns how many ticks this frame is presented.
     #[inline]
     pub fn duration(&self) -> u32 {
         self.duration
     }
 
+    /// Returns the orientation of the image.
     #[inline]
     pub fn orientation(&self) -> u32 {
         self.orientation
     }
 
+    /// Creates a buffer with interleaved channels.
     #[inline]
     pub fn image(&self) -> FrameBuffer {
         let mut fb: Vec<_> = self.color_channels.clone();
@@ -314,27 +425,33 @@ impl Render {
         FrameBuffer::from_grids(&fb, self.orientation)
     }
 
+    /// Returns the color channels.
     #[inline]
     pub fn color_channels(&self) -> &[SimpleGrid<f32>] {
         &self.color_channels
     }
 
+    /// Returns the mutable slice to the color channels.
     #[inline]
     pub fn color_channels_mut(&mut self) -> &mut [SimpleGrid<f32>] {
         &mut self.color_channels
     }
 
+    /// Returns the extra channels, potentially including alpha and black channels.
     #[inline]
     pub fn extra_channels(&self) -> &[ExtraChannel] {
         &self.extra_channels
     }
 
+    /// Returns the mutable slice to the extra channels, potentially including alpha and black
+    /// channels.
     #[inline]
     pub fn extra_channels_mut(&mut self) -> &mut [ExtraChannel] {
         &mut self.extra_channels
     }
 }
 
+/// Extra channel of the image.
 #[derive(Debug)]
 pub struct ExtraChannel {
     ty: ExtraChannelType,
@@ -343,37 +460,44 @@ pub struct ExtraChannel {
 }
 
 impl ExtraChannel {
+    /// Returns the type of the extra channel.
     #[inline]
     pub fn ty(&self) -> ExtraChannelType {
         self.ty
     }
 
+    /// Returns the name of the channel.
     #[inline]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Returns the sample grid of the channel.
     #[inline]
     pub fn grid(&self) -> &SimpleGrid<f32> {
         &self.grid
     }
 
+    /// Returns the mutable sample grid of the channel.
     #[inline]
     pub fn grid_mut(&mut self) -> &mut SimpleGrid<f32> {
         &mut self.grid
     }
 
+    /// Returns `true` if the channel is a black channel of CMYK image.
     #[inline]
     pub fn is_black(&self) -> bool {
         matches!(self.ty, ExtraChannelType::Black)
     }
 
+    /// Returns `true` if the channel is an alpha channel.
     #[inline]
     pub fn is_alpha(&self) -> bool {
         matches!(self.ty, ExtraChannelType::Alpha { .. })
     }
 }
 
+/// Cropping region information.
 #[derive(Debug, Default, Copy, Clone)]
 pub struct CropInfo {
     pub width: u32,

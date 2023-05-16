@@ -385,7 +385,7 @@ impl<'f> ContextInner<'f> {
     }
 
     fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {
-        let frame_idx = frame.idx();
+        let frame_idx = frame.index();
         let (is_keyframe, keyframe_idx) = match self.keyframes.binary_search(&frame_idx) {
             Ok(val) => (true, val),
             Err(val) => (false, val),

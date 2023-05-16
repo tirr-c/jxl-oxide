@@ -2,6 +2,10 @@
 name = "jxl-oxide-cli"
 description = "CLI tools of jxl-oxide"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
+repository = "https://github.com/tirr-c/jxl-oxide.git"
+readme = "README.md"
+keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
+categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
 version = "0.1.0"

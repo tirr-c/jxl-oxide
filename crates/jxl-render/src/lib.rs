@@ -1,3 +1,4 @@
+//! This crate is the core of jxl-oxide that provides JPEG XL renderer.
 use std::io::Read;
 
 use jxl_bitstream::Bitstream;
@@ -17,34 +18,37 @@ pub use error::{Error, Result};
 
 use inner::*;
 
+/// Render context that tracks loaded and rendered frames.
 #[derive(Debug)]
 pub struct RenderContext<'a> {
     inner: ContextInner<'a>,
     state: RenderState,
-    icc: Vec<u8>,
 }
 
 impl<'a> RenderContext<'a> {
+    /// Creates a new render context.
     pub fn new(image_header: &'a ImageHeader) -> Self {
         Self {
             inner: ContextInner::new(image_header),
             state: RenderState::new(),
-            icc: Vec::new(),
         }
     }
 }
 
 impl RenderContext<'_> {
+    /// Returns the image width.
     #[inline]
     pub fn width(&self) -> u32 {
         self.inner.width()
     }
 
+    /// Returns the image height.
     #[inline]
     pub fn height(&self) -> u32 {
         self.inner.height()
     }
 
+    /// Returns the number of loaded keyframes in the context.
     #[inline]
     pub fn loaded_keyframes(&self) -> usize {
         self.inner.loaded_keyframes()
@@ -52,21 +56,10 @@ impl RenderContext<'_> {
 }
 
 impl RenderContext<'_> {
-    pub fn read_icc_if_exists<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<&[u8]> {
-        if self.inner.metadata().colour_encoding.want_icc {
-            tracing::debug!("Image has ICC profile");
-            let icc = jxl_color::icc::read_icc(bitstream)?;
-            self.icc = jxl_color::icc::decode_icc(&icc)?;
-        }
-
-        Ok(&self.icc)
-    }
-
-    pub fn icc(&self) -> &[u8] {
-        &self.icc
-    }
-
-    pub fn load_cropped<R: Read>(
+    /// Load all frames in the bitstream, with the given cropping region.
+    ///
+    /// `region` is expected to be in the order `(left, top, width, height)`.
+    pub fn load_all_frames_cropped<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
         progressive: bool,
@@ -98,6 +91,9 @@ impl RenderContext<'_> {
         Ok(ProgressiveResult::FrameComplete)
     }
 
+    /// Load a single keyframe from the bitstream.
+    ///
+    /// `region` is expected to be in the order `(left, top, width, height)`.
     pub fn load_until_keyframe<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -130,16 +126,18 @@ impl RenderContext<'_> {
         Ok(ProgressiveResult::FrameComplete)
     }
 
+    /// Load all frames in the bitstream.
     pub fn load_all_frames<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
         progressive: bool,
     ) -> Result<ProgressiveResult> {
-        self.load_cropped(bitstream, progressive, None)
+        self.load_all_frames_cropped(bitstream, progressive, None)
     }
 }
 
 impl<'a> RenderContext<'a> {
+    /// Returns the frame with the keyframe index, or `None` if the keyframe does not exist.
     #[inline]
     pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame<'a>> {
         self.inner.keyframe(keyframe_idx)
@@ -203,6 +201,9 @@ impl RenderContext<'_> {
         Ok(())
     }
 
+    /// Renders the first keyframe with the given cropping region.
+    ///
+    /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
     #[inline]
     pub fn render_cropped(
         &mut self,
@@ -211,6 +212,9 @@ impl RenderContext<'_> {
         self.render_keyframe_cropped(0, region)
     }
 
+    /// Renders the keyframe with the given cropping region.
+    ///
+    /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
     pub fn render_keyframe_cropped(
         &mut self,
         keyframe_idx: usize,
@@ -350,6 +354,7 @@ impl FrameRender {
     }
 }
 
+/// Frame with its index in the image.
 #[derive(Debug)]
 pub struct IndexedFrame<'a> {
     f: Frame<'a>,
@@ -357,11 +362,12 @@ pub struct IndexedFrame<'a> {
 }
 
 impl<'a> IndexedFrame<'a> {
-    pub fn new(frame: Frame<'a>, idx: usize) -> Self {
-        IndexedFrame { f: frame, idx }
+    fn new(frame: Frame<'a>, index: usize) -> Self {
+        IndexedFrame { f: frame, idx: index }
     }
 
-    pub fn idx(&self) -> usize {
+    /// Returns the frame index.
+    pub fn index(&self) -> usize {
         self.idx
     }
 }
