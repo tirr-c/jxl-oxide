@@ -322,7 +322,7 @@ fn main() {
             if sixteen_bits {
                 let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];
                 for (b, s) in buf.chunks_exact_mut(2).zip(fb.buf()) {
-                    let w = (*s * 65535.0).clamp(0.0, 65535.0) as u16;
+                    let w = (*s * 65535.0 + 0.5).clamp(0.0, 65535.0) as u16;
                     let [b0, b1] = w.to_be_bytes();
                     b[0] = b0;
                     b[1] = b1;
@@ -331,7 +331,7 @@ fn main() {
             } else {
                 let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels()];
                 for (b, s) in buf.iter_mut().zip(fb.buf()) {
-                    *b = (*s * 255.0).clamp(0.0, 255.0) as u8;
+                    *b = (*s * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 }
                 writer.write_image_data(&buf).expect("failed to write frame");
             }
