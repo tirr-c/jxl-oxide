@@ -10,6 +10,11 @@ pub fn adaptive_lf_smoothing_impl(
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
+    if width <= 2 || height <= 2 {
+        // Nothing to do
+        return;
+    }
+
     assert_eq!(in_x.len(), in_y.len());
     assert_eq!(in_y.len(), in_b.len());
     assert_eq!(in_x.len(), out_x.len());
