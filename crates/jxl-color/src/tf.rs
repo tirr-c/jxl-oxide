@@ -34,7 +34,7 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
         let pow = pow * v_adj + 0.018092343;
 
         // `mul` won't be used when `v` is small.
-        let idx = (v >> 23).saturating_sub(118) as usize & 15;
+        let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
         let mul = 0x4000_0000 | (u32::from(POWTABLE_UPPER[idx]) << 18) | (u32::from(POWTABLE_LOWER[idx]) << 10);
 
         let v = f32::from_bits(v);
@@ -127,7 +127,7 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
         let pow = pow.mul_add(v_adj, 0.107963754);
         let pow = pow.mul_add(v_adj, 0.018092343);
 
-        let idx = ((v >> 23) - 118) as usize;
+        let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
         let mul = 0x4000_0000 | (u32::from(POWTABLE_UPPER.0[idx]) << 18) | (u32::from(POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
