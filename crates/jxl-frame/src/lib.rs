@@ -97,7 +97,25 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
         }
         pass_shifts.insert(header.passes.num_passes - 1, (0i32, maxshift));
 
-        let mut plan = Vec::new();
+        Ok(Self {
+            image_header,
+            header,
+            toc,
+            plan: Vec::new(),
+            next_instr: 0,
+            buf_slot: HashMap::new(),
+            data,
+            pass_shifts,
+        })
+    }
+}
+
+impl Frame<'_> {
+    fn prepare_default_plan(&mut self) {
+        let header = &self.header;
+        let passes = &header.passes;
+        let toc = &self.toc;
+        let plan = &mut self.plan;
         if toc.is_single_entry() {
             let group = toc.lf_global();
             plan.push(GroupInstr::Read(0, group));
@@ -243,17 +261,6 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
         if let Some(GroupInstr::ProgressiveScan { .. }) = plan.last() {
             plan.pop();
         }
-
-        Ok(Self {
-            image_header,
-            header,
-            toc,
-            plan,
-            next_instr: 0,
-            buf_slot: HashMap::new(),
-            data,
-            pass_shifts,
-        })
     }
 }
 
@@ -324,6 +331,10 @@ impl Frame<'_> {
     ) -> Result<ProgressiveResult> {
         let span = tracing::span!(tracing::Level::TRACE, "Frame::load_with_filter");
         let _guard = span.enter();
+
+        if self.plan.is_empty() {
+            self.prepare_default_plan();
+        }
 
         while let Some(&instr) = self.plan.get(self.next_instr) {
             let result = self.process_instr(bitstream, instr, &mut filter_fn);
