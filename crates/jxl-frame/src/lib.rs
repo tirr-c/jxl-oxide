@@ -401,115 +401,19 @@ impl Frame<'_> {
                 self.buf_slot.insert(slot_idx, (group.kind, buf));
             },
             GroupInstr::Decode(slot_idx) => {
-                let (kind, buf) = self.buf_slot.remove(&slot_idx).expect("specified slot is not present");
+                let &(kind, ref buf) = self.buf_slot.get(&slot_idx).unwrap();
                 tracing::trace!(group_kind = format_args!("{:?}", kind), "Decoding group");
                 if !filter_fn(&self.header, &self.data, kind) {
                     return Ok(());
                 }
 
                 let mut bitstream = Bitstream::new(std::io::Cursor::new(buf));
-                self.load_single(&mut bitstream, kind)?;
+                self.data.load_single(&mut bitstream, kind, self.image_header, &self.header, &self.pass_shifts)?;
             },
             GroupInstr::ProgressiveScan { downsample_factor, done, .. } => {
                 tracing::debug!(downsample_factor, done, "Single progressive scan");
             },
         }
-        Ok(())
-    }
-
-    fn load_single<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-        kind: TocGroupKind,
-    ) -> Result<()> {
-        match kind {
-            TocGroupKind::All => {
-                self.read_merged_group(bitstream)?;
-            },
-            TocGroupKind::LfGlobal => {
-                self.data.lf_global = Some(self.read_lf_global(bitstream)?);
-            },
-            TocGroupKind::LfGroup(lf_group_idx) => {
-                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
-                self.data.lf_group.insert(lf_group_idx, self.read_lf_group(bitstream, lf_global, lf_group_idx)?);
-            },
-            TocGroupKind::HfGlobal => {
-                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
-                self.data.hf_global = Some(self.read_hf_global(bitstream, lf_global)?);
-            },
-            TocGroupKind::GroupPass { pass_idx, group_idx } => {
-                let lf_global = self.data.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
-                let lf_group_idx = self.header.lf_group_idx_from_group_idx(group_idx);
-                let lf_group = self.data.lf_group.get(&lf_group_idx).expect("invalid decode plan: LfGroup not decoded");
-                let hf_global = self.data.hf_global.as_ref().expect("invalid decode plan: HfGlobal not decoded");
-
-                let group = self.read_group_pass(
-                    bitstream,
-                    lf_global,
-                    lf_group,
-                    hf_global.as_ref(),
-                    pass_idx,
-                    group_idx,
-                )?;
-                self.data.group_pass.insert((pass_idx, group_idx), group);
-            },
-        }
-        Ok(())
-    }
-
-    fn read_lf_global<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<LfGlobal> {
-        read_bits!(bitstream, Bundle(LfGlobal), (self.image_header, &self.header))
-    }
-
-    fn read_lf_group<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal, lf_group_idx: u32) -> Result<LfGroup> {
-        let lf_group_params = LfGroupParams::new(&self.header, lf_global, lf_group_idx);
-        read_bits!(bitstream, Bundle(LfGroup), lf_group_params)
-    }
-
-    fn read_hf_global<R: Read>(&self, bitstream: &mut Bitstream<R>, lf_global: &LfGlobal) -> Result<Option<HfGlobal>> {
-        let has_hf_global = self.header.encoding == crate::header::Encoding::VarDct;
-        let hf_global = if has_hf_global {
-            let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global);
-            Some(HfGlobal::parse(bitstream, params)?)
-        } else {
-            None
-        };
-        Ok(hf_global)
-    }
-
-    fn read_group_pass<R: Read>(
-        &self,
-        bitstream: &mut Bitstream<R>,
-        lf_global: &LfGlobal,
-        lf_group: &LfGroup,
-        hf_global: Option<&HfGlobal>,
-        pass_idx: u32,
-        group_idx: u32,
-    ) -> Result<PassGroup> {
-        let shift = self.pass_shifts.get(&pass_idx).copied();
-        let params = PassGroupParams::new(
-            &self.header,
-            lf_global,
-            lf_group,
-            hf_global,
-            pass_idx,
-            group_idx,
-            shift,
-        );
-        read_bits!(bitstream, Bundle(PassGroup), params)
-    }
-
-    fn read_merged_group<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        let lf_global = self.read_lf_global(bitstream)?;
-        let lf_group = self.read_lf_group(bitstream, &lf_global, 0)?;
-        let hf_global = self.read_hf_global(bitstream, &lf_global)?;
-        let group_pass = self.read_group_pass(bitstream, &lf_global, &lf_group, hf_global.as_ref(), 0, 0)?;
-
-        self.data.lf_global = Some(lf_global);
-        self.data.lf_group.insert(0, lf_group);
-        self.data.hf_global = Some(hf_global);
-        self.data.group_pass.insert((0, 0), group_pass);
-
         Ok(())
     }
 }
@@ -561,6 +465,136 @@ impl FrameData {
         }
         lf_global.apply_modular_inverse_transform();
         Ok(self)
+    }
+}
+
+impl FrameData {
+    fn load_single<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        kind: TocGroupKind,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+        pass_shifts: &BTreeMap<u32, (i32, i32)>,
+    ) -> Result<()> {
+        match kind {
+            TocGroupKind::All => {
+                let shift = pass_shifts.get(&0).copied();
+                self.read_merged_group(bitstream, shift, image_header, frame_header)?;
+            },
+            TocGroupKind::LfGlobal => {
+                self.lf_global = Some(self.read_lf_global(bitstream, image_header, frame_header)?);
+            },
+            TocGroupKind::LfGroup(lf_group_idx) => {
+                let lf_global = self.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                self.lf_group.insert(lf_group_idx, self.read_lf_group(bitstream, lf_global, lf_group_idx, frame_header)?);
+            },
+            TocGroupKind::HfGlobal => {
+                let lf_global = self.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                self.hf_global = Some(self.read_hf_global(bitstream, lf_global, image_header, frame_header)?);
+            },
+            TocGroupKind::GroupPass { pass_idx, group_idx } => {
+                let lf_global = self.lf_global.as_ref().expect("invalid decode plan: LfGlobal not decoded");
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let lf_group = self.lf_group.get(&lf_group_idx).expect("invalid decode plan: LfGroup not decoded");
+                let hf_global = self.hf_global.as_ref().expect("invalid decode plan: HfGlobal not decoded");
+
+                let shift = pass_shifts.get(&pass_idx).copied();
+                let group = self.read_group_pass(
+                    bitstream,
+                    lf_global,
+                    lf_group,
+                    hf_global.as_ref(),
+                    pass_idx,
+                    group_idx,
+                    shift,
+                    frame_header,
+                )?;
+                self.group_pass.insert((pass_idx, group_idx), group);
+            },
+        }
+        Ok(())
+    }
+
+    fn read_lf_global<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+    ) -> Result<LfGlobal> {
+        read_bits!(bitstream, Bundle(LfGlobal), (image_header, frame_header))
+    }
+
+    fn read_lf_group<R: Read>(
+        &self,
+        bitstream: &mut Bitstream<R>,
+        lf_global: &LfGlobal,
+        lf_group_idx: u32,
+        frame_header: &FrameHeader,
+    ) -> Result<LfGroup> {
+        let lf_group_params = LfGroupParams::new(frame_header, lf_global, lf_group_idx);
+        read_bits!(bitstream, Bundle(LfGroup), lf_group_params)
+    }
+
+    fn read_hf_global<R: Read>(
+        &self,
+        bitstream: &mut Bitstream<R>,
+        lf_global: &LfGlobal,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+    ) -> Result<Option<HfGlobal>> {
+        let has_hf_global = frame_header.encoding == crate::header::Encoding::VarDct;
+        let hf_global = if has_hf_global {
+            let params = HfGlobalParams::new(&image_header.metadata, frame_header, lf_global);
+            Some(HfGlobal::parse(bitstream, params)?)
+        } else {
+            None
+        };
+        Ok(hf_global)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn read_group_pass<R: Read>(
+        &self,
+        bitstream: &mut Bitstream<R>,
+        lf_global: &LfGlobal,
+        lf_group: &LfGroup,
+        hf_global: Option<&HfGlobal>,
+        pass_idx: u32,
+        group_idx: u32,
+        shift: Option<(i32, i32)>,
+        frame_header: &FrameHeader,
+    ) -> Result<PassGroup> {
+        let params = PassGroupParams::new(
+            frame_header,
+            lf_global,
+            lf_group,
+            hf_global,
+            pass_idx,
+            group_idx,
+            shift,
+        );
+        read_bits!(bitstream, Bundle(PassGroup), params)
+    }
+
+    fn read_merged_group<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        shift: Option<(i32, i32)>,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+    ) -> Result<()> {
+        let lf_global = self.read_lf_global(bitstream, image_header, frame_header)?;
+        let lf_group = self.read_lf_group(bitstream, &lf_global, 0, frame_header)?;
+        let hf_global = self.read_hf_global(bitstream, &lf_global, image_header, frame_header)?;
+        let group_pass = self.read_group_pass(bitstream, &lf_global, &lf_group, hf_global.as_ref(), 0, 0, shift, frame_header)?;
+
+        self.lf_global = Some(lf_global);
+        self.lf_group.insert(0, lf_group);
+        self.hf_global = Some(hf_global);
+        self.group_pass.insert((0, 0), group_pass);
+
+        Ok(())
     }
 }
 
