@@ -16,7 +16,7 @@ pub enum TransformInfo {
 impl TransformInfo {
     pub(super) fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
         match self {
-            Self::Rct(_) => Ok(()),
+            Self::Rct(rct) => rct.transform_channel_info(channels),
             Self::Palette(pal) => pal.transform_channel_info(channels),
             Self::Squeeze(sq) => sq.transform_channel_info(channels),
         }
@@ -124,6 +124,23 @@ impl Bundle<&WpHeader> for Palette {
 }
 
 impl Rct {
+    fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
+        let begin_c = self.begin_c;
+        let end_c = self.begin_c + 3;
+        if end_c as usize > channels.info.len() {
+            return Err(Error::InvalidRctParams);
+        }
+
+        let ModularChannelInfo { width, height, .. } = channels.info[begin_c as usize];
+        for info in &channels.info[(begin_c + 1) as usize..end_c as usize] {
+            if width != info.width || height != info.height {
+                return Err(Error::InvalidRctParams);
+            }
+        }
+
+        Ok(())
+    }
+
     fn inverse(&self, image: &mut super::Image) {
         let permutation = (self.rct_type / 7) as usize;
         let ty = self.rct_type % 7;

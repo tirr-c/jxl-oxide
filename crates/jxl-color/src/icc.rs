@@ -31,7 +31,7 @@ pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8
     let mut encoded_icc = vec![0u8; enc_size as usize];
     let mut b1 = 0u8;
     let mut b2 = 0u8;
-    decoder.begin(bitstream).unwrap();
+    decoder.begin(bitstream)?;
     for (idx, b) in encoded_icc.iter_mut().enumerate() {
         let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))?;
         if sym >= 256 {
@@ -179,10 +179,16 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     let output_size = varint(&mut tmp_cursor)?;
     let commands_size = varint(&mut tmp_cursor)?;
     let stream_offset = tmp_cursor.position();
+    if stream_offset + commands_size > stream.len() as u64 {
+        return Err(Error::InvalidIccStream("invalid commands_size"));
+    }
 
     let mut out = Vec::with_capacity(output_size as usize);
     let (commands, data) = stream[stream_offset as usize..].split_at(commands_size as usize);
     let header_size = output_size.min(128) as usize;
+    if data.len() < header_size {
+        return Err(Error::InvalidIccStream("invalid output_size"));
+    }
     let (header_data, mut data) = data.split_at(header_size);
     let mut commands_stream = Cursor::new(commands);
 

@@ -15,33 +15,45 @@ pub struct Histogram {
 
 impl Histogram {
     pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, log_alphabet_size: u32) -> Result<Self> {
-        let table_size = 1u16 << log_alphabet_size;
+        let table_size = (1u16 << log_alphabet_size) as usize;
         let log_bucket_size = 12 - log_alphabet_size;
         let bucket_size = 1u16 << log_bucket_size;
 
         let alphabet_size;
-        let mut dist = vec![0u16; table_size as usize];
+        let mut dist = vec![0u16; table_size];
         if read_bits!(bitstream, Bool)? {
             if read_bits!(bitstream, Bool)? {
                 // binary
-                let v0 = Self::read_u8(bitstream)?;
-                let v1 = Self::read_u8(bitstream)?;
+                let v0 = Self::read_u8(bitstream)? as usize;
+                let v1 = Self::read_u8(bitstream)? as usize;
                 if v0 == v1 {
                     return Err(Error::InvalidAnsHistogram);
                 }
+                alphabet_size = v0.max(v1) + 1;
+                if alphabet_size > table_size {
+                    return Err(Error::InvalidAnsHistogram);
+                }
+
                 let prob = bitstream.read_bits(12)? as u16;
-                dist[v0 as usize] = prob;
-                dist[v1 as usize] = (1u16 << 12) - prob;
-                alphabet_size = v0.max(v1) as usize + 1;
+                dist[v0] = prob;
+                dist[v1] = (1u16 << 12) - prob;
             } else {
                 // unary
-                let val = Self::read_u8(bitstream)?;
-                dist[val as usize] = 1 << 12;
-                alphabet_size = val as usize + 1;
+                let val = Self::read_u8(bitstream)? as usize;
+                alphabet_size = val + 1;
+                if alphabet_size > table_size {
+                    return Err(Error::InvalidAnsHistogram);
+                }
+
+                dist[val] = 1 << 12;
             }
         } else if read_bits!(bitstream, Bool)? {
             // evenly distributed
             alphabet_size = Self::read_u8(bitstream)? as usize + 1;
+            if alphabet_size > table_size {
+                return Err(Error::InvalidAnsHistogram);
+            }
+
             let base = (1usize << 12) / alphabet_size;
             let leftover = (1usize << 12) % alphabet_size;
             dist[0..leftover].fill(base as u16 + 1);
@@ -61,6 +73,9 @@ impl Histogram {
                 return Err(Error::InvalidAnsHistogram);
             }
             alphabet_size = Self::read_u8(bitstream)? as usize + 3;
+            if alphabet_size > table_size {
+                return Err(Error::InvalidAnsHistogram);
+            }
             let mut repeat_ranges = Vec::new();
 
             let mut omit_data = None;
@@ -69,6 +84,9 @@ impl Histogram {
                 dist[idx] = read_prefix(bitstream)?;
                 if dist[idx] == 13 {
                     let repeat_count = Self::read_u8(bitstream)? as usize + 4;
+                    if idx + repeat_count > alphabet_size {
+                        return Err(Error::InvalidAnsHistogram);
+                    }
                     repeat_ranges.push(idx..(idx + repeat_count));
                     idx += repeat_count;
                     dist[idx] = 0;
@@ -132,9 +150,9 @@ impl Histogram {
         }
 
         if let Some(single_sym_idx) = dist.iter().position(|&d| d == 1 << 12) {
-            let symbols = vec![single_sym_idx as u16; table_size as usize];
-            let offsets = (0..table_size).map(|i| bucket_size * i).collect();
-            let cutoffs = vec![0u16; table_size as usize];
+            let symbols = vec![single_sym_idx as u16; table_size];
+            let offsets = (0..table_size as u16).map(|i| bucket_size * i).collect();
+            let cutoffs = vec![0u16; table_size];
             return Ok(Self {
                 dist,
                 symbols,
@@ -146,8 +164,8 @@ impl Histogram {
 
         let mut cutoffs = dist.clone();
         let mut symbols = (0..(alphabet_size as u16)).collect::<Vec<_>>();
-        symbols.resize(table_size as usize, 0);
-        let mut offsets = vec![0u16; table_size as usize];
+        symbols.resize(table_size, 0);
+        let mut offsets = vec![0u16; table_size];
 
         let mut underfull = Vec::new();
         let mut overfull = Vec::new();
@@ -170,7 +188,7 @@ impl Histogram {
             }
         }
 
-        for idx in 0..(table_size as usize) {
+        for idx in 0..table_size {
             if cutoffs[idx] == bucket_size {
                 symbols[idx] = idx as u16;
                 offsets[idx] = 0;

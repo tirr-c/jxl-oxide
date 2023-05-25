@@ -409,17 +409,19 @@ impl<R> Drop for RewindMarker<'_, R> {
             return;
         }
 
-        let empty_area = &mut self.original.buf[self.original.buf_offset + self.original.buf_valid_len..];
-        if empty_area.len() > read_data.len() {
-            let mut buf = vec![0u8; self.original.buf_valid_len + read_data.len()];
-            let (l, r) = buf.split_at_mut(self.original.buf_valid_len);
-            l.copy_from_slice(self.original.left_in_buffer());
+        let empty_area = &mut self.original.buf[self.original.buf_valid_len..];
+        if empty_area.len() < read_data.len() {
+            let left_in_buffer = self.original.left_in_buffer();
+            let mut buf = vec![0u8; left_in_buffer.len() + read_data.len()];
+            let (l, r) = buf.split_at_mut(left_in_buffer.len());
+            l.copy_from_slice(left_in_buffer);
             r.copy_from_slice(read_data);
             self.original.buf_offset = 0;
-            self.original.buf_valid_len += read_data.len();
+            self.original.buf_valid_len = buf.len();
             self.original.buf = buf;
         } else {
             empty_area[..read_data.len()].copy_from_slice(read_data);
+            self.original.buf_valid_len += read_data.len();
         }
     }
 }
