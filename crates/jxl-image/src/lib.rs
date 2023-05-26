@@ -14,8 +14,6 @@ use jxl_color::header::*;
 /// Use [`Bundle::parse`] to parse the header.
 #[derive(Debug)]
 pub struct ImageHeader {
-    /// JPEG XL bitstream signature (`0x0aff`).
-    pub signature: u32,
     /// Image size information.
     pub size: SizeHeader,
     /// Image metadata.
@@ -34,11 +32,7 @@ impl<Ctx> Bundle<Ctx> for ImageHeader {
         let size = SizeHeader::parse(bitstream, ())?;
         let metadata = ImageMetadata::parse(bitstream, ())?;
 
-        Ok(Self {
-            signature,
-            size,
-            metadata,
-        })
+        Ok(Self { size, metadata })
     }
 }
 
