@@ -443,6 +443,13 @@ impl<Ctx> Bundle<Ctx> for BlendMode {
     }
 }
 
+impl BlendMode {
+    #[inline]
+    pub fn use_alpha(self) -> bool {
+        matches!(self, Self::Blend | Self::MulAdd)
+    }
+}
+
 fn is_aabb_collides(rect0: (u32, u32, u32, u32), rect1: (u32, u32, u32, u32)) -> bool {
     let (x0, y0, w0, h0) = rect0;
     let (x1, y1, w1, h1) = rect1;

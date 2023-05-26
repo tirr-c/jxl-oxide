@@ -34,7 +34,7 @@ pub struct BlendingModeInformation {
     pub clamp: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PatchBlendMode {
     None = 0,
@@ -64,6 +64,13 @@ impl TryFrom<u32> for PatchBlendMode {
             7 => MulAddBelow,
             _ => return Err(jxl_bitstream::Error::InvalidEnum { name: "PatchBlendMode", value }),
         })
+    }
+}
+
+impl PatchBlendMode {
+    #[inline]
+    pub fn use_alpha(self) -> bool {
+        matches!(self, Self::BlendAbove | Self::BlendBelow | Self::MulAddAbove | Self::MulAddBelow)
     }
 }
 

@@ -85,7 +85,9 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
 
-        if header.blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len() {
+        if header.blending_info.mode.use_alpha() &&
+            header.blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
+        {
             return Err(
                 jxl_bitstream::Error::ValidationFailed("blending_info.alpha_channel out of range")
                     .into()

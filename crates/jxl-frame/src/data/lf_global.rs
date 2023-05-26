@@ -34,8 +34,24 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
     type Error = crate::Error;
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
-        let patches = header.flags.patches().then(|| {
-            Patches::parse(bitstream, image_header)
+        let patches = header.flags.patches().then(|| -> Result<_> {
+            let patches = Patches::parse(bitstream, image_header)?;
+            let it = patches
+                .patches
+                .iter()
+                .flat_map(|patch| &patch.patch_targets)
+                .flat_map(|target| &target.blending);
+            for blending_info in it {
+                if blending_info.mode.use_alpha() &&
+                    blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
+                {
+                    return Err(
+                        jxl_bitstream::Error::ValidationFailed("blending_info.alpha_channel out of range")
+                            .into()
+                    );
+                }
+            }
+            Ok(patches)
         }).transpose()?;
         let splines = header.flags.splines().then(|| {
             Splines::parse(bitstream, header)
