@@ -210,7 +210,7 @@ impl IntegerConfig {
             let msb_bits = add_log2_ceil(split_exponent);
             let msb_in_token = bitstream.read_bits(msb_bits)?;
             if msb_in_token > split_exponent {
-                return Err(crate::Error::InvalidIntegerConfig);
+                return Err(Error::InvalidIntegerConfig);
             }
             let lsb_bits = add_log2_ceil(split_exponent - msb_in_token);
             let lsb_in_token = bitstream.read_bits(lsb_bits)?;
@@ -219,7 +219,7 @@ impl IntegerConfig {
             (0u32, 0u32)
         };
         if lsb_in_token + msb_in_token > split_exponent {
-            return Err(crate::Error::InvalidIntegerConfig)
+            return Err(Error::InvalidIntegerConfig)
         }
         Ok(Self {
             split_exponent,
