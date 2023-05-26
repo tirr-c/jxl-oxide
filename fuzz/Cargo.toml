@@ -1,0 +1,22 @@
+[package]
+name = "jxl-oxide-fuzz-afl"
+version = "0.0.1"
+publish = false
+edition = "2021"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "jxl-oxide-reproduce"
+path = "src/reproduce.rs"
+
+[dependencies]
+
+[dependencies.jxl-oxide]
+path = "../crates/jxl-oxide"
+
+[dependencies.afl]
+version = "0.13.0"
+
