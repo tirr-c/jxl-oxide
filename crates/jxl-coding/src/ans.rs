@@ -105,7 +105,9 @@ impl Histogram {
                 }
                 idx += 1;
             }
-            let (_, omit_pos) = omit_data.unwrap();
+            let Some((_, omit_pos)) = omit_data else {
+                return Err(Error::InvalidAnsHistogram);
+            };
             if dist.get(omit_pos + 1) == Some(&13) {
                 return Err(Error::InvalidAnsHistogram);
             }
