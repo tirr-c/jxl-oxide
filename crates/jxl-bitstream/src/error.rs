@@ -13,6 +13,7 @@ pub enum Error {
         name: &'static str,
         value: u32,
     },
+    ValidationFailed(&'static str),
     /// The name couldn't be parsed as UTF-8 string.
     NonUtf8Name,
     /// The bitstream couldn't be skipped to the given position, mainly due to the direction being
@@ -46,6 +47,9 @@ impl std::fmt::Display for Error {
             },
             Self::InvalidEnum { name, value } => {
                 write!(f, "Enum({}) read invalid enum value of {}", name, value)
+            },
+            Self::ValidationFailed(msg) => {
+                write!(f, "bitstream validation failed: {msg}")
             },
             Self::NonUtf8Name => {
                 write!(f, "read non-UTF-8 name")

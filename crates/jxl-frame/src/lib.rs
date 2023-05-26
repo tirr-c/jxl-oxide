@@ -84,6 +84,17 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &'a ImageHeader) -> Result<Self> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
+
+        if header.blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len() {
+            return Err(
+                jxl_bitstream::Error::ValidationFailed("blending_info.alpha_channel out of range")
+                    .into()
+            );
+        }
+        if header.flags.use_lf_frame() && header.lf_level >= 4 {
+            return Err(jxl_bitstream::Error::ValidationFailed("lf_level out of range").into());
+        }
+
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
         let data = FrameData::new(&header);
 

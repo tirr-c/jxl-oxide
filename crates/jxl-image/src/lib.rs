@@ -9,18 +9,36 @@ use std::io::Read;
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result, Name};
 use jxl_color::header::*;
 
-define_bundle! {
-    /// JPEG XL image header.
-    ///
-    /// Use [`Bundle::parse`] to parse the header.
-    #[derive(Debug)]
-    pub struct ImageHeader {
-        /// JPEG XL bitstream signature (`0x0aff`).
-        pub signature: ty(u(16)),
-        /// Image size information.
-        pub size: ty(Bundle(SizeHeader)),
-        /// Image metadata.
-        pub metadata: ty(Bundle(ImageMetadata)),
+/// JPEG XL image header.
+///
+/// Use [`Bundle::parse`] to parse the header.
+#[derive(Debug)]
+pub struct ImageHeader {
+    /// JPEG XL bitstream signature (`0x0aff`).
+    pub signature: u32,
+    /// Image size information.
+    pub size: SizeHeader,
+    /// Image metadata.
+    pub metadata: ImageMetadata,
+}
+
+impl<Ctx> Bundle<Ctx> for ImageHeader {
+    type Error = jxl_bitstream::Error;
+
+    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
+        let signature = bitstream.read_bits(16)?;
+        if signature != 0xaff {
+            return Err(jxl_bitstream::Error::ValidationFailed("JPEG XL signature mismatch"));
+        }
+
+        let size = SizeHeader::parse(bitstream, ())?;
+        let metadata = ImageMetadata::parse(bitstream, ())?;
+
+        Ok(Self {
+            signature,
+            size,
+            metadata,
+        })
     }
 }
 

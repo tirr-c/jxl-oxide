@@ -178,9 +178,7 @@ impl ContextInner<'_> {
         );
 
         // Check if LF frame exists
-        if header.flags.use_lf_frame() &&
-            (header.lf_level >= 4 || self.lf_frame[header.lf_level as usize] == usize::MAX)
-        {
+        if header.flags.use_lf_frame() && self.lf_frame[header.lf_level as usize] == usize::MAX {
             return Err(Error::UninitializedLfFrame(header.lf_level));
         }
 
