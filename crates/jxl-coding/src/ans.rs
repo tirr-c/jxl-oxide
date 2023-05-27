@@ -89,7 +89,6 @@ impl Histogram {
                     }
                     repeat_ranges.push(idx..(idx + repeat_count));
                     idx += repeat_count;
-                    dist[idx] = 0;
                     continue;
                 }
                 match &mut omit_data {
