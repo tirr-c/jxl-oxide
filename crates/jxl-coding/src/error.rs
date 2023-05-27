@@ -3,10 +3,11 @@
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Lz77NotAllowed,
-    InvalidPrefixHistogram,
     InvalidAnsHistogram,
     InvalidAnsStream,
+    InvalidIntegerConfig,
     InvalidPermutation,
+    InvalidPrefixHistogram,
 }
 
 impl std::error::Error for Error {
@@ -23,10 +24,11 @@ impl std::fmt::Display for Error {
         match self {
             Self::Bitstream(err) => write!(f, "error from bitstream: {}", err),
             Self::Lz77NotAllowed => write!(f, "LZ77-enabled decoder when it is not allowed"),
-            Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
             Self::InvalidAnsHistogram => write!(f, "invalid ANS distribution"),
             Self::InvalidAnsStream => write!(f, "ANS stream verification failed"),
+            Self::InvalidIntegerConfig => write!(f, "invalid hybrid integer configuration"),
             Self::InvalidPermutation => write!(f, "invalid permutation"),
+            Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
         }
     }
 }
