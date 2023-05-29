@@ -70,8 +70,25 @@ impl Decoder {
     }
 
     /// Read an integer from the bitstream with the given context and LZ77 distance multiplier.
-    pub fn read_varint_with_multiplier<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32, dist_multiplier: u32) -> Result<u32> {
+    pub fn read_varint_with_multiplier<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        ctx: u32,
+        dist_multiplier: u32,
+    ) -> Result<u32> {
         let cluster = self.inner.clusters[ctx as usize];
+        self.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)
+    }
+
+    /// Read an integer from the bitstream with the given *cluster* and LZ77 distance multiplier.
+    ///
+    /// Contexts can be converted to clusters using [the cluster map][Self::cluster_map].
+    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+        dist_multiplier: u32,
+    ) -> Result<u32> {
         Ok(if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
             let min_symbol = min_symbol as u16;
             let r;
@@ -130,6 +147,10 @@ impl Decoder {
     /// checks if the final state matches expected state, which is specified in the specification.
     pub fn finalize(&self) -> Result<()> {
         self.inner.code.finalize()
+    }
+
+    pub fn cluster_map(&self) -> &[u8] {
+        &self.inner.clusters
     }
 }
 

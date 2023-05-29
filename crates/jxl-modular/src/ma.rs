@@ -42,9 +42,16 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
     type Error = crate::Error;
 
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> crate::Result<Self> {
+        struct FoldingTreeLeaf {
+            ctx: u32,
+            predictor: super::predictor::Predictor,
+            offset: i32,
+            multiplier: u32,
+        }
+
         enum FoldingTree {
             Decision(u32, i32),
-            Leaf(MaTreeLeaf),
+            Leaf(FoldingTreeLeaf),
         }
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
@@ -78,7 +85,7 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
                     return Err(crate::Error::InvalidMaTree);
                 }
                 let multiplier = (mul_bits + 1) << mul_log;
-                let node = FoldingTree::Leaf(MaTreeLeaf {
+                let node = FoldingTree::Leaf(FoldingTreeLeaf {
                     ctx,
                     predictor,
                     offset,
@@ -90,6 +97,8 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
             nodes.push(node);
         }
         tree_decoder.finalize()?;
+        let decoder = Decoder::parse(bitstream, ctx)?;
+        let cluster_map = decoder.cluster_map();
 
         let mut tmp = VecDeque::new();
         for node in nodes.into_iter().rev() {
@@ -104,7 +113,9 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
                         right: Box::new(right),
                     });
                 },
-                FoldingTree::Leaf(leaf) => {
+                FoldingTree::Leaf(FoldingTreeLeaf { ctx, predictor, offset, multiplier }) => {
+                    let cluster = cluster_map[ctx as usize];
+                    let leaf = MaTreeLeafClustered { cluster, predictor, offset, multiplier };
                     tmp.push_back(MaTreeNode::Leaf(leaf));
                 },
             }
@@ -112,7 +123,6 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
         assert_eq!(tmp.len(), 1);
         let tree = tmp.pop_front().unwrap();
 
-        let decoder = Decoder::parse(bitstream, ctx)?;
         Ok(Self {
             tree: Arc::new(tree),
             decoder,
@@ -137,12 +147,12 @@ enum FlatMaTreeNode {
         left_idx: u32,
         right_idx: u32,
     },
-    Leaf(MaTreeLeaf),
+    Leaf(MaTreeLeafClustered),
 }
 
-#[derive(Debug, Clone)]
-struct MaTreeLeaf {
-    ctx: u32,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MaTreeLeafClustered {
+    cluster: u8,
     predictor: super::predictor::Predictor,
     offset: i32,
     multiplier: u32,
@@ -152,13 +162,13 @@ impl FlatMaTree {
     fn new(nodes: Vec<FlatMaTreeNode>) -> Self {
         let need_self_correcting = nodes.iter().any(|node| match *node {
             FlatMaTreeNode::Decision { property, .. } => property == 15,
-            FlatMaTreeNode::Leaf(MaTreeLeaf { predictor, .. }) => predictor == Predictor::SelfCorrecting,
+            FlatMaTreeNode::Leaf(MaTreeLeafClustered { predictor, .. }) => predictor == Predictor::SelfCorrecting,
         });
 
         Self { nodes, need_self_correcting }
     }
 
-    fn get_leaf(&self, properties: &Properties) -> Result<&MaTreeLeaf> {
+    fn get_leaf(&self, properties: &Properties) -> Result<&MaTreeLeafClustered> {
         let mut current_node = &self.nodes[0];
         loop {
             match current_node {
@@ -191,7 +201,7 @@ impl FlatMaTree {
         dist_multiplier: u32,
     ) -> Result<(i32, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties)?;
-        let diff = decoder.read_varint_with_multiplier(bitstream, leaf.ctx, dist_multiplier)?;
+        let diff = decoder.read_varint_with_multiplier_clustered(bitstream, leaf.cluster, dist_multiplier)?;
         let diff = unpack_signed(diff) * leaf.multiplier as i32 + leaf.offset;
         Ok((diff, leaf.predictor))
     }
@@ -205,7 +215,7 @@ enum MaTreeNode {
         left: Box<MaTreeNode>,
         right: Box<MaTreeNode>,
     },
-    Leaf(MaTreeLeaf),
+    Leaf(MaTreeLeafClustered),
 }
 
 impl MaTreeNode {
@@ -226,13 +236,24 @@ impl MaTreeNode {
                     right_idx: 0,
                 });
                 left.flatten(channel, stream_idx, out);
-                let right_idx = out.len() as u32;
+                let right_idx = out.len();
                 right.flatten(channel, stream_idx, out);
+                if right_idx == idx + 2 && out.len() == right_idx + 1 {
+                    let Some(FlatMaTreeNode::Leaf(right)) = out.pop() else { panic!() };
+                    let Some(FlatMaTreeNode::Leaf(left)) = out.pop() else { panic!() };
+                    if left == right {
+                        out[idx] = FlatMaTreeNode::Leaf(left);
+                        return;
+                    }
+                    out.push(FlatMaTreeNode::Leaf(left));
+                    out.push(FlatMaTreeNode::Leaf(right));
+                }
+
                 out[idx] = FlatMaTreeNode::Decision {
                     property,
                     value,
                     left_idx: (idx + 1) as u32,
-                    right_idx,
+                    right_idx: right_idx as u32,
                 };
             },
             MaTreeNode::Leaf(ref leaf) => {
