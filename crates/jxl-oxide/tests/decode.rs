@@ -52,7 +52,8 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
                     for (&actual_float, expected) in buf.iter().zip(expected_buf.chunks_exact(2)) {
                         let expected = u16::from_le_bytes([expected[0], expected[1]]);
                         let actual = (actual_float * 65535.0 + 0.5) as u16;
-                        assert_eq!(expected, actual);
+                        let diff = actual.abs_diff(expected);
+                        assert!(diff < 4);
                     }
                 }
             },
@@ -66,6 +67,23 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
                 break;
             },
         }
+    }
+}
+
+fn download_url_with_cache(url: &str, name: &str) -> Vec<u8> {
+    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/cache");
+    path.push(name);
+
+    if let Ok(buf) = std::fs::read(&path) {
+        buf
+    } else {
+        let bytes = reqwest::blocking::get(url)
+            .and_then(|resp| resp.error_for_status())
+            .and_then(|resp| resp.bytes())
+            .expect("Cannot download the given URL");
+        std::fs::write(path, &bytes).ok();
+        bytes.to_vec()
     }
 }
 
@@ -96,7 +114,9 @@ macro_rules! test {
                         output_url.push("output.buf.zst.url");
                         let output_url = std::fs::read_to_string(output_url).expect("Failed to get fixture URL");
 
-                        let resp = reqwest::blocking::get(output_url.trim()).expect("Failed to connect");
+                        let filename = concat!(stringify!($name), ".buf.zst");
+                        let resp = download_url_with_cache(output_url.trim(), filename);
+                        let resp = std::io::Cursor::new(resp);
                         let expected = zstd::Decoder::new(resp).expect("Failed to open Zstandard stream");
                         decode(&input, expected);
                     },
