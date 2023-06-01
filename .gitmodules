@@ -1,3 +1,6 @@
 [submodule "crates/jxl-render/tests/reference"]
 	path = crates/jxl-oxide/tests/conformance
 	url = https://github.com/libjxl/conformance.git
+[submodule "crates/jxl-oxide/tests/decode"]
+	path = crates/jxl-oxide/tests/decode
+	url = https://github.com/tirr-c/jxl-oxide-testdata.git
