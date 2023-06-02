@@ -1,2 +1,3 @@
 *.npy
 *.icc
+*.buf.zst
