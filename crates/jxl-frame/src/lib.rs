@@ -85,13 +85,14 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), image_header)?;
 
-        if header.blending_info.mode.use_alpha() &&
-            header.blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
-        {
-            return Err(
-                jxl_bitstream::Error::ValidationFailed("blending_info.alpha_channel out of range")
-                    .into()
-            );
+        for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
+            if blending_info.mode.use_alpha()
+                && blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
+            {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "blending_info.alpha_channel out of range",
+                ).into());
+            }
         }
         if header.flags.use_lf_frame() && header.lf_level >= 4 {
             return Err(jxl_bitstream::Error::ValidationFailed("lf_level out of range").into());
