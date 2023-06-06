@@ -67,7 +67,7 @@ pub fn cut_with_block_info<'g>(
                 let x = coeff.bx;
                 let y = coeff.by;
                 let sx = x >> hshift;
-                let sy = y >> hshift;
+                let sy = y >> vshift;
                 if (sx << hshift) != x || (sy << vshift) != y {
                     continue;
                 }
