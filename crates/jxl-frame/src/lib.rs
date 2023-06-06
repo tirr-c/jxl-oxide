@@ -97,6 +97,28 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
             return Err(jxl_bitstream::Error::ValidationFailed("lf_level out of range").into());
         }
 
+        for ec_info in &image_header.metadata.ec_info {
+            if ec_info.dim_shift > 7 + header.group_size_shift {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "dim_shift too large"
+                ).into());
+            }
+        }
+
+        if header.upsampling > 1 {
+            for (ec_upsampling, ec_info) in header
+                .ec_upsampling
+                .iter()
+                .zip(image_header.metadata.ec_info.iter())
+            {
+                if (ec_upsampling << ec_info.dim_shift) < header.upsampling {
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "EC upsampling < color upsampling, which is invalid"
+                    ).into());
+                }
+            }
+        }
+
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
         let data = FrameData::new(&header);
 
