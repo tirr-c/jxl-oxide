@@ -132,4 +132,5 @@ test! {
     starrail_jpegli_xyb,
     issue_24,
     issue_26,
+    issue_32,
 }
