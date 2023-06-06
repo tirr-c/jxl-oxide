@@ -231,12 +231,7 @@ impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
 
         let ty_id = read_bits!(bitstream, Enum(ExtraChannelTypeRaw))?;
         let bit_depth = BitDepth::parse(bitstream, ())?;
-
         let dim_shift = read_bits!(bitstream, U32(0, 3, 4, 1 + u(3)))?;
-        if (1usize << dim_shift) > 8 {
-            return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large"))
-        }
-
         let name = Name::parse(bitstream, ())?;
 
         let ty = match ty_id {
