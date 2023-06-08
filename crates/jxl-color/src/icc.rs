@@ -26,6 +26,15 @@ use crate::{
 /// Reads the encoded ICC profile stream from the given bitstream.
 pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
+
+    if enc_size > (1 << 28) {
+        // Avoids allocating too much memory (>256MiB)
+        // Maximum ICC output_size for Level 10
+        return Err(jxl_bitstream::Error::ValidationFailed(
+            "Too large encoded ICC profile"
+        ).into())
+    }
+
     let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)?;
 
     let mut encoded_icc = vec![0u8; enc_size as usize];
