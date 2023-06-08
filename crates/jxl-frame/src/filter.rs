@@ -121,7 +121,11 @@ impl Bundle<Encoding> for EdgePreservingFilter {
         };
 
         let sigma_for_modular = if encoding == Encoding::Modular {
-            bitstream.read_f16_as_f32()?
+            let out = bitstream.read_f16_as_f32()?;
+            if out < f32::EPSILON {
+                tracing::warn!("EPF: sigma for modular is too small");
+            }
+            out
         } else {
             1.0
         };
