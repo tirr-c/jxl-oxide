@@ -30,8 +30,13 @@ impl<Ctx> Bundle<Ctx> for Gabor {
 
         let mut weights = [[0.0f32; 2]; 3];
         for chan_weight in &mut weights {
-            for weight in chan_weight {
+            for weight in &mut *chan_weight {
                 *weight = bitstream.read_f16_as_f32()?;
+            }
+            if f32::abs(1.0 + (chan_weight[0] + chan_weight[1]) * 4.0) < f32::EPSILON {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "Gaborish weights lead to near 0 unnormalized kernel"
+                ).into());
             }
         }
         Ok(Self::Enabled(weights))
