@@ -116,7 +116,12 @@ impl Bundle<HfMetadataParams<'_>> for HfMetadata {
 
             while x < bw {
                 if !block_info.get(x, y).unwrap().is_occupied() {
-                    let dct_select = *block_info_raw.get(data_idx, 0).unwrap();
+                    let Some(&dct_select) = block_info_raw.get(data_idx, 0) else {
+                        tracing::error!(lf_group_idx, x, y, "BlockInfo doesn't fill LF group");
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "BlockInfo doesn't fill LF group"
+                        ).into());
+                    };
                     let dct_select = TransformType::try_from(dct_select as u8)?;
                     let mul = *block_info_raw.get(data_idx, 1).unwrap();
                     let hf_mul = mul + 1;
@@ -125,7 +130,31 @@ impl Bundle<HfMetadataParams<'_>> for HfMetadata {
                     let epf = epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
-                            debug_assert!(!block_info.get(x + dx, y + dy).unwrap().is_occupied());
+                            if let Some(info) = block_info.get(x + dx, y + dy) {
+                                if info.is_occupied() {
+                                    tracing::error!(
+                                        lf_group_idx,
+                                        base_x = x, base_y = y,
+                                        dct_select = format_args!("{:?}", dct_select),
+                                        x = x + dx, y = y + dy,
+                                        "Varblocks overlap",
+                                    );
+                                    return Err(jxl_bitstream::Error::ValidationFailed(
+                                        "Varblocks overlap")
+                                    .into());
+                                }
+                            } else {
+                                tracing::error!(
+                                    lf_group_idx,
+                                    base_x = x, base_y = y,
+                                    dct_select = format_args!("{:?}", dct_select),
+                                    "Varblock doesn't fit in an LF group",
+                                );
+                                return Err(jxl_bitstream::Error::ValidationFailed(
+                                    "Varblock doesn't fit in an LF group")
+                                .into());
+                            };
+
                             block_info.set(x + dx, y + dy, if dx == 0 && dy == 0 {
                                 BlockInfo::Data {
                                     dct_select,
