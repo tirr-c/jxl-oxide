@@ -26,11 +26,34 @@ impl<Ctx> Bundle<Ctx> for ImageHeader {
     fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
         let signature = bitstream.read_bits(16)?;
         if signature != 0xaff {
-            return Err(jxl_bitstream::Error::ValidationFailed("JPEG XL signature mismatch"));
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "JPEG XL signature mismatch"
+            ));
         }
 
         let size = SizeHeader::parse(bitstream, ())?;
         let metadata = ImageMetadata::parse(bitstream, ())?;
+
+        let tone_mapping = &metadata.tone_mapping;
+        if tone_mapping.intensity_target <= 0.0 {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Invalid intensity target"
+            ));
+        }
+        if tone_mapping.min_nits < 0.0
+            || tone_mapping.min_nits > tone_mapping.intensity_target
+        {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Invalid tone mapping min_nits"
+            ));
+        }
+        if tone_mapping.linear_below < 0.0
+            || (tone_mapping.relative_to_max_display && tone_mapping.linear_below > 1.0)
+        {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Invalid tone mapping linear_below"
+            ));
+        }
 
         Ok(Self { size, metadata })
     }
