@@ -154,7 +154,7 @@ fn shuffle4(bytes: &[u8]) -> Vec<u8> {
             base += step;
         }
     }
-    for idx in 0..wide_count {
+    for idx in 1..=wide_count {
         out.push(bytes[(step + 1) * idx - 1]);
     }
     out
@@ -219,6 +219,9 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
             let tag = match tagcode {
                 0 => break,
                 1 => {
+                    if data.len() < 4 {
+                        return Err(Error::InvalidIccStream("unexpected end of data stream"));
+                    }
                     let (tag, next_data) = data.split_at(4);
                     data = next_data;
                     tag
