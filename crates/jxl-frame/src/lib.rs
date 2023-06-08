@@ -120,6 +120,12 @@ impl<'a> Bundle<&'a ImageHeader> for Frame<'a> {
             }
         }
 
+        if header.width == 0 || header.height == 0 {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Invalid crop dimensions for frame: zero width or height"
+            ).into());
+        }
+
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
         let data = FrameData::new(&header);
 
