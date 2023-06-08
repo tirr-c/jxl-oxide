@@ -438,7 +438,7 @@ impl<Ctx> Bundle<Ctx> for BitDepth {
                     "Invalid exp_bits per float sample",
                 ));
             }
-            let mantissa_bits = bits_per_sample.wrapping_sub(exp_bits).wrapping_sub(1);
+            let mantissa_bits = bits_per_sample.wrapping_sub(exp_bits + 1);
             if !(2..=23).contains(&mantissa_bits) {
                 return Err(jxl_bitstream::Error::ValidationFailed(
                     "Invalid mantissa_bits per float sample",
