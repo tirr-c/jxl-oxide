@@ -433,9 +433,25 @@ impl<Ctx> Bundle<Ctx> for BitDepth {
         if bitstream.read_bool()? { // float_sample
             let bits_per_sample = read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
             let exp_bits = read_bits!(bitstream, 1 + u(4))?;
+            if !(2..=8).contains(&exp_bits) {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "Invalid exp_bits per float sample",
+                ));
+            }
+            let mantissa_bits = bits_per_sample.wrapping_sub(exp_bits + 1);
+            if !(2..=23).contains(&mantissa_bits) {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "Invalid mantissa_bits per float sample",
+                ));
+            }
             Ok(Self::FloatSample { bits_per_sample, exp_bits })
         } else {
             let bits_per_sample = read_bits!(bitstream, U32(8, 10, 12, 1 + u(6)))?;
+            if bits_per_sample > 31 {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "Invalid bits_per_sample",
+                ));
+            }
             Ok(Self::IntegerSample { bits_per_sample })
         }
     }
