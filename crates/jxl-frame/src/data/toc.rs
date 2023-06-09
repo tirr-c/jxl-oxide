@@ -162,6 +162,12 @@ impl Bundle<&crate::FrameHeader> for Toc {
             1 + ctx.num_lf_groups() + 1 + num_groups * num_passes
         };
 
+        if entry_count > 65536 {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Too many TOC entries"
+            ).into());
+        }
+
         let permutated_toc = bitstream.read_bool()?;
         let permutation = if permutated_toc {
             let mut decoder = jxl_coding::Decoder::parse(bitstream, 8)?;
