@@ -76,6 +76,7 @@ fn run_test<R: std::io::Read>(
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
     let mut renderer = image.renderer();
+    renderer.set_render_spot_colour(false);
 
     let transform = target_icc.map(|target_icc| {
         let source_profile = Profile::new_icc(&renderer.rendered_icc()).expect("failed to parse ICC profile");

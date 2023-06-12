@@ -135,6 +135,7 @@ impl<R: Read> JxlImage<R> {
             image_header: &self.image_header,
             embedded_icc: self.embedded_icc.as_deref(),
             ctx,
+            render_spot_colour: !self.image_header.metadata.grayscale(),
             crop_region: None,
             end_of_image: false,
         }
@@ -157,6 +158,7 @@ pub struct JxlRenderer<'img, R> {
     image_header: &'img ImageHeader,
     embedded_icc: Option<&'img [u8]>,
     ctx: RenderContext<'img>,
+    render_spot_colour: bool,
     crop_region: Option<CropInfo>,
     end_of_image: bool,
 }
@@ -184,6 +186,23 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
     #[inline]
     fn crop_region_flattened(&self) -> Option<(u32, u32, u32, u32)> {
         self.crop_region.map(|info| (info.left, info.top, info.width, info.height))
+    }
+
+    /// Sets whether the spot colour channels will be rendered.
+    #[inline]
+    pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
+        if render_spot_colour && self.image_header.metadata.grayscale() {
+            tracing::warn!("Spot colour channels are not rendered on grayscale images");
+            return self;
+        }
+        self.render_spot_colour = render_spot_colour;
+        self
+    }
+
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_colour(&self) -> bool {
+        self.render_spot_colour
     }
 
     /// Returns the embedded ICC profile.
@@ -272,7 +291,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         let mut grids = self.ctx.render_keyframe_cropped(keyframe_index, region)?;
 
         let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
-        let color_channels: Vec<_> = grids.drain(..color_channels).collect();
+        let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
         let extra_channels: Vec<_> = grids
             .into_iter()
             .zip(&self.image_header.metadata.ec_info)
@@ -282,6 +301,14 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
                 grid,
             })
         .collect();
+
+        if self.render_spot_colour {
+            for ec in &extra_channels {
+                if ec.is_spot_colour() {
+                    jxl_render::render_spot_colour(&mut color_channels, &ec.grid, &ec.ty)?;
+                }
+            }
+        }
 
         let frame = self.ctx.keyframe(keyframe_index).unwrap();
         let frame_header = frame.header();
@@ -496,6 +523,12 @@ impl ExtraChannel {
     #[inline]
     pub fn is_alpha(&self) -> bool {
         matches!(self.ty, ExtraChannelType::Alpha { .. })
+    }
+
+    /// Returns `true` if the channel is a spot colour channel.
+    #[inline]
+    pub fn is_spot_colour(&self) -> bool {
+        matches!(self.ty, ExtraChannelType::SpotColour { .. })
     }
 }
 
