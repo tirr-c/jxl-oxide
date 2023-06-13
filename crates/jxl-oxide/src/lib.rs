@@ -126,6 +126,16 @@ impl<R: Read> JxlImage<R> {
         self.embedded_icc.as_deref()
     }
 
+    /// Returns the ICC profile that describes rendered images.
+    ///
+    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
+    ///   linear sRGB or linear grayscale colorspace.
+    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
+    /// - Else, the profile describes the color encoding signalled in the image header.
+    pub fn rendered_icc(&self) -> Vec<u8> {
+        create_rendered_icc(&self.image_header.metadata, self.embedded_icc.as_deref())
+    }
+
     /// Starts rendering the image.
     #[inline]
     pub fn renderer(&mut self) -> JxlRenderer<'_, R> {
@@ -218,13 +228,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
     /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
     /// - Else, the profile describes the color encoding signalled in the image header.
     pub fn rendered_icc(&self) -> Vec<u8> {
-        if !self.image_header.metadata.xyb_encoded {
-            if let Some(icc) = self.embedded_icc {
-                return icc.to_vec();
-            }
-        }
-
-        jxl_color::icc::colour_encoding_to_icc(&self.image_header.metadata.colour_encoding)
+        create_rendered_icc(&self.image_header.metadata, self.embedded_icc)
     }
 
     /// Returns the pixel format of the rendered image.
@@ -539,4 +543,14 @@ pub struct CropInfo {
     pub height: u32,
     pub left: u32,
     pub top: u32,
+}
+
+fn create_rendered_icc(metadata: &image::ImageMetadata, embedded_icc: Option<&[u8]>) -> Vec<u8> {
+    if !metadata.xyb_encoded {
+        if let Some(icc) = embedded_icc {
+            return icc.to_vec();
+        }
+    }
+
+    jxl_color::icc::colour_encoding_to_icc(&metadata.colour_encoding)
 }
