@@ -225,7 +225,7 @@ pub fn render_spline(
             ).into());
         }
         // Maximum total_estimated_area_reached for Level 5
-        if estimated_area > (8 * image_size + (1u64 << 25)).min(1u64 << 30) {
+        if estimated_area > (1u64 << 30).min(8 * image_size + (1u64 << 25)) {
             tracing::warn!(
                 "Large estimated_area of splines, expect slower decoding: {}",
                 estimated_area
