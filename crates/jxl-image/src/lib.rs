@@ -34,6 +34,13 @@ impl<Ctx> Bundle<Ctx> for ImageHeader {
         let size = SizeHeader::parse(bitstream, ())?;
         let metadata = ImageMetadata::parse(bitstream, ())?;
 
+        if metadata.ec_info.len() > 256 {
+            tracing::error!(num_extra = metadata.ec_info.len(), "num_extra too large");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "num_extra too large"
+            ))
+        }
+
         let tone_mapping = &metadata.tone_mapping;
         if tone_mapping.intensity_target <= 0.0 {
             return Err(jxl_bitstream::Error::ValidationFailed(

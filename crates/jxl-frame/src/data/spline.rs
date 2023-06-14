@@ -27,7 +27,10 @@ impl Bundle<&FrameHeader> for Splines {
 
         let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
         if num_splines > max_num_splines {
-            return Err(crate::Error::TooManySplines(num_splines));
+            tracing::error!(num_splines, max_num_splines, "Too many splines");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "too many splines"
+            ).into());
         }
 
         let mut start_points = vec![(0i32, 0i32); num_splines];
@@ -91,7 +94,10 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
 
         let max_num_points = usize::min(MAX_NUM_CONTROL_POINTS, num_pixels / 2);
         if num_points > max_num_points {
-            return Err(crate::Error::TooManySplinePoints(num_points));
+            tracing::error!(num_points, max_num_points, "Too many spline points");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "too many spline points"
+            ).into())
         }
 
         let mut quant_points = Vec::with_capacity(1 + num_points);

@@ -258,16 +258,50 @@ impl Bundle<ModularParams<'_>> for ModularData {
         params: ModularParams<'_>,
     ) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
+        if header.nb_transforms > 512 {
+            tracing::error!(nb_transforms = header.nb_transforms, "nb_transforms too large");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "nb_transforms too large"
+            ).into());
+        }
+
         let ma_ctx = if header.use_global_tree {
             params.ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.clone()
         } else {
             read_bits!(bitstream, Bundle(ma::MaConfig))?
         };
+        if ma_ctx.tree_depth() > 2048 {
+            tracing::error!(tree_depth = ma_ctx.tree_depth(), "Decoded MA tree is too deep");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "decoded MA tree is too deep"
+            ).into())
+        }
 
         let mut channels = ModularChannels::from_params(&params);
         for transform in &mut header.transform {
             transform.or_default(&mut channels);
             transform.transform_channel_info(&mut channels)?;
+        }
+
+        if channels.info.len() > (1 << 16) {
+            tracing::error!(nb_channels_tr = channels.info.len(), "nb_channels_tr too large");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "nb_channels_tr too large"
+            ).into());
+        }
+
+        if !header.use_global_tree {
+            let num_local_samples: u64 = channels.info.iter()
+                .map(|ch| (ch.width as u64 * ch.height as u64))
+                .sum();
+            let local_ma_nodes = ma_ctx.num_tree_nodes();
+            let max_local_ma_nodes = (1 << 20).min(1024 + num_local_samples) as usize;
+            if ma_ctx.num_tree_nodes() > max_local_ma_nodes {
+                tracing::error!(local_ma_nodes, max_local_ma_nodes, "Too many local MA tree nodes");
+                return Err(jxl_bitstream::Error::ProfileConformance(
+                    "too many local MA tree nodes"
+                ).into());
+            }
         }
 
         let image = Image::new(channels.clone(), params.group_dim, params.bit_depth);

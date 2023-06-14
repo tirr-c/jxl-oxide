@@ -9,8 +9,6 @@ pub enum Error {
     IncompleteFrameData {
         field: &'static str,
     },
-    TooManySplines(usize),
-    TooManySplinePoints(usize),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -46,8 +44,6 @@ impl std::fmt::Display for Error {
             Self::VarDct(err) => write!(f, "vardct error: {}", err),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
             Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
-            Self::TooManySplines(num) => write!(f, "Too many splines: {}", num),
-            Self::TooManySplinePoints(num) => write!(f, "Too many spline control points: {}", num),
         }
     }
 }

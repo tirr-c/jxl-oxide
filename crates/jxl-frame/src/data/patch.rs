@@ -3,7 +3,7 @@ use std::io::Read;
 use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
 use jxl_image::ImageHeader;
 
-use crate::Result;
+use crate::{Result, FrameHeader};
 
 #[derive(Debug)]
 pub struct Patches {
@@ -74,10 +74,13 @@ impl PatchBlendMode {
     }
 }
 
-impl Bundle<&ImageHeader> for Patches {
+impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: &ImageHeader) -> Result<Self> {
+    fn parse<R: Read>(
+        bitstream: &mut Bitstream<R>,
+        (image_header, frame_header): (&ImageHeader, &FrameHeader),
+    ) -> Result<Self> {
         let num_extra = image_header.metadata.ec_info.len();
         let alpha_channel_indices = image_header.metadata.ec_info.iter()
             .enumerate()
@@ -88,6 +91,14 @@ impl Bundle<&ImageHeader> for Patches {
         decoder.begin(bitstream)?;
 
         let num_patches = decoder.read_varint(bitstream, 0)?;
+        let max_num_patches = (1 << 24).min((frame_header.width as u64 * frame_header.height as u64 / 16) as u32);
+        if num_patches > max_num_patches {
+            tracing::error!(num_patches, max_num_patches, "Too many patches");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "too many patches"
+            ).into());
+        }
+
         let patches = std::iter::repeat_with(|| -> Result<_> {
             let ref_idx = decoder.read_varint(bitstream, 1)?;
             let x0 = decoder.read_varint(bitstream, 3)?;

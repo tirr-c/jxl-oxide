@@ -371,7 +371,7 @@ impl Frame<'_> {
         progressive: bool,
         mut filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
     ) -> Result<ProgressiveResult> {
-        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_with_filter");
+        let span = tracing::span!(tracing::Level::TRACE, "Load with filter");
         let _guard = span.enter();
 
         if self.plan.is_empty() {
@@ -410,7 +410,7 @@ impl Frame<'_> {
         bitstream: &mut Bitstream<R>,
         region: Option<(u32, u32, u32, u32)>,
     ) -> Result<()> {
-        let span = tracing::span!(tracing::Level::TRACE, "Frame::load_cropped");
+        let span = tracing::span!(tracing::Level::TRACE, "Load cropped");
         let _guard = span.enter();
 
         self.load_with_filter(bitstream, false, crop_filter(region)).map(drop)
@@ -427,7 +427,7 @@ impl Frame<'_> {
         instr: GroupInstr,
         mut filter_fn: impl FnMut(&FrameHeader, &FrameData, TocGroupKind) -> bool,
     ) -> Result<()> {
-        let span = tracing::span!(tracing::Level::TRACE, "Frame::process_instr", instr = format_args!("{:?}", instr));
+        let span = tracing::span!(tracing::Level::TRACE, "Process instruction", instr = format_args!("{:?}", instr));
         let _guard = span.enter();
 
         match instr {
@@ -564,6 +564,8 @@ impl FrameData {
         image_header: &ImageHeader,
         frame_header: &FrameHeader,
     ) -> Result<LfGlobal> {
+        let span = tracing::span!(tracing::Level::TRACE, "Decode LfGlobal");
+        let _guard = span.enter();
         read_bits!(bitstream, Bundle(LfGlobal), (image_header, frame_header))
     }
 
@@ -574,6 +576,8 @@ impl FrameData {
         lf_group_idx: u32,
         frame_header: &FrameHeader,
     ) -> Result<LfGroup> {
+        let span = tracing::span!(tracing::Level::TRACE, "Decode LfGroup", lf_group_idx);
+        let _guard = span.enter();
         let lf_group_params = LfGroupParams::new(frame_header, lf_global, lf_group_idx);
         read_bits!(bitstream, Bundle(LfGroup), lf_group_params)
     }
@@ -587,6 +591,8 @@ impl FrameData {
     ) -> Result<Option<HfGlobal>> {
         let has_hf_global = frame_header.encoding == crate::header::Encoding::VarDct;
         let hf_global = if has_hf_global {
+            let span = tracing::span!(tracing::Level::TRACE, "Decode HfGlobal");
+            let _guard = span.enter();
             let params = HfGlobalParams::new(&image_header.metadata, frame_header, lf_global);
             Some(HfGlobal::parse(bitstream, params)?)
         } else {
@@ -607,6 +613,8 @@ impl FrameData {
         shift: Option<(i32, i32)>,
         frame_header: &FrameHeader,
     ) -> Result<PassGroup> {
+        let span = tracing::span!(tracing::Level::TRACE, "Decode PassGroup", pass_idx, group_idx);
+        let _guard = span.enter();
         let params = PassGroupParams::new(
             frame_header,
             lf_global,

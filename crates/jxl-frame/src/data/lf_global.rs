@@ -35,7 +35,10 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
         let patches = header.flags.patches().then(|| -> Result<_> {
-            let patches = Patches::parse(bitstream, image_header)?;
+            let span = tracing::span!(tracing::Level::TRACE, "Decode Patches");
+            let _guard = span.enter();
+
+            let patches = Patches::parse(bitstream, (image_header, header))?;
             let it = patches
                 .patches
                 .iter()
@@ -54,9 +57,15 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
             Ok(patches)
         }).transpose()?;
         let splines = header.flags.splines().then(|| {
+            let span = tracing::span!(tracing::Level::TRACE, "Decode Splines");
+            let _guard = span.enter();
+
             Splines::parse(bitstream, header)
         }).transpose()?;
         let noise = header.flags.noise().then(|| {
+            let span = tracing::span!(tracing::Level::TRACE, "Decode Noise");
+            let _guard = span.enter();
+
             NoiseParameters::parse(bitstream, ())
         }).transpose()?;
         let lf_dequant = read_bits!(bitstream, Bundle(LfChannelDequantization))?;
@@ -112,9 +121,13 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
     type Error = crate::Error;
 
     fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
+        let _guard = span.enter();
+
         let ma_config = bitstream.read_bool()?
             .then(|| read_bits!(bitstream, Bundle(MaConfig)))
             .transpose()?;
+
         let mut shifts = Vec::new();
         if header.encoding == Encoding::Modular {
             let width = header.color_sample_width();
@@ -138,6 +151,19 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
             let height = header.sample_height(ec_upsampling);
             let shift = ChannelShift::from_shift(ec_info.dim_shift);
             shifts.push(ModularChannelParams::with_shift(width, height, shift));
+        }
+
+        if let Some(ma_config) = &ma_config {
+            let num_channels = shifts.len() as u64;
+            let max_global_ma_nodes = 1024 + header.width as u64 * header.height as u64 * num_channels / 16;
+            let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
+            let global_ma_nodes = ma_config.num_tree_nodes();
+            if global_ma_nodes > max_global_ma_nodes {
+                tracing::error!(global_ma_nodes, max_global_ma_nodes, "Too many global MA tree nodes");
+                return Err(jxl_bitstream::Error::ProfileConformance(
+                    "too many global MA tree nodes"
+                ).into());
+            }
         }
 
         let group_dim = header.group_dim();
