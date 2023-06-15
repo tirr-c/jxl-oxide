@@ -14,6 +14,8 @@ use super::predictor::{Predictor, Properties};
 /// information of an entropy decoder. These components are read from the bitstream.
 #[derive(Debug, Clone)]
 pub struct MaConfig {
+    num_tree_nodes: usize,
+    tree_depth: usize,
     tree: Arc<MaTreeNode>,
     decoder: Decoder,
 }
@@ -35,6 +37,20 @@ impl MaConfig {
         let mut nodes = Vec::new();
         self.tree.flatten(channel, stream_idx, &mut nodes);
         FlatMaTree::new(nodes)
+    }
+}
+
+impl MaConfig {
+    /// Returns the number of MA tree nodes.
+    #[inline]
+    pub fn num_tree_nodes(&self) -> usize {
+        self.num_tree_nodes
+    }
+
+    /// Returns the maximum distance from root to any leaf node.
+    #[inline]
+    pub fn tree_depth(&self) -> usize {
+        self.tree_depth
     }
 }
 
@@ -97,33 +113,39 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
             nodes.push(node);
         }
         tree_decoder.finalize()?;
+        let num_tree_nodes = nodes.len();
         let decoder = Decoder::parse(bitstream, ctx)?;
         let cluster_map = decoder.cluster_map();
 
-        let mut tmp = VecDeque::new();
+        let mut tmp = VecDeque::<(_, usize)>::new();
         for node in nodes.into_iter().rev() {
             match node {
                 FoldingTree::Decision(property, value) => {
-                    let right = tmp.pop_front().unwrap();
-                    let left = tmp.pop_front().unwrap();
-                    tmp.push_back(MaTreeNode::Decision {
-                        property,
-                        value,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    });
+                    let (right, dr) = tmp.pop_front().unwrap();
+                    let (left, dl) = tmp.pop_front().unwrap();
+                    tmp.push_back((
+                        MaTreeNode::Decision {
+                            property,
+                            value,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        dr.max(dl) + 1,
+                    ));
                 },
                 FoldingTree::Leaf(FoldingTreeLeaf { ctx, predictor, offset, multiplier }) => {
                     let cluster = cluster_map[ctx as usize];
                     let leaf = MaTreeLeafClustered { cluster, predictor, offset, multiplier };
-                    tmp.push_back(MaTreeNode::Leaf(leaf));
+                    tmp.push_back((MaTreeNode::Leaf(leaf), 0usize));
                 },
             }
         }
         assert_eq!(tmp.len(), 1);
-        let tree = tmp.pop_front().unwrap();
+        let (tree, tree_depth) = tmp.pop_front().unwrap();
 
         Ok(Self {
+            num_tree_nodes,
+            tree_depth,
             tree: Arc::new(tree),
             decoder,
         })

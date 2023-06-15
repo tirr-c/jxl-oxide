@@ -10,7 +10,6 @@ pub enum Error {
     InvalidReference(u32),
     NotReady,
     NotSupported(&'static str),
-    TooLargeEstimatedArea(u64),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -51,7 +50,6 @@ impl std::fmt::Display for Error {
             InvalidReference(idx) => write!(f, "invalid reference {idx}"),
             NotReady => write!(f, "image is not ready to be rendered"),
             NotSupported(msg) => write!(f, "not supported: {}", msg),
-            TooLargeEstimatedArea(area) => write!(f, "Too large estimated area for splines: {}", area),
         }
     }
 }

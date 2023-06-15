@@ -217,11 +217,15 @@ pub fn render_spline(
             &mut estimated_area,
         );
         // Maximum total_estimated_area_reached for Level 10
-        if estimated_area > (1024 * image_size + (1u64 << 32)).min(1u64 << 42) {
-            return Err(crate::Error::TooLargeEstimatedArea(estimated_area));
+        let max_estimated_area = (1u64 << 42).min(1024 * image_size + (1u64 << 32));
+        if estimated_area > max_estimated_area {
+            tracing::error!(estimated_area, max_estimated_area, "Too large estimated area for splines");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "too large estimated area for splines"
+            ).into());
         }
         // Maximum total_estimated_area_reached for Level 5
-        if estimated_area > (8 * image_size + (1u64 << 25)).min(1u64 << 30) {
+        if estimated_area > (1u64 << 30).min(8 * image_size + (1u64 << 25)) {
             tracing::warn!(
                 "Large estimated_area of splines, expect slower decoding: {}",
                 estimated_area

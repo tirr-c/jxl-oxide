@@ -30,7 +30,7 @@ pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8
     if enc_size > (1 << 28) {
         // Avoids allocating too much memory (>256MiB)
         // Maximum ICC output_size for Level 10
-        return Err(jxl_bitstream::Error::ValidationFailed(
+        return Err(jxl_bitstream::Error::ProfileConformance(
             "Too large encoded ICC profile"
         ).into())
     }
