@@ -24,7 +24,7 @@ version = "0.3.1"
 path = "../jxl-color"
 
 [dependencies.jxl-frame]
-version = "0.3.0"
+version = "0.4.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
