@@ -149,6 +149,7 @@ impl Decoder {
         self.inner.code.finalize()
     }
 
+    /// Returns the cluster mapping of distributions.
     pub fn cluster_map(&self) -> &[u8] {
         &self.inner.clusters
     }
