@@ -1,4 +1,8 @@
 # jxl-oxide
+[![crates.io](https://img.shields.io/crates/v/jxl-oxide.svg)](https://crates.io/crates/jxl-oxide)
+[![docs.rs](https://docs.rs/jxl-oxide/badge.svg)](https://docs.rs/crate/jxl-oxide/)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/tirr-c/jxl-oxide/build.yml?branch=main)](https://github.com/tirr-c/jxl-oxide/actions/workflows/build.yml?query=branch%3Amain)
+
 JPEG XL decoder written in pure Rust.
 
 jxl-oxide consists of small library crates (`jxl-bitstream`, `jxl-coding`, ...), a blanket library
