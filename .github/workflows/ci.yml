@@ -17,17 +17,43 @@ jobs:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
+        with:
+          components: 'llvm-tools-preview'
       - uses: actions/cache@v3
         with:
           path: |
+            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.18-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.18-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - run: cargo test --release
+      - name: Install grcov
+        run: cargo install grcov --version 0.8.18
+      - name: Run tests
+        run: cargo test --no-fail-fast
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Cinstrument-coverage'
+          RUSTDOCFLAGS: '-Cinstrument-coverage'
+      - name: Run grcov
+        run: |
+          grcov . --binary-path target/debug/deps/ -s . -t lcov --branch \
+            --ignore-not-existing --ignore '../**' --ignore '/*' \
+            -o coverage.lcov
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.lcov
+          flags: rust
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   clippy:
     name: Clippy
