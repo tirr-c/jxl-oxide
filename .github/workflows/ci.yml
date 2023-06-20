@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
         with:
           components: 'llvm-tools-preview'
@@ -58,17 +58,21 @@ jobs:
             ${{ runner.os }}-dot-cargo-
       - name: Install grcov
         run: cargo install grcov --version 0.8.18
+      - name: Build
+        run: cargo build
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
       - name: Run tests
         run: cargo test --no-fail-fast
         env:
           CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Cinstrument-coverage'
-          RUSTDOCFLAGS: '-Cinstrument-coverage'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
+          RUSTDOCFLAGS: '-Cpanic=abort'
       - name: Run grcov
         run: |
-          grcov . --binary-path target/debug/deps/ -s . -t lcov --branch \
-            --ignore-not-existing --ignore '../**' --ignore '/*' \
-            -o coverage.lcov
+          zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" \) -print`
+          grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore '../**' --ignore "/*" -o coverage.lcov
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
         with:
