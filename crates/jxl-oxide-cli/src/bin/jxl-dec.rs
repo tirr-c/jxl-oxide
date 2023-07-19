@@ -39,8 +39,8 @@ struct Args {
     #[arg(long, value_parser = parse_crop_info)]
     crop: Option<CropInfo>,
     /// Format to output
-    #[arg(value_enum, short = 'f', long)]
-    output_format: Option<OutputFormat>,
+    #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
+    output_format: OutputFormat,
     #[arg(short, long)]
     verbose: bool,
 }
@@ -189,8 +189,7 @@ fn main() {
     tracing::info!("Took {:.2} ms", elapsed_ms);
 
     if let Some(output) = &args.output {
-        let output_format = args.output_format.unwrap_or(OutputFormat::Png);
-        tracing::debug!(output_format = format_args!("{:?}", output_format));
+        tracing::debug!(output_format = format_args!("{:?}", args.output_format));
 
         // Color encoding information
         let pixfmt = renderer.pixel_format();
@@ -216,7 +215,7 @@ fn main() {
         };
         encoder.set_color(color_type);
 
-        let sixteen_bits = match output_format {
+        let sixteen_bits = match args.output_format {
             OutputFormat::Png => metadata.bit_depth.bits_per_sample() > 8,
             OutputFormat::Png8 => false,
             OutputFormat::Png16 => true,
