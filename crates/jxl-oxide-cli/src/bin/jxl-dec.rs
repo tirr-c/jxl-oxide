@@ -38,8 +38,21 @@ struct Args {
     input: PathBuf,
     #[arg(long, value_parser = parse_crop_info)]
     crop: Option<CropInfo>,
+    /// Format to output
+    #[arg(value_enum, short = 'f', long)]
+    output_format: Option<OutputFormat>,
     #[arg(short, long)]
     verbose: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum OutputFormat {
+    /// PNG, respects bit depth information.
+    Png,
+    /// PNG, always 8-bit.
+    Png8,
+    /// PNG, always 16-bit.
+    Png16,
 }
 
 fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
@@ -176,6 +189,9 @@ fn main() {
     tracing::info!("Took {:.2} ms", elapsed_ms);
 
     if let Some(output) = &args.output {
+        let output_format = args.output_format.unwrap_or(OutputFormat::Png);
+        tracing::debug!(output_format = format_args!("{:?}", output_format));
+
         // Color encoding information
         let pixfmt = renderer.pixel_format();
         let source_icc = renderer.rendered_icc();
@@ -200,7 +216,11 @@ fn main() {
         };
         encoder.set_color(color_type);
 
-        let sixteen_bits = metadata.bit_depth.bits_per_sample() > 8;
+        let sixteen_bits = match output_format {
+            OutputFormat::Png => metadata.bit_depth.bits_per_sample() > 8,
+            OutputFormat::Png8 => false,
+            OutputFormat::Png16 => true,
+        };
         if sixteen_bits {
             encoder.set_depth(png::BitDepth::Sixteen);
         } else {
