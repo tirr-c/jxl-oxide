@@ -281,16 +281,16 @@ fn main() {
             } else {
                 Some((icc, None))
             }
-        } else if colour_encoding.is_srgb() {
-            encoder.set_srgb(match colour_encoding.rendering_intent {
-                RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
-                RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
-                RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
-                RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
-            });
-
-            None
         } else {
+            if colour_encoding.is_srgb() {
+                encoder.set_srgb(match colour_encoding.rendering_intent {
+                    RenderingIntent::Perceptual => png::SrgbRenderingIntent::Perceptual,
+                    RenderingIntent::Relative => png::SrgbRenderingIntent::RelativeColorimetric,
+                    RenderingIntent::Saturation => png::SrgbRenderingIntent::Saturation,
+                    RenderingIntent::Absolute => png::SrgbRenderingIntent::AbsoluteColorimetric,
+                });
+            }
+
             // TODO: emit gAMA and cHRM
             Some((&*source_icc, cicp))
         };
