@@ -126,7 +126,7 @@ fn main() {
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
 
     if let Some(icc_path) = &args.icc_output {
-        tracing::info!("Writing ICC profile");
+        tracing::debug!("Writing ICC profile");
         std::fs::write(icc_path, image.rendered_icc()).expect("Failed to write ICC profile");
     }
 
@@ -436,6 +436,7 @@ fn write_npy<R: Read, W: Write>(
     output.write_all(&(header.len() as u16).to_le_bytes()).unwrap();
     output.write_all(header.as_bytes()).unwrap();
 
+    tracing::debug!("Writing image data");
     for keyframe in keyframes {
         let fb = keyframe.image();
         for sample in fb.buf() {
