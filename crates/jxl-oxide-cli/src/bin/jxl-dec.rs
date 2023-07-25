@@ -173,6 +173,9 @@ fn main() {
 
     let mut keyframes = Vec::new();
     let mut renderer = image.renderer();
+    if args.output_format == OutputFormat::Npy {
+        renderer.set_render_spot_colour(false);
+    }
     loop {
         let result = renderer.render_next_frame().expect("rendering frames failed");
         match result {
@@ -438,7 +441,12 @@ fn write_npy<R: Read, W: Write>(
 
     tracing::debug!("Writing image data");
     for keyframe in keyframes {
-        let fb = keyframe.image();
+        let mut channels = keyframe.color_channels().to_vec();
+        for ch in keyframe.extra_channels() {
+            channels.push(ch.grid().clone());
+        }
+        let fb = FrameBuffer::from_grids(&channels, metadata.orientation);
+
         for sample in fb.buf() {
             output.write_all(&sample.to_bits().to_le_bytes()).unwrap();
         }
