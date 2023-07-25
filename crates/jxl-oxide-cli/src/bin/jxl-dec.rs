@@ -126,12 +126,8 @@ fn main() {
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
 
     if let Some(icc_path) = &args.icc_output {
-        if let Some(icc) = image.embedded_icc() {
-            tracing::info!("Writing ICC profile");
-            std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
-        } else {
-            tracing::warn!("Input does not have embedded ICC profile, ignoring --icc-output");
-        }
+        tracing::info!("Writing ICC profile");
+        std::fs::write(icc_path, image.rendered_icc()).expect("Failed to write ICC profile");
     }
 
     let mut crop = args.crop.and_then(|crop| {
