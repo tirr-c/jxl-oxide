@@ -154,7 +154,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
         }
 
         if let Some(ma_config) = &ma_config {
-            let num_channels = shifts.len() as u64;
+            let num_channels = (image_header.metadata.encoded_color_channels() + image_header.metadata.ec_info.len()) as u64;
             let max_global_ma_nodes = 1024 + header.width as u64 * header.height as u64 * num_channels / 16;
             let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
             let global_ma_nodes = ma_config.num_tree_nodes();
