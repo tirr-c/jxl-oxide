@@ -1,19 +1,19 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::Read,
+    sync::Arc,
 };
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
+    data::*,
     filter::Gabor,
     header::{Encoding, FrameType},
     Frame,
-    ProgressiveResult,
 };
-use jxl_grid::SimpleGrid;
+use jxl_grid::{SimpleGrid, CutGrid};
 use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::ChannelShift;
-use jxl_vardct::HfCoeff;
 
 use crate::{
     blend,
@@ -27,20 +27,20 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ContextInner<'a> {
-    image_header: &'a ImageHeader,
-    pub(crate) frames: Vec<IndexedFrame<'a>>,
+pub struct ContextInner {
+    image_header: Arc<ImageHeader>,
+    pub(crate) frames: Vec<IndexedFrame>,
     pub(crate) keyframes: Vec<usize>,
     pub(crate) keyframe_in_progress: Option<usize>,
     pub(crate) refcounts: Vec<usize>,
     pub(crate) frame_deps: Vec<FrameDependence>,
     pub(crate) lf_frame: [usize; 4],
     pub(crate) reference: [usize; 4],
-    pub(crate) loading_frame: Option<IndexedFrame<'a>>,
+    pub(crate) loading_frame: Option<IndexedFrame>,
 }
 
-impl<'a> ContextInner<'a> {
-    pub fn new(image_header: &'a ImageHeader) -> Self {
+impl ContextInner {
+    pub fn new(image_header: Arc<ImageHeader>) -> Self {
         Self {
             image_header,
             frames: Vec::new(),
@@ -55,7 +55,7 @@ impl<'a> ContextInner<'a> {
     }
 }
 
-impl<'a> ContextInner<'a> {
+impl ContextInner {
     #[inline]
     pub fn width(&self) -> u32 {
         self.image_header.size.width
@@ -67,7 +67,7 @@ impl<'a> ContextInner<'a> {
     }
 
     #[inline]
-    pub fn metadata(&self) -> &'a ImageMetadata {
+    pub fn metadata(&self) -> &ImageMetadata {
         &self.image_header.metadata
     }
 
@@ -81,7 +81,7 @@ impl<'a> ContextInner<'a> {
         self.keyframes.len() + (self.keyframe_in_progress.is_some() as usize)
     }
 
-    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame<'a>> {
+    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame> {
         if keyframe_idx == self.keyframes.len() {
             if let Some(idx) = self.keyframe_in_progress {
                 Some(&self.frames[idx])
@@ -145,20 +145,18 @@ impl<'a> ContextInner<'a> {
     }
 }
 
-impl ContextInner<'_> {
-    pub fn load_cropped_single<R: Read>(
+impl ContextInner {
+    pub fn load_single<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
-        progressive: bool,
-        mut region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<(ProgressiveResult, &IndexedFrame)> {
-        let image_header = self.image_header;
+    ) -> Result<&IndexedFrame> {
+        let image_header = &self.image_header;
 
         let frame = match &mut self.loading_frame {
             Some(frame) => frame,
             slot => {
                 let mut bitstream = bitstream.rewindable();
-                let frame = Frame::parse(&mut bitstream, image_header)?;
+                let frame = Frame::parse(&mut bitstream, image_header.clone())?;
                 bitstream.commit();
                 *slot = Some(IndexedFrame::new(frame, self.frames.len()));
                 slot.as_mut().unwrap()
@@ -182,30 +180,15 @@ impl ContextInner<'_> {
             return Err(Error::UninitializedLfFrame(header.lf_level));
         }
 
-        if let Some(region) = &mut region {
-            frame.adjust_region(region);
-        };
-        let filter = if region.is_some() {
-            Box::new(jxl_frame::crop_filter(region)) as Box<dyn FnMut(&_, &_, _) -> bool>
-        } else {
-            Box::new(|_: &_, _: &_, _| true)
-        };
-
-        let result = if header.frame_type == FrameType::RegularFrame {
-            frame.load_with_filter(bitstream, progressive, filter)?
-        } else {
-            frame.load_all(bitstream)?;
-            ProgressiveResult::FrameComplete
-        };
-
-        Ok((result, frame))
+        frame.read_all(bitstream)?;
+        Ok(frame)
     }
 }
 
-impl<'f> ContextInner<'f> {
+impl ContextInner {
     pub fn render_frame<'a>(
         &'a self,
-        frame: &'a IndexedFrame<'f>,
+        frame: &'a IndexedFrame,
         reference_frames: ReferenceFrames<'a>,
         cache: &mut RenderCache,
         mut region: Option<(u32, u32, u32, u32)>,
@@ -215,7 +198,7 @@ impl<'f> ContextInner<'f> {
             frame.adjust_region(region);
         }
 
-        let mut fb = match frame_header.encoding {
+        let (mut fb, gmodular) = match frame_header.encoding {
             Encoding::Modular => self.render_modular(frame, cache, region),
             Encoding::VarDct => self.render_vardct(frame, reference_frames.lf, cache, region),
         }?;
@@ -227,13 +210,13 @@ impl<'f> ContextInner<'f> {
         if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf([a, b, c], &frame.data().lf_group, frame_header);
+        filter::apply_epf([a, b, c], &cache.lf_groups, frame_header);
 
         let [a, b, c] = fb;
         let mut ret = vec![a, b, c];
-        self.append_extra_channels(frame, &mut ret);
+        self.append_extra_channels(frame, &mut ret, gmodular);
 
-        self.render_features(frame, &mut ret, reference_frames.refs)?;
+        self.render_features(frame, &mut ret, reference_frames.refs, cache)?;
 
         if !frame_header.save_before_ct {
             if frame_header.do_ycbcr {
@@ -267,21 +250,20 @@ impl<'f> ContextInner<'f> {
             }
             cropped
         } else {
-            blend::blend(self.image_header, reference_frames.refs, frame, &ret)
+            blend::blend(&self.image_header, reference_frames.refs, frame, &ret)
         })
     }
 
     fn append_extra_channels<'a>(
         &'a self,
-        frame: &'a IndexedFrame<'f>,
+        frame: &'a IndexedFrame,
         fb: &mut Vec<SimpleGrid<f32>>,
+        gmodular: GlobalModular,
     ) {
         tracing::debug!("Attaching extra channels");
 
-        let frame_data = frame.data();
-        let lf_global = frame_data.lf_global.as_ref().unwrap();
-        let extra_channel_from = lf_global.gmodular.extra_channel_from();
-        let gmodular = &lf_global.gmodular.modular;
+        let extra_channel_from = gmodular.extra_channel_from();
+        let gmodular = &gmodular.modular;
 
         let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
 
@@ -319,13 +301,13 @@ impl<'f> ContextInner<'f> {
 
     fn render_features<'a>(
         &'a self,
-        frame: &'a IndexedFrame<'f>,
+        frame: &'a IndexedFrame,
         grid: &mut [SimpleGrid<f32>],
         reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
+        cache: &mut RenderCache,
     ) -> Result<()> {
-        let frame_data = frame.data();
         let frame_header = frame.header();
-        let lf_global = frame_data.lf_global.as_ref().unwrap();
+        let lf_global = cache.lf_global.as_ref().unwrap();
         let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
             (
                 x.lf_chan_corr.base_correlation_x,
@@ -334,7 +316,7 @@ impl<'f> ContextInner<'f> {
         });
 
         for (idx, g) in grid.iter_mut().enumerate() {
-            features::upsample(g, self.image_header, frame_header, idx);
+            features::upsample(g, &self.image_header, frame_header, idx);
         }
 
         if let Some(patches) = &lf_global.patches {
@@ -342,7 +324,7 @@ impl<'f> ContextInner<'f> {
                 let Some(ref_grid) = reference_grids[patch.ref_idx as usize] else {
                     return Err(Error::InvalidReference(patch.ref_idx));
                 };
-                blend::patch(self.image_header, grid, ref_grid, patch);
+                blend::patch(&self.image_header, grid, ref_grid, patch);
             }
         }
 
@@ -413,23 +395,28 @@ impl<'f> ContextInner<'f> {
 
     fn render_modular<'a>(
         &'a self,
-        frame: &'a IndexedFrame<'f>,
-        _cache: &mut RenderCache,
+        frame: &'a IndexedFrame,
+        cache: &mut RenderCache,
         _region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<[SimpleGrid<f32>; 3]> {
+    ) -> Result<([SimpleGrid<f32>; 3], GlobalModular)> {
         let metadata = self.metadata();
         let xyb_encoded = self.xyb_encoded();
         let frame_header = frame.header();
-        let frame_data = frame.data();
-        let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
-        let gmodular = &lf_global.gmodular.modular;
+
+        let lf_global = if let Some(x) = &cache.lf_global {
+            x
+        } else {
+            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+            cache.lf_global = Some(lf_global);
+            cache.lf_global.as_ref().unwrap()
+        };
+        let mut gmodular = lf_global.gmodular.clone();
+
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr = [0, 1, 2].map(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
         let channels = metadata.encoded_color_channels();
-
-        let channel_data = &gmodular.image().channel_data()[..channels];
 
         let width = frame_header.color_sample_width() as usize;
         let height = frame_header.color_sample_height() as usize;
@@ -439,6 +426,34 @@ impl<'f> ContextInner<'f> {
             SimpleGrid::new(width, height),
             SimpleGrid::new(width, height),
         ];
+
+        let lf_groups = &mut cache.lf_groups;
+        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
+
+        for pass_idx in 0..frame_header.passes.num_passes {
+            for group_idx in 0..frame_header.num_groups() {
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
+                let Some(mut bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+
+                let shift = frame.pass_shifts(pass_idx);
+                decode_pass_group(
+                    &mut bitstream,
+                    PassGroupParams {
+                        frame_header,
+                        lf_group,
+                        pass_idx,
+                        group_idx,
+                        shift,
+                        gmodular: &mut gmodular,
+                        vardct: None,
+                    },
+                )?;
+            }
+        }
+
+        gmodular.modular.inverse_transform();
+        let channel_data = gmodular.modular.image().channel_data();
 
         for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.iter_mut()) {
             let buffer = buffer.buf_mut();
@@ -487,56 +502,44 @@ impl<'f> ContextInner<'f> {
             }
         }
 
-        Ok(fb_xyb)
+        Ok((fb_xyb, gmodular))
     }
 
     fn render_vardct<'a>(
         &'a self,
-        frame: &'a IndexedFrame<'f>,
+        frame: &'a IndexedFrame,
         lf_frame: Option<&'a [SimpleGrid<f32>]>,
         cache: &mut RenderCache,
-        region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<[SimpleGrid<f32>; 3]> {
+        _region: Option<(u32, u32, u32, u32)>,
+    ) -> Result<([SimpleGrid<f32>; 3], GlobalModular)> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_vardct");
         let _guard = span.enter();
 
-        let metadata = self.metadata();
         let frame_header = frame.header();
-        let frame_data = frame.data();
-        let lf_global = frame_data.lf_global.as_ref().ok_or(Error::IncompleteFrame)?;
+
+        let lf_global = if let Some(x) = &cache.lf_global {
+            x
+        } else {
+            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+            cache.lf_global = Some(lf_global);
+            cache.lf_global.as_ref().unwrap()
+        };
+        let mut gmodular = lf_global.gmodular.clone();
         let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
-        let hf_global = frame_data.hf_global.as_ref().ok_or(Error::IncompleteFrame)?;
-        let hf_global = hf_global.as_ref().expect("HfGlobal not found for VarDCT frame");
+
+        let hf_global = if let Some(x) = &cache.hf_global {
+            x
+        } else {
+            let hf_global = frame.try_parse_hf_global(Some(lf_global)).ok_or(Error::IncompleteFrame)??;
+            cache.hf_global = Some(hf_global);
+            cache.hf_global.as_ref().unwrap()
+        };
+
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
         });
         let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
-
-        // Modular extra channels are already merged into GlobalModular,
-        // so it's okay to drop PassGroup modular
-        for (&(pass_idx, group_idx), group_pass) in &frame_data.group_pass {
-            if let Some(region) = region {
-                if !frame_header.is_group_collides_region(group_idx, region) {
-                    continue;
-                }
-            }
-            if !cache.coeff_merged.insert((pass_idx, group_idx)) {
-                continue;
-            }
-
-            let hf_coeff = group_pass.hf_coeff.as_ref().unwrap();
-            cache.group_coeffs
-                .entry(group_idx as usize)
-                .or_insert_with(HfCoeff::empty)
-                .merge(hf_coeff);
-        }
-        let group_coeffs = &cache.group_coeffs;
-
-        let quantizer = &lf_global_vardct.quantizer;
-        let oim = &metadata.opsin_inverse_matrix;
-        let dequant_matrices = &hf_global.dequant_matrices;
-        let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
 
         let width = frame_header.color_sample_width() as usize;
         let height = frame_header.color_sample_height() as usize;
@@ -559,171 +562,138 @@ impl<'f> ContextInner<'f> {
             SimpleGrid::new(width_rounded, height_rounded),
         ];
 
-        let mut subgrids = {
-            let [x, y, b] = &mut fb_xyb;
-            let group_dim = frame_header.group_dim() as usize;
-            [
-                cut_grid::cut_with_block_info(x, group_coeffs, group_dim, shifts_cbycr[0]),
-                cut_grid::cut_with_block_info(y, group_coeffs, group_dim, shifts_cbycr[1]),
-                cut_grid::cut_with_block_info(b, group_coeffs, group_dim, shifts_cbycr[2]),
-            ]
-        };
+        let lf_groups = &mut cache.lf_groups;
+        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
 
-        let lf_group_it = frame_data.lf_group
-            .iter()
-            .filter(|(&lf_group_idx, _)| {
-                let Some(region) = region else { return true; };
-                frame_header.is_lf_group_collides_region(lf_group_idx, region)
-            });
-        let mut hf_meta_map = HashMap::new();
-        let mut lf_image_changed = false;
-        for (&lf_group_idx, data) in lf_group_it {
-            let group_x = lf_group_idx % frame_header.lf_groups_per_row();
-            let group_y = lf_group_idx / frame_header.lf_groups_per_row();
+        let mut lf_xyb_buf;
+        let lf_xyb;
+        if let Some(x) = lf_frame {
+            lf_xyb = x;
+        } else {
+            lf_xyb_buf = [
+                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
+                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
+                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
+            ];
+            for idx in 0..frame_header.num_lf_groups() {
+                let Some(lf_group) = lf_groups.get(&idx) else { continue; };
 
-            let lf_group_idx = lf_group_idx as usize;
-            hf_meta_map.insert(lf_group_idx, data.hf_meta.as_ref().unwrap());
+                let lf_group_x = idx % frame_header.lf_groups_per_row();
+                let lf_group_y = idx / frame_header.lf_groups_per_row();
+                let left = lf_group_x * frame_header.group_dim();
+                let top = lf_group_y * frame_header.group_dim();
 
-            if lf_frame.is_some() {
-                continue;
-            }
-            if !cache.inserted_lf_groups.insert(lf_group_idx) {
-                continue;
-            }
+                let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
+                let channel_data = lf_coeff.lf_quant.image().channel_data();
 
-            let group_dim = frame_header.group_dim();
-            let lf_coeff = data.lf_coeff.as_ref().unwrap();
-            let quant_channel_data = lf_coeff.lf_quant.image().channel_data();
-            let [lf_x, lf_y, lf_b] = &mut cache.dequantized_lf;
+                let [lf_x, lf_y, lf_b] = &mut lf_xyb_buf;
+                let lf_x = cut_grid::make_quant_cut_grid(lf_x, left as usize, top as usize, shifts_cbycr[0], &channel_data[1]);
+                let lf_y = cut_grid::make_quant_cut_grid(lf_y, left as usize, top as usize, shifts_cbycr[1], &channel_data[0]);
+                let lf_b = cut_grid::make_quant_cut_grid(lf_b, left as usize, top as usize, shifts_cbycr[2], &channel_data[2]);
+                let mut lf = [lf_x, lf_y, lf_b];
 
-            let left = (group_x * group_dim) as usize;
-            let top = (group_y * group_dim) as usize;
-            let lf_x = cut_grid::make_quant_cut_grid(lf_x, left, top, shifts_cbycr[0], &quant_channel_data[1]);
-            let lf_y = cut_grid::make_quant_cut_grid(lf_y, left, top, shifts_cbycr[1], &quant_channel_data[0]);
-            let lf_b = cut_grid::make_quant_cut_grid(lf_b, left, top, shifts_cbycr[2], &quant_channel_data[2]);
-            let mut lf = [lf_x, lf_y, lf_b];
-
-            vardct::dequant_lf(
-                &mut lf,
-                &lf_global.lf_dequant,
-                quantizer,
-                lf_coeff.extra_precision,
-            );
-            if !subsampled {
-                vardct::chroma_from_luma_lf(
+                vardct::dequant_lf(
                     &mut lf,
-                    &lf_global_vardct.lf_chan_corr,
+                    &lf_global.lf_dequant,
+                    &lf_global_vardct.quantizer,
+                    lf_coeff.extra_precision,
+                );
+                if !subsampled {
+                    vardct::chroma_from_luma_lf(
+                        &mut lf,
+                        &lf_global_vardct.lf_chan_corr,
+                    );
+                }
+            }
+
+            if !frame_header.flags.skip_adaptive_lf_smoothing() {
+                vardct::adaptive_lf_smoothing(
+                    &mut lf_xyb_buf,
+                    &lf_global.lf_dequant,
+                    &lf_global_vardct.quantizer,
                 );
             }
 
-            lf_image_changed = true;
+            lf_xyb = &lf_xyb_buf;
         }
 
-        if lf_image_changed && lf_frame.is_none() && !frame_header.flags.skip_adaptive_lf_smoothing() {
-            let smoothed_lf = match &mut cache.smoothed_lf {
-                Some(smoothed_lf) => smoothed_lf,
-                x => {
-                    let width = cache.dequantized_lf[0].width();
-                    let height = cache.dequantized_lf[0].height();
-                    *x = Some(std::array::from_fn(|_| SimpleGrid::new(width, height)));
-                    x.as_mut().unwrap()
-                },
-            };
-            vardct::adaptive_lf_smoothing(
-                &cache.dequantized_lf,
-                smoothed_lf,
-                &lf_global.lf_dequant,
-                quantizer,
-            );
-        }
+        let group_dim = frame_header.group_dim();
+        for pass_idx in 0..frame_header.passes.num_passes {
+            for group_idx in 0..frame_header.num_groups() {
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
+                let Some(mut bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
 
-        let dequantized_lf = if let Some(lf_frame) = lf_frame {
-            lf_frame
-        } else if let Some(smoothed_lf) = &cache.smoothed_lf {
-            smoothed_lf
-        } else {
-            &cache.dequantized_lf
-        };
+                let group_x = group_idx % frame_header.groups_per_row();
+                let group_y = group_idx / frame_header.groups_per_row();
+                let left = group_x * group_dim;
+                let top = group_y * group_dim;
+                let group_width = group_dim.min(width_rounded as u32 - left);
+                let group_height = group_dim.min(height_rounded as u32 - top);
 
-        let group_dim = frame_header.group_dim() as usize;
-        let groups_per_row = frame_header.groups_per_row() as usize;
+                let [fb_x, fb_y, fb_b] = &mut fb_xyb;
+                let mut grid_xyb = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
+                    let hshift = shifts_cbycr[idx].hshift();
+                    let vshift = shifts_cbycr[idx].vshift();
+                    let group_width = group_width >> hshift;
+                    let group_height = group_height >> vshift;
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    let offset = top as usize * width_rounded + left as usize;
+                    CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, width_rounded)
+                });
 
-        for (group_idx, hf_coeff) in group_coeffs {
-            let mut x = subgrids[0].remove(group_idx).unwrap();
-            let mut y = subgrids[1].remove(group_idx).unwrap();
-            let mut b = subgrids[2].remove(group_idx).unwrap();
-            let lf_group_id = frame_header.lf_group_idx_from_group_idx(*group_idx as u32) as usize;
-            let hf_meta = hf_meta_map.get(&lf_group_id).unwrap();
-            let x_from_y = &hf_meta.x_from_y;
-            let b_from_y = &hf_meta.b_from_y;
-
-            let group_row = group_idx / groups_per_row;
-            let group_col = group_idx % groups_per_row;
-
-            for coeff_data in hf_coeff.data() {
-                let bx = coeff_data.bx;
-                let by = coeff_data.by;
-                let coord = (bx, by);
-                let mut x = x.get_mut(&coord);
-                let mut y = y.get_mut(&coord);
-                let mut b = b.get_mut(&coord);
-                let dct_select = coeff_data.dct_select;
-
-                if let Some(x) = &mut x {
-                    vardct::dequant_hf_varblock(coeff_data, x, 0, oim, quantizer, dequant_matrices, Some(frame_header.x_qm_scale));
-                }
-                if let Some(y) = &mut y {
-                    vardct::dequant_hf_varblock(coeff_data, y, 1, oim, quantizer, dequant_matrices, None);
-                }
-                if let Some(b) = &mut b {
-                    vardct::dequant_hf_varblock(coeff_data, b, 2, oim, quantizer, dequant_matrices, Some(frame_header.b_qm_scale));
-                }
-
-                let lf_left = (group_col * group_dim) / 8 + bx;
-                let lf_top = (group_row * group_dim) / 8 + by;
-                if !subsampled {
-                    let lf_left = (lf_left % group_dim) * 8;
-                    let lf_top = (lf_top % group_dim) * 8;
-                    let mut xyb = [
-                        &mut **x.as_mut().unwrap(),
-                        &mut **y.as_mut().unwrap(),
-                        &mut **b.as_mut().unwrap(),
-                    ];
-                    vardct::chroma_from_luma_hf(&mut xyb, lf_left, lf_top, x_from_y, b_from_y, lf_chan_corr);
-                }
-
-                for ((coeff, lf_dequant), shift) in [x, y, b].into_iter().zip(dequantized_lf.iter()).zip(shifts_cbycr) {
-                    let Some(coeff) = coeff else { continue; };
-
-                    let s_lf_left = lf_left >> shift.hshift();
-                    let s_lf_top = lf_top >> shift.vshift();
-                    if s_lf_left << shift.hshift() != lf_left || s_lf_top << shift.vshift() != lf_top {
-                        continue;
-                    }
-
-                    let llf = vardct::llf_from_lf(lf_dequant, s_lf_left, s_lf_top, dct_select);
-                    for y in 0..llf.height() {
-                        for x in 0..llf.width() {
-                            *coeff.get_mut(x, y) = *llf.get(x, y).unwrap();
-                        }
-                    }
-
-                    vardct::transform(coeff, dct_select);
-                }
+                let shift = frame.pass_shifts(pass_idx);
+                decode_pass_group(
+                    &mut bitstream,
+                    PassGroupParams {
+                        frame_header,
+                        lf_group,
+                        pass_idx,
+                        group_idx,
+                        shift,
+                        gmodular: &mut gmodular,
+                        vardct: Some(PassGroupParamsVardct {
+                            lf_vardct: lf_global_vardct,
+                            hf_global,
+                            hf_coeff_output: &mut grid_xyb,
+                        }),
+                    },
+                )?;
             }
         }
 
-        if width == width_rounded && height == width_rounded {
-            Ok(fb_xyb)
+        gmodular.modular.inverse_transform();
+        vardct::dequant_hf_varblock(
+            &mut fb_xyb,
+            &self.image_header,
+            frame_header,
+            lf_global,
+            &*lf_groups,
+            hf_global,
+        );
+        if !subsampled {
+            vardct::chroma_from_luma_hf(
+                &mut fb_xyb,
+                frame_header,
+                lf_global,
+                &*lf_groups,
+            );
+        }
+        vardct::transform_with_lf(lf_xyb, &mut fb_xyb, frame_header, &*lf_groups);
+
+        let fb = if width == width_rounded && height == width_rounded {
+            fb_xyb
         } else {
-            Ok(fb_xyb.map(|g| {
+            fb_xyb.map(|g| {
                 let mut new_g = SimpleGrid::new(width, height);
                 for (new_row, row) in new_g.buf_mut().chunks_exact_mut(width).zip(g.buf().chunks_exact(width_rounded)) {
                     new_row.copy_from_slice(&row[..width]);
                 }
                 new_g
-            }))
-        }
+            })
+        };
+        Ok((fb, gmodular))
     }
 }
 
@@ -747,15 +717,13 @@ pub struct ReferenceFrames<'state> {
 
 #[derive(Debug)]
 pub struct RenderCache {
-    dequantized_lf: [SimpleGrid<f32>; 3],
-    smoothed_lf: Option<[SimpleGrid<f32>; 3]>,
-    inserted_lf_groups: HashSet<usize>,
-    group_coeffs: HashMap<usize, HfCoeff>,
-    coeff_merged: HashSet<(u32, u32)>,
+    lf_global: Option<LfGlobal>,
+    hf_global: Option<HfGlobal>,
+    lf_groups: HashMap<u32, LfGroup>,
 }
 
 impl RenderCache {
-    pub fn new(frame: &IndexedFrame<'_>) -> Self {
+    pub fn new(frame: &IndexedFrame) -> Self {
         let frame_header = frame.header();
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
@@ -770,13 +738,33 @@ impl RenderCache {
             *w = shift_w;
             *h = shift_h;
         }
-        let dequantized_lf = whd.map(|(w, h)| SimpleGrid::new(w as usize, h as usize));
         Self {
-            dequantized_lf,
-            smoothed_lf: None,
-            inserted_lf_groups: HashSet::new(),
-            group_coeffs: HashMap::new(),
-            coeff_merged: HashSet::new(),
+            lf_global: None,
+            hf_global: None,
+            lf_groups: HashMap::new(),
         }
     }
+}
+
+fn load_lf_groups(
+    frame: &IndexedFrame,
+    lf_global: &LfGlobal,
+    lf_groups: &mut HashMap<u32, LfGroup>,
+    _region: Option<(u32, u32, u32, u32)>,
+    gmodular: &mut GlobalModular,
+) -> Result<()> {
+    let frame_header = frame.header();
+    for idx in 0..frame_header.num_lf_groups() {
+        let lf_group = lf_groups.entry(idx);
+        let lf_group = match lf_group {
+            std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
+            std::collections::hash_map::Entry::Vacant(x) => {
+                let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
+                &*x.insert(lf_group)
+            },
+        };
+        gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
+    }
+
+    Ok(())
 }

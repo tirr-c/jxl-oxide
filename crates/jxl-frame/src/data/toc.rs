@@ -15,7 +15,8 @@ pub struct Toc {
     num_lf_groups: usize,
     num_groups: usize,
     groups: Vec<TocGroup>,
-    bitstream_order: Vec<usize>,
+    bitstream_to_original: Vec<usize>,
+    original_to_bitstream: Vec<usize>,
     total_size: u64,
 }
 
@@ -38,7 +39,7 @@ impl std::fmt::Debug for Toc {
                 "bitstream_order",
                 &format_args!(
                     "({})",
-                    if self.bitstream_order.is_empty() { "empty" } else { "non-empty" },
+                    if self.bitstream_to_original.is_empty() { "empty" } else { "non-empty" },
                 ),
             )
             .finish_non_exhaustive()
@@ -97,7 +98,7 @@ impl PartialOrd for TocGroupKind {
 impl Toc {
     /// Returns the offset to the beginning of the data.
     pub fn bookmark(&self) -> Bookmark {
-        let idx = self.bitstream_order.first().copied().unwrap_or(0);
+        let idx = self.bitstream_to_original.first().copied().unwrap_or(0);
         self.groups[idx].offset
     }
 
@@ -106,31 +107,22 @@ impl Toc {
         self.groups.len() <= 1
     }
 
-    pub fn lf_global(&self) -> TocGroup {
-        self.groups[0]
-    }
+    pub fn group_index_bitstream_order(&self, kind: TocGroupKind) -> usize {
+        let original_order = match kind {
+            TocGroupKind::All if self.is_single_entry() => 0,
+            _ if self.is_single_entry() => panic!("Cannot request group type of {:?} for single-group frame", kind),
+            TocGroupKind::All => panic!("Cannot request group type of All for multi-group frame"),
+            TocGroupKind::LfGlobal => 0,
+            TocGroupKind::LfGroup(lf_group_idx) => 1 + lf_group_idx as usize,
+            TocGroupKind::HfGlobal => 1 + self.num_lf_groups,
+            TocGroupKind::GroupPass { pass_idx, group_idx } =>
+                1 + self.num_lf_groups + 1 + pass_idx as usize * self.num_groups + group_idx as usize,
+        };
 
-    pub fn lf_group(&self, idx: u32) -> TocGroup {
-        if self.is_single_entry() {
-            panic!("cannot obtain LfGroup offset of single entry frame");
-        } else if (idx as usize) >= self.num_lf_groups {
-            panic!("index out of range: {} >= {} (num_lf_groups)", idx, self.num_lf_groups);
+        if self.original_to_bitstream.is_empty() {
+            original_order
         } else {
-            self.groups[idx as usize + 1]
-        }
-    }
-
-    pub fn hf_global(&self) -> TocGroup {
-        self.groups[self.num_lf_groups + 1]
-    }
-
-    pub fn pass_group(&self, pass_idx: u32, group_idx: u32) -> TocGroup {
-        if self.is_single_entry() {
-            panic!("cannot obtain PassGroup offset of single entry frame");
-        } else {
-            let mut idx = 1 + self.num_lf_groups + 1;
-            idx += (pass_idx as usize * self.num_groups) + group_idx as usize;
-            self.groups[idx]
+            self.original_to_bitstream[original_order]
         }
     }
 
@@ -140,10 +132,10 @@ impl Toc {
     }
 
     pub fn iter_bitstream_order(&self) -> impl Iterator<Item = TocGroup> + Send {
-        let groups = if self.bitstream_order.is_empty() {
+        let groups = if self.bitstream_to_original.is_empty() {
             self.groups.clone()
         } else {
-            self.bitstream_order.iter().map(|&idx| self.groups[idx]).collect()
+            self.bitstream_to_original.iter().map(|&idx| self.groups[idx]).collect()
         };
         groups.into_iter()
     }
@@ -211,18 +203,18 @@ impl Bundle<&crate::FrameHeader> for Toc {
             out
         };
 
-        let (offsets, sizes, bitstream_order) = if permutated_toc {
-            let mut bitstream_order = vec![0usize; permutation.len()];
+        let (offsets, sizes, bitstream_to_original, original_to_bitstream) = if permutated_toc {
+            let mut bitstream_to_original = vec![0usize; permutation.len()];
             let mut offsets_out = Vec::with_capacity(permutation.len());
             let mut sizes_out = Vec::with_capacity(permutation.len());
-            for (idx, perm) in permutation.into_iter().enumerate() {
+            for (idx, &perm) in permutation.iter().enumerate() {
                 offsets_out.push(offsets[perm]);
                 sizes_out.push(sizes[perm]);
-                bitstream_order[perm] = idx;
+                bitstream_to_original[perm] = idx;
             }
-            (offsets_out, sizes_out, bitstream_order)
+            (offsets_out, sizes_out, bitstream_to_original, permutation)
         } else {
-            (offsets, sizes, Vec::new())
+            (offsets, sizes, Vec::new(), Vec::new())
         };
 
         let groups = sizes
@@ -240,7 +232,8 @@ impl Bundle<&crate::FrameHeader> for Toc {
             num_lf_groups: ctx.num_lf_groups() as usize,
             num_groups: num_groups as usize,
             groups,
-            bitstream_order,
+            bitstream_to_original,
+            original_to_bitstream,
             total_size,
         })
     }

@@ -26,12 +26,12 @@ pub use param::*;
 ///    - creating a subimage of existing image by calling [self.make_subimage_params_lf_group] or
 ///      [self.make_subimage_params_pass_group].
 /// 2. Decode pixels by calling [self.decode_image] or [self.decode_image_gmodular].
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ModularData {
     group_dim: u32,
     header: ModularHeader,
@@ -318,7 +318,7 @@ impl Bundle<ModularParams<'_>> for ModularData {
 }
 
 define_bundle! {
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct ModularHeader error(crate::Error) {
         use_global_tree: ty(Bool),
         wp_params: ty(Bundle(predictor::WpHeader)),

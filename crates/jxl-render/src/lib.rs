@@ -1,8 +1,9 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
 use std::io::Read;
+use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
-use jxl_frame::{Frame, ProgressiveResult};
+use jxl_frame::{Frame, data::TocGroupKind};
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ExtraChannelType};
 
@@ -20,14 +21,14 @@ use inner::*;
 
 /// Render context that tracks loaded and rendered frames.
 #[derive(Debug)]
-pub struct RenderContext<'a> {
-    inner: ContextInner<'a>,
+pub struct RenderContext {
+    inner: ContextInner,
     state: RenderState,
 }
 
-impl<'a> RenderContext<'a> {
+impl RenderContext {
     /// Creates a new render context.
-    pub fn new(image_header: &'a ImageHeader) -> Self {
+    pub fn new(image_header: Arc<ImageHeader>) -> Self {
         Self {
             inner: ContextInner::new(image_header),
             state: RenderState::new(),
@@ -35,7 +36,7 @@ impl<'a> RenderContext<'a> {
     }
 }
 
-impl RenderContext<'_> {
+impl RenderContext {
     /// Returns the image width.
     #[inline]
     pub fn width(&self) -> u32 {
@@ -55,26 +56,14 @@ impl RenderContext<'_> {
     }
 }
 
-impl RenderContext<'_> {
-    /// Load all frames in the bitstream, with the given cropping region.
-    ///
-    /// `region` is expected to be in the order `(left, top, width, height)`.
-    pub fn load_all_frames_cropped<R: Read>(
+impl RenderContext {
+    /// Load all frames in the bitstream.
+    pub fn load_all_frames<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
-        progressive: bool,
-        region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<ProgressiveResult> {
+    ) -> Result<()> {
         loop {
-            let result = self.inner.load_cropped_single(bitstream, progressive, region);
-            let (result, frame) = match result {
-                Ok(val) => val,
-                Err(Error::Frame(e)) if e.unexpected_eof() => return Ok(ProgressiveResult::NeedMoreData),
-                Err(e) => return Err(e),
-            };
-            if result != ProgressiveResult::FrameComplete {
-                return Ok(result);
-            }
+            let frame = self.inner.load_single(bitstream)?;
 
             let is_last = frame.header().is_last;
             let toc = frame.toc();
@@ -88,28 +77,16 @@ impl RenderContext<'_> {
             bitstream.skip_to_bookmark(bookmark)?;
         }
 
-        Ok(ProgressiveResult::FrameComplete)
+        Ok(())
     }
 
     /// Load a single keyframe from the bitstream.
-    ///
-    /// `region` is expected to be in the order `(left, top, width, height)`.
     pub fn load_until_keyframe<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
-        progressive: bool,
-        region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<ProgressiveResult> {
+    ) -> Result<()> {
         loop {
-            let result = self.inner.load_cropped_single(bitstream, progressive, region);
-            let (result, frame) = match result {
-                Ok(val) => val,
-                Err(Error::Frame(e)) if e.unexpected_eof() => return Ok(ProgressiveResult::NeedMoreData),
-                Err(e) => return Err(e),
-            };
-            if result != ProgressiveResult::FrameComplete {
-                return Ok(result);
-            }
+            let frame = self.inner.load_single(bitstream)?;
 
             let is_keyframe = frame.header().is_keyframe();
             let toc = frame.toc();
@@ -123,29 +100,20 @@ impl RenderContext<'_> {
             bitstream.skip_to_bookmark(bookmark)?;
         }
 
-        Ok(ProgressiveResult::FrameComplete)
-    }
-
-    /// Load all frames in the bitstream.
-    pub fn load_all_frames<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-        progressive: bool,
-    ) -> Result<ProgressiveResult> {
-        self.load_all_frames_cropped(bitstream, progressive, None)
+        Ok(())
     }
 }
 
-impl<'a> RenderContext<'a> {
+impl RenderContext {
     /// Returns the frame with the keyframe index, or `None` if the keyframe does not exist.
     #[inline]
-    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame<'a>> {
+    pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame> {
         self.inner.keyframe(keyframe_idx)
     }
 }
 
-impl RenderContext<'_> {
-    fn render_by_index(&mut self, index: usize, region: Option<(u32, u32, u32, u32)>) -> Result<()> {
+impl RenderContext {
+    fn render_by_index(&mut self, index: usize) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
         let _guard = span.enter();
 
@@ -155,10 +123,10 @@ impl RenderContext<'_> {
 
         let deps = self.inner.frame_deps[index];
         for dep in deps.indices() {
-            self.render_by_index(dep, None)?;
+            self.render_by_index(dep)?;
         }
 
-        tracing::debug!(index, region = format_args!("{:?}", region), "Rendering frame");
+        tracing::debug!(index, "Rendering frame");
         let frame = &self.inner.frames[index];
         let (prev, state) = self.state.renders.split_at_mut(index);
         let state = &mut state[0];
@@ -177,7 +145,7 @@ impl RenderContext<'_> {
             },
         };
 
-        let grid = self.inner.render_frame(frame, reference_frames, cache, region)?;
+        let grid = self.inner.render_frame(frame, reference_frames, cache, None)?;
         *state = FrameRender::Done(grid);
 
         let mut unref = |idx: usize| {
@@ -201,27 +169,25 @@ impl RenderContext<'_> {
         Ok(())
     }
 
-    /// Renders the first keyframe with the given cropping region.
+    /// Renders the first keyframe.
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
     #[inline]
-    pub fn render_cropped(
+    pub fn render(
         &mut self,
-        region: Option<(u32, u32, u32, u32)>,
     ) -> Result<Vec<SimpleGrid<f32>>> {
-        self.render_keyframe_cropped(0, region)
+        self.render_keyframe(0)
     }
 
-    /// Renders the keyframe with the given cropping region.
+    /// Renders the keyframe.
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
-    pub fn render_keyframe_cropped(
+    pub fn render_keyframe(
         &mut self,
         keyframe_idx: usize,
-        region: Option<(u32, u32, u32, u32)>,
     ) -> Result<Vec<SimpleGrid<f32>>> {
-        let (frame, grid) = if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
-            self.render_by_index(idx, region)?;
+        let (frame, mut grid) = if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
+            self.render_by_index(idx)?;
             let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
             let frame = &self.inner.frames[idx];
             (frame, grid.clone())
@@ -229,7 +195,7 @@ impl RenderContext<'_> {
             let mut current_frame_grid = None;
             if let Some(frame) = &self.inner.loading_frame {
                 if frame.header().frame_type.is_normal_frame() {
-                    let ret = self.render_loading_frame(region);
+                    let ret = self.render_loading_frame();
                     match ret {
                         Ok(grid) => current_frame_grid = Some(grid),
                         Err(Error::IncompleteFrame) => {},
@@ -242,7 +208,7 @@ impl RenderContext<'_> {
                 let frame = self.inner.loading_frame.as_ref().unwrap();
                 (frame, grid)
             } else if let Some(idx) = self.inner.keyframe_in_progress {
-                self.render_by_index(idx, region)?;
+                self.render_by_index(idx)?;
                 let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
                 let frame = &self.inner.frames[idx];
                 (frame, grid.clone())
@@ -253,45 +219,29 @@ impl RenderContext<'_> {
 
         let frame_header = frame.header();
 
-        let mut cropped = if let Some((l, t, w, h)) = region {
-            let mut cropped = Vec::with_capacity(grid.len());
-            for g in grid {
-                let mut new_grid = SimpleGrid::new(w as usize, h as usize);
-                for (idx, v) in new_grid.buf_mut().iter_mut().enumerate() {
-                    let y = idx / w as usize;
-                    let x = idx % w as usize;
-                    *v = *g.get(x + l as usize, y + t as usize).unwrap();
-                }
-                cropped.push(new_grid);
-            }
-            cropped
-        } else {
-            grid
-        };
-
         if frame_header.save_before_ct {
             if frame_header.do_ycbcr {
-                let [cb, y, cr, ..] = &mut *cropped else { panic!() };
+                let [cb, y, cr, ..] = &mut *grid else { panic!() };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            self.inner.convert_color(&mut cropped);
+            self.inner.convert_color(&mut grid);
         }
 
         let channels = if self.inner.metadata().grayscale() { 1 } else { 3 };
-        cropped.drain(channels..3);
-        Ok(cropped)
+        grid.drain(channels..3);
+        Ok(grid)
     }
 
-    fn render_loading_frame(&mut self, region: Option<(u32, u32, u32, u32)>) -> Result<Vec<SimpleGrid<f32>>> {
+    fn render_loading_frame(&mut self) -> Result<Vec<SimpleGrid<f32>>> {
         let frame = self.inner.loading_frame.as_ref().unwrap();
         let header = frame.header();
-        if frame.data().lf_global.is_none() {
+        if frame.data(TocGroupKind::LfGlobal).is_none() {
             return Err(Error::IncompleteFrame);
         }
 
         let lf_frame = if header.flags.use_lf_frame() {
             let lf_frame_idx = self.inner.lf_frame[header.lf_level as usize];
-            self.render_by_index(lf_frame_idx, None)?;
+            self.render_by_index(lf_frame_idx)?;
             Some(self.state.renders[lf_frame_idx].as_grid().unwrap())
         } else {
             None
@@ -308,7 +258,7 @@ impl RenderContext<'_> {
             refs: [None; 4],
         };
 
-        self.inner.render_frame(frame, reference_frames, cache, region)
+        self.inner.render_frame(frame, reference_frames, cache, None)
     }
 }
 
@@ -356,13 +306,13 @@ impl FrameRender {
 
 /// Frame with its index in the image.
 #[derive(Debug)]
-pub struct IndexedFrame<'a> {
-    f: Frame<'a>,
+pub struct IndexedFrame {
+    f: Frame,
     idx: usize,
 }
 
-impl<'a> IndexedFrame<'a> {
-    fn new(frame: Frame<'a>, index: usize) -> Self {
+impl IndexedFrame {
+    fn new(frame: Frame, index: usize) -> Self {
         IndexedFrame { f: frame, idx: index }
     }
 
@@ -372,15 +322,15 @@ impl<'a> IndexedFrame<'a> {
     }
 }
 
-impl<'a> std::ops::Deref for IndexedFrame<'a> {
-    type Target = Frame<'a>;
+impl std::ops::Deref for IndexedFrame {
+    type Target = Frame;
 
     fn deref(&self) -> &Self::Target {
         &self.f
     }
 }
 
-impl<'a> std::ops::DerefMut for IndexedFrame<'a> {
+impl std::ops::DerefMut for IndexedFrame {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.f
     }

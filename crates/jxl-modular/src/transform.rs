@@ -6,7 +6,7 @@ use jxl_grid::Grid;
 use crate::{Error, Result};
 use super::{ModularChannelInfo, Image, predictor::{Predictor, PredictorState, WpHeader}};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TransformInfo {
     Rct(Rct),
     Palette(Palette),
@@ -68,19 +68,19 @@ impl Bundle<&WpHeader> for TransformInfo {
 }
 
 define_bundle! {
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Rct error(crate::Error) {
         begin_c: ty(U32(u(3), 8 + u(6), 72 + u(10), 1096 + u(13))),
         rct_type: ty(U32(6, u(2), 2 + u(4), 10 + u(6))),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Squeeze error(crate::Error) {
         num_sq: ty(U32(0, 1 + u(4), 9 + u(6), 41 + u(8))),
         sp: ty(Vec[Bundle(SqueezeParams)]; num_sq),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct SqueezeParams error(crate::Error) {
         horizontal: ty(Bool),
         in_place: ty(Bool),
@@ -89,7 +89,7 @@ define_bundle! {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Palette {
     begin_c: u32,
     num_c: u32,

@@ -57,6 +57,7 @@ use std::{
     fs::File,
     io::Read,
     path::Path,
+    sync::Arc,
 };
 
 mod fb;
@@ -81,7 +82,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 #[derive(Debug)]
 pub struct JxlImage<R> {
     bitstream: Bitstream<ContainerDetectingReader<R>>,
-    image_header: ImageHeader,
+    image_header: Arc<ImageHeader>,
     embedded_icc: Option<Vec<u8>>,
 }
 
@@ -89,7 +90,7 @@ impl<R: Read> JxlImage<R> {
     /// Creates a `JxlImage` from the reader.
     pub fn from_reader(reader: R) -> Result<Self> {
         let mut bitstream = Bitstream::new_detect(reader);
-        let image_header = ImageHeader::parse(&mut bitstream, ())?;
+        let image_header = Arc::new(ImageHeader::parse(&mut bitstream, ())?);
 
         let embedded_icc = image_header.metadata.colour_encoding.want_icc.then(|| {
             tracing::debug!("Image has an embedded ICC profile");
@@ -101,7 +102,7 @@ impl<R: Read> JxlImage<R> {
             tracing::debug!("Skipping preview frame");
             bitstream.zero_pad_to_byte()?;
 
-            let frame = Frame::parse(&mut bitstream, &image_header)?;
+            let frame = Frame::parse(&mut bitstream, image_header.clone())?;
             let toc = frame.toc();
             let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
             bitstream.skip_to_bookmark(bookmark)?;
@@ -139,10 +140,10 @@ impl<R: Read> JxlImage<R> {
     /// Starts rendering the image.
     #[inline]
     pub fn renderer(&mut self) -> JxlRenderer<'_, R> {
-        let ctx = RenderContext::new(&self.image_header);
+        let ctx = RenderContext::new(self.image_header.clone());
         JxlRenderer {
             bitstream: &mut self.bitstream,
-            image_header: &self.image_header,
+            image_header: self.image_header.clone(),
             embedded_icc: self.embedded_icc.as_deref(),
             ctx,
             render_spot_colour: !self.image_header.metadata.grayscale(),
@@ -165,9 +166,9 @@ impl JxlImage<File> {
 #[derive(Debug)]
 pub struct JxlRenderer<'img, R> {
     bitstream: &'img mut Bitstream<ContainerDetectingReader<R>>,
-    image_header: &'img ImageHeader,
+    image_header: Arc<ImageHeader>,
     embedded_icc: Option<&'img [u8]>,
-    ctx: RenderContext<'img>,
+    ctx: RenderContext,
     render_spot_colour: bool,
     crop_region: Option<CropInfo>,
     end_of_image: bool,
@@ -176,8 +177,8 @@ pub struct JxlRenderer<'img, R> {
 impl<'img, R: Read> JxlRenderer<'img, R> {
     /// Returns the image header.
     #[inline]
-    pub fn image_header(&self) -> &'img ImageHeader {
-        self.image_header
+    pub fn image_header(&self) -> &ImageHeader {
+        &self.image_header
     }
 
     /// Sets the cropping region of the image.
@@ -194,6 +195,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
     }
 
     #[inline]
+    #[allow(unused)]
     fn crop_region_flattened(&self) -> Option<(u32, u32, u32, u32)> {
         self.crop_region.map(|info| (info.left, info.top, info.width, info.height))
     }
@@ -264,17 +266,11 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
             return Ok(LoadResult::NoMoreFrames);
         }
 
-        let region = self.crop_region_flattened();
-        let result = self.ctx.load_until_keyframe(self.bitstream, false, region)?;
-        match result {
-            jxl_frame::ProgressiveResult::NeedMoreData => Ok(LoadResult::NeedMoreData),
-            jxl_frame::ProgressiveResult::FrameComplete => {
-                let keyframe_index = self.ctx.loaded_keyframes() - 1;
-                self.end_of_image = self.frame_header(keyframe_index).unwrap().is_last;
-                Ok(LoadResult::Done(keyframe_index))
-            },
-            _ => unreachable!(),
-        }
+        self.ctx.load_until_keyframe(self.bitstream)?;
+
+        let keyframe_index = self.ctx.loaded_keyframes() - 1;
+        self.end_of_image = self.frame_header(keyframe_index).unwrap().is_last;
+        Ok(LoadResult::Done(keyframe_index))
     }
 
     /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
@@ -291,8 +287,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
 
     /// Renders the given keyframe.
     pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
-        let region = self.crop_region_flattened();
-        let mut grids = self.ctx.render_keyframe_cropped(keyframe_index, region)?;
+        let mut grids = self.ctx.render_keyframe(keyframe_index)?;
 
         let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();

@@ -14,7 +14,7 @@ use crate::{
 ///
 /// A decoded Modular image consists of multiple channels. Those channels may not be in the same
 /// size.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Image {
     group_dim: u32,
     bit_depth: u32,

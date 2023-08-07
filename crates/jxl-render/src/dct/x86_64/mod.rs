@@ -1,6 +1,6 @@
-use jxl_grid::{CutGrid, SimdVector, SimpleGrid};
+use jxl_grid::{CutGrid, SimdVector};
 
-use super::consts;
+use super::{consts, DctDirection};
 use std::arch::x86_64::*;
 
 const LANE_SIZE: usize = 4;
@@ -11,47 +11,31 @@ fn transpose_lane(lanes: &mut [Lane]) {
     unsafe { _MM_TRANSPOSE4_PS(row0, row1, row2, row3); }
 }
 
-pub fn dct_2d(io: &mut SimpleGrid<f32>) {
-    let width = io.width();
-    let height = io.height();
-    if width % LANE_SIZE != 0 || height % LANE_SIZE != 0 {
-        return super::generic::dct_2d(io);
+pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
+    if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
+        return super::generic::dct_2d(io, direction);
     }
 
-    let io_buf = io.buf_mut();
-    dct_2d_generic(io_buf, width, height, false)
-}
-
-pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
-    let mut io = CutGrid::from_buf(io_buf, width, height, width);
     let Some(mut io) = io.as_vectored() else {
         tracing::trace!("Input buffer is not aligned");
-        return super::generic::dct_2d_generic(io_buf, width, height, inverse);
+        return super::generic::dct_2d(io, direction);
     };
-    dct_2d_lane(&mut io, inverse);
+    dct_2d_lane(&mut io, direction);
 }
 
-pub fn idct_2d(io: &mut CutGrid<'_>) {
-    let Some(mut io) = io.as_vectored() else {
-        tracing::trace!("Input buffer is not aligned");
-        return super::generic::idct_2d(io);
-    };
-    dct_2d_lane(&mut io, true);
-}
-
-fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, inverse: bool) {
+fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     let scratch_size = io.height().max(io.width() * LANE_SIZE) * 2;
     unsafe {
         let mut scratch_lanes = vec![_mm_setzero_ps(); scratch_size];
-        column_dct_lane(io, &mut scratch_lanes, inverse);
-        row_dct_lane(io, &mut scratch_lanes, inverse);
+        column_dct_lane(io, &mut scratch_lanes, direction);
+        row_dct_lane(io, &mut scratch_lanes, direction);
     }
 }
 
 fn column_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
-    inverse: bool,
+    direction: DctDirection,
 ) {
     let width = io.width();
     let height = io.height();
@@ -60,7 +44,7 @@ fn column_dct_lane(
         for (y, input) in io_lanes.iter_mut().enumerate() {
             *input = io.get(x, y);
         }
-        dct(io_lanes, scratch_lanes, inverse);
+        dct(io_lanes, scratch_lanes, direction);
         for (y, output) in io_lanes.chunks_exact_mut(LANE_SIZE).enumerate() {
             transpose_lane(output);
             for (dy, output) in output.iter_mut().enumerate() {
@@ -73,7 +57,7 @@ fn column_dct_lane(
 fn row_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
-    inverse: bool,
+    direction: DctDirection,
 ) {
     let width = io.width() * LANE_SIZE;
     let height = io.height();
@@ -84,36 +68,23 @@ fn row_dct_lane(
                 *input = io.get(x, y + dy);
             }
         }
-        dct(io_lanes, scratch_lanes, inverse);
+        dct(io_lanes, scratch_lanes, direction);
         for (x, output) in io_lanes.chunks_exact_mut(LANE_SIZE).enumerate() {
-            if width != height {
-                transpose_lane(output);
-            }
+            transpose_lane(output);
             for (dy, output) in output.iter_mut().enumerate() {
                 *io.get_mut(x, y + dy) = *output;
             }
         }
     }
-
-    if width == height {
-        for y in 0..height / LANE_SIZE {
-            for x in (y + 1)..width / LANE_SIZE {
-                io.swap((x, y * LANE_SIZE), (y, x * LANE_SIZE));
-                io.swap((x, y * LANE_SIZE + 1), (y, x * LANE_SIZE + 1));
-                io.swap((x, y * LANE_SIZE + 2), (y, x * LANE_SIZE + 2));
-                io.swap((x, y * LANE_SIZE + 3), (y, x * LANE_SIZE + 3));
-            }
-        }
-    }
 }
 
-fn dct4(input: [Lane; 4], inverse: bool) -> [Lane; 4] {
+fn dct4(input: [Lane; 4], direction: DctDirection) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961);
     let sec1 = Lane::splat_f32(1.306563);
 
     let quarter = Lane::splat_f32(0.25);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
-    if !inverse {
+    if direction == DctDirection::Forward {
         let sum03 = input[0].add(input[3]);
         let sum12 = input[1].add(input[2]);
         let tmp0 = input[0].sub(input[3]).mul(sec0);
@@ -144,7 +115,7 @@ fn dct4(input: [Lane; 4], inverse: bool) -> [Lane; 4] {
     }
 }
 
-fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
+fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
     let n = io.len();
     assert!(scratch.len() == n);
 
@@ -159,25 +130,25 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
     if n == 2 {
         let tmp0 = io[0].add(io[1]);
         let tmp1 = io[0].sub(io[1]);
-        if inverse {
-            io[0] = tmp0;
-            io[1] = tmp1;
-        } else {
+        if direction == DctDirection::Forward {
             io[0] = tmp0.mul(half);
             io[1] = tmp1.mul(half);
+        } else {
+            io[0] = tmp0;
+            io[1] = tmp1;
         }
         return;
     }
 
     if n == 4 {
-        io.copy_from_slice(&dct4([io[0], io[1], io[2], io[3]], inverse));
+        io.copy_from_slice(&dct4([io[0], io[1], io[2], io[3]], direction));
         return;
     }
 
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
     if n == 8 {
         let sec = consts::sec_half_small(8);
-        if !inverse {
+        if direction == DctDirection::Forward {
             let input0 = [
                 io[0].add(io[7]).mul(half),
                 io[1].add(io[6]).mul(half),
@@ -190,11 +161,11 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
                 io[2].sub(io[5]).mul(Lane::splat_f32(sec[2] / 2.0)),
                 io[3].sub(io[4]).mul(Lane::splat_f32(sec[3] / 2.0)),
             ];
-            let output0 = dct4(input0, false);
+            let output0 = dct4(input0, DctDirection::Forward);
             for (idx, v) in output0.into_iter().enumerate() {
                 io[idx * 2] = v;
             }
-            let mut output1 = dct4(input1, false);
+            let mut output1 = dct4(input1, DctDirection::Forward);
             output1[0] = output1[0].mul(sqrt2);
             for idx in 0..3 {
                 io[idx * 2 + 1] = output1[idx].add(output1[idx + 1]);
@@ -208,8 +179,8 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
                 io[5].add(io[3]),
                 io[7].add(io[5]),
             ];
-            let output0 = dct4(input0, true);
-            let output1 = dct4(input1, true);
+            let output0 = dct4(input0, DctDirection::Inverse);
+            let output1 = dct4(input1, DctDirection::Inverse);
             for (idx, &sec) in sec.iter().enumerate() {
                 let r = output1[idx].mul(Lane::splat_f32(sec));
                 io[idx] = output0[idx].add(r);
@@ -221,15 +192,15 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
 
     assert!(n.is_power_of_two());
 
-    if !inverse {
+    if direction == DctDirection::Forward {
         let (input0, input1) = scratch.split_at_mut(n / 2);
         for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
             input0[idx] = io[idx].add(io[n - idx - 1]).mul(half);
             input1[idx] = io[idx].sub(io[n - idx - 1]).mul(Lane::splat_f32(sec / 2.0));
         }
         let (output0, output1) = io.split_at_mut(n / 2);
-        dct(input0, output0, false);
-        dct(input1, output1, false);
+        dct(input0, output0, DctDirection::Forward);
+        dct(input1, output1, DctDirection::Forward);
         for (idx, v) in input0.iter().enumerate() {
             io[idx * 2] = *v;
         }
@@ -248,8 +219,8 @@ fn dct(io: &mut [Lane], scratch: &mut [Lane], inverse: bool) {
         input0[0] = io[0];
         input1[0] = io[1].mul(sqrt2);
         let (output0, output1) = io.split_at_mut(n / 2);
-        dct(input0, output0, true);
-        dct(input1, output1, true);
+        dct(input0, output0, DctDirection::Inverse);
+        dct(input1, output1, DctDirection::Inverse);
         for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
             let r = input1[idx].mul(Lane::splat_f32(sec));
             output0[idx] = input0[idx].add(r);
