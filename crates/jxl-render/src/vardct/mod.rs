@@ -12,7 +12,7 @@ use jxl_vardct::{
     BlockInfo,
 };
 
-use crate::dct::dct_2d;
+use crate::dct;
 
 mod transform;
 pub use transform::transform;
@@ -323,7 +323,7 @@ pub fn transform_with_lf(
                                 *out.get_mut(x, y) = *lf.get(left / 8 + x, top / 8 + y).unwrap();
                             }
                         }
-                        dct_2d(&mut out);
+                        dct::dct_2d(&mut out, dct::DctDirection::Forward);
                         for y in 0..bh {
                             for x in 0..bw {
                                 *out.get_mut(x, y) *= scale_f(y, bh * 8) * scale_f(x, bw * 8);

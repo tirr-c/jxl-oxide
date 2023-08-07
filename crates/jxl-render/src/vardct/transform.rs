@@ -1,7 +1,7 @@
 use jxl_grid::CutGrid;
 use jxl_vardct::TransformType;
 
-use crate::dct::{idct_2d, dct_2d_generic};
+use crate::dct::{dct_2d, DctDirection};
 
 fn aux_idct2_in_place(block: &mut CutGrid<'_>, size: usize) {
     debug_assert!(size.is_power_of_two());
@@ -46,7 +46,7 @@ fn transform_dct4(coeff: &mut CutGrid<'_>) {
                     *scratch.get_mut(iy, ix) = coeff.get(x + ix * 2, y + iy * 2);
                 }
             }
-            dct_2d_generic(&mut scratch, true);
+            dct_2d(&mut scratch, DctDirection::Inverse);
         }
     }
 
@@ -113,7 +113,7 @@ fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
                 *scratch.get_mut(ix, iy) = coeff.get(ix, iy * 2 + idx);
             }
         }
-        dct_2d_generic(&mut scratch, true);
+        dct_2d(&mut scratch, DctDirection::Inverse);
     }
 
     if transpose {
@@ -161,7 +161,7 @@ fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
             scratch_4x4[ix * 4 + iy] = coeff.get(2 * ix + 1, 2 * iy);
         }
     }
-    dct_2d_generic(&mut CutGrid::from_buf(&mut scratch_4x4, 4, 4, 4), true);
+    dct_2d(&mut CutGrid::from_buf(&mut scratch_4x4, 4, 4, 4), DctDirection::Inverse);
 
     scratch_4x8[0] = coeff.get(0, 0) - coeff.get(0, 1);
     for iy in 0..4 {
@@ -172,7 +172,7 @@ fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
             scratch_4x8[iy * 8 + ix] = coeff.get(ix, 2 * iy + 1);
         }
     }
-    dct_2d_generic(&mut CutGrid::from_buf(&mut scratch_4x8, 8, 4, 8), true);
+    dct_2d(&mut CutGrid::from_buf(&mut scratch_4x8, 8, 4, 8), DctDirection::Inverse);
 
     for iy in 0..4 {
         let afv_y = if flip_y == 0 { iy } else { 3 - iy };
@@ -197,7 +197,7 @@ fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
 }
 
 fn transform_dct(coeff: &mut CutGrid<'_>) {
-    idct_2d(coeff);
+    dct_2d(coeff, DctDirection::Inverse);
 }
 
 pub fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
