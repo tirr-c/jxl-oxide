@@ -158,13 +158,13 @@ pub fn dequant_hf_varblock(
                         let row = coeff.get_row_mut(y as usize);
                         let matrix_row = &matrix[(y * width) as usize..][..width as usize];
                         for (q, &m) in row.iter_mut().zip(matrix_row) {
-                            let q_abs = q.abs();
-                            if q_abs == 1.0f32 {
+                            if q.abs() <= 1.0f32 {
                                 *q *= quant_bias;
-                            } else if q_abs != 0.0f32 {
+                            } else {
                                 *q -= quant_bias_numerator / *q;
                             }
-                            *q *= mul * m;
+                            *q *= m;
+                            *q *= mul;
                         }
                     }
                 }
