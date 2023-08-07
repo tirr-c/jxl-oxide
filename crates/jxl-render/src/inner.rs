@@ -6,9 +6,10 @@ use std::{
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
+    data::*,
     filter::Gabor,
     header::{Encoding, FrameType},
-    Frame, data::{LfGlobal, HfGlobal, decode_pass_group, LfGroup, GlobalModular, PassGroupParams, PassGroupParamsVardct},
+    Frame,
 };
 use jxl_grid::{SimpleGrid, CutGrid};
 use jxl_image::{ImageHeader, ImageMetadata};
@@ -427,17 +428,7 @@ impl ContextInner {
         ];
 
         let lf_groups = &mut cache.lf_groups;
-        for idx in 0..frame_header.num_lf_groups() {
-            let lf_group = lf_groups.entry(idx);
-            let lf_group = match lf_group {
-                std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
-                std::collections::hash_map::Entry::Vacant(x) => {
-                    let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
-                    &*x.insert(lf_group)
-                },
-            };
-            gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
-        }
+        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
 
         for pass_idx in 0..frame_header.passes.num_passes {
             for group_idx in 0..frame_header.num_groups() {
@@ -572,17 +563,7 @@ impl ContextInner {
         ];
 
         let lf_groups = &mut cache.lf_groups;
-        for idx in 0..frame_header.num_lf_groups() {
-            let lf_group = lf_groups.entry(idx);
-            let lf_group = match lf_group {
-                std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
-                std::collections::hash_map::Entry::Vacant(x) => {
-                    let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
-                    &*x.insert(lf_group)
-                },
-            };
-            gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
-        }
+        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
 
         let mut lf_xyb_buf;
         let lf_xyb;
@@ -763,4 +744,27 @@ impl RenderCache {
             lf_groups: HashMap::new(),
         }
     }
+}
+
+fn load_lf_groups(
+    frame: &IndexedFrame,
+    lf_global: &LfGlobal,
+    lf_groups: &mut HashMap<u32, LfGroup>,
+    _region: Option<(u32, u32, u32, u32)>,
+    gmodular: &mut GlobalModular,
+) -> Result<()> {
+    let frame_header = frame.header();
+    for idx in 0..frame_header.num_lf_groups() {
+        let lf_group = lf_groups.entry(idx);
+        let lf_group = match lf_group {
+            std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
+            std::collections::hash_map::Entry::Vacant(x) => {
+                let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
+                &*x.insert(lf_group)
+            },
+        };
+        gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
+    }
+
+    Ok(())
 }
