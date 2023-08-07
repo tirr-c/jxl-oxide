@@ -1,74 +1,23 @@
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::CutGrid;
 
 use super::consts;
 
-pub fn dct_2d(io: &mut SimpleGrid<f32>) {
-    let width = io.width();
-    let height = io.height();
-    let io_buf = io.buf_mut();
-    dct_2d_generic(io_buf, width, height, false)
-}
-
-pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
-    let mut buf = vec![0f32; width.max(height)];
-
-    let row = &mut buf[..width];
-    for y in 0..height {
-        dct(&mut io_buf[y * width..][..width], row, inverse);
-    }
-
-    let block_size = width.min(height);
-    for by in (0..height).step_by(block_size) {
-        for bx in (0..width).step_by(block_size) {
-            for dy in 0..block_size {
-                for dx in (dy + 1)..block_size {
-                    io_buf.swap((by + dy) * width + (bx + dx), (by + dx) * width + (bx + dy));
-                }
-            }
-        }
-    }
-
-    let scratch = &mut buf[..height];
-    if block_size == height {
-        for row in io_buf.chunks_exact_mut(height) {
-            dct(row, scratch, inverse);
-        }
-    } else {
-        let mut row = vec![0f32; height];
-        for y in 0..width {
-            for (idx, chunk) in row.chunks_exact_mut(width).enumerate() {
-                let y = y + idx * block_size;
-                chunk.copy_from_slice(&io_buf[y * width..][..width]);
-            }
-            dct(&mut row, scratch, inverse);
-            for (idx, chunk) in row.chunks_exact(width).enumerate() {
-                let y = y + idx * block_size;
-                io_buf[y * width..][..width].copy_from_slice(chunk);
-            }
-        }
-    }
-
-    if width != height {
-        for by in (0..height).step_by(block_size) {
-            for bx in (0..width).step_by(block_size) {
-                for dy in 0..block_size {
-                    for dx in (dy + 1)..block_size {
-                        io_buf.swap((by + dy) * width + (bx + dx), (by + dx) * width + (bx + dy));
-                    }
-                }
-            }
-        }
-    }
+pub fn dct_2d(io: &mut CutGrid<'_>) {
+    dct_2d_generic(io, false)
 }
 
 pub fn idct_2d(io: &mut CutGrid<'_>) {
+    dct_2d_generic(io, true)
+}
+
+pub fn dct_2d_generic(io: &mut CutGrid<'_>, inverse: bool) {
     let width = io.width();
     let height = io.height();
     let mut buf = vec![0f32; width.max(height)];
 
     let row = &mut buf[..width];
     for y in 0..height {
-        dct(io.get_row_mut(y), row, true);
+        dct(io.get_row_mut(y), row, inverse);
     }
 
     let block_size = width.min(height);
@@ -87,7 +36,7 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
         for y in 0..height {
             let grouped_row = io.get_row_mut(y);
             for row in grouped_row.chunks_exact_mut(height) {
-                dct(row, scratch, true);
+                dct(row, scratch, inverse);
             }
         }
     } else {
@@ -97,7 +46,7 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
                 let y = y + idx * block_size;
                 chunk.copy_from_slice(io.get_row(y));
             }
-            dct(&mut row, scratch, true);
+            dct(&mut row, scratch, inverse);
             for (idx, chunk) in row.chunks_exact(width).enumerate() {
                 let y = y + idx * block_size;
                 io.get_row_mut(y).copy_from_slice(chunk);
@@ -105,13 +54,11 @@ pub fn idct_2d(io: &mut CutGrid<'_>) {
         }
     }
 
-    if width != height {
-        for by in (0..height).step_by(block_size) {
-            for bx in (0..width).step_by(block_size) {
-                for dy in 0..block_size {
-                    for dx in (dy + 1)..block_size {
-                        io.swap((bx + dx, by + dy), (bx + dy, by + dx));
-                    }
+    for by in (0..height).step_by(block_size) {
+        for bx in (0..width).step_by(block_size) {
+            for dy in 0..block_size {
+                for dx in (dy + 1)..block_size {
+                    io.swap((bx + dx, by + dy), (bx + dy, by + dx));
                 }
             }
         }

@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SimdVector, SimpleGrid};
+use jxl_grid::{CutGrid, SimdVector};
 
 use super::consts;
 use std::arch::x86_64::*;
@@ -11,32 +11,24 @@ fn transpose_lane(lanes: &mut [Lane]) {
     unsafe { _MM_TRANSPOSE4_PS(row0, row1, row2, row3); }
 }
 
-pub fn dct_2d(io: &mut SimpleGrid<f32>) {
-    let width = io.width();
-    let height = io.height();
-    if width % LANE_SIZE != 0 || height % LANE_SIZE != 0 {
-        return super::generic::dct_2d(io);
-    }
-
-    let io_buf = io.buf_mut();
-    dct_2d_generic(io_buf, width, height, false)
-}
-
-pub fn dct_2d_generic(io_buf: &mut [f32], width: usize, height: usize, inverse: bool) {
-    let mut io = CutGrid::from_buf(io_buf, width, height, width);
-    let Some(mut io) = io.as_vectored() else {
-        tracing::trace!("Input buffer is not aligned");
-        return super::generic::dct_2d_generic(io_buf, width, height, inverse);
-    };
-    dct_2d_lane(&mut io, inverse);
+pub fn dct_2d(io: &mut CutGrid<'_>) {
+    dct_2d_generic(io, false)
 }
 
 pub fn idct_2d(io: &mut CutGrid<'_>) {
+    dct_2d_generic(io, true)
+}
+
+pub fn dct_2d_generic(io: &mut CutGrid<'_>, inverse: bool) {
+    if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
+        return super::generic::dct_2d_generic(io, inverse);
+    }
+
     let Some(mut io) = io.as_vectored() else {
         tracing::trace!("Input buffer is not aligned");
-        return super::generic::idct_2d(io);
+        return super::generic::dct_2d_generic(io, inverse);
     };
-    dct_2d_lane(&mut io, true);
+    dct_2d_lane(&mut io, inverse);
 }
 
 fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, inverse: bool) {
@@ -86,22 +78,9 @@ fn row_dct_lane(
         }
         dct(io_lanes, scratch_lanes, inverse);
         for (x, output) in io_lanes.chunks_exact_mut(LANE_SIZE).enumerate() {
-            if width != height {
-                transpose_lane(output);
-            }
+            transpose_lane(output);
             for (dy, output) in output.iter_mut().enumerate() {
                 *io.get_mut(x, y + dy) = *output;
-            }
-        }
-    }
-
-    if width == height {
-        for y in 0..height / LANE_SIZE {
-            for x in (y + 1)..width / LANE_SIZE {
-                io.swap((x, y * LANE_SIZE), (y, x * LANE_SIZE));
-                io.swap((x, y * LANE_SIZE + 1), (y, x * LANE_SIZE + 1));
-                io.swap((x, y * LANE_SIZE + 2), (y, x * LANE_SIZE + 2));
-                io.swap((x, y * LANE_SIZE + 3), (y, x * LANE_SIZE + 3));
             }
         }
     }

@@ -141,7 +141,7 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
 pub fn blend(
     image_header: &ImageHeader,
     reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
-    new_frame: &Frame<'_>,
+    new_frame: &Frame,
     new_grid: &[SimpleGrid<f32>],
 ) -> Vec<SimpleGrid<f32>> {
     let header = new_frame.header();

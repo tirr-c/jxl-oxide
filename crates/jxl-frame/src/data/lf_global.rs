@@ -85,12 +85,6 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
     }
 }
 
-impl LfGlobal {
-    pub(crate) fn apply_modular_inverse_transform(&mut self) {
-        self.gmodular.modular.inverse_transform();
-    }
-}
-
 define_bundle! {
     #[derive(Debug)]
     pub struct LfGlobalVarDct error(crate::Error) {
@@ -100,7 +94,7 @@ define_bundle! {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GlobalModular {
     pub ma_config: Option<MaConfig>,
     pub modular: Modular,
