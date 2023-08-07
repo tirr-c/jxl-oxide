@@ -330,7 +330,7 @@ impl std::ops::Deref for IndexedFrame {
     }
 }
 
-impl<'a> std::ops::DerefMut for IndexedFrame {
+impl std::ops::DerefMut for IndexedFrame {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.f
     }

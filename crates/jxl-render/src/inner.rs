@@ -8,7 +8,7 @@ use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
     filter::Gabor,
     header::{Encoding, FrameType},
-    Frame, data::{LfGlobal, HfGlobal, decode_pass_group, LfGroup, GlobalModular},
+    Frame, data::{LfGlobal, HfGlobal, decode_pass_group, LfGroup, GlobalModular, PassGroupParams, PassGroupParamsVardct},
 };
 use jxl_grid::{SimpleGrid, CutGrid};
 use jxl_image::{ImageHeader, ImageMetadata};
@@ -448,15 +448,15 @@ impl ContextInner {
                 let shift = frame.pass_shifts(pass_idx);
                 decode_pass_group(
                     &mut bitstream,
-                    frame_header,
-                    None,
-                    lf_group,
-                    None,
-                    pass_idx,
-                    group_idx,
-                    shift,
-                    &mut gmodular,
-                    None,
+                    PassGroupParams {
+                        frame_header,
+                        lf_group,
+                        pass_idx,
+                        group_idx,
+                        shift,
+                        gmodular: &mut gmodular,
+                        vardct: None,
+                    },
                 )?;
             }
         }
@@ -665,15 +665,19 @@ impl ContextInner {
                 let shift = frame.pass_shifts(pass_idx);
                 decode_pass_group(
                     &mut bitstream,
-                    frame_header,
-                    Some(lf_global_vardct),
-                    lf_group,
-                    Some(hf_global),
-                    pass_idx,
-                    group_idx,
-                    shift,
-                    &mut gmodular,
-                    Some(&mut grid_xyb),
+                    PassGroupParams {
+                        frame_header,
+                        lf_group,
+                        pass_idx,
+                        group_idx,
+                        shift,
+                        gmodular: &mut gmodular,
+                        vardct: Some(PassGroupParamsVardct {
+                            lf_vardct: lf_global_vardct,
+                            hf_global,
+                            hf_coeff_output: &mut grid_xyb,
+                        }),
+                    },
                 )?;
             }
         }

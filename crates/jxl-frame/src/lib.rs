@@ -33,6 +33,8 @@ pub use header::FrameHeader;
 
 use crate::data::*;
 
+type ByteSliceBitstream<'buf> = Bitstream<Cursor<&'buf [u8]>>;
+
 /// JPEG XL frame.
 ///
 /// A frame represents a single unit of image that can be displayed or referenced by other frames.
@@ -164,8 +166,16 @@ impl Frame {
     }
 }
 
+struct AllParseResult<'buf> {
+    #[allow(unused)]
+    lf_global: LfGlobal,
+    lf_group: LfGroup,
+    hf_global: Option<HfGlobal>,
+    pass_group_bitstream: ByteSliceBitstream<'buf>,
+}
+
 impl Frame {
-    fn try_parse_all(&self) -> Option<Result<(LfGlobal, LfGroup, Option<HfGlobal>, Bitstream<Cursor<&[u8]>>)>> {
+    fn try_parse_all(&self) -> Option<Result<AllParseResult>> {
         if !self.toc.is_single_entry() {
             panic!();
         }
@@ -182,7 +192,12 @@ impl Frame {
         })();
 
         match result {
-            Ok((lf_global, lf_group, hf_global)) => Some(Ok((lf_global, lf_group, hf_global, bitstream))),
+            Ok((lf_global, lf_group, hf_global)) => Some(Ok(AllParseResult {
+                lf_global,
+                lf_group,
+                hf_global,
+                pass_group_bitstream: bitstream,
+            })),
             Err(e) => Some(Err(e)),
         }
     }
@@ -205,7 +220,7 @@ impl Frame {
             if lf_group_idx != 0 {
                 return None;
             }
-            Some(self.try_parse_all()?.map(|(_, x, _, _)| x))
+            Some(self.try_parse_all()?.map(|x| x.lf_group))
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
             let group = self.data.get(idx)?;
@@ -229,7 +244,7 @@ impl Frame {
         }
 
         if self.toc.is_single_entry() {
-            Some(self.try_parse_all()?.map(|(_, _, x, _)| x.unwrap()))
+            Some(self.try_parse_all()?.map(|x| x.hf_global.unwrap()))
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::HfGlobal);
             let group = self.data.get(idx)?;
@@ -248,9 +263,9 @@ impl Frame {
         }
     }
 
-    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<Bitstream<Cursor<&[u8]>>>> {
+    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<ByteSliceBitstream>> {
         if self.toc.is_single_entry() {
-            Some(self.try_parse_all()?.map(|(_, _, _, x)| x))
+            Some(self.try_parse_all()?.map(|x| x.pass_group_bitstream))
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::GroupPass { pass_idx, group_idx });
             let group = self.data.get(idx)?;

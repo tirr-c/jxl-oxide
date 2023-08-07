@@ -11,19 +11,39 @@ use super::{
     HfGlobal,
 };
 
+#[derive(Debug)]
+pub struct PassGroupParams<'frame, 'buf, 'g> {
+    pub frame_header: &'frame FrameHeader,
+    pub lf_group: &'frame LfGroup,
+    pub pass_idx: u32,
+    pub group_idx: u32,
+    pub shift: Option<(i32, i32)>,
+    pub gmodular: &'g mut GlobalModular,
+    pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
+}
+
+#[derive(Debug)]
+pub struct PassGroupParamsVardct<'frame, 'buf, 'g> {
+    pub lf_vardct: &'frame LfGlobalVarDct,
+    pub hf_global: &'frame HfGlobal,
+    pub hf_coeff_output: &'buf mut [CutGrid<'g, f32>; 3],
+}
+
 pub fn decode_pass_group<R: std::io::Read>(
     bitstream: &mut Bitstream<R>,
-    frame_header: &FrameHeader,
-    lf_vardct: Option<&LfGlobalVarDct>,
-    lf_group: &LfGroup,
-    hf_global: Option<&HfGlobal>,
-    pass_idx: u32,
-    group_idx: u32,
-    shift: Option<(i32, i32)>,
-    gmodular: &mut GlobalModular,
-    hf_coeff_output: Option<&mut [CutGrid<'_, f32>; 3]>,
+    params: PassGroupParams,
 ) -> Result<()> {
-    if let (Some(lf_vardct), Some(hf_meta), Some(hf_global), Some(hf_coeff_output)) = (lf_vardct, &lf_group.hf_meta, hf_global, hf_coeff_output) {
+    let PassGroupParams {
+        frame_header,
+        lf_group,
+        pass_idx,
+        group_idx,
+        shift,
+        gmodular,
+        vardct,
+    } = params;
+
+    if let (Some(PassGroupParamsVardct { lf_vardct, hf_global, hf_coeff_output }), Some(hf_meta)) = (vardct, &lf_group.hf_meta) {
         let hf_pass = &hf_global.hf_passes[pass_idx as usize];
         let coeff_shift = frame_header.passes.shift.get(pass_idx as usize)
             .copied()
