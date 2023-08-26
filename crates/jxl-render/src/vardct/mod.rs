@@ -52,7 +52,7 @@ pub fn dequant_lf(
 }
 
 pub fn adaptive_lf_smoothing(
-    lf_image: &mut [SimpleGrid<f32>; 3],
+    lf_image: &mut [SimpleGrid<f32>],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
 ) {
@@ -61,7 +61,7 @@ pub fn adaptive_lf_smoothing(
     let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / scale_inv as f32;
 
-    let [in_x, in_y, in_b] = lf_image;
+    let [in_x, in_y, in_b] = lf_image else { panic!("lf_image should be three-channel image") };
     let width = in_x.width();
     let height = in_x.height();
 
@@ -78,7 +78,7 @@ pub fn adaptive_lf_smoothing(
 }
 
 pub fn dequant_hf_varblock(
-    out: &mut [SimpleGrid<f32>; 3],
+    out: &mut [SimpleGrid<f32>],
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
@@ -125,6 +125,16 @@ pub fn dequant_hf_varblock(
                         continue;
                     }
 
+                    let left = lf_left as usize + bx * 8;
+                    let top = lf_top as usize + by * 8;
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    if coeff.width() <= left || coeff.height() <= top {
+                        continue;
+                    }
+                    let offset = top * stride + left;
+                    let coeff_buf = coeff.buf_mut();
+
                     let (bw, bh) = dct_select.dct_select_size();
                     let width = bw * 8;
                     let height = bh * 8;
@@ -143,13 +153,8 @@ pub fn dequant_hf_varblock(
                         matrix = &new_matrix;
                     }
 
-                    let left = lf_left as usize + bx * 8;
-                    let top = lf_top as usize + by * 8;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-
                     let mut coeff = CutGrid::from_buf(
-                        &mut coeff.buf_mut()[top * stride + left..],
+                        &mut coeff_buf[offset..],
                         width as usize,
                         height as usize,
                         stride,
@@ -206,7 +211,7 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_xyb: &mut [SimpleGrid<f32>; 3],
+    coeff_xyb: &mut [SimpleGrid<f32>],
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
@@ -218,7 +223,7 @@ pub fn chroma_from_luma_hf(
         ..
     } = lf_global.vardct.as_ref().unwrap().lf_chan_corr;
 
-    let [coeff_x, coeff_y, coeff_b] = coeff_xyb;
+    let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
     let width = coeff_x.width();
     let height = coeff_x.height();
     let lf_group_dim = frame_header.lf_group_dim() as usize;
@@ -241,12 +246,13 @@ pub fn chroma_from_luma_hf(
                 let cfactor_x = cx / 64;
                 let cfactor_y = cy / 64;
 
+                let Some(&coeff_y) = coeff_y.get(x, y) else { continue; };
+
                 let x_factor = *x_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let b_factor = *b_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
                 let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-                let coeff_y = *coeff_y.get(x, y).unwrap();
                 *coeff_x.get_mut(x, y).unwrap() += kx * coeff_y;
                 *coeff_b.get_mut(x, y).unwrap() += kb * coeff_y;
             }
@@ -256,7 +262,7 @@ pub fn chroma_from_luma_hf(
 
 pub fn transform_with_lf(
     lf: &[SimpleGrid<f32>],
-    coeff_out: &mut [SimpleGrid<f32>; 3],
+    coeff_out: &mut [SimpleGrid<f32>],
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup>,
 ) {
@@ -306,13 +312,18 @@ pub fn transform_with_lf(
                     let top = lf_top as usize + by * 8;
                     let left = left >> hshift;
                     let top = top >> vshift;
+                    if coeff.width() <= left || coeff.height() <= top {
+                        continue;
+                    }
+                    let offset = top * stride + left;
+                    let coeff_buf = coeff.buf_mut();
 
                     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
                         debug_assert_eq!(bw * bh, 1);
-                        *coeff.get_mut(left, top).unwrap() = *lf.get(left / 8, top / 8).unwrap();
+                        coeff_buf[offset] = *lf.get(left / 8, top / 8).unwrap();
                     } else {
                         let mut out = CutGrid::from_buf(
-                            &mut coeff.buf_mut()[top * stride + left..],
+                            &mut coeff_buf[offset..],
                             bw,
                             bh,
                             stride,

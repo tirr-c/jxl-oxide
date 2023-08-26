@@ -287,7 +287,8 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
 
     /// Renders the given keyframe.
     pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
-        let mut grids = self.ctx.render_keyframe(keyframe_index)?;
+        let mut grids = self.ctx.render_keyframe(keyframe_index, None)?;
+        let mut grids = grids.take_buffer();
 
         let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();

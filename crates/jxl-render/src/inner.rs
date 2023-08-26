@@ -9,7 +9,7 @@ use jxl_frame::{
     data::*,
     filter::Gabor,
     header::{Encoding, FrameType},
-    Frame,
+    Frame, FrameHeader,
 };
 use jxl_grid::{SimpleGrid, CutGrid};
 use jxl_image::{ImageHeader, ImageMetadata};
@@ -23,7 +23,7 @@ use crate::{
     vardct,
     IndexedFrame,
     Result,
-    Error,
+    Error, region::{Region, ImageWithRegion},
 };
 
 #[derive(Debug)]
@@ -191,19 +191,50 @@ impl ContextInner {
         frame: &'a IndexedFrame,
         reference_frames: ReferenceFrames<'a>,
         cache: &mut RenderCache,
-        mut region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<Vec<SimpleGrid<f32>>> {
+        frame_region: Region,
+    ) -> Result<ImageWithRegion> {
         let frame_header = frame.header();
-        if let Some(region) = &mut region {
-            frame.adjust_region(region);
-        }
+        let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
+
+        let color_upsample_factor = frame_header.upsampling.ilog2();
+        let max_upsample_factor = frame_header.ec_upsampling.iter()
+            .zip(self.image_header.metadata.ec_info.iter())
+            .map(|(upsampling, ec_info)| upsampling.ilog2() + ec_info.dim_shift)
+            .max()
+            .unwrap_or(color_upsample_factor);
+
+        let color_padded_region = if max_upsample_factor > 0 {
+            let padded_region = frame_region.downsample(max_upsample_factor).pad(2);
+            let upsample_diff = max_upsample_factor - color_upsample_factor;
+            Region {
+                left: padded_region.left << upsample_diff,
+                top: padded_region.top << upsample_diff,
+                width: padded_region.width << upsample_diff,
+                height: padded_region.height << upsample_diff,
+            }
+        } else {
+            frame_region
+        };
+
+        // TODO: actual region could be smaller.
+        let color_padded_region = if frame_header.restoration_filter.epf.enabled() {
+            color_padded_region.pad(3)
+        } else if frame_header.restoration_filter.gab.enabled() || frame_header.do_ycbcr {
+            color_padded_region.pad(1)
+        } else {
+            color_padded_region
+        }.intersection(full_frame_region);
 
         let (mut fb, gmodular) = match frame_header.encoding {
-            Encoding::Modular => self.render_modular(frame, cache, region),
-            Encoding::VarDct => self.render_vardct(frame, reference_frames.lf, cache, region),
+            Encoding::Modular => self.render_modular(frame, cache, color_padded_region),
+            Encoding::VarDct => self.render_vardct(frame, reference_frames.lf, cache, color_padded_region),
         }?;
+        if fb.region().intersection(full_frame_region) != fb.region() {
+            let mut new_fb = fb.clone_intersection(full_frame_region);
+            std::mem::swap(&mut fb, &mut new_fb);
+        }
 
-        let [a, b, c] = &mut fb;
+        let [a, b, c] = fb.buffer_mut() else { panic!() };
         if frame.header().do_ycbcr {
             filter::apply_jpeg_upsampling([a, b, c], frame_header.jpeg_upsampling);
         }
@@ -212,67 +243,75 @@ impl ContextInner {
         }
         filter::apply_epf([a, b, c], &cache.lf_groups, frame_header);
 
-        let [a, b, c] = fb;
-        let mut ret = vec![a, b, c];
-        self.append_extra_channels(frame, &mut ret, gmodular);
+        self.upsample_color_channels(&mut fb, frame_header, frame_region);
+        self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
 
-        self.render_features(frame, &mut ret, reference_frames.refs, cache)?;
+        self.render_features(frame, &mut fb, reference_frames.refs, cache)?;
 
         if !frame_header.save_before_ct {
             if frame_header.do_ycbcr {
-                let [cb, y, cr, ..] = &mut *ret else { panic!() };
+                let [cb, y, cr, ..] = fb.buffer_mut() else { panic!() };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            self.convert_color(&mut ret);
+            self.convert_color(fb.buffer_mut());
         }
 
-        Ok(if !frame_header.frame_type.is_normal_frame() {
-            ret
-        } else if frame_header.resets_canvas {
-            let mut cropped = Vec::with_capacity(ret.len());
-            let l = (-frame_header.x0) as usize;
-            let t = (-frame_header.y0) as usize;
-            let w = self.width() as usize;
-            let h = self.height() as usize;
-            for g in ret {
-                if g.width() == w && g.height() == h {
-                    cropped.push(g);
-                    continue;
-                }
-
-                let mut new_grid = SimpleGrid::new(w, h);
-                for (idx, v) in new_grid.buf_mut().iter_mut().enumerate() {
-                    let y = idx / w;
-                    let x = idx % w;
-                    *v = *g.get(x + l, y + t).unwrap();
-                }
-                cropped.push(new_grid);
-            }
-            cropped
+        Ok(if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
+            fb
         } else {
-            blend::blend(&self.image_header, reference_frames.refs, frame, &ret)
+            blend::blend(&self.image_header, reference_frames.refs, frame, &fb)
         })
+    }
+
+    fn upsample_color_channels(&self, fb: &mut ImageWithRegion, frame_header: &FrameHeader, original_region: Region) {
+        let upsample_factor = frame_header.upsampling.ilog2();
+
+        let mut buffer = fb.take_buffer();
+        let region = fb.region();
+        for (idx, g) in buffer.iter_mut().enumerate() {
+            features::upsample(g, &self.image_header, frame_header, idx);
+        }
+        let upsampled_fb = ImageWithRegion::from_buffer(
+            buffer,
+            region.left << upsample_factor,
+            region.top << upsample_factor,
+        );
+        *fb = ImageWithRegion::from_region(upsampled_fb.channels(), original_region);
+        for (channel_idx, output) in fb.buffer_mut().iter_mut().enumerate() {
+            upsampled_fb.clone_region_channel(original_region, channel_idx, output);
+        }
     }
 
     fn append_extra_channels<'a>(
         &'a self,
         frame: &'a IndexedFrame,
-        fb: &mut Vec<SimpleGrid<f32>>,
+        fb: &mut ImageWithRegion,
         gmodular: GlobalModular,
+        original_region: Region,
     ) {
         tracing::debug!("Attaching extra channels");
+        let fb_region = fb.region();
+        let frame_header = frame.header();
 
         let extra_channel_from = gmodular.extra_channel_from();
         let gmodular = &gmodular.modular;
 
         let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
 
-        let width = frame.header().color_sample_width() as usize;
-        let height = frame.header().color_sample_height() as usize;
+        for (idx, g) in channel_data.iter().enumerate() {
+            let upsampling = frame_header.ec_upsampling[idx];
+            let ec_info = &self.image_header.metadata.ec_info[idx];
 
-        for (g, ec_info) in channel_data.iter().zip(&self.image_header.metadata.ec_info) {
+            let upsample_factor = upsampling.ilog2() + ec_info.dim_shift;
+            let region = if upsample_factor > 0 {
+                original_region.downsample(upsample_factor)
+            } else {
+                original_region
+            };
             let bit_depth = ec_info.bit_depth;
 
+            let width = region.width as usize;
+            let height = region.height as usize;
             let mut out = SimpleGrid::new(width, height);
             let buffer = out.buf_mut();
 
@@ -281,29 +320,54 @@ impl ContextInner {
             for (group_idx, g) in g.groups() {
                 let base_x = (group_idx % group_stride) * gw;
                 let base_y = (group_idx / group_stride) * gh;
+                let group_region = Region {
+                    left: base_x as i32,
+                    top: base_y as i32,
+                    width: gw as u32,
+                    height: gh as u32,
+                };
+                let region_intersection = region.intersection(group_region);
+                if region_intersection.is_empty() {
+                    continue;
+                }
+
+                let group_x = region.left.abs_diff(region_intersection.left) as usize;
+                let group_y = region.top.abs_diff(region_intersection.top) as usize;
+
+                let begin_x = region_intersection.left.abs_diff(group_region.left) as usize;
+                let begin_y = region_intersection.top.abs_diff(group_region.top) as usize;
+                let end_x = begin_x + region_intersection.width as usize;
+                let end_y = begin_y + region_intersection.height as usize;
                 for (idx, &s) in g.buf().iter().enumerate() {
-                    let y = base_y + idx / g.width();
-                    if y >= height {
+                    let x = idx % g.width();
+                    let y = idx / g.width();
+                    if y >= end_y {
                         break;
                     }
-                    let x = base_x + idx % g.width();
-                    if x >= width {
+                    if y < begin_y || !(begin_x..end_x).contains(&x) {
                         continue;
                     }
 
-                    buffer[y * width + x] = bit_depth.parse_integer_sample(s);
+                    buffer[(group_y + y - begin_y) * width + (group_x + x - begin_x)] = bit_depth.parse_integer_sample(s);
                 }
             }
 
-            fb.push(out);
+            features::upsample(&mut out, &self.image_header, frame_header, idx + 3);
+            let out = ImageWithRegion::from_buffer(
+                vec![out],
+                region.left << upsample_factor,
+                region.top << upsample_factor,
+            );
+            let cropped = fb.add_channel();
+            out.clone_region_channel(fb_region, 0, cropped);
         }
     }
 
     fn render_features<'a>(
         &'a self,
         frame: &'a IndexedFrame,
-        grid: &mut [SimpleGrid<f32>],
-        reference_grids: [Option<&[SimpleGrid<f32>]>; 4],
+        grid: &mut ImageWithRegion,
+        reference_grids: [Option<Reference>; 4],
         cache: &mut RenderCache,
     ) -> Result<()> {
         let frame_header = frame.header();
@@ -315,16 +379,12 @@ impl ContextInner {
             )
         });
 
-        for (idx, g) in grid.iter_mut().enumerate() {
-            features::upsample(g, &self.image_header, frame_header, idx);
-        }
-
         if let Some(patches) = &lf_global.patches {
             for patch in &patches.patches {
                 let Some(ref_grid) = reference_grids[patch.ref_idx as usize] else {
                     return Err(Error::InvalidReference(patch.ref_idx));
                 };
-                blend::patch(&self.image_header, grid, ref_grid, patch);
+                blend::patch(&self.image_header, grid, ref_grid.image, patch);
             }
         }
 
@@ -397,8 +457,8 @@ impl ContextInner {
         &'a self,
         frame: &'a IndexedFrame,
         cache: &mut RenderCache,
-        _region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<([SimpleGrid<f32>; 3], GlobalModular)> {
+        region: Region,
+    ) -> Result<(ImageWithRegion, GlobalModular)> {
         let metadata = self.metadata();
         let xyb_encoded = self.xyb_encoded();
         let frame_header = frame.header();
@@ -418,17 +478,12 @@ impl ContextInner {
         });
         let channels = metadata.encoded_color_channels();
 
-        let width = frame_header.color_sample_width() as usize;
-        let height = frame_header.color_sample_height() as usize;
+        let stride = region.width as usize;
         let bit_depth = metadata.bit_depth;
-        let mut fb_xyb = [
-            SimpleGrid::new(width, height),
-            SimpleGrid::new(width, height),
-            SimpleGrid::new(width, height),
-        ];
+        let mut fb_xyb = ImageWithRegion::from_region(channels, region);
 
         let lf_groups = &mut cache.lf_groups;
-        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
+        load_lf_groups(frame, lf_global, lf_groups, region.downsample(3), &mut gmodular)?;
 
         for pass_idx in 0..frame_header.passes.num_passes {
             for group_idx in 0..frame_header.num_groups() {
@@ -455,26 +510,43 @@ impl ContextInner {
         gmodular.modular.inverse_transform();
         let channel_data = gmodular.modular.image().channel_data();
 
-        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.iter_mut()) {
+        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.buffer_mut()) {
             let buffer = buffer.buf_mut();
             let (gw, gh) = g.group_dim();
             let group_stride = g.groups_per_row();
+            let region = region.downsample_separate(shift.hshift() as u32, shift.vshift() as u32);
             for (group_idx, g) in g.groups() {
                 let base_x = (group_idx % group_stride) * gw;
                 let base_y = (group_idx / group_stride) * gh;
+                let group_region = Region {
+                    left: base_x as i32,
+                    top: base_y as i32,
+                    width: gw as u32,
+                    height: gh as u32,
+                };
+                let region_intersection = region.intersection(group_region);
+                if region_intersection.is_empty() {
+                    continue;
+                }
+
+                let group_x = region.left.abs_diff(region_intersection.left) as usize;
+                let group_y = region.top.abs_diff(region_intersection.top) as usize;
+
+                let begin_x = region_intersection.left.abs_diff(group_region.left) as usize;
+                let begin_y = region_intersection.top.abs_diff(group_region.top) as usize;
+                let end_x = begin_x + region_intersection.width as usize;
+                let end_y = begin_y + region_intersection.height as usize;
                 for (idx, &s) in g.buf().iter().enumerate() {
-                    let y = base_y + idx / g.width();
-                    let y = y << shift.vshift();
-                    if y >= height {
+                    let x = idx % g.width();
+                    let y = idx / g.width();
+                    if y >= end_y {
                         break;
                     }
-                    let x = base_x + idx % g.width();
-                    let x = x << shift.hshift();
-                    if x >= width {
+                    if y < begin_y || !(begin_x..end_x).contains(&x) {
                         continue;
                     }
 
-                    buffer[y * width + x] = if xyb_encoded {
+                    buffer[(group_y + y - begin_y) * stride + (group_x + x - begin_x)] = if xyb_encoded {
                         s as f32
                     } else {
                         bit_depth.parse_integer_sample(s)
@@ -484,13 +556,17 @@ impl ContextInner {
         }
 
         if channels == 1 {
+            fb_xyb.add_channel();
+            fb_xyb.add_channel();
+            let fb_xyb = fb_xyb.buffer_mut();
             fb_xyb[1] = fb_xyb[0].clone();
             fb_xyb[2] = fb_xyb[0].clone();
         }
         if xyb_encoded {
+            let fb_xyb = fb_xyb.buffer_mut();
             // Make Y'X'B' to X'Y'B'
             fb_xyb.swap(0, 1);
-            let [x, y, b] = &mut fb_xyb;
+            let [x, y, b] = fb_xyb else { panic!() };
             let x = x.buf_mut();
             let y = y.buf_mut();
             let b = b.buf_mut();
@@ -508,32 +584,14 @@ impl ContextInner {
     fn render_vardct<'a>(
         &'a self,
         frame: &'a IndexedFrame,
-        lf_frame: Option<&'a [SimpleGrid<f32>]>,
+        lf_frame: Option<Reference<'a>>,
         cache: &mut RenderCache,
-        _region: Option<(u32, u32, u32, u32)>,
-    ) -> Result<([SimpleGrid<f32>; 3], GlobalModular)> {
+        region: Region,
+    ) -> Result<(ImageWithRegion, GlobalModular)> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_vardct");
         let _guard = span.enter();
 
         let frame_header = frame.header();
-
-        let lf_global = if let Some(x) = &cache.lf_global {
-            x
-        } else {
-            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
-            cache.lf_global = Some(lf_global);
-            cache.lf_global.as_ref().unwrap()
-        };
-        let mut gmodular = lf_global.gmodular.clone();
-        let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
-
-        let hf_global = if let Some(x) = &cache.hf_global {
-            x
-        } else {
-            let hf_global = frame.try_parse_hf_global(Some(lf_global)).ok_or(Error::IncompleteFrame)??;
-            cache.hf_global = Some(hf_global);
-            cache.hf_global.as_ref().unwrap()
-        };
 
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
@@ -556,37 +614,85 @@ impl ContextInner {
             }
             (bw * 8, bh * 8)
         };
-        let mut fb_xyb = [
-            SimpleGrid::new(width_rounded, height_rounded),
-            SimpleGrid::new(width_rounded, height_rounded),
-            SimpleGrid::new(width_rounded, height_rounded),
-        ];
+
+        let aligned_region = region.container_aligned(frame_header.group_dim());
+        let aligned_lf_region = {
+            // group_dim is multiple of 8
+            let aligned_region_div8 = Region {
+                left: aligned_region.left / 8,
+                top: aligned_region.top / 8,
+                width: aligned_region.width / 8,
+                height: aligned_region.height / 8,
+            };
+            if frame_header.flags.skip_adaptive_lf_smoothing() {
+                aligned_region_div8
+            } else {
+                aligned_region_div8.pad(1)
+            }.container_aligned(frame_header.group_dim())
+        };
+
+        let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
+        let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
+
+        let lf_global = if let Some(x) = &cache.lf_global {
+            x
+        } else {
+            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+            cache.lf_global = Some(lf_global);
+            cache.lf_global.as_ref().unwrap()
+        };
+        let mut gmodular = lf_global.gmodular.clone();
+        let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
+
+        let hf_global = if let Some(x) = &cache.hf_global {
+            x
+        } else {
+            let hf_global = frame.try_parse_hf_global(Some(lf_global)).ok_or(Error::IncompleteFrame)??;
+            cache.hf_global = Some(hf_global);
+            cache.hf_global.as_ref().unwrap()
+        };
+
+        let mut fb_xyb = ImageWithRegion::from_region(3, aligned_region);
+        let fb_stride = aligned_region.width as usize;
 
         let lf_groups = &mut cache.lf_groups;
-        load_lf_groups(frame, lf_global, lf_groups, _region, &mut gmodular)?;
+        load_lf_groups(frame, lf_global, lf_groups, aligned_lf_region, &mut gmodular)?;
 
-        let mut lf_xyb_buf;
-        let lf_xyb;
-        if let Some(x) = lf_frame {
-            lf_xyb = x;
-        } else {
-            lf_xyb_buf = [
-                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
-                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
-                SimpleGrid::new(width_rounded / 8, height_rounded / 8),
-            ];
+        let group_dim = frame_header.group_dim();
+        let lf_xyb = (|| {
+            if let Some(x) = lf_frame {
+                if aligned_lf_region.contains(x.image.region()) {
+                    return std::borrow::Cow::Borrowed(x.image);
+                }
+            }
+
+            let mut lf_xyb_buf = ImageWithRegion::from_region(3, aligned_lf_region);
+            let lf_groups_per_row = frame_header.lf_groups_per_row();
+
             for idx in 0..frame_header.num_lf_groups() {
                 let Some(lf_group) = lf_groups.get(&idx) else { continue; };
 
-                let lf_group_x = idx % frame_header.lf_groups_per_row();
-                let lf_group_y = idx / frame_header.lf_groups_per_row();
+                let lf_group_x = idx % lf_groups_per_row;
+                let lf_group_y = idx / lf_groups_per_row;
                 let left = lf_group_x * frame_header.group_dim();
                 let top = lf_group_y * frame_header.group_dim();
+                let lf_group_region = Region {
+                    left: left as i32,
+                    top: top as i32,
+                    width: group_dim,
+                    height: group_dim,
+                };
+                if aligned_lf_region.intersection(lf_group_region).is_empty() {
+                    continue;
+                }
+
+                let left = left - aligned_lf_region.left as u32;
+                let top = top - aligned_lf_region.top as u32;
 
                 let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
                 let channel_data = lf_coeff.lf_quant.image().channel_data();
 
-                let [lf_x, lf_y, lf_b] = &mut lf_xyb_buf;
+                let [lf_x, lf_y, lf_b] = lf_xyb_buf.buffer_mut() else { panic!() };
                 let lf_x = cut_grid::make_quant_cut_grid(lf_x, left as usize, top as usize, shifts_cbycr[0], &channel_data[1]);
                 let lf_y = cut_grid::make_quant_cut_grid(lf_y, left as usize, top as usize, shifts_cbycr[1], &channel_data[0]);
                 let lf_b = cut_grid::make_quant_cut_grid(lf_b, left as usize, top as usize, shifts_cbycr[2], &channel_data[2]);
@@ -608,16 +714,16 @@ impl ContextInner {
 
             if !frame_header.flags.skip_adaptive_lf_smoothing() {
                 vardct::adaptive_lf_smoothing(
-                    &mut lf_xyb_buf,
+                    lf_xyb_buf.buffer_mut(),
                     &lf_global.lf_dequant,
                     &lf_global_vardct.quantizer,
                 );
             }
 
-            lf_xyb = &lf_xyb_buf;
-        }
+            std::borrow::Cow::Owned(lf_xyb_buf)
+        })();
+        let lf_xyb = &*lf_xyb;
 
-        let group_dim = frame_header.group_dim();
         for pass_idx in 0..frame_header.passes.num_passes {
             for group_idx in 0..frame_header.num_groups() {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
@@ -631,7 +737,20 @@ impl ContextInner {
                 let group_width = group_dim.min(width_rounded as u32 - left);
                 let group_height = group_dim.min(height_rounded as u32 - top);
 
-                let [fb_x, fb_y, fb_b] = &mut fb_xyb;
+                let group_region = Region {
+                    left: left as i32,
+                    top: top as i32,
+                    width: group_width,
+                    height: group_height,
+                };
+                if group_region.intersection(aligned_region).is_empty() {
+                    continue;
+                }
+
+                let left = left - aligned_region.left as u32;
+                let top = top - aligned_region.top as u32;
+
+                let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
                 let mut grid_xyb = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
                     let hshift = shifts_cbycr[idx].hshift();
                     let vshift = shifts_cbycr[idx].vshift();
@@ -639,8 +758,8 @@ impl ContextInner {
                     let group_height = group_height >> vshift;
                     let left = left >> hshift;
                     let top = top >> vshift;
-                    let offset = top as usize * width_rounded + left as usize;
-                    CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, width_rounded)
+                    let offset = top as usize * fb_stride + left as usize;
+                    CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, fb_stride)
                 });
 
                 let shift = frame.pass_shifts(pass_idx);
@@ -665,7 +784,7 @@ impl ContextInner {
 
         gmodular.modular.inverse_transform();
         vardct::dequant_hf_varblock(
-            &mut fb_xyb,
+            fb_xyb.buffer_mut(),
             &self.image_header,
             frame_header,
             lf_global,
@@ -674,26 +793,20 @@ impl ContextInner {
         );
         if !subsampled {
             vardct::chroma_from_luma_hf(
-                &mut fb_xyb,
+                fb_xyb.buffer_mut(),
                 frame_header,
                 lf_global,
                 &*lf_groups,
             );
         }
-        vardct::transform_with_lf(lf_xyb, &mut fb_xyb, frame_header, &*lf_groups);
+        vardct::transform_with_lf(
+            lf_xyb.buffer(),
+            fb_xyb.buffer_mut(),
+            frame_header,
+            &*lf_groups,
+        );
 
-        let fb = if width == width_rounded && height == width_rounded {
-            fb_xyb
-        } else {
-            fb_xyb.map(|g| {
-                let mut new_g = SimpleGrid::new(width, height);
-                for (new_row, row) in new_g.buf_mut().chunks_exact_mut(width).zip(g.buf().chunks_exact(width_rounded)) {
-                    new_row.copy_from_slice(&row[..width]);
-                }
-                new_g
-            })
-        };
-        Ok((fb, gmodular))
+        Ok((fb_xyb, gmodular))
     }
 }
 
@@ -711,8 +824,14 @@ impl FrameDependence {
 
 #[derive(Debug, Default)]
 pub struct ReferenceFrames<'state> {
-    pub(crate) lf: Option<&'state [SimpleGrid<f32>]>,
-    pub(crate) refs: [Option<&'state [SimpleGrid<f32>]>; 4],
+    pub(crate) lf: Option<Reference<'state>>,
+    pub(crate) refs: [Option<Reference<'state>>; 4],
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Reference<'state> {
+    pub(crate) frame: &'state IndexedFrame,
+    pub(crate) image: &'state ImageWithRegion,
 }
 
 #[derive(Debug)]
@@ -750,11 +869,25 @@ fn load_lf_groups(
     frame: &IndexedFrame,
     lf_global: &LfGlobal,
     lf_groups: &mut HashMap<u32, LfGroup>,
-    _region: Option<(u32, u32, u32, u32)>,
+    lf_region: Region,
     gmodular: &mut GlobalModular,
 ) -> Result<()> {
     let frame_header = frame.header();
+    let lf_groups_per_row = frame_header.lf_groups_per_row();
+    let group_dim = frame_header.group_dim();
     for idx in 0..frame_header.num_lf_groups() {
+        let left = (idx % lf_groups_per_row) * group_dim;
+        let top = (idx / lf_groups_per_row) * group_dim;
+        let lf_group_region = Region {
+            left: left as i32,
+            top: top as i32,
+            width: group_dim,
+            height: group_dim,
+        };
+        if lf_region.intersection(lf_group_region).is_empty() {
+            continue;
+        }
+
         let lf_group = lf_groups.entry(idx);
         let lf_group = match lf_group {
             std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
@@ -768,3 +901,4 @@ fn load_lf_groups(
 
     Ok(())
 }
+
