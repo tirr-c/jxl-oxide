@@ -784,7 +784,7 @@ impl ContextInner {
 
         gmodular.modular.inverse_transform();
         vardct::dequant_hf_varblock(
-            fb_xyb.buffer_mut(),
+            &mut fb_xyb,
             &self.image_header,
             frame_header,
             lf_global,
@@ -800,8 +800,8 @@ impl ContextInner {
             );
         }
         vardct::transform_with_lf(
-            lf_xyb.buffer(),
-            fb_xyb.buffer_mut(),
+            lf_xyb,
+            &mut fb_xyb,
             frame_header,
             &*lf_groups,
         );

@@ -12,7 +12,7 @@ use jxl_vardct::{
     BlockInfo,
 };
 
-use crate::dct;
+use crate::{dct, region::ImageWithRegion, Region};
 
 mod transform;
 pub use transform::transform;
@@ -78,13 +78,15 @@ pub fn adaptive_lf_smoothing(
 }
 
 pub fn dequant_hf_varblock(
-    out: &mut [SimpleGrid<f32>],
+    out: &mut ImageWithRegion,
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
     hf_global: &HfGlobal,
 ) {
+    let region = out.region();
+    let out = out.buffer_mut();
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -127,17 +129,24 @@ pub fn dequant_hf_varblock(
 
                     let left = lf_left as usize + bx * 8;
                     let top = lf_top as usize + by * 8;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-                    if coeff.width() <= left || coeff.height() <= top {
-                        continue;
-                    }
-                    let offset = top * stride + left;
-                    let coeff_buf = coeff.buf_mut();
-
                     let (bw, bh) = dct_select.dct_select_size();
                     let width = bw * 8;
                     let height = bh * 8;
+                    let block_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width,
+                        height,
+                    };
+                    if region.intersection(block_region).is_empty() {
+                        continue;
+                    }
+
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    let offset = (top - (region.top as usize >> vshift)) * stride + (left - (region.left as usize >> hshift));
+                    let coeff_buf = coeff.buf_mut();
+
                     let need_transpose = dct_select.need_transpose();
                     let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
@@ -261,8 +270,8 @@ pub fn chroma_from_luma_hf(
 }
 
 pub fn transform_with_lf(
-    lf: &[SimpleGrid<f32>],
-    coeff_out: &mut [SimpleGrid<f32>],
+    lf: &ImageWithRegion,
+    coeff_out: &mut ImageWithRegion,
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup>,
 ) {
@@ -276,6 +285,10 @@ pub fn transform_with_lf(
         recip.recip()
     }
 
+    let lf_region = lf.region();
+    let coeff_region = coeff_out.region();
+    let lf = lf.buffer();
+    let coeff_out = coeff_out.buffer_mut();
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -304,23 +317,34 @@ pub fn transform_with_lf(
                         continue;
                     }
 
+                    let left = lf_left as usize + bx * 8;
+                    let top = lf_top as usize + by * 8;
                     let (bw, bh) = dct_select.dct_select_size();
+                    let width = bw * 8;
+                    let height = bh * 8;
+                    let block_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width,
+                        height,
+                    };
+                    if coeff_region.intersection(block_region).is_empty() {
+                        continue;
+                    }
+
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    let offset = (top - (coeff_region.top as usize >> vshift)) * stride + (left - (coeff_region.left as usize >> hshift));
+                    let coeff_buf = coeff.buf_mut();
+
                     let bw = bw as usize;
                     let bh = bh as usize;
 
-                    let left = lf_left as usize + bx * 8;
-                    let top = lf_top as usize + by * 8;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-                    if coeff.width() <= left || coeff.height() <= top {
-                        continue;
-                    }
-                    let offset = top * stride + left;
-                    let coeff_buf = coeff.buf_mut();
-
+                    let lf_x = left / 8 - (lf_region.left as usize >> hshift);
+                    let lf_y = top / 8 - (lf_region.top as usize >> vshift);
                     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
                         debug_assert_eq!(bw * bh, 1);
-                        coeff_buf[offset] = *lf.get(left / 8, top / 8).unwrap();
+                        coeff_buf[offset] = *lf.get(lf_x, lf_y).unwrap();
                     } else {
                         let mut out = CutGrid::from_buf(
                             &mut coeff_buf[offset..],
@@ -331,7 +355,7 @@ pub fn transform_with_lf(
 
                         for y in 0..bh {
                             for x in 0..bw {
-                                *out.get_mut(x, y) = *lf.get(left / 8 + x, top / 8 + y).unwrap();
+                                *out.get_mut(x, y) = *lf.get(lf_x + x, lf_y + y).unwrap();
                             }
                         }
                         dct::dct_2d(&mut out, dct::DctDirection::Forward);
@@ -343,9 +367,9 @@ pub fn transform_with_lf(
                     }
 
                     let mut block = CutGrid::from_buf(
-                        &mut coeff.buf_mut()[top * stride + left..],
-                        bw * 8,
-                        bh * 8,
+                        &mut coeff_buf[offset..],
+                        width as usize,
+                        height as usize,
                         stride,
                     );
                     transform(&mut block, dct_select);
