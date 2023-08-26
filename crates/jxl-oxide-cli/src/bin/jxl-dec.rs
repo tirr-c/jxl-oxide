@@ -130,7 +130,7 @@ fn main() {
         std::fs::write(icc_path, image.rendered_icc()).expect("Failed to write ICC profile");
     }
 
-    let mut crop = args.crop.and_then(|crop| {
+    let crop = args.crop.and_then(|crop| {
         if crop.width == 0 && crop.height == 0 {
             None
         } else if crop.width == 0 {
@@ -148,22 +148,8 @@ fn main() {
         }
     });
 
-    if let Some(crop) = &mut crop {
-        tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
-        let (w, h, x, y) = image_meta.apply_orientation(
-            crop.width,
-            crop.height,
-            crop.left,
-            crop.top,
-            true,
-        );
-        crop.width = w;
-        crop.height = h;
-        crop.left = x;
-        crop.top = y
-    }
-
     let (width, height) = if let Some(crop) = crop {
+        tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
         (crop.width, crop.height)
     } else {
         (image_size.width, image_size.height)
@@ -177,7 +163,7 @@ fn main() {
         renderer.set_render_spot_colour(false);
     }
     loop {
-        let result = renderer.render_next_frame().expect("rendering frames failed");
+        let result = renderer.render_next_frame_cropped(crop).expect("rendering frames failed");
         match result {
             jxl_oxide::RenderResult::Done(frame) => keyframes.push(frame),
             jxl_oxide::RenderResult::NeedMoreData => panic!("Unexpected end of file"),
