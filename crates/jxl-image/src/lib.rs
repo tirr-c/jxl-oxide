@@ -214,18 +214,18 @@ impl ImageMetadata {
 
     /// Returns where the given coordinate will be placed after the orientation is applied.
     #[inline]
-    pub fn apply_orientation(&self, width: u32, height: u32, left: u32, top: u32, inverse: bool) -> (u32, u32, u32, u32) {
+    pub fn apply_orientation(&self, width: u32, height: u32, left: i32, top: i32, inverse: bool) -> (u32, u32, i32, i32) {
         let (left, top) = match self.orientation {
             1 => (left, top),
-            2 => (width - left - 1, top),
-            3 => (width - left - 1, height - top - 1),
-            4 => (left, height - top - 1),
+            2 => (width as i32 - left - 1, top),
+            3 => (width as i32 - left - 1, height as i32 - top - 1),
+            4 => (left, height as i32 - top - 1),
             5 => (top, left),
-            6 if inverse => (top, width - left - 1),
-            6 => (height - top - 1, left),
-            7 => (height - top - 1, width - left - 1),
-            8 if inverse => (height - top - 1, left),
-            8 => (top, width - left - 1),
+            6 if inverse => (top, width as i32 - left - 1),
+            6 => (height as i32 - top - 1, left),
+            7 => (height as i32 - top - 1, width as i32 - left - 1),
+            8 if inverse => (height as i32 - top - 1, left),
+            8 => (top, width as i32 - left - 1),
             _ => unreachable!(),
         };
         let (width, height) = match self.orientation {

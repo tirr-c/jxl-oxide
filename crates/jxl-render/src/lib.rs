@@ -126,16 +126,39 @@ impl RenderContext {
         let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
             Region::with_size(frame_header.width, frame_header.height)
         } else if let Some(image_region) = image_region {
-            let (width, height, left, top) = frame.image_header().metadata.apply_orientation(
-                image_region.width,
-                image_region.height,
-                image_region.left as u32,
-                image_region.top as u32,
+            let (image_width, image_height, _, _) = image_header.metadata.apply_orientation(
+                image_header.size.width,
+                image_header.size.height,
+                0,
+                0,
+                false,
+            );
+            let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
+                image_width,
+                image_height,
+                image_region.left,
+                image_region.top,
                 true,
             );
+            let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
+                image_width,
+                image_height,
+                image_region.left + image_region.width as i32,
+                image_region.top + image_region.height as i32,
+                true,
+            );
+
+            if left > right {
+                std::mem::swap(&mut left, &mut right);
+            }
+            if top > bottom {
+                std::mem::swap(&mut top, &mut bottom);
+            }
+            let width = right.abs_diff(left);
+            let height = bottom.abs_diff(top);
             Region {
-                left: left as i32 - frame_header.x0,
-                top: top as i32 - frame_header.y0,
+                left: left - frame_header.x0,
+                top: top - frame_header.y0,
                 width,
                 height,
             }
