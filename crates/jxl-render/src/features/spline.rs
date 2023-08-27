@@ -4,7 +4,8 @@ use jxl_frame::{
     data::{Splines, QuantSpline},
     FrameHeader,
 };
-use jxl_grid::SimpleGrid;
+
+use crate::region::ImageWithRegion;
 
 /// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
 #[derive(Debug)]
@@ -202,10 +203,12 @@ impl Spline {
 
 pub fn render_spline(
     frame_header: &FrameHeader,
-    base_grid: &mut [SimpleGrid<f32>],
+    base_grid: &mut ImageWithRegion,
     splines: &Splines,
     base_correlations_xb: Option<(f32, f32)>,
 ) -> crate::Result<()> {
+    let region = base_grid.region();
+
     let mut estimated_area = 0u64;
     let image_size = (frame_header.width * frame_header.height) as u64;
 
@@ -261,12 +264,22 @@ pub fn render_spline(
                 (arc.point.y + max_distance + 1.5).floor() as i32,
             );
 
-            #[allow(clippy::needless_range_loop)]
-            for channel in 0..3 {
-                let buffer = &mut base_grid[channel];
+            for (channel, buffer) in base_grid.buffer_mut()[..3].iter_mut().enumerate() {
                 for y in ybegin..yend {
+                    let fy = y - region.top;
+                    if fy < 0 {
+                        continue;
+                    }
+
                     for x in xbegin..xend {
-                        let sample = buffer.get_mut(x as usize, y as usize).unwrap();
+                        let fx = x - region.left;
+                        if fx < 0 {
+                            continue;
+                        }
+
+                        let Some(sample) = buffer.get_mut(fx as usize, fy as usize) else {
+                            break;
+                        };
                         let dx = (x as f32) - arc.point.x;
                         let dy = (y as f32) - arc.point.y;
                         let distance = f32::sqrt(dx * dx + dy * dy);

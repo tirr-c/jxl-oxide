@@ -286,8 +286,9 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
     }
 
     /// Renders the given keyframe.
-    pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
-        let mut grids = self.ctx.render_keyframe(keyframe_index)?;
+    pub fn render_frame_cropped(&mut self, keyframe_index: usize, image_region: Option<CropInfo>) -> Result<Render> {
+        let mut grids = self.ctx.render_keyframe(keyframe_index, image_region.map(From::from))?;
+        let mut grids = grids.take_buffer();
 
         let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
@@ -324,17 +325,27 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         Ok(result)
     }
 
+    /// Renders the given keyframe.
+    pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
+        self.render_frame_cropped(keyframe_index, None)
+    }
+
     /// Loads and renders the next keyframe.
-    pub fn render_next_frame(&mut self) -> Result<RenderResult> {
+    pub fn render_next_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<RenderResult> {
         let load_result = self.load_next_frame()?;
         match load_result {
             LoadResult::Done(keyframe_index) => {
-                let render = self.render_frame(keyframe_index)?;
+                let render = self.render_frame_cropped(keyframe_index, image_region)?;
                 Ok(RenderResult::Done(render))
             },
             LoadResult::NeedMoreData => Ok(RenderResult::NeedMoreData),
             LoadResult::NoMoreFrames => Ok(RenderResult::NoMoreFrames),
         }
+    }
+
+    /// Loads and renders the next keyframe.
+    pub fn render_next_frame(&mut self) -> Result<RenderResult> {
+        self.render_next_frame_cropped(None)
     }
 }
 
@@ -538,6 +549,17 @@ pub struct CropInfo {
     pub height: u32,
     pub left: u32,
     pub top: u32,
+}
+
+impl From<CropInfo> for jxl_render::Region {
+    fn from(value: CropInfo) -> Self {
+        Self {
+            left: value.left as i32,
+            top: value.top as i32,
+            width: value.width,
+            height: value.height,
+        }
+    }
 }
 
 fn create_rendered_icc(metadata: &image::ImageMetadata, embedded_icc: Option<&[u8]>) -> Vec<u8> {

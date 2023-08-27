@@ -8,8 +8,6 @@ pub fn upsample(
     channel_idx: usize,
 ) {
     let metadata = &image_header.metadata;
-    let frame_width = frame_header.width;
-    let frame_height = frame_header.height;
 
     let factor;
     if let Some(ec_idx) = channel_idx.checked_sub(3) {
@@ -20,18 +18,12 @@ pub fn upsample(
             let up8 = dim_shift / 3;
             let last_up = dim_shift % 3;
 
-            let mut width = grid.width() as u32;
-            let mut height = grid.height() as u32;
             for _ in 0..up8 {
-                width = (width << 3).min(frame_width);
-                height = (height << 3).min(frame_height);
-                upsample_inner::<8, 210>(grid, width, height, &metadata.up8_weight);
+                upsample_inner::<8, 210>(grid, &metadata.up8_weight);
             }
-            width = (width << last_up).min(frame_width);
-            height = (height << last_up).min(frame_height);
             match last_up {
-                1 => upsample_inner::<2, 15>(grid, width, height, &metadata.up2_weight),
-                2 => upsample_inner::<4, 55>(grid, width, height, &metadata.up4_weight),
+                1 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
+                2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
                 _ => {},
             }
         }
@@ -47,17 +39,15 @@ pub fn upsample(
 
     match factor {
         1 => {},
-        2 => upsample_inner::<2, 15>(grid, frame_width, frame_height, &metadata.up2_weight),
-        4 => upsample_inner::<4, 55>(grid, frame_width, frame_height, &metadata.up4_weight),
-        8 => upsample_inner::<8, 210>(grid, frame_width, frame_height, &metadata.up8_weight),
+        2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
+        4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
+        8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight),
         _ => panic!("invalid upsampling factor {}", factor),
     }
 }
 
 fn upsample_inner<const K: usize, const NW: usize>(
     grid: &mut SimpleGrid<f32>,
-    frame_width: u32,
-    frame_height: u32,
     weights: &[f32; NW],
 ) {
     assert!(
@@ -65,10 +55,10 @@ fn upsample_inner<const K: usize, const NW: usize>(
         (K == 4 && NW == 55) ||
         (K == 8 && NW == 210)
     );
-    let frame_width = frame_width as usize;
-    let frame_height = frame_height as usize;
     let grid_width = grid.width();
     let grid_height = grid.height();
+    let frame_width = grid_width << K.ilog2();
+    let frame_height = grid_height << K.ilog2();
 
     // 5x5 kernel
     const PADDING: usize = 2;

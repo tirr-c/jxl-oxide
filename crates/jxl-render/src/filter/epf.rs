@@ -141,8 +141,8 @@ pub fn apply_epf(
             let epf_sigma = &hf_meta.epf_sigma;
             for y8 in 0..epf_sigma.height() {
                 for x8 in 0..epf_sigma.width() {
-                    let sigma = *epf_sigma.get(x8, y8).unwrap();
-                    *sigma_grid.get_mut(base_x + x8, base_y + y8).unwrap() = sigma;
+                    let Some(target) = sigma_grid.get_mut(base_x + x8, base_y + y8) else { continue; };
+                    *target = *epf_sigma.get(x8, y8).unwrap();
                 }
             }
         }

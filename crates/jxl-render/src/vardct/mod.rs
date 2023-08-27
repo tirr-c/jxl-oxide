@@ -12,7 +12,7 @@ use jxl_vardct::{
     BlockInfo,
 };
 
-use crate::dct;
+use crate::{dct, region::ImageWithRegion, Region};
 
 mod transform;
 pub use transform::transform;
@@ -52,7 +52,7 @@ pub fn dequant_lf(
 }
 
 pub fn adaptive_lf_smoothing(
-    lf_image: &mut [SimpleGrid<f32>; 3],
+    lf_image: &mut [SimpleGrid<f32>],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
 ) {
@@ -61,7 +61,7 @@ pub fn adaptive_lf_smoothing(
     let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / scale_inv as f32;
 
-    let [in_x, in_y, in_b] = lf_image;
+    let [in_x, in_y, in_b] = lf_image else { panic!("lf_image should be three-channel image") };
     let width = in_x.width();
     let height = in_x.height();
 
@@ -78,13 +78,15 @@ pub fn adaptive_lf_smoothing(
 }
 
 pub fn dequant_hf_varblock(
-    out: &mut [SimpleGrid<f32>; 3],
+    out: &mut ImageWithRegion,
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
     hf_global: &HfGlobal,
 ) {
+    let region = out.region();
+    let out = out.buffer_mut();
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -125,9 +127,26 @@ pub fn dequant_hf_varblock(
                         continue;
                     }
 
+                    let left = lf_left as usize + bx * 8;
+                    let top = lf_top as usize + by * 8;
                     let (bw, bh) = dct_select.dct_select_size();
                     let width = bw * 8;
                     let height = bh * 8;
+                    let block_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width,
+                        height,
+                    };
+                    if region.intersection(block_region).is_empty() {
+                        continue;
+                    }
+
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    let offset = (top - (region.top as usize >> vshift)) * stride + (left - (region.left as usize >> hshift));
+                    let coeff_buf = coeff.buf_mut();
+
                     let need_transpose = dct_select.need_transpose();
                     let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
@@ -143,13 +162,8 @@ pub fn dequant_hf_varblock(
                         matrix = &new_matrix;
                     }
 
-                    let left = lf_left as usize + bx * 8;
-                    let top = lf_top as usize + by * 8;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-
                     let mut coeff = CutGrid::from_buf(
-                        &mut coeff.buf_mut()[top * stride + left..],
+                        &mut coeff_buf[offset..],
                         width as usize,
                         height as usize,
                         stride,
@@ -206,7 +220,7 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_xyb: &mut [SimpleGrid<f32>; 3],
+    coeff_xyb: &mut ImageWithRegion,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
@@ -217,8 +231,10 @@ pub fn chroma_from_luma_hf(
         base_correlation_b,
         ..
     } = lf_global.vardct.as_ref().unwrap().lf_chan_corr;
+    let region = coeff_xyb.region();
+    let coeff_xyb = coeff_xyb.buffer_mut();
 
-    let [coeff_x, coeff_y, coeff_b] = coeff_xyb;
+    let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
     let width = coeff_x.width();
     let height = coeff_x.height();
     let lf_group_dim = frame_header.lf_group_dim() as usize;
@@ -233,30 +249,48 @@ pub fn chroma_from_luma_hf(
         let lf_top = ((lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
         let lf_group_width = lf_group_dim.min(width - lf_left);
         let lf_group_height = lf_group_dim.min(height - lf_top);
+        let lf_group_region = Region {
+            left: lf_left as i32,
+            top: lf_top as i32,
+            width: lf_group_width as u32,
+            height: lf_group_height as u32,
+        };
+        let intersection_region = region.intersection(lf_group_region);
+        if intersection_region.is_empty() {
+            continue;
+        }
 
-        for cy in 0..lf_group_height {
-            for cx in 0..lf_group_width {
+        let begin_x = intersection_region.left as usize - lf_left;
+        let begin_y = intersection_region.top as usize - lf_top;
+        let end_x = begin_x + intersection_region.width as usize;
+        let end_y = begin_y + intersection_region.height as usize;
+
+        for cy in begin_y..end_y {
+            for cx in begin_x..end_x {
                 let x = lf_left + cx;
                 let y = lf_top + cy;
+                let fx = x.saturating_add_signed(-region.left as isize);
+                let fy = y.saturating_add_signed(-region.top as isize);
                 let cfactor_x = cx / 64;
                 let cfactor_y = cy / 64;
+
+                let Some(&coeff_y) = coeff_y.get(fx, fy) else { continue; };
 
                 let x_factor = *x_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let b_factor = *b_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
                 let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-                let coeff_y = *coeff_y.get(x, y).unwrap();
-                *coeff_x.get_mut(x, y).unwrap() += kx * coeff_y;
-                *coeff_b.get_mut(x, y).unwrap() += kb * coeff_y;
+                *coeff_x.get_mut(fx, fy).unwrap() += kx * coeff_y;
+                *coeff_b.get_mut(fx, fy).unwrap() += kb * coeff_y;
             }
         }
     }
 }
 
 pub fn transform_with_lf(
-    lf: &[SimpleGrid<f32>],
-    coeff_out: &mut [SimpleGrid<f32>; 3],
+    lf: &ImageWithRegion,
+    coeff_out: &mut ImageWithRegion,
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup>,
 ) {
@@ -270,6 +304,10 @@ pub fn transform_with_lf(
         recip.recip()
     }
 
+    let lf_region = lf.region();
+    let coeff_region = coeff_out.region();
+    let lf = lf.buffer();
+    let coeff_out = coeff_out.buffer_mut();
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -298,21 +336,37 @@ pub fn transform_with_lf(
                         continue;
                     }
 
+                    let left = lf_left as usize + bx * 8;
+                    let top = lf_top as usize + by * 8;
                     let (bw, bh) = dct_select.dct_select_size();
+                    let width = bw * 8;
+                    let height = bh * 8;
+                    let block_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width,
+                        height,
+                    };
+                    if coeff_region.intersection(block_region).is_empty() {
+                        continue;
+                    }
+
+                    let left = left >> hshift;
+                    let top = top >> vshift;
+                    let offset = (top - (coeff_region.top as usize >> vshift)) * stride + (left - (coeff_region.left as usize >> hshift));
+                    let coeff_buf = coeff.buf_mut();
+
                     let bw = bw as usize;
                     let bh = bh as usize;
 
-                    let left = lf_left as usize + bx * 8;
-                    let top = lf_top as usize + by * 8;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-
+                    let lf_x = left / 8 - (lf_region.left as usize >> hshift);
+                    let lf_y = top / 8 - (lf_region.top as usize >> vshift);
                     if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
                         debug_assert_eq!(bw * bh, 1);
-                        *coeff.get_mut(left, top).unwrap() = *lf.get(left / 8, top / 8).unwrap();
+                        coeff_buf[offset] = *lf.get(lf_x, lf_y).unwrap();
                     } else {
                         let mut out = CutGrid::from_buf(
-                            &mut coeff.buf_mut()[top * stride + left..],
+                            &mut coeff_buf[offset..],
                             bw,
                             bh,
                             stride,
@@ -320,7 +374,7 @@ pub fn transform_with_lf(
 
                         for y in 0..bh {
                             for x in 0..bw {
-                                *out.get_mut(x, y) = *lf.get(left / 8 + x, top / 8 + y).unwrap();
+                                *out.get_mut(x, y) = *lf.get(lf_x + x, lf_y + y).unwrap();
                             }
                         }
                         dct::dct_2d(&mut out, dct::DctDirection::Forward);
@@ -332,9 +386,9 @@ pub fn transform_with_lf(
                     }
 
                     let mut block = CutGrid::from_buf(
-                        &mut coeff.buf_mut()[top * stride + left..],
-                        bw * 8,
-                        bh * 8,
+                        &mut coeff_buf[offset..],
+                        width as usize,
+                        height as usize,
                         stride,
                     );
                     transform(&mut block, dct_select);

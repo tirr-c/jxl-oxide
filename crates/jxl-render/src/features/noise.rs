@@ -3,24 +3,36 @@ use std::num::Wrapping;
 use jxl_frame::{data::NoiseParameters, FrameHeader};
 use jxl_grid::{PaddedGrid, SimpleGrid};
 
+use crate::region::ImageWithRegion;
+
 pub fn render_noise(
     header: &FrameHeader,
     visible_frames_num: usize,
     invisible_frames_num: usize,
     base_correlations_xb: Option<(f32, f32)>,
-    grid: &mut [SimpleGrid<f32>],
+    grid: &mut ImageWithRegion,
     params: &NoiseParameters,
 ) -> crate::Result<()> {
-    let width = header.width as usize;
-    let height = header.height as usize;
+    let region = grid.region();
+    let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else { panic!() };
+    assert!(region.left >= 0 && region.top >= 0);
+
+    let left = region.left as usize;
+    let top = region.top as usize;
+    let width = region.width as usize;
+    let height = region.height as usize;
     let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
 
+    // TODO: Initialize smaller noise grid.
     let noise_buffer = init_noise(visible_frames_num, invisible_frames_num, header);
 
-    for y in 0..height {
-        for x in 0..width {
-            let grid_x = grid[0].get(x, y).unwrap();
-            let grid_y = grid[1].get(x, y).unwrap();
+    for fy in 0..height {
+        let y = fy + top;
+        for fx in 0..width {
+            let x = fx + left;
+
+            let grid_x = grid_r.get(fx, fy).unwrap();
+            let grid_y = grid_g.get(fx, fy).unwrap();
             let noise_r = noise_buffer[0].get(x, y).unwrap();
             let noise_g = noise_buffer[1].get(x, y).unwrap();
             let noise_b = noise_buffer[2].get(x, y).unwrap();
@@ -52,9 +64,9 @@ pub fn render_noise(
             let sg = (lut[in_int_g + 1] - lut[in_int_g]) * in_frac_g + lut[in_int_g];
             let nr = 0.22 * sr * (0.0078125 * noise_r + 0.9921875 * noise_b);
             let ng = 0.22 * sg * (0.0078125 * noise_g + 0.9921875 * noise_b);
-            *grid[0].get_mut(x, y).unwrap() += corr_x * (nr + ng) + nr - ng;
-            *grid[1].get_mut(x, y).unwrap() += nr + ng;
-            *grid[2].get_mut(x, y).unwrap() += corr_b * (nr + ng);
+            *grid_r.get_mut(fx, fy).unwrap() += corr_x * (nr + ng) + nr - ng;
+            *grid_g.get_mut(fx, fy).unwrap() += nr + ng;
+            *grid_b.get_mut(fx, fy).unwrap() += corr_b * (nr + ng);
         }
     }
 
