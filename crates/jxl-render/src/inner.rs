@@ -206,12 +206,7 @@ impl ContextInner {
         let color_padded_region = if max_upsample_factor > 0 {
             let padded_region = frame_region.downsample(max_upsample_factor).pad(2);
             let upsample_diff = max_upsample_factor - color_upsample_factor;
-            Region {
-                left: padded_region.left << upsample_diff,
-                top: padded_region.top << upsample_diff,
-                width: padded_region.width << upsample_diff,
-                height: padded_region.height << upsample_diff,
-            }
+            padded_region.upsample(upsample_diff)
         } else {
             frame_region
         };
@@ -219,7 +214,9 @@ impl ContextInner {
         // TODO: actual region could be smaller.
         let color_padded_region = if frame_header.restoration_filter.epf.enabled() {
             color_padded_region.pad(3)
-        } else if frame_header.restoration_filter.gab.enabled() || frame_header.do_ycbcr {
+        } else if frame_header.do_ycbcr {
+            color_padded_region.pad(1).downsample(2).upsample(2)
+        } else if frame_header.restoration_filter.gab.enabled() {
             color_padded_region.pad(1)
         } else {
             color_padded_region
@@ -267,14 +264,14 @@ impl ContextInner {
         let upsample_factor = frame_header.upsampling.ilog2();
 
         let mut buffer = fb.take_buffer();
-        let region = fb.region();
+        let upsampled_region = fb.region().upsample(upsample_factor);
         for (idx, g) in buffer.iter_mut().enumerate() {
             features::upsample(g, &self.image_header, frame_header, idx);
         }
         let upsampled_fb = ImageWithRegion::from_buffer(
             buffer,
-            region.left << upsample_factor,
-            region.top << upsample_factor,
+            upsampled_region.left,
+            upsampled_region.top,
         );
         *fb = ImageWithRegion::from_region(upsampled_fb.channels(), original_region);
         for (channel_idx, output) in fb.buffer_mut().iter_mut().enumerate() {
@@ -471,6 +468,7 @@ impl ContextInner {
             cache.lf_global.as_ref().unwrap()
         };
         let mut gmodular = lf_global.gmodular.clone();
+        let modular_region = compute_modular_region(frame_header, &gmodular, region);
 
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let shifts_cbycr = [0, 1, 2].map(|idx| {
@@ -483,13 +481,29 @@ impl ContextInner {
         let mut fb_xyb = ImageWithRegion::from_region(channels, region);
 
         let lf_groups = &mut cache.lf_groups;
-        load_lf_groups(frame, lf_global, lf_groups, region.downsample(3), &mut gmodular)?;
+        load_lf_groups(frame, lf_global, lf_groups, modular_region.downsample(3), &mut gmodular)?;
 
+        let group_dim = frame_header.group_dim();
         for pass_idx in 0..frame_header.passes.num_passes {
             for group_idx in 0..frame_header.num_groups() {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
                 let Some(mut bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+
+                let group_x = group_idx % frame_header.groups_per_row();
+                let group_y = group_idx / frame_header.groups_per_row();
+                let left = group_x * group_dim;
+                let top = group_y * group_dim;
+
+                let group_region = Region {
+                    left: left as i32,
+                    top: top as i32,
+                    width: group_dim,
+                    height: group_dim,
+                };
+                if group_region.intersection(modular_region).is_empty() {
+                    continue;
+                }
 
                 let shift = frame.pass_shifts(pass_idx);
                 decode_pass_group(
@@ -599,6 +613,16 @@ impl ContextInner {
         });
         let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
 
+        let lf_global = if let Some(x) = &cache.lf_global {
+            x
+        } else {
+            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+            cache.lf_global = Some(lf_global);
+            cache.lf_global.as_ref().unwrap()
+        };
+        let mut gmodular = lf_global.gmodular.clone();
+        let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
+
         let width = frame_header.color_sample_width() as usize;
         let height = frame_header.color_sample_height() as usize;
         let (width_rounded, height_rounded) = {
@@ -631,18 +655,11 @@ impl ContextInner {
             }.container_aligned(frame_header.group_dim())
         };
 
+        let modular_region = compute_modular_region(frame_header, &gmodular, aligned_region);
+        let modular_lf_region = compute_modular_region(frame_header, &gmodular, aligned_lf_region)
+            .intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
         let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
         let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
-
-        let lf_global = if let Some(x) = &cache.lf_global {
-            x
-        } else {
-            let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
-            cache.lf_global = Some(lf_global);
-            cache.lf_global.as_ref().unwrap()
-        };
-        let mut gmodular = lf_global.gmodular.clone();
-        let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
 
         let hf_global = if let Some(x) = &cache.hf_global {
             x
@@ -656,7 +673,7 @@ impl ContextInner {
         let fb_stride = aligned_region.width as usize;
 
         let lf_groups = &mut cache.lf_groups;
-        load_lf_groups(frame, lf_global, lf_groups, aligned_lf_region, &mut gmodular)?;
+        load_lf_groups(frame, lf_global, lf_groups, modular_lf_region, &mut gmodular)?;
 
         let group_dim = frame_header.group_dim();
         let lf_xyb = (|| {
@@ -743,24 +760,35 @@ impl ContextInner {
                     width: group_width,
                     height: group_height,
                 };
-                if group_region.intersection(aligned_region).is_empty() {
+                if group_region.intersection(modular_region).is_empty() {
                     continue;
                 }
 
-                let left = left - aligned_region.left as u32;
-                let top = top - aligned_region.top as u32;
+                let mut grid_xyb;
+                let vardct = if group_region.intersection(aligned_region).is_empty() {
+                    None
+                } else {
+                    let left = left - aligned_region.left as u32;
+                    let top = top - aligned_region.top as u32;
 
-                let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
-                let mut grid_xyb = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
-                    let hshift = shifts_cbycr[idx].hshift();
-                    let vshift = shifts_cbycr[idx].vshift();
-                    let group_width = group_width >> hshift;
-                    let group_height = group_height >> vshift;
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-                    let offset = top as usize * fb_stride + left as usize;
-                    CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, fb_stride)
-                });
+                    let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
+                    grid_xyb = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
+                        let hshift = shifts_cbycr[idx].hshift();
+                        let vshift = shifts_cbycr[idx].vshift();
+                        let group_width = group_width >> hshift;
+                        let group_height = group_height >> vshift;
+                        let left = left >> hshift;
+                        let top = top >> vshift;
+                        let offset = top as usize * fb_stride + left as usize;
+                        CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, fb_stride)
+                    });
+
+                    Some(PassGroupParamsVardct {
+                        lf_vardct: lf_global_vardct,
+                        hf_global,
+                        hf_coeff_output: &mut grid_xyb,
+                    })
+                };
 
                 let shift = frame.pass_shifts(pass_idx);
                 decode_pass_group(
@@ -772,11 +800,7 @@ impl ContextInner {
                         group_idx,
                         shift,
                         gmodular: &mut gmodular,
-                        vardct: Some(PassGroupParamsVardct {
-                            lf_vardct: lf_global_vardct,
-                            hf_global,
-                            hf_coeff_output: &mut grid_xyb,
-                        }),
+                        vardct,
                     },
                 )?;
             }
@@ -793,7 +817,7 @@ impl ContextInner {
         );
         if !subsampled {
             vardct::chroma_from_luma_hf(
-                fb_xyb.buffer_mut(),
+                &mut fb_xyb,
                 frame_header,
                 lf_global,
                 &*lf_groups,
@@ -902,3 +926,26 @@ fn load_lf_groups(
     Ok(())
 }
 
+#[inline]
+fn compute_modular_region(
+    frame_header: &FrameHeader,
+    gmodular: &GlobalModular,
+    region: Region,
+) -> Region {
+    if gmodular.modular.has_delta_palette() {
+        Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
+    } else if gmodular.modular.has_squeeze() {
+        let mut region = region;
+        if region.left > 0 {
+            region.width += region.left as u32;
+            region.left = 0;
+        }
+        if region.top > 0 {
+            region.height += region.top as u32;
+            region.top = 0;
+        }
+        region
+    } else {
+        region
+    }
+}

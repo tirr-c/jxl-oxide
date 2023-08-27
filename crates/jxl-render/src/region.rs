@@ -142,6 +142,21 @@ impl Region {
         }
     }
 
+    #[inline]
+    pub fn upsample(self, factor: u32) -> Self {
+        self.upsample_separate(factor, factor)
+    }
+
+    #[inline]
+    pub fn upsample_separate(self, factor_x: u32, factor_y: u32) -> Self {
+        Self {
+            left: self.left << factor_x,
+            top: self.top << factor_y,
+            width: self.width << factor_x,
+            height: self.height << factor_y,
+        }
+    }
+
     pub(crate) fn container_aligned(self, grid_dim: u32) -> Self {
         debug_assert!(grid_dim.is_power_of_two());
         let add = grid_dim - 1;

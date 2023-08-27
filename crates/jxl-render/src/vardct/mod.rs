@@ -220,7 +220,7 @@ pub fn chroma_from_luma_lf(
 }
 
 pub fn chroma_from_luma_hf(
-    coeff_xyb: &mut [SimpleGrid<f32>],
+    coeff_xyb: &mut ImageWithRegion,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
@@ -231,6 +231,8 @@ pub fn chroma_from_luma_hf(
         base_correlation_b,
         ..
     } = lf_global.vardct.as_ref().unwrap().lf_chan_corr;
+    let region = coeff_xyb.region();
+    let coeff_xyb = coeff_xyb.buffer_mut();
 
     let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
     let width = coeff_x.width();
@@ -247,23 +249,40 @@ pub fn chroma_from_luma_hf(
         let lf_top = ((lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
         let lf_group_width = lf_group_dim.min(width - lf_left);
         let lf_group_height = lf_group_dim.min(height - lf_top);
+        let lf_group_region = Region {
+            left: lf_left as i32,
+            top: lf_top as i32,
+            width: lf_group_width as u32,
+            height: lf_group_height as u32,
+        };
+        let intersection_region = region.intersection(lf_group_region);
+        if intersection_region.is_empty() {
+            continue;
+        }
 
-        for cy in 0..lf_group_height {
-            for cx in 0..lf_group_width {
+        let begin_x = intersection_region.left as usize - lf_left;
+        let begin_y = intersection_region.top as usize - lf_top;
+        let end_x = begin_x + intersection_region.width as usize;
+        let end_y = begin_y + intersection_region.height as usize;
+
+        for cy in begin_y..end_y {
+            for cx in begin_x..end_x {
                 let x = lf_left + cx;
                 let y = lf_top + cy;
+                let fx = x.saturating_add_signed(-region.left as isize);
+                let fy = y.saturating_add_signed(-region.top as isize);
                 let cfactor_x = cx / 64;
                 let cfactor_y = cy / 64;
 
-                let Some(&coeff_y) = coeff_y.get(x, y) else { continue; };
+                let Some(&coeff_y) = coeff_y.get(fx, fy) else { continue; };
 
                 let x_factor = *x_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let b_factor = *b_from_y.get(cfactor_x, cfactor_y).unwrap();
                 let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
                 let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-                *coeff_x.get_mut(x, y).unwrap() += kx * coeff_y;
-                *coeff_b.get_mut(x, y).unwrap() += kb * coeff_y;
+                *coeff_x.get_mut(fx, fy).unwrap() += kx * coeff_y;
+                *coeff_b.get_mut(fx, fy).unwrap() += kb * coeff_y;
             }
         }
     }
