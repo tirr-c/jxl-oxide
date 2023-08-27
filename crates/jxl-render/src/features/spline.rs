@@ -277,7 +277,9 @@ pub fn render_spline(
                             continue;
                         }
 
-                        let sample = buffer.get_mut(fx as usize, fy as usize).unwrap();
+                        let Some(sample) = buffer.get_mut(fx as usize, fy as usize) else {
+                            break;
+                        };
                         let dx = (x as f32) - arc.point.x;
                         let dy = (y as f32) - arc.point.y;
                         let distance = f32::sqrt(dx * dx + dy * dy);
