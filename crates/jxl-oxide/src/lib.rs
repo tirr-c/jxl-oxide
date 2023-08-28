@@ -26,7 +26,8 @@
 //! ```
 //!
 //! `JxlImage` parses the image header and embedded ICC profile (if there's any). Use
-//! [`JxlImage::renderer`] to start rendering the image. You might need to use
+//! [`JxlImage::render_next_frame`], or [`JxlImage::load_next_frame`] followed by
+//! [`JxlImage::render_frame`] to render the image. You might need to use
 //! [`JxlRenderer::rendered_icc`] to do color management correctly.
 //!
 //! ```no_run
@@ -37,9 +38,8 @@
 //! # fn wait_for_data() {}
 //! # fn main() -> jxl_oxide::Result<()> {
 //! # let mut image = JxlImage::open("input.jxl").unwrap();
-//! let mut renderer = image.renderer();
 //! loop {
-//!     let result = renderer.render_next_frame()?;
+//!     let result = image.render_next_frame()?;
 //!     match result {
 //!         RenderResult::Done(render) => {
 //!             present_image(render);
@@ -84,6 +84,9 @@ pub struct JxlImage<R> {
     bitstream: Bitstream<ContainerDetectingReader<R>>,
     image_header: Arc<ImageHeader>,
     embedded_icc: Option<Vec<u8>>,
+    ctx: RenderContext,
+    render_spot_colour: bool,
+    end_of_image: bool,
 }
 
 impl<R: Read> JxlImage<R> {
@@ -108,13 +111,29 @@ impl<R: Read> JxlImage<R> {
             bitstream.skip_to_bookmark(bookmark)?;
         }
 
+        let render_spot_colour = !image_header.metadata.grayscale();
+
         Ok(Self {
             bitstream,
-            image_header,
+            image_header: image_header.clone(),
             embedded_icc,
+            ctx: RenderContext::new(image_header),
+            render_spot_colour,
+            end_of_image: false,
         })
     }
+}
 
+impl JxlImage<File> {
+    /// Creates a `JxlImage` from the filesystem.
+    #[inline]
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let file = File::open(path)?;
+        Self::from_reader(file)
+    }
+}
+
+impl<R> JxlImage<R> {
     /// Returns the image header.
     #[inline]
     pub fn image_header(&self) -> &ImageHeader {
@@ -135,102 +154,6 @@ impl<R: Read> JxlImage<R> {
     /// - Else, the profile describes the color encoding signalled in the image header.
     pub fn rendered_icc(&self) -> Vec<u8> {
         create_rendered_icc(&self.image_header.metadata, self.embedded_icc.as_deref())
-    }
-
-    /// Starts rendering the image.
-    #[inline]
-    pub fn renderer(&mut self) -> JxlRenderer<'_, R> {
-        let ctx = RenderContext::new(self.image_header.clone());
-        JxlRenderer {
-            bitstream: &mut self.bitstream,
-            image_header: self.image_header.clone(),
-            embedded_icc: self.embedded_icc.as_deref(),
-            ctx,
-            render_spot_colour: !self.image_header.metadata.grayscale(),
-            crop_region: None,
-            end_of_image: false,
-        }
-    }
-}
-
-impl JxlImage<File> {
-    /// Creates a `JxlImage` from the filesystem.
-    #[inline]
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let file = File::open(path)?;
-        Self::from_reader(file)
-    }
-}
-
-/// Renderer for the initialized JPEG XL image.
-#[derive(Debug)]
-pub struct JxlRenderer<'img, R> {
-    bitstream: &'img mut Bitstream<ContainerDetectingReader<R>>,
-    image_header: Arc<ImageHeader>,
-    embedded_icc: Option<&'img [u8]>,
-    ctx: RenderContext,
-    render_spot_colour: bool,
-    crop_region: Option<CropInfo>,
-    end_of_image: bool,
-}
-
-impl<'img, R: Read> JxlRenderer<'img, R> {
-    /// Returns the image header.
-    #[inline]
-    pub fn image_header(&self) -> &ImageHeader {
-        &self.image_header
-    }
-
-    /// Sets the cropping region of the image.
-    #[inline]
-    pub fn set_crop_region(&mut self, crop_region: Option<CropInfo>) -> &mut Self {
-        self.crop_region = crop_region;
-        self
-    }
-
-    /// Returns the cropping region of the image.
-    #[inline]
-    pub fn crop_region(&self) -> Option<CropInfo> {
-        self.crop_region
-    }
-
-    #[inline]
-    #[allow(unused)]
-    fn crop_region_flattened(&self) -> Option<(u32, u32, u32, u32)> {
-        self.crop_region.map(|info| (info.left, info.top, info.width, info.height))
-    }
-
-    /// Sets whether the spot colour channels will be rendered.
-    #[inline]
-    pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
-        if render_spot_colour && self.image_header.metadata.grayscale() {
-            tracing::warn!("Spot colour channels are not rendered on grayscale images");
-            return self;
-        }
-        self.render_spot_colour = render_spot_colour;
-        self
-    }
-
-    /// Returns whether the spot color channels will be rendered.
-    #[inline]
-    pub fn render_spot_colour(&self) -> bool {
-        self.render_spot_colour
-    }
-
-    /// Returns the embedded ICC profile.
-    #[inline]
-    pub fn embedded_icc(&self) -> Option<&'img [u8]> {
-        self.embedded_icc
-    }
-
-    /// Returns the ICC profile that describes rendered images.
-    ///
-    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
-    ///   linear sRGB or linear grayscale colorspace.
-    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
-    /// - Else, the profile describes the color encoding signalled in the image header.
-    pub fn rendered_icc(&self) -> Vec<u8> {
-        create_rendered_icc(&self.image_header.metadata, self.embedded_icc)
     }
 
     /// Returns the pixel format of the rendered image.
@@ -257,6 +180,25 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         }
     }
 
+    /// Sets whether the spot colour channels will be rendered.
+    #[inline]
+    pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
+        if render_spot_colour && self.image_header.metadata.grayscale() {
+            tracing::warn!("Spot colour channels are not rendered on grayscale images");
+            return self;
+        }
+        self.render_spot_colour = render_spot_colour;
+        self
+    }
+
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_colour(&self) -> bool {
+        self.render_spot_colour
+    }
+}
+
+impl<R: Read> JxlImage<R> {
     /// Loads the next keyframe, and returns the result with the keyframe index.
     ///
     /// Unlike [`render_next_frame`][Self::render_next_frame], this method does not render the
@@ -266,7 +208,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
             return Ok(LoadResult::NoMoreFrames);
         }
 
-        self.ctx.load_until_keyframe(self.bitstream)?;
+        self.ctx.load_until_keyframe(&mut self.bitstream)?;
 
         let keyframe_index = self.ctx.loaded_keyframes() - 1;
         self.end_of_image = self.frame_header(keyframe_index).unwrap().is_last;
@@ -285,7 +227,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         self.ctx.loaded_keyframes()
     }
 
-    /// Renders the given keyframe.
+    /// Renders the given keyframe with optional cropping region.
     pub fn render_frame_cropped(&mut self, keyframe_index: usize, image_region: Option<CropInfo>) -> Result<Render> {
         let mut grids = self.ctx.render_keyframe(keyframe_index, image_region.map(From::from))?;
         let mut grids = grids.take_buffer();
@@ -330,7 +272,7 @@ impl<'img, R: Read> JxlRenderer<'img, R> {
         self.render_frame_cropped(keyframe_index, None)
     }
 
-    /// Loads and renders the next keyframe.
+    /// Loads and renders the next keyframe with optional cropping region.
     pub fn render_next_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<RenderResult> {
         let load_result = self.load_next_frame()?;
         match load_result {

@@ -26,10 +26,9 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
     let fixture_header = FixtureHeader::from_bytes(header);
 
     let mut image = jxl_oxide::JxlImage::from_reader(std::io::Cursor::new(data)).unwrap();
-    let mut renderer = image.renderer();
 
     loop {
-        let result = renderer.render_next_frame().unwrap();
+        let result = image.render_next_frame().unwrap();
         match result {
             jxl_oxide::RenderResult::Done(frame) => {
                 let mut marker = 0u8;

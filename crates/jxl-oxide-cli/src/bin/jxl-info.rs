@@ -102,13 +102,12 @@ fn main() {
     }
 
     let animated = image_meta.animation.is_some();
-    let mut renderer = image.renderer();
     loop {
-        let result = renderer.load_next_frame().expect("rendering frames failed");
+        let result = image.load_next_frame().expect("loading frames failed");
         let frame_header = match result {
             jxl_oxide::LoadResult::Done(idx) => {
                 println!("Frame #{idx}");
-                renderer.frame_header(idx).unwrap()
+                image.frame_header(idx).unwrap()
             }
             jxl_oxide::LoadResult::NeedMoreData => panic!("Unexpected end of file"),
             jxl_oxide::LoadResult::NoMoreFrames => break,
