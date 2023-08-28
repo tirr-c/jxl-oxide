@@ -75,14 +75,13 @@ fn run_test<R: std::io::Read>(
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
-    let mut renderer = image.renderer();
-    renderer.set_render_spot_colour(false);
+    image.set_render_spot_colour(false);
 
     let transform = target_icc.map(|target_icc| {
-        let source_profile = Profile::new_icc(&renderer.rendered_icc()).expect("failed to parse ICC profile");
+        let source_profile = Profile::new_icc(&image.rendered_icc()).expect("failed to parse ICC profile");
         let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
 
-        if renderer.image_header().metadata.grayscale() {
+        if image.image_header().metadata.grayscale() {
             LcmsTransform::Grayscale(Transform::new(
                 &source_profile,
                 lcms2::PixelFormat::GRAY_FLT,
@@ -103,7 +102,7 @@ fn run_test<R: std::io::Read>(
 
     let mut num_keyframes = 0usize;
     loop {
-        let result = renderer.render_next_frame().expect("failed to render frame");
+        let result = image.render_next_frame().expect("failed to render frame");
         let render = match result {
             jxl_oxide::RenderResult::Done(render) => render,
             jxl_oxide::RenderResult::NeedMoreData => panic!("unexpected end of file"),

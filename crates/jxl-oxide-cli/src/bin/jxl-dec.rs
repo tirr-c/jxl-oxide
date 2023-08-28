@@ -158,12 +158,11 @@ fn main() {
     let decode_start = std::time::Instant::now();
 
     let mut keyframes = Vec::new();
-    let mut renderer = image.renderer();
     if args.output_format == OutputFormat::Npy {
-        renderer.set_render_spot_colour(false);
+        image.set_render_spot_colour(false);
     }
     loop {
-        let result = renderer.render_next_frame_cropped(crop).expect("rendering frames failed");
+        let result = image.render_next_frame_cropped(crop).expect("rendering frames failed");
         match result {
             jxl_oxide::RenderResult::Done(frame) => keyframes.push(frame),
             jxl_oxide::RenderResult::NeedMoreData => panic!("Unexpected end of file"),
@@ -177,7 +176,7 @@ fn main() {
 
     if let Some(output) = &args.output {
         tracing::debug!(output_format = format_args!("{:?}", args.output_format));
-        let pixel_format = renderer.pixel_format();
+        let pixel_format = image.pixel_format();
         let output = std::fs::File::create(output).expect("failed to open output file");
         match args.output_format {
             OutputFormat::Png => {

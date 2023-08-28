@@ -14,9 +14,8 @@ fn main() {
     header[8..12].copy_from_slice(&channels.to_le_bytes());
     stdout.write_all(&header).unwrap();
 
-    let mut renderer = image.renderer();
     loop {
-        let result = renderer.render_next_frame().unwrap();
+        let result = image.render_next_frame().unwrap();
         match result {
             jxl_oxide::RenderResult::Done(frame) => {
                 stdout.write_all(&[0]).unwrap();
