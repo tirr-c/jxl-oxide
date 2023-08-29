@@ -66,6 +66,20 @@ impl<Ctx> Bundle<Ctx> for ImageHeader {
     }
 }
 
+impl ImageHeader {
+    /// Returns the image width with orientation applied.
+    #[inline]
+    pub fn width_with_orientation(&self) -> u32 {
+        self.metadata.apply_orientation(self.size.width, self.size.height, 0, 0, false).0
+    }
+
+    /// Returns the image height with orientation applied.
+    #[inline]
+    pub fn height_with_orientation(&self) -> u32 {
+        self.metadata.apply_orientation(self.size.width, self.size.height, 0, 0, false).1
+    }
+}
+
 define_bundle! {
     /// Image size information.
     #[derive(Debug)]
