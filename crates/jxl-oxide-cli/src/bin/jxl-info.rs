@@ -37,7 +37,23 @@ fn main() {
     let image_meta = &image.image_header().metadata;
 
     println!("JPEG XL image");
-    println!("  Image dimension: {}x{}", image_size.width, image_size.height);
+
+    println!("  Image dimension: {}x{}", image.width(), image.height());
+    if image_meta.orientation != 1 {
+        println!("    Encoded image dimension: {}x{}", image_size.width, image_size.height);
+        print!("    Orientation of encoded image: ");
+        match image_meta.orientation {
+            2 => println!("flipped horizontally"),
+            3 => println!("rotated 180 degrees"),
+            4 => println!("flipped vertically"),
+            5 => println!("transposed"),
+            6 => println!("rotated 90 degrees CCW"),
+            7 => println!("rotated 90 degrees CCW, and then flipped horizontally"),
+            8 => println!("rotated 90 degrees CW"),
+            _ => {},
+        }
+    }
+
     println!("  Bit depth: {} bits", image_meta.bit_depth.bits_per_sample());
     if image_meta.xyb_encoded {
         println!("  XYB encoded, suggested display color encoding:");

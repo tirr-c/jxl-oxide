@@ -122,7 +122,7 @@ fn main() {
     let mut image = JxlImage::open(&args.input).expect("Failed to open file");
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
-    tracing::info!("Image dimension: {}x{}", image_size.width, image_size.height);
+    tracing::info!("Image dimension: {}x{}", image.width(), image.height());
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
 
     if let Some(icc_path) = &args.icc_output {

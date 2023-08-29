@@ -140,6 +140,18 @@ impl<R> JxlImage<R> {
         &self.image_header
     }
 
+    /// Returns the image width with orientation applied.
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.image_header.width_with_orientation()
+    }
+
+    /// Returns the image height with orientation applied.
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.image_header.height_with_orientation()
+    }
+
     /// Returns the embedded ICC profile.
     #[inline]
     pub fn embedded_icc(&self) -> Option<&[u8]> {
