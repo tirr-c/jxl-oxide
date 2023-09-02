@@ -235,8 +235,6 @@ pub fn chroma_from_luma_hf(
     let coeff_xyb = coeff_xyb.buffer_mut();
 
     let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
-    let width = coeff_x.width();
-    let height = coeff_x.height();
     let lf_group_dim = frame_header.lf_group_dim() as usize;
 
     for lf_group_idx in 0..frame_header.num_lf_groups() {
@@ -247,13 +245,11 @@ pub fn chroma_from_luma_hf(
 
         let lf_left = ((lf_group_idx % frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
         let lf_top = ((lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
-        let lf_group_width = lf_group_dim.min(width - lf_left);
-        let lf_group_height = lf_group_dim.min(height - lf_top);
         let lf_group_region = Region {
             left: lf_left as i32,
             top: lf_top as i32,
-            width: lf_group_width as u32,
-            height: lf_group_height as u32,
+            width: lf_group_dim as u32,
+            height: lf_group_dim as u32,
         };
         let intersection_region = region.intersection(lf_group_region);
         if intersection_region.is_empty() {
