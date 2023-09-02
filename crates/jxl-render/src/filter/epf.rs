@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
 
+use crate::{region::ImageWithRegion, Region};
+
 #[inline]
 fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
     let inv_sigma = step_multiplier * 6.6 * (1.0 - std::f32::consts::FRAC_1_SQRT_2) / sigma;
@@ -90,7 +92,7 @@ fn epf_step(
 }
 
 pub fn apply_epf(
-    fb: [&mut SimpleGrid<f32>; 3],
+    fb: &mut ImageWithRegion,
     lf_groups: &HashMap<u32, LfGroup>,
     frame_header: &FrameHeader,
 ) {
@@ -105,8 +107,13 @@ pub fn apply_epf(
     let span = tracing::span!(tracing::Level::TRACE, "apply_epf");
     let _guard = span.enter();
 
-    let width = fb[0].width();
-    let height = fb[0].height();
+    let region = fb.region();
+    let fb = fb.buffer_mut();
+    assert!(region.left % 8 == 0);
+    assert!(region.top % 8 == 0);
+
+    let width = region.width as usize;
+    let height = region.height as usize;
     let mut fb_in = [
         SimpleGrid::new(width + 6, height + 6),
         SimpleGrid::new(width + 6, height + 6),
@@ -117,7 +124,7 @@ pub fn apply_epf(
         SimpleGrid::new(width + 6, height + 6),
         SimpleGrid::new(width + 6, height + 6),
     ];
-    for (output, input) in fb_in.iter_mut().zip(&fb) {
+    for (output, input) in fb_in.iter_mut().zip(&*fb) {
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {
@@ -126,9 +133,9 @@ pub fn apply_epf(
     }
 
     tracing::debug!("Preparing sigma grid");
-    let w8 = (width + 7) / 8;
-    let h8 = (height + 7) / 8;
-    let mut sigma_grid = SimpleGrid::new(w8, h8);
+    let sigma_region = region.downsample(3);
+    let mut sigma_image = ImageWithRegion::from_region(1, sigma_region);
+    let sigma_grid = &mut sigma_image.buffer_mut()[0];
     let mut need_sigma_init = true;
 
     let lf_groups_per_row = frame_header.lf_groups_per_row();
@@ -136,13 +143,30 @@ pub fn apply_epf(
     for (&lf_group_idx, lf_group) in lf_groups {
         let base_x = ((lf_group_idx % lf_groups_per_row) * lf_group_dim8) as usize;
         let base_y = ((lf_group_idx / lf_groups_per_row) * lf_group_dim8) as usize;
+        let lf_region = Region {
+            left: base_x as i32,
+            top: base_y as i32,
+            width: lf_group_dim8,
+            height: lf_group_dim8,
+        };
+        let intersection = sigma_region.intersection(lf_region);
+        if intersection.is_empty() {
+            continue;
+        }
+
         if let Some(hf_meta) = &lf_group.hf_meta {
             need_sigma_init = false;
             let epf_sigma = &hf_meta.epf_sigma;
-            for y8 in 0..epf_sigma.height() {
-                for x8 in 0..epf_sigma.width() {
-                    let Some(target) = sigma_grid.get_mut(base_x + x8, base_y + y8) else { continue; };
-                    *target = *epf_sigma.get(x8, y8).unwrap();
+
+            let lf_region = intersection.translate(-lf_region.left, -lf_region.top);
+            let sigma_region = intersection.translate(-sigma_region.left, -sigma_region.top);
+            for y8 in 0..lf_region.height as usize {
+                let lf_y = lf_region.top as usize + y8;
+                let sigma_y = sigma_region.top as usize + y8;
+                for x8 in 0..lf_region.width as usize {
+                    let lf_x = lf_region.left as usize + x8;
+                    let sigma_x = sigma_region.left as usize + x8;
+                    *sigma_grid.get_mut(sigma_x, sigma_y).unwrap() = *epf_sigma.get(lf_x, lf_y).unwrap();
                 }
             }
         }
@@ -183,7 +207,7 @@ pub fn apply_epf(
         epf_step(
             &fb_in,
             &mut fb_out,
-            &sigma_grid,
+            sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass0_sigma_scale,
@@ -226,7 +250,7 @@ pub fn apply_epf(
         epf_step(
             &fb_in,
             &mut fb_out,
-            &sigma_grid,
+            sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             1.0,
@@ -266,7 +290,7 @@ pub fn apply_epf(
         epf_step(
             &fb_in,
             &mut fb_out,
-            &sigma_grid,
+            sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass2_sigma_scale,
@@ -276,7 +300,7 @@ pub fn apply_epf(
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
-    for (output, input) in fb.into_iter().zip(fb_in) {
+    for (output, input) in fb.iter_mut().zip(fb_in) {
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {

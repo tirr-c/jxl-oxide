@@ -227,6 +227,9 @@ impl ContextInner {
         if frame_header.do_ycbcr {
             color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
         }
+        if frame_header.restoration_filter.epf.enabled() {
+            color_padded_region = color_padded_region.container_aligned(8);
+        }
         color_padded_region = color_padded_region.intersection(full_frame_region);
 
         let (mut fb, gmodular) = match frame_header.encoding {
@@ -245,7 +248,7 @@ impl ContextInner {
         if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf([a, b, c], &cache.lf_groups, frame_header);
+        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header);
 
         self.upsample_color_channels(&mut fb, frame_header, frame_region);
         self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
