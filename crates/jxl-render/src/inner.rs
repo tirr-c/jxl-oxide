@@ -7,7 +7,7 @@ use std::{
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
     data::*,
-    filter::Gabor,
+    filter::{Gabor, EdgePreservingFilter},
     header::{Encoding, FrameType},
     Frame, FrameHeader,
 };
@@ -203,7 +203,7 @@ impl ContextInner {
             .max()
             .unwrap_or(color_upsample_factor);
 
-        let color_padded_region = if max_upsample_factor > 0 {
+        let mut color_padded_region = if max_upsample_factor > 0 {
             let padded_region = frame_region.downsample(max_upsample_factor).pad(2);
             let upsample_diff = max_upsample_factor - color_upsample_factor;
             padded_region.upsample(upsample_diff)
@@ -212,15 +212,22 @@ impl ContextInner {
         };
 
         // TODO: actual region could be smaller.
-        let color_padded_region = if frame_header.restoration_filter.epf.enabled() {
-            color_padded_region.pad(3)
-        } else if frame_header.do_ycbcr {
-            color_padded_region.pad(1).downsample(2).upsample(2)
-        } else if frame_header.restoration_filter.gab.enabled() {
-            color_padded_region.pad(1)
-        } else {
-            color_padded_region
-        }.intersection(full_frame_region);
+        if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+            color_padded_region = if iters == 1 {
+                color_padded_region.pad(2)
+            } else if iters == 2 {
+                color_padded_region.pad(5)
+            } else {
+                color_padded_region.pad(6)
+            };
+        }
+        if frame_header.restoration_filter.gab.enabled() {
+            color_padded_region = color_padded_region.pad(1);
+        }
+        if frame_header.do_ycbcr {
+            color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
+        }
+        color_padded_region = color_padded_region.intersection(full_frame_region);
 
         let (mut fb, gmodular) = match frame_header.encoding {
             Encoding::Modular => self.render_modular(frame, cache, color_padded_region),
