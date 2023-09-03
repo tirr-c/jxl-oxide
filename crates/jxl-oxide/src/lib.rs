@@ -153,6 +153,9 @@ impl<R> JxlImage<R> {
     }
 
     /// Returns the embedded ICC profile.
+    ///
+    /// It does *not* describe the colorspace of rendered images. Use
+    /// [`rendered_icc`][Self::rendered_icc] to do color management.
     #[inline]
     pub fn embedded_icc(&self) -> Option<&[u8]> {
         self.embedded_icc.as_deref()
