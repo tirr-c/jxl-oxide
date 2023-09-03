@@ -1,6 +1,6 @@
 //! This crate provides types related to representation of VarDCT frames, such as
 //! [varblock transform types][TransformType], [LF images][LfCoeff],
-//! [dequantization matrices][DequantMatrixSet] and [HF coefficients][HfCoeff].
+//! [dequantization matrices][DequantMatrixSet] and [HF coefficients][write_hf_coeff].
 //!
 //! Actual decoding (dequantization and rendering) of such frames is not done in this crate.
 mod dct_select;
