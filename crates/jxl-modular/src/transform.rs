@@ -38,11 +38,8 @@ impl TransformInfo {
         }
     }
 
-    pub fn is_delta_palette(&self) -> bool {
-        match self {
-            Self::Palette(pal) => pal.nb_deltas > 0,
-            _ => false,
-        }
+    pub fn is_palette(&self) -> bool {
+        matches!(self, Self::Palette(_))
     }
 
     pub fn is_squeeze(&self) -> bool {

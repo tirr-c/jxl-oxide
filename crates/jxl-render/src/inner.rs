@@ -948,7 +948,7 @@ fn compute_modular_region(
     gmodular: &GlobalModular,
     region: Region,
 ) -> Region {
-    if gmodular.modular.has_delta_palette() {
+    if gmodular.modular.has_palette() {
         Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
     } else if gmodular.modular.has_squeeze() {
         let mut region = region;
