@@ -17,7 +17,7 @@ impl<'a> HfPassParams<'a> {
 /// HF coefficient decoder configuration.
 ///
 /// Includes distribution for the entropy decoder and the order of HF coefficients. This struct is
-/// passed as a parameter when decoding [`HfCoeff`][crate::HfCoeff].
+/// passed as a parameter when [decoding HF coefficients][crate::write_hf_coeff].
 #[derive(Debug)]
 pub struct HfPass {
     permutation: [[Vec<usize>; 3]; 13],
