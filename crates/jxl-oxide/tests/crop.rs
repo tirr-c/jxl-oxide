@@ -79,6 +79,8 @@ macro_rules! testcase {
 testcase! {
     bicycles,
     bike,
+    alpha_triangles,
+    lz77_flower,
     sunset_logo,
     blendmodes,
     progressive,
@@ -90,4 +92,9 @@ testcase! {
     cafe,
     upsampling,
     delta_palette,
+    patches_lossless,
+    grayscale,
+    grayscale_jpeg,
+    grayscale_public_university,
+    spot,
 }
