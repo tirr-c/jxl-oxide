@@ -8,20 +8,20 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 
 [dependencies]
-lcms2 = "5.6.0"
+lcms2 = "6.0.0"
 miniz_oxide = "0.7.1"
-png = "0.17.9"
+png = "0.17.10"
 
 [dependencies.clap]
-version = "4.3.4"
+version = "4.4.2"
 features = ["derive"]
 
 [dependencies.jxl-oxide]
-version = "0.3.0"
+version = "0.4.0"
 path = "../jxl-oxide"
 
 [dependencies.tracing]
@@ -30,5 +30,5 @@ default_features = false
 features = ["std"]
 
 [dependencies.tracing-subscriber]
-version = "0.3.16"
+version = "0.3.17"
 features = ["env-filter"]
