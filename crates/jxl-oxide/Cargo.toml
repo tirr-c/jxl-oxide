@@ -45,8 +45,8 @@ default_features = false
 features = ["std"]
 
 [dev-dependencies]
-lcms2 = "5.5.0"
-zstd = "0.12.3"
+lcms2 = "6.0.0"
+zstd = "0.12.4"
 
 [dev-dependencies.rand]
 version = "0.8.5"
@@ -54,5 +54,5 @@ default_features = false
 features = ["getrandom", "small_rng"]
 
 [dev-dependencies.reqwest]
-version = "0.11.14"
+version = "0.11.20"
 features = ["blocking"]
