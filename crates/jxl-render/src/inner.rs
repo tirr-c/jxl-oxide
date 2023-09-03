@@ -956,30 +956,8 @@ fn compute_modular_region(
     gmodular: &GlobalModular,
     region: Region,
 ) -> Region {
-    if gmodular.modular.has_palette() {
+    if gmodular.modular.has_palette() || gmodular.modular.has_squeeze() {
         Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
-    } else if gmodular.modular.has_squeeze() {
-        let mut region = region;
-        if region.left > 0 {
-            region.width += region.left as u32;
-            region.left = 0;
-        }
-        if region.top > 0 {
-            region.height += region.top as u32;
-            region.top = 0;
-        }
-
-        let mut right = region.left + region.width as i32;
-        if (1..frame_header.color_sample_width() as i32).contains(&right) {
-            right = (right as u32).next_power_of_two().min(frame_header.color_sample_width()) as i32;
-        }
-        let mut bottom = region.top + region.height as i32;
-        if (1..frame_header.color_sample_height() as i32).contains(&bottom) {
-            bottom = (bottom as u32).next_power_of_two().min(frame_header.color_sample_height()) as i32;
-        }
-        region.width = right.abs_diff(region.left);
-        region.height = bottom.abs_diff(region.top);
-        region
     } else {
         region
     }
