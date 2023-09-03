@@ -195,6 +195,11 @@ impl ContextInner {
     ) -> Result<ImageWithRegion> {
         let frame_header = frame.header();
         let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
+        let frame_region = if frame_header.lf_level != 0 {
+            frame_region.pad(4)
+        } else {
+            frame_region
+        };
 
         let color_upsample_factor = frame_header.upsampling.ilog2();
         let max_upsample_factor = frame_header.ec_upsampling.iter()
@@ -687,15 +692,16 @@ impl ContextInner {
 
         let group_dim = frame_header.group_dim();
         let lf_xyb = (|| {
+            let mut lf_xyb_buf = ImageWithRegion::from_region(3, aligned_lf_region);
+
             if let Some(x) = lf_frame {
-                if aligned_lf_region.contains(x.image.region()) {
-                    return std::borrow::Cow::Borrowed(x.image);
-                }
+                x.image.clone_region_channel(aligned_lf_region, 0, &mut lf_xyb_buf.buffer_mut()[0]);
+                x.image.clone_region_channel(aligned_lf_region, 1, &mut lf_xyb_buf.buffer_mut()[1]);
+                x.image.clone_region_channel(aligned_lf_region, 2, &mut lf_xyb_buf.buffer_mut()[2]);
+                return std::borrow::Cow::Owned(lf_xyb_buf);
             }
 
-            let mut lf_xyb_buf = ImageWithRegion::from_region(3, aligned_lf_region);
             let lf_groups_per_row = frame_header.lf_groups_per_row();
-
             for idx in 0..frame_header.num_lf_groups() {
                 let Some(lf_group) = lf_groups.get(&idx) else { continue; };
 
