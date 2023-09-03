@@ -36,11 +36,13 @@ struct Args {
     icc_output: Option<PathBuf>,
     /// Input file
     input: PathBuf,
+    /// (unstable) Region to render, in format of 'width height left top'
     #[arg(long, value_parser = parse_crop_info)]
     crop: Option<CropInfo>,
     /// Format to output
     #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
     output_format: OutputFormat,
+    /// Print debug information
     #[arg(short, long)]
     verbose: bool,
 }
