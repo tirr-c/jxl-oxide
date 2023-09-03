@@ -960,8 +960,17 @@ fn compute_modular_region(
             region.height += region.top as u32;
             region.top = 0;
         }
-        region.width = region.width.next_power_of_two().min(frame_header.color_sample_width());
-        region.height = region.height.next_power_of_two().min(frame_header.color_sample_height());
+
+        let mut right = region.left + region.width as i32;
+        if (1..frame_header.color_sample_width() as i32).contains(&right) {
+            right = (right as u32).next_power_of_two().min(frame_header.color_sample_width()) as i32;
+        }
+        let mut bottom = region.top + region.height as i32;
+        if (1..frame_header.color_sample_height() as i32).contains(&bottom) {
+            bottom = (bottom as u32).next_power_of_two().min(frame_header.color_sample_height()) as i32;
+        }
+        region.width = right.abs_diff(region.left);
+        region.height = bottom.abs_diff(region.top);
         region
     } else {
         region
