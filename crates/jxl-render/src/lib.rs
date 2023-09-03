@@ -116,7 +116,7 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<()> {
+    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
         let _guard = span.enter();
 
@@ -164,7 +164,7 @@ impl RenderContext {
 
         if let FrameRender::Done(image) = &self.state.renders[index] {
             if image.region().contains(frame_region) {
-                return Ok(());
+                return Ok(frame_region);
             }
         }
 
@@ -200,7 +200,7 @@ impl RenderContext {
         let grid = self.inner.render_frame(frame, reference_frames, cache, frame_region)?;
         *state = FrameRender::Done(grid);
 
-        Ok(())
+        Ok(frame_region)
     }
 
     /// Renders the first keyframe.
@@ -223,11 +223,12 @@ impl RenderContext {
         image_region: Option<Region>,
     ) -> Result<ImageWithRegion> {
         let (frame, mut grid) = if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
-            self.render_by_index(idx, image_region)?;
+            let frame_region = self.render_by_index(idx, image_region)?;
             let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
             let frame = &self.inner.frames[idx];
-            (frame, grid.clone())
+            (frame, grid.clone_intersection(frame_region))
         } else {
+            // TODO: apply crop region to loading frame.
             let mut current_frame_grid = None;
             if let Some(frame) = &self.inner.loading_frame {
                 if frame.header().frame_type.is_normal_frame() {
@@ -244,10 +245,10 @@ impl RenderContext {
                 let frame = self.inner.loading_frame.as_ref().unwrap();
                 (frame, grid)
             } else if let Some(idx) = self.inner.keyframe_in_progress {
-                self.render_by_index(idx, image_region)?;
+                let frame_region = self.render_by_index(idx, image_region)?;
                 let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
                 let frame = &self.inner.frames[idx];
-                (frame, grid.clone())
+                (frame, grid.clone_intersection(frame_region))
             } else {
                 return Err(Error::IncompleteFrame);
             }
