@@ -7,7 +7,7 @@ use std::{
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
     data::*,
-    filter::Gabor,
+    filter::{Gabor, EdgePreservingFilter},
     header::{Encoding, FrameType},
     Frame, FrameHeader,
 };
@@ -165,14 +165,15 @@ impl ContextInner {
 
         let header = frame.header();
         tracing::debug!(
+            index = self.frames.len(),
             width = header.color_sample_width(),
             height = header.color_sample_height(),
-            frame_type = format_args!("{:?}", header.frame_type),
-            encoding = format_args!("{:?}", header.encoding),
-            jpeg_upsampling = format_args!("{:?}", header.do_ycbcr.then_some(header.jpeg_upsampling)),
+            frame_type = ?header.frame_type,
+            encoding = ?header.encoding,
+            jpeg_upsampling = ?header.do_ycbcr.then_some(header.jpeg_upsampling),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
-            "Decoding {}x{} frame", header.color_sample_width(), header.color_sample_height()
+            "Loading frame"
         );
 
         // Check if LF frame exists
@@ -195,6 +196,12 @@ impl ContextInner {
     ) -> Result<ImageWithRegion> {
         let frame_header = frame.header();
         let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
+        let frame_region = if frame_header.lf_level != 0 {
+            // Lower level frames might be padded, so apply padding to LF frames
+            frame_region.pad(4 * frame_header.lf_level + 32)
+        } else {
+            frame_region
+        };
 
         let color_upsample_factor = frame_header.upsampling.ilog2();
         let max_upsample_factor = frame_header.ec_upsampling.iter()
@@ -203,8 +210,9 @@ impl ContextInner {
             .max()
             .unwrap_or(color_upsample_factor);
 
-        let color_padded_region = if max_upsample_factor > 0 {
-            let padded_region = frame_region.downsample(max_upsample_factor).pad(2);
+        let mut color_padded_region = if max_upsample_factor > 0 {
+            // Additional upsampling pass is needed for every 3 levels of upsampling factor.
+            let padded_region = frame_region.downsample(max_upsample_factor).pad(2 + (max_upsample_factor - 1) / 3);
             let upsample_diff = max_upsample_factor - color_upsample_factor;
             padded_region.upsample(upsample_diff)
         } else {
@@ -212,15 +220,29 @@ impl ContextInner {
         };
 
         // TODO: actual region could be smaller.
-        let color_padded_region = if frame_header.restoration_filter.epf.enabled() {
-            color_padded_region.pad(3)
-        } else if frame_header.do_ycbcr {
-            color_padded_region.pad(1).downsample(2).upsample(2)
-        } else if frame_header.restoration_filter.gab.enabled() {
-            color_padded_region.pad(1)
-        } else {
-            color_padded_region
-        }.intersection(full_frame_region);
+        if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+            // EPF references adjacent samples.
+            color_padded_region = if iters == 1 {
+                color_padded_region.pad(2)
+            } else if iters == 2 {
+                color_padded_region.pad(5)
+            } else {
+                color_padded_region.pad(6)
+            };
+        }
+        if frame_header.restoration_filter.gab.enabled() {
+            // Gabor-like filter references adjacent samples.
+            color_padded_region = color_padded_region.pad(1);
+        }
+        if frame_header.do_ycbcr {
+            // Chroma upsampling references adjacent samples.
+            color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
+        }
+        if frame_header.restoration_filter.epf.enabled() {
+            // EPF performs filtering in 8x8 blocks.
+            color_padded_region = color_padded_region.container_aligned(8);
+        }
+        color_padded_region = color_padded_region.intersection(full_frame_region);
 
         let (mut fb, gmodular) = match frame_header.encoding {
             Encoding::Modular => self.render_modular(frame, cache, color_padded_region),
@@ -238,7 +260,7 @@ impl ContextInner {
         if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf([a, b, c], &cache.lf_groups, frame_header);
+        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header);
 
         self.upsample_color_channels(&mut fb, frame_header, frame_region);
         self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
@@ -301,7 +323,7 @@ impl ContextInner {
 
             let upsample_factor = upsampling.ilog2() + ec_info.dim_shift;
             let region = if upsample_factor > 0 {
-                original_region.downsample(upsample_factor)
+                original_region.downsample(upsample_factor).pad(2 + (upsample_factor - 1) / 3)
             } else {
                 original_region
             };
@@ -349,11 +371,12 @@ impl ContextInner {
                 }
             }
 
+            let upsampled_region = region.upsample(upsample_factor);
             features::upsample(&mut out, &self.image_header, frame_header, idx + 3);
             let out = ImageWithRegion::from_buffer(
                 vec![out],
-                region.left << upsample_factor,
-                region.top << upsample_factor,
+                upsampled_region.left,
+                upsampled_region.top,
             );
             let cropped = fb.add_channel();
             out.clone_region_channel(fb_region, 0, cropped);
@@ -677,15 +700,16 @@ impl ContextInner {
 
         let group_dim = frame_header.group_dim();
         let lf_xyb = (|| {
+            let mut lf_xyb_buf = ImageWithRegion::from_region(3, aligned_lf_region);
+
             if let Some(x) = lf_frame {
-                if aligned_lf_region.contains(x.image.region()) {
-                    return std::borrow::Cow::Borrowed(x.image);
-                }
+                x.image.clone_region_channel(aligned_lf_region, 0, &mut lf_xyb_buf.buffer_mut()[0]);
+                x.image.clone_region_channel(aligned_lf_region, 1, &mut lf_xyb_buf.buffer_mut()[1]);
+                x.image.clone_region_channel(aligned_lf_region, 2, &mut lf_xyb_buf.buffer_mut()[2]);
+                return std::borrow::Cow::Owned(lf_xyb_buf);
             }
 
-            let mut lf_xyb_buf = ImageWithRegion::from_region(3, aligned_lf_region);
             let lf_groups_per_row = frame_header.lf_groups_per_row();
-
             for idx in 0..frame_header.num_lf_groups() {
                 let Some(lf_group) = lf_groups.get(&idx) else { continue; };
 
@@ -932,19 +956,8 @@ fn compute_modular_region(
     gmodular: &GlobalModular,
     region: Region,
 ) -> Region {
-    if gmodular.modular.has_delta_palette() {
+    if gmodular.modular.has_palette() || gmodular.modular.has_squeeze() {
         Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
-    } else if gmodular.modular.has_squeeze() {
-        let mut region = region;
-        if region.left > 0 {
-            region.width += region.left as u32;
-            region.left = 0;
-        }
-        if region.top > 0 {
-            region.height += region.top as u32;
-            region.top = 0;
-        }
-        region
     } else {
         region
     }

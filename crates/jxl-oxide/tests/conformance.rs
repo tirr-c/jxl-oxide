@@ -2,6 +2,8 @@ use lcms2::{Profile, Transform};
 
 use jxl_oxide::{JxlImage, FrameBuffer};
 
+mod util;
+
 enum LcmsTransform {
     Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
     Rgb(Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
@@ -189,10 +191,7 @@ macro_rules! conformance_test {
 
                 let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
 
-                let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                path.push("tests/conformance/testcases");
-                path.push(stringify!($name));
-                path.push("input.jxl");
+                let path = util::conformance_path(stringify!($name));
                 let image = JxlImage::open(path).expect("Failed to open file");
 
                 run_test(image, target_icc, expected, $peak_error, $max_rmse);

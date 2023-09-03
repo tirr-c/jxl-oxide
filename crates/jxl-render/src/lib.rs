@@ -116,7 +116,7 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<()> {
+    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
         let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
         let _guard = span.enter();
 
@@ -126,13 +126,8 @@ impl RenderContext {
         let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
             Region::with_size(frame_header.width, frame_header.height)
         } else if let Some(image_region) = image_region {
-            let (image_width, image_height, _, _) = image_header.metadata.apply_orientation(
-                image_header.size.width,
-                image_header.size.height,
-                0,
-                0,
-                false,
-            );
+            let image_width = image_header.width_with_orientation();
+            let image_height = image_header.height_with_orientation();
             let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
                 image_width,
                 image_height,
@@ -143,8 +138,8 @@ impl RenderContext {
             let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
                 image_width,
                 image_height,
-                image_region.left + image_region.width as i32,
-                image_region.top + image_region.height as i32,
+                image_region.left + image_region.width as i32 - 1,
+                image_region.top + image_region.height as i32 - 1,
                 true,
             );
 
@@ -154,8 +149,8 @@ impl RenderContext {
             if top > bottom {
                 std::mem::swap(&mut top, &mut bottom);
             }
-            let width = right.abs_diff(left);
-            let height = bottom.abs_diff(top);
+            let width = right.abs_diff(left) + 1;
+            let height = bottom.abs_diff(top) + 1;
             Region {
                 left: left - frame_header.x0,
                 top: top - frame_header.y0,
@@ -169,7 +164,7 @@ impl RenderContext {
 
         if let FrameRender::Done(image) = &self.state.renders[index] {
             if image.region().contains(frame_region) {
-                return Ok(());
+                return Ok(frame_region);
             }
         }
 
@@ -178,7 +173,7 @@ impl RenderContext {
             self.render_by_index(dep, image_region)?;
         }
 
-        tracing::debug!(index, "Rendering frame");
+        tracing::debug!(index, ?image_region, ?frame_region, "Rendering frame");
         let frame = &self.inner.frames[index];
         let (prev, state) = self.state.renders.split_at_mut(index);
         let state = &mut state[0];
@@ -205,7 +200,7 @@ impl RenderContext {
         let grid = self.inner.render_frame(frame, reference_frames, cache, frame_region)?;
         *state = FrameRender::Done(grid);
 
-        Ok(())
+        Ok(frame_region)
     }
 
     /// Renders the first keyframe.
@@ -228,11 +223,12 @@ impl RenderContext {
         image_region: Option<Region>,
     ) -> Result<ImageWithRegion> {
         let (frame, mut grid) = if let Some(&idx) = self.inner.keyframes.get(keyframe_idx) {
-            self.render_by_index(idx, image_region)?;
+            let frame_region = self.render_by_index(idx, image_region)?;
             let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
             let frame = &self.inner.frames[idx];
-            (frame, grid.clone())
+            (frame, grid.clone_intersection(frame_region))
         } else {
+            // TODO: apply crop region to loading frame.
             let mut current_frame_grid = None;
             if let Some(frame) = &self.inner.loading_frame {
                 if frame.header().frame_type.is_normal_frame() {
@@ -249,10 +245,10 @@ impl RenderContext {
                 let frame = self.inner.loading_frame.as_ref().unwrap();
                 (frame, grid)
             } else if let Some(idx) = self.inner.keyframe_in_progress {
-                self.render_by_index(idx, image_region)?;
+                let frame_region = self.render_by_index(idx, image_region)?;
                 let FrameRender::Done(grid) = &self.state.renders[idx] else { panic!(); };
                 let frame = &self.inner.frames[idx];
-                (frame, grid.clone())
+                (frame, grid.clone_intersection(frame_region))
             } else {
                 return Err(Error::IncompleteFrame);
             }

@@ -65,9 +65,9 @@ impl Modular {
 }
 
 impl Modular {
-    pub fn has_delta_palette(&self) -> bool {
+    pub fn has_palette(&self) -> bool {
         let Some(image) = &self.inner else { return false; };
-        image.header.transform.iter().any(|tr| tr.is_delta_palette())
+        image.header.transform.iter().any(|tr| tr.is_palette())
     }
 
     pub fn has_squeeze(&self) -> bool {
