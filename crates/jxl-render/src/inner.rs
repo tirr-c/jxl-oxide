@@ -198,7 +198,7 @@ impl ContextInner {
         let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
         let frame_region = if frame_header.lf_level != 0 {
             // Lower level frames might be padded, so apply padding to LF frames
-            frame_region.pad(4)
+            frame_region.pad(4 + 32 * frame_header.lf_level)
         } else {
             frame_region
         };
