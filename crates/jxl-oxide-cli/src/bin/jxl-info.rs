@@ -9,6 +9,7 @@ use jxl_oxide::JxlImage;
 struct Args {
     /// Input file
     input: PathBuf,
+    /// Print debug information
     #[arg(short, long)]
     verbose: bool,
 }
