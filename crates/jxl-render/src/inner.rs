@@ -960,6 +960,8 @@ fn compute_modular_region(
             region.height += region.top as u32;
             region.top = 0;
         }
+        region.width = region.width.next_power_of_two().min(frame_header.color_sample_width());
+        region.height = region.height.next_power_of_two().min(frame_header.color_sample_height());
         region
     } else {
         region
