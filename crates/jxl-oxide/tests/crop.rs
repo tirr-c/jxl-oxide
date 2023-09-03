@@ -41,23 +41,9 @@ fn run_test(buf: &[u8]) {
             .render_frame_cropped(idx, Some(crop))
             .expect("Failed to render cropped image");
 
-        for (expected, actual) in full_render.color_channels().iter().zip(cropped_render.color_channels()) {
+        for (expected, actual) in full_render.image_planar().into_iter().zip(cropped_render.image_planar()) {
             let expected = expected.buf();
             let actual = actual.buf();
-
-            let it = expected
-                .chunks_exact(width as usize)
-                .skip(crop_top as usize)
-                .zip(actual.chunks_exact(crop_width as usize));
-            for (expected_row, actual_row) in it {
-                let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
-                assert_eq!(expected_row, actual_row);
-            }
-        }
-
-        for (expected, actual) in full_render.extra_channels().iter().zip(cropped_render.extra_channels()) {
-            let expected = expected.grid().buf();
-            let actual = actual.grid().buf();
 
             let it = expected
                 .chunks_exact(width as usize)

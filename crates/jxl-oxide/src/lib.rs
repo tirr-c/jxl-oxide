@@ -395,7 +395,9 @@ impl Render {
         self.orientation
     }
 
-    /// Creates a buffer with interleaved channels.
+    /// Creates a buffer with interleaved channels, with orientation applied.
+    ///
+    /// Extra channels other than black and alpha are not included.
     #[inline]
     pub fn image(&self) -> FrameBuffer {
         let mut fb: Vec<_> = self.color_channels.clone();
@@ -418,19 +420,36 @@ impl Render {
         FrameBuffer::from_grids(&fb, self.orientation)
     }
 
+    /// Creates a separate buffer by channel, with orientation applied.
+    ///
+    /// All extra channels are included.
+    pub fn image_planar(&self) -> Vec<FrameBuffer> {
+        self.color_channels
+            .iter()
+            .chain(self.extra_channels.iter().map(|x| &x.grid))
+            .map(|x| FrameBuffer::from_grids(std::slice::from_ref(x), self.orientation))
+            .collect()
+    }
+
     /// Returns the color channels.
+    ///
+    /// Orientation is not applied.
     #[inline]
     pub fn color_channels(&self) -> &[SimpleGrid<f32>] {
         &self.color_channels
     }
 
     /// Returns the mutable slice to the color channels.
+    ///
+    /// Orientation is not applied.
     #[inline]
     pub fn color_channels_mut(&mut self) -> &mut [SimpleGrid<f32>] {
         &mut self.color_channels
     }
 
     /// Returns the extra channels, potentially including alpha and black channels.
+    ///
+    /// Orientation is not applied.
     #[inline]
     pub fn extra_channels(&self) -> &[ExtraChannel] {
         &self.extra_channels
@@ -438,6 +457,8 @@ impl Render {
 
     /// Returns the mutable slice to the extra channels, potentially including alpha and black
     /// channels.
+    ///
+    /// Orientation is not applied.
     #[inline]
     pub fn extra_channels_mut(&mut self) -> &mut [ExtraChannel] {
         &mut self.extra_channels
