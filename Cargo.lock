@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-frame"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -607,7 +607,7 @@ version = "0.1.1"
 
 [[package]]
 name = "jxl-image"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-color",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-color",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "clap",
  "jxl-oxide",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-vardct"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
