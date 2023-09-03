@@ -209,7 +209,7 @@ impl ContextInner {
             .unwrap_or(color_upsample_factor);
 
         let mut color_padded_region = if max_upsample_factor > 0 {
-            let padded_region = frame_region.downsample(max_upsample_factor).pad(2);
+            let padded_region = frame_region.downsample(max_upsample_factor).pad(2 + (max_upsample_factor - 1) / 3);
             let upsample_diff = max_upsample_factor - color_upsample_factor;
             padded_region.upsample(upsample_diff)
         } else {
@@ -316,7 +316,7 @@ impl ContextInner {
 
             let upsample_factor = upsampling.ilog2() + ec_info.dim_shift;
             let region = if upsample_factor > 0 {
-                original_region.downsample(upsample_factor)
+                original_region.downsample(upsample_factor).pad(2 + (upsample_factor - 1) / 3)
             } else {
                 original_region
             };
@@ -364,11 +364,13 @@ impl ContextInner {
                 }
             }
 
+            let upsampled_region = region.upsample(upsample_factor);
+            tracing::debug!(fb_region = ?fb.region(), ?region, ?upsampled_region);
             features::upsample(&mut out, &self.image_header, frame_header, idx + 3);
             let out = ImageWithRegion::from_buffer(
                 vec![out],
-                region.left << upsample_factor,
-                region.top << upsample_factor,
+                upsampled_region.left,
+                upsampled_region.top,
             );
             let cropped = fb.add_channel();
             out.clone_region_channel(fb_region, 0, cropped);
