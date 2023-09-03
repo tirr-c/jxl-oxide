@@ -6,8 +6,7 @@
 //! A frame consists of a few components:
 //! - [Frame header][FrameHeader].
 //! - [Table of contents (TOC)][data::Toc].
-//! - Actual frame data, in the following order, potentially permuted as specified in
-//!   the TOC:
+//! - Actual frame data, in the following order, potentially permuted as specified in the TOC:
 //!   - one [`LfGlobal`][data::LfGlobal],
 //!   - [`num_lf_groups`] [`LfGroup`][data::LfGroup]'s, in raster order,
 //!   - one [`HfGlobal`][data::HfGlobal], potentially empty for Modular frames, and
