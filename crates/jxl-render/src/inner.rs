@@ -165,14 +165,15 @@ impl ContextInner {
 
         let header = frame.header();
         tracing::debug!(
+            index = self.frames.len(),
             width = header.color_sample_width(),
             height = header.color_sample_height(),
-            frame_type = format_args!("{:?}", header.frame_type),
-            encoding = format_args!("{:?}", header.encoding),
-            jpeg_upsampling = format_args!("{:?}", header.do_ycbcr.then_some(header.jpeg_upsampling)),
+            frame_type = ?header.frame_type,
+            encoding = ?header.encoding,
+            jpeg_upsampling = ?header.do_ycbcr.then_some(header.jpeg_upsampling),
             upsampling = header.upsampling,
             lf_level = header.lf_level,
-            "Decoding {}x{} frame", header.color_sample_width(), header.color_sample_height()
+            "Loading frame"
         );
 
         // Check if LF frame exists
@@ -196,6 +197,7 @@ impl ContextInner {
         let frame_header = frame.header();
         let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
         let frame_region = if frame_header.lf_level != 0 {
+            // Lower level frames might be padded, so apply padding to LF frames
             frame_region.pad(4)
         } else {
             frame_region
@@ -209,6 +211,7 @@ impl ContextInner {
             .unwrap_or(color_upsample_factor);
 
         let mut color_padded_region = if max_upsample_factor > 0 {
+            // Additional upsampling pass is needed for every 3 levels of upsampling factor.
             let padded_region = frame_region.downsample(max_upsample_factor).pad(2 + (max_upsample_factor - 1) / 3);
             let upsample_diff = max_upsample_factor - color_upsample_factor;
             padded_region.upsample(upsample_diff)
@@ -218,6 +221,7 @@ impl ContextInner {
 
         // TODO: actual region could be smaller.
         if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+            // EPF references adjacent samples.
             color_padded_region = if iters == 1 {
                 color_padded_region.pad(2)
             } else if iters == 2 {
@@ -227,12 +231,15 @@ impl ContextInner {
             };
         }
         if frame_header.restoration_filter.gab.enabled() {
+            // Gabor-like filter references adjacent samples.
             color_padded_region = color_padded_region.pad(1);
         }
         if frame_header.do_ycbcr {
+            // Chroma upsampling references adjacent samples.
             color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
         }
         if frame_header.restoration_filter.epf.enabled() {
+            // EPF performs filtering in 8x8 blocks.
             color_padded_region = color_padded_region.container_aligned(8);
         }
         color_padded_region = color_padded_region.intersection(full_frame_region);
@@ -365,7 +372,6 @@ impl ContextInner {
             }
 
             let upsampled_region = region.upsample(upsample_factor);
-            tracing::debug!(fb_region = ?fb.region(), ?region, ?upsampled_region);
             features::upsample(&mut out, &self.image_header, frame_header, idx + 3);
             let out = ImageWithRegion::from_buffer(
                 vec![out],

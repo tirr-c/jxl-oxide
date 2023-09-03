@@ -173,7 +173,7 @@ impl RenderContext {
             self.render_by_index(dep, image_region)?;
         }
 
-        tracing::debug!(index, "Rendering frame");
+        tracing::debug!(index, ?image_region, ?frame_region, "Rendering frame");
         let frame = &self.inner.frames[index];
         let (prev, state) = self.state.renders.split_at_mut(index);
         let state = &mut state[0];
