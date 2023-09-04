@@ -150,17 +150,11 @@ pub fn dequant_hf_varblock(
                     let need_transpose = dct_select.need_transpose();
                     let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
-                    let mut new_matrix;
-                    let mut matrix = dequant_matrices.get(channel, dct_select);
-                    if need_transpose {
-                        new_matrix = vec![0f32; matrix.len()];
-                        for (idx, val) in new_matrix.iter_mut().enumerate() {
-                            let mat_x = idx % width as usize;
-                            let mat_y = idx / width as usize;
-                            *val = matrix[mat_x * height as usize + mat_y];
-                        }
-                        matrix = &new_matrix;
-                    }
+                    let matrix = if need_transpose {
+                        dequant_matrices.get_transposed(channel, dct_select)
+                    } else {
+                        dequant_matrices.get(channel, dct_select)
+                    };
 
                     let mut coeff = CutGrid::from_buf(
                         &mut coeff_buf[offset..],
@@ -168,9 +162,8 @@ pub fn dequant_hf_varblock(
                         height as usize,
                         stride,
                     );
-                    for y in 0..height {
-                        let row = coeff.get_row_mut(y as usize);
-                        let matrix_row = &matrix[(y * width) as usize..][..width as usize];
+                    for (y, matrix_row) in matrix.chunks_exact(width as usize).enumerate() {
+                        let row = coeff.get_row_mut(y);
                         for (q, &m) in row.iter_mut().zip(matrix_row) {
                             if q.abs() <= 1.0f32 {
                                 *q *= quant_bias;
