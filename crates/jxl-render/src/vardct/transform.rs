@@ -3,11 +3,11 @@ use jxl_vardct::TransformType;
 
 use crate::dct::{dct_2d, DctDirection};
 
-fn aux_idct2_in_place(block: &mut CutGrid<'_>, size: usize) {
-    debug_assert!(size.is_power_of_two());
+fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
+    debug_assert!(SIZE.is_power_of_two());
 
-    let num_2x2 = size / 2;
-    let mut scratch = vec![0.0f32; size * size];
+    let num_2x2 = SIZE / 2;
+    let mut scratch = [[0.0f32; SIZE]; SIZE];
     for y in 0..num_2x2 {
         for x in 0..num_2x2 {
             let c00 = block.get(x, y);
@@ -15,27 +15,26 @@ fn aux_idct2_in_place(block: &mut CutGrid<'_>, size: usize) {
             let c10 = block.get(x, y + num_2x2);
             let c11 = block.get(x + num_2x2, y + num_2x2);
 
-            let base_idx = 2 * (y * size + x);
-            scratch[base_idx] = c00 + c01 + c10 + c11;
-            scratch[base_idx + 1] = c00 + c01 - c10 - c11;
-            scratch[base_idx + size] = c00 - c01 + c10 - c11;
-            scratch[base_idx + size + 1] = c00 - c01 - c10 + c11;
+            scratch[2 * y][2 * x] = c00 + c01 + c10 + c11;
+            scratch[2 * y][2 * x + 1] = c00 + c01 - c10 - c11;
+            scratch[2 * y + 1][2 * x] = c00 - c01 + c10 - c11;
+            scratch[2 * y + 1][2 * x + 1] = c00 - c01 - c10 + c11;
         }
     }
 
-    for y in 0..size {
-        block.get_row_mut(y)[..size].copy_from_slice(&scratch[y * size..][..size]);
+    for (y, scratch_row) in scratch.into_iter().enumerate() {
+        block.get_row_mut(y)[..SIZE].copy_from_slice(&scratch_row);
     }
 }
 
 fn transform_dct2(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place(coeff, 2);
-    aux_idct2_in_place(coeff, 4);
-    aux_idct2_in_place(coeff, 8);
+    aux_idct2_in_place::<2>(coeff);
+    aux_idct2_in_place::<4>(coeff);
+    aux_idct2_in_place::<8>(coeff);
 }
 
 fn transform_dct4(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place(coeff, 2);
+    aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
     for y in 0..2 {
@@ -63,7 +62,7 @@ fn transform_dct4(coeff: &mut CutGrid<'_>) {
 }
 
 fn transform_hornuss(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place(coeff, 2);
+    aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
     for y in 0..2 {
