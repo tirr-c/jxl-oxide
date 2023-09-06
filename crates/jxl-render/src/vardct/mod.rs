@@ -150,17 +150,11 @@ pub fn dequant_hf_varblock(
                     let need_transpose = dct_select.need_transpose();
                     let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
-                    let mut new_matrix;
-                    let mut matrix = dequant_matrices.get(channel, dct_select);
-                    if need_transpose {
-                        new_matrix = vec![0f32; matrix.len()];
-                        for (idx, val) in new_matrix.iter_mut().enumerate() {
-                            let mat_x = idx % width as usize;
-                            let mat_y = idx / width as usize;
-                            *val = matrix[mat_x * height as usize + mat_y];
-                        }
-                        matrix = &new_matrix;
-                    }
+                    let matrix = if need_transpose {
+                        dequant_matrices.get_transposed(channel, dct_select)
+                    } else {
+                        dequant_matrices.get(channel, dct_select)
+                    };
 
                     let mut coeff = CutGrid::from_buf(
                         &mut coeff_buf[offset..],
@@ -168,9 +162,8 @@ pub fn dequant_hf_varblock(
                         height as usize,
                         stride,
                     );
-                    for y in 0..height {
-                        let row = coeff.get_row_mut(y as usize);
-                        let matrix_row = &matrix[(y * width) as usize..][..width as usize];
+                    for (y, matrix_row) in matrix.chunks_exact(width as usize).enumerate() {
+                        let row = coeff.get_row_mut(y);
                         for (q, &m) in row.iter_mut().zip(matrix_row) {
                             if q.abs() <= 1.0f32 {
                                 *q *= quant_bias;
@@ -292,14 +285,6 @@ pub fn transform_with_lf(
 ) {
     use TransformType::*;
 
-    fn scale_f(c: usize, b: usize) -> f32 {
-        let cb = c as f32 / b as f32;
-        let recip = (cb * std::f32::consts::FRAC_PI_2).cos() *
-            (cb * std::f32::consts::PI).cos() *
-            (cb * 2.0 * std::f32::consts::PI).cos();
-        recip.recip()
-    }
-
     let lf_region = lf.region();
     let coeff_region = coeff_out.region();
     let lf = lf.buffer();
@@ -392,4 +377,29 @@ pub fn transform_with_lf(
             }
         }
     }
+}
+
+fn scale_f(c: usize, b: usize) -> f32 {
+    // Precomputed for c = 0..32, b = 256
+    #[allow(clippy::excessive_precision)]
+    const SCALE_F: [f32; 32] = [
+        1.0000000000000000, 0.9996047255830407,
+        0.9984194528776054, 0.9964458326264695,
+        0.9936866130906366, 0.9901456355893141,
+        0.9858278282666936, 0.9807391980963174,
+        0.9748868211368796, 0.9682788310563117,
+        0.9609244059440204, 0.9528337534340876,
+        0.9440180941651672, 0.9344896436056892,
+        0.9242615922757944, 0.9133480844001980,
+        0.9017641950288744, 0.8895259056651056,
+        0.8766500784429904, 0.8631544288990163,
+        0.8490574973847023, 0.8343786191696513,
+        0.8191378932865928, 0.8033561501721485,
+        0.7870549181591013, 0.7702563888779096,
+        0.7529833816270532, 0.7352593067735488,
+        0.7171081282466044, 0.6985543251889097,
+        0.6796228528314652, 0.6603391026591464,
+    ];
+    let c = c * (256 / b);
+    SCALE_F[c].recip()
 }

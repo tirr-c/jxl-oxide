@@ -488,6 +488,7 @@ impl BundleDefault<TransformType> for DequantMatrixParams {
 #[derive(Debug)]
 pub struct DequantMatrixSet {
     matrices: Vec<[Vec<f32>; 3]>,
+    matrices_tr: Vec<[Vec<f32>; 3]>,
 }
 
 impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
@@ -528,10 +529,27 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
             }).collect::<Result<_>>()?
         };
 
-        let matrices = param_list.into_iter()
+        let matrices: Vec<_> = param_list.into_iter()
             .map(|params| params.into_matrix())
             .collect();
-        Ok(Self { matrices })
+        let matrices_tr = matrices
+            .iter()
+            .zip(DCT_SELECT_LIST)
+            .map(|(matrix, dct_select)| {
+                std::array::from_fn(|idx| {
+                    let matrix = &matrix[idx];
+                    let (width, height) = dct_select.dequant_matrix_size();
+                    let mut out = vec![0f32; matrix.len()];
+                    for (idx, val) in out.iter_mut().enumerate() {
+                        let mat_x = idx % height as usize;
+                        let mat_y = idx / height as usize;
+                        *val = matrix[mat_x * width as usize + mat_y];
+                    }
+                    out
+                })
+            })
+            .collect();
+        Ok(Self { matrices, matrices_tr })
     }
 }
 
@@ -562,5 +580,33 @@ impl DequantMatrixSet {
             Dct128x256 | Dct256x128 => 16,
         };
         &self.matrices[idx][channel]
+    }
+
+    /// Returns the transposed dequantization matrix for the given channel and transform type.
+    ///
+    /// The coefficients is in the raster order.
+    pub fn get_transposed(&self, channel: usize, dct_select: TransformType) -> &[f32] {
+        use TransformType::*;
+
+        let idx = match dct_select {
+            Dct8 => 0,
+            Hornuss => 1,
+            Dct2 => 2,
+            Dct4 => 3,
+            Dct16 => 4,
+            Dct32 => 5,
+            Dct8x16 | Dct16x8 => 6,
+            Dct8x32 | Dct32x8 => 7,
+            Dct16x32 | Dct32x16 => 8,
+            Dct4x8 | Dct8x4 => 9,
+            Afv0 | Afv1 | Afv2 | Afv3 => 10,
+            Dct64 => 11,
+            Dct32x64 | Dct64x32 => 12,
+            Dct128 => 13,
+            Dct64x128 | Dct128x64 => 14,
+            Dct256 => 15,
+            Dct128x256 | Dct256x128 => 16,
+        };
+        &self.matrices_tr[idx][channel]
     }
 }

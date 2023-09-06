@@ -212,6 +212,42 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 }
 
+impl<V: Copy> CutGrid<'_, V> {
+    /// Split the grid horizontally at an index.
+    ///
+    /// # Panics
+    /// Panics if `x > self.width()`.
+    pub fn split_horizontal(&mut self, x: usize) -> (CutGrid<'_, V>, CutGrid<'_, V>) {
+        assert!(x <= self.width);
+
+        let left_ptr = self.ptr;
+        let right_ptr = NonNull::new(self.get_ptr(x, 0)).unwrap();
+        // SAFETY: two grids are contained in `self` and disjoint.
+        unsafe {
+            let left_grid = CutGrid::new(left_ptr, x, self.height, self.stride);
+            let right_grid = CutGrid::new(right_ptr, self.width - x, self.height, self.stride);
+            (left_grid, right_grid)
+        }
+    }
+
+    /// Split the grid vertically at an index.
+    ///
+    /// # Panics
+    /// Panics if `y > self.height()`.
+    pub fn split_vertical(&mut self, y: usize) -> (CutGrid<'_, V>, CutGrid<'_, V>) {
+        assert!(y <= self.height);
+
+        let top_ptr = self.ptr;
+        let bottom_ptr = NonNull::new(self.get_ptr(0, y)).unwrap();
+        // SAFETY: two grids are contained in `self` and disjoint.
+        unsafe {
+            let top_grid = CutGrid::new(top_ptr, self.width, y, self.stride);
+            let bottom_grid = CutGrid::new(bottom_ptr, self.width, self.height - y, self.stride);
+            (top_grid, bottom_grid)
+        }
+    }
+}
+
 impl<'g> CutGrid<'g, f32> {
     pub fn as_vectored<V: SimdVector>(&mut self) -> Option<CutGrid<'_, V>> {
         let mask = V::SIZE - 1;

@@ -5,7 +5,86 @@ use super::{consts, DctDirection};
 pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
     let width = io.width();
     let height = io.height();
+    if width * height <= 1 {
+        return;
+    }
+
+    let mul = if direction == DctDirection::Forward { 0.5 } else { 1.0 };
+    if width == 2 && height == 1 {
+        let v0 = io.get(0, 0);
+        let v1 = io.get(1, 0);
+        *io.get_mut(0, 0) = (v0 + v1) * mul;
+        *io.get_mut(1, 0) = (v0 - v1) * mul;
+        return;
+    }
+    if width == 1 && height == 2 {
+        let v0 = io.get(0, 0);
+        let v1 = io.get(0, 1);
+        *io.get_mut(0, 0) = (v0 + v1) * mul;
+        *io.get_mut(0, 1) = (v0 - v1) * mul;
+        return;
+    }
+    if width == 2 && height == 2 {
+        let v00 = io.get(0, 0);
+        let v01 = io.get(1, 0);
+        let v10 = io.get(0, 1);
+        let v11 = io.get(1, 1);
+        *io.get_mut(0, 0) = (v00 + v01 + v10 + v11) * mul * mul;
+        *io.get_mut(1, 0) = (v00 - v01 + v10 - v11) * mul * mul;
+        *io.get_mut(0, 1) = (v00 + v01 - v10 - v11) * mul * mul;
+        *io.get_mut(1, 1) = (v00 - v01 - v10 + v11) * mul * mul;
+        return;
+    }
+
     let mut buf = vec![0f32; width.max(height)];
+    if height == 1 {
+        dct(io.get_row_mut(0), &mut buf, direction);
+        return;
+    }
+    if width == 1 {
+        let mut row = vec![0f32; height];
+        for (y, v) in row.iter_mut().enumerate() {
+            *v = io.get(0, y);
+        }
+        dct(&mut row, &mut buf, direction);
+        for (y, v) in row.into_iter().enumerate() {
+            *io.get_mut(0, y) = v;
+        }
+        return;
+    }
+
+    if height == 2 {
+        let (mut row0, mut row1) = io.split_vertical(1);
+        let row0 = row0.get_row_mut(0);
+        let row1 = row1.get_row_mut(0);
+        for (v0, v1) in row0.iter_mut().zip(row1.iter_mut()) {
+            let tv0 = *v0;
+            let tv1 = *v1;
+            *v0 = (tv0 + tv1) * mul;
+            *v1 = (tv0 - tv1) * mul;
+        }
+
+        dct(row0, &mut buf, direction);
+        dct(row1, &mut buf, direction);
+        return;
+    }
+    if width == 2 {
+        let mut row = vec![0f32; height * 2];
+        let (row0, row1) = row.split_at_mut(height);
+        for y in 0..height {
+            let v0 = io.get(0, y);
+            let v1 = io.get(1, y);
+            row0[y] = (v0 + v1) * mul;
+            row1[y] = (v0 - v1) * mul;
+        }
+        dct(row0, &mut buf, direction);
+        dct(row1, &mut buf, direction);
+        for y in 0..height {
+            *io.get_mut(0, y) = row0[y];
+            *io.get_mut(1, y) = row1[y];
+        }
+        return;
+    }
 
     let row = &mut buf[..width];
     for y in 0..height {
