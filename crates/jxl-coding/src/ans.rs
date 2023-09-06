@@ -6,11 +6,17 @@ use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Histogram {
-    dist: Vec<u16>,
-    symbols: Vec<u16>,
-    offsets: Vec<u16>,
-    cutoffs: Vec<u16>,
+    buckets: Vec<Bucket>,
     log_bucket_size: u32,
+    single_symbol: Option<u16>,
+}
+
+#[derive(Debug)]
+struct Bucket {
+    dist: u16,
+    alias_symbol: u16,
+    alias_offset: u16,
+    alias_cutoff: u16,
 }
 
 impl Histogram {
@@ -151,60 +157,68 @@ impl Histogram {
         }
 
         if let Some(single_sym_idx) = dist.iter().position(|&d| d == 1 << 12) {
-            let symbols = vec![single_sym_idx as u16; table_size];
-            let offsets = (0..table_size as u16).map(|i| bucket_size * i).collect();
-            let cutoffs = vec![0u16; table_size];
+            let buckets = dist.into_iter()
+                .enumerate()
+                .map(|(i, dist)| Bucket {
+                    dist,
+                    alias_symbol: single_sym_idx as u16,
+                    alias_offset: bucket_size * i as u16,
+                    alias_cutoff: 0,
+                })
+                .collect();
             return Ok(Self {
-                dist,
-                symbols,
-                offsets,
-                cutoffs,
+                buckets,
                 log_bucket_size,
+                single_symbol: Some(single_sym_idx as u16),
             });
         }
 
-        let mut cutoffs = dist.clone();
-        let mut symbols = (0..(alphabet_size as u16)).collect::<Vec<_>>();
-        symbols.resize(table_size, 0);
-        let mut offsets = vec![0u16; table_size];
+        let mut buckets: Vec<_> = dist
+            .into_iter()
+            .enumerate()
+            .map(|(i, dist)| Bucket {
+                dist,
+                alias_symbol: if i < alphabet_size { i as u16 } else { 0 },
+                alias_offset: 0,
+                alias_cutoff: dist,
+            })
+            .collect();
 
         let mut underfull = Vec::new();
         let mut overfull = Vec::new();
-        for (idx, d) in dist.iter().enumerate() {
-            match d.cmp(&bucket_size) {
+        for (idx, &Bucket { dist, .. }) in buckets.iter().enumerate() {
+            match dist.cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(idx),
                 std::cmp::Ordering::Equal => {},
                 std::cmp::Ordering::Greater => overfull.push(idx),
             }
         }
         while let (Some(o), Some(u)) = (overfull.pop(), underfull.pop()) {
-            let by = bucket_size - cutoffs[u];
-            cutoffs[o] -= by;
-            symbols[u] = o as u16;
-            offsets[u] = cutoffs[o];
-            match cutoffs[o].cmp(&bucket_size) {
+            let by = bucket_size - buckets[u].alias_cutoff;
+            buckets[o].alias_cutoff -= by;
+            buckets[u].alias_symbol = o as u16;
+            buckets[u].alias_offset = buckets[o].alias_cutoff;
+            match buckets[o].alias_cutoff.cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(o),
                 std::cmp::Ordering::Equal => {},
                 std::cmp::Ordering::Greater => overfull.push(o),
             }
         }
 
-        for idx in 0..table_size {
-            if cutoffs[idx] == bucket_size {
-                symbols[idx] = idx as u16;
-                offsets[idx] = 0;
-                cutoffs[idx] = 0;
+        for (idx, bucket) in buckets.iter_mut().enumerate() {
+            if bucket.alias_cutoff == bucket_size {
+                bucket.alias_symbol = idx as u16;
+                bucket.alias_offset = 0;
+                bucket.alias_cutoff = 0;
             } else {
-                offsets[idx] -= cutoffs[idx];
+                bucket.alias_offset -= bucket.alias_cutoff;
             }
         }
 
         Ok(Self {
-            dist,
-            symbols,
-            offsets,
-            cutoffs,
+            buckets,
             log_bucket_size,
+            single_symbol: None,
         })
     }
 
@@ -222,8 +236,9 @@ impl Histogram {
     fn map_alias(&self, idx: u16) -> (u16, u16) {
         let i = (idx >> self.log_bucket_size) as usize;
         let pos = idx & ((1 << self.log_bucket_size) - 1);
-        if pos >= self.cutoffs[i] {
-            (self.symbols[i], self.offsets[i] + pos)
+        let bucket = &self.buckets[i];
+        if pos >= bucket.alias_cutoff {
+            (bucket.alias_symbol, bucket.alias_offset + pos)
         } else {
             (i as u16, pos)
         }
@@ -232,11 +247,16 @@ impl Histogram {
     pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>, state: &mut u32) -> Result<u16> {
         let idx = (*state & 0xfff) as u16;
         let (symbol, offset) = self.map_alias(idx);
-        *state = (*state >> 12) * (self.dist[symbol as usize] as u32) + offset as u32;
+        *state = (*state >> 12) * (self.buckets[symbol as usize].dist as u32) + offset as u32;
         if *state < (1 << 16) {
             *state = (*state << 16) | bitstream.read_bits(16)?;
         }
         Ok(symbol)
+    }
+
+    #[inline]
+    pub fn single_symbol(&self) -> Option<u16> {
+        self.single_symbol
     }
 }
 
