@@ -161,6 +161,7 @@ pub struct FlatMaTree {
 }
 
 #[derive(Debug)]
+#[repr(u32)]
 enum FlatMaTreeNode {
     FusedDecision {
         prop_level0: u32,
