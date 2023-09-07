@@ -188,7 +188,7 @@ impl<R: Read> Bitstream<R> {
             return self.read_single_bit_inner();
         }
 
-        assert!(self.bits_left >= n);
+        debug_assert!(self.bits_left >= n);
         let mask = (1 << n) - 1;
         let data = self.current & mask;
         self.current >>= n;
@@ -199,7 +199,7 @@ impl<R: Read> Bitstream<R> {
 
     #[inline]
     fn read_single_bit_inner(&mut self) -> u64 {
-        assert!(self.bits_left > 0);
+        debug_assert!(self.bits_left > 0);
         let data = self.current & 1;
         self.current >>= 1;
         self.bits_left -= 1;
