@@ -129,7 +129,7 @@ pub struct PredictorState {
     second_prev_row: Vec<i32>,
     prev_row: Vec<i32>,
     curr_row: Vec<i32>,
-    prev_channels: Vec<PrevChannelState>,
+    prev_channels_rev: Vec<PrevChannelState>,
     self_correcting: Option<SelfCorrectingPredictor>,
     y: u32,
     w: i32,
@@ -211,7 +211,7 @@ impl PredictorState {
             second_prev_row: Vec::with_capacity(width as usize),
             prev_row: Vec::with_capacity(width as usize),
             curr_row: Vec::with_capacity(width as usize),
-            prev_channels: (0..prev_channels).map(|_| PrevChannelState::new(width)).collect(),
+            prev_channels_rev: (0..prev_channels).map(|_| PrevChannelState::new(width)).collect(),
             self_correcting,
             y: 0,
             w: 0,
@@ -221,9 +221,9 @@ impl PredictorState {
         }
     }
 
-    pub fn properties<'p, 's>(&'p mut self, prev_channel_samples: &'s [i32]) -> Properties<'p, 's> {
+    pub fn properties<'p, 's>(&'p mut self, prev_channel_samples_rev: &'s [i32]) -> Properties<'p, 's> {
         let prediction = self.sc_predict();
-        Properties::new(self, prev_channel_samples, prediction)
+        Properties::new(self, prev_channel_samples_rev, prediction)
     }
 
     fn sc_predict(&self) -> Option<PredictionResult> {
@@ -433,13 +433,13 @@ impl SelfCorrectingPredictor {
 #[derive(Debug)]
 pub struct Properties<'p, 's> {
     predictor: &'p mut PredictorState,
-    prev_channel_samples: &'s [i32],
+    prev_channel_samples_rev: &'s [i32],
     sc_prediction: Option<PredictionResult>,
     prop_cache: [i32; 16],
 }
 
 impl<'p, 's> Properties<'p, 's> {
-    fn new(pred: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
+    fn new(pred: &'p mut PredictorState, prev_channel_samples_rev: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
         let prop_cache = [
             pred.channel_index as i32,
             pred.stream_index as i32,
@@ -464,7 +464,7 @@ impl<'p, 's> Properties<'p, 's> {
         ];
         Self {
             predictor: pred,
-            prev_channel_samples,
+            prev_channel_samples_rev,
             sc_prediction,
             prop_cache,
         }
@@ -478,13 +478,11 @@ impl Properties<'_, '_> {
 
     #[inline]
     fn get_extra(&self, prop_extra: usize) -> i32 {
-        let len = self.prev_channel_samples.len();
-        let rev_channel_idx = prop_extra / 4;
+        let prev_channel_idx = prop_extra / 4;
         let prop_idx = prop_extra % 4;
-        let Some(prev_channel_idx) = len.checked_sub(rev_channel_idx + 1) else { return 0; };
 
-        let c = self.prev_channel_samples[prev_channel_idx];
-        let prev_channel = &self.predictor.prev_channels[prev_channel_idx];
+        let Some(c) = self.prev_channel_samples_rev.get(prev_channel_idx).copied() else { return 0; };
+        let prev_channel = &self.predictor.prev_channels_rev[prev_channel_idx];
         if prop_idx == 0 {
             c.abs()
         } else if prop_idx == 1 {
@@ -544,7 +542,7 @@ impl Properties<'_, '_> {
             }
         }
 
-        for (ch, sample) in pred.prev_channels.iter_mut().zip(self.prev_channel_samples) {
+        for (ch, sample) in pred.prev_channels_rev.iter_mut().zip(self.prev_channel_samples_rev) {
             ch.record(*sample);
         }
     }
