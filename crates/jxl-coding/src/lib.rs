@@ -133,6 +133,24 @@ impl Decoder {
         })
     }
 
+    pub fn as_rle(&mut self) -> Option<DecoderRleMode<'_>> {
+        let &Lz77::Enabled { ref state, min_symbol, min_length } = &self.lz77 else { return None; };
+        let lz_cluster = self.inner.lz_dist_cluster();
+        let lz_conf = &self.inner.configs[lz_cluster as usize];
+        let Some(sym) = self.inner.code.single_symbol(lz_cluster) else { return None; };
+        (sym == 1 && lz_conf.split_exponent == 0).then_some(DecoderRleMode {
+            inner: &mut self.inner,
+            min_symbol,
+            min_length,
+            len_config: state.lz_len_conf.clone(),
+        })
+    }
+
+    #[inline]
+    pub fn single_token(&self, cluster: u8) -> Option<u32> {
+        self.inner.single_token(cluster)
+    }
+
     /// Explicitly start reading an entropy encoded stream.
     ///
     /// This involves reading an initial state for the ANS stream. It's okay to skip this method,
@@ -152,6 +170,39 @@ impl Decoder {
     /// Returns the cluster mapping of distributions.
     pub fn cluster_map(&self) -> &[u8] {
         &self.inner.clusters
+    }
+}
+
+/// An entropy decoder, in RLE mode.
+#[derive(Debug)]
+pub struct DecoderRleMode<'dec> {
+    inner: &'dec mut DecoderInner,
+    min_symbol: u32,
+    min_length: u32,
+    len_config: IntegerConfig,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RleToken {
+    Value(u32),
+    Repeat(u32),
+}
+
+impl DecoderRleMode<'_> {
+    #[inline]
+    pub fn read_varint_clustered<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+    ) -> Result<RleToken> {
+        let token = self.inner.code.read_symbol(bitstream, cluster)? as u32;
+        Ok(if token >= self.min_symbol {
+            let length = self.inner.read_uint(bitstream, &self.len_config, token - self.min_symbol)? + self.min_length;
+            RleToken::Repeat(length)
+        } else {
+            let value = self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token)?;
+            RleToken::Value(value)
+        })
     }
 }
 
@@ -308,6 +359,13 @@ impl DecoderInner {
         })
     }
 
+    #[inline]
+    fn single_token(&self, cluster: u8) -> Option<u32> {
+        let single_symbol = self.code.single_symbol(cluster)? as u32;
+        let IntegerConfig { split, .. } = self.configs[cluster as usize];
+        (single_symbol < split).then_some(single_symbol)
+    }
+
     fn read_uint<R: std::io::Read>(&self, bitstream: &mut Bitstream<R>, config: &IntegerConfig, token: u32) -> Result<u32> {
         let &IntegerConfig { split_exponent, split, msb_in_token, lsb_in_token, .. } = config;
         if token < split {
@@ -353,6 +411,14 @@ impl Coder {
                 let dist = &dist[cluster as usize];
                 dist.read_symbol(bitstream, state)
             },
+        }
+    }
+
+    #[inline]
+    fn single_symbol(&self, cluster: u8) -> Option<u16> {
+        match self {
+            Self::PrefixCode(dist) => dist[cluster as usize].single_symbol(),
+            Self::Ans { dist, .. } => dist[cluster as usize].single_symbol(),
         }
     }
 

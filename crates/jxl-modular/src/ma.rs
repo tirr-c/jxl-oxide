@@ -173,11 +173,11 @@ enum FlatMaTreeNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MaTreeLeafClustered {
-    cluster: u8,
-    predictor: super::predictor::Predictor,
-    offset: i32,
-    multiplier: u32,
+pub(crate) struct MaTreeLeafClustered {
+    pub(crate) cluster: u8,
+    pub(crate) predictor: super::predictor::Predictor,
+    pub(crate) offset: i32,
+    pub(crate) multiplier: u32,
 }
 
 impl FlatMaTree {
@@ -226,6 +226,26 @@ impl FlatMaTree {
         let diff = decoder.read_varint_with_multiplier_clustered(bitstream, leaf.cluster, dist_multiplier)?;
         let diff = unpack_signed(diff) * leaf.multiplier as i32 + leaf.offset;
         Ok((diff, leaf.predictor))
+    }
+
+    #[inline]
+    pub(crate) fn decode_sample_rle(
+        &self,
+        next: &mut impl FnMut(u8) -> Result<i32>,
+        properties: &Properties,
+    ) -> Result<(i32, super::predictor::Predictor)> {
+        let leaf = self.get_leaf(properties)?;
+        let diff = next(leaf.cluster)?;
+        let diff = diff * leaf.multiplier as i32 + leaf.offset;
+        Ok((diff, leaf.predictor))
+    }
+
+    #[inline]
+    pub(crate) fn single_node(&self) -> Option<&MaTreeLeafClustered> {
+        match self.nodes.get(0) {
+            Some(FlatMaTreeNode::Leaf(node)) => Some(node),
+            _ => None,
+        }
     }
 }
 

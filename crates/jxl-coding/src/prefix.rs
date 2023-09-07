@@ -287,4 +287,10 @@ impl Histogram {
         }
         unreachable!()
     }
+
+    #[inline]
+    pub fn single_symbol(&self) -> Option<u16> {
+        let &[symbol] = &*self.symbols else { return None; };
+        Some(symbol)
+    }
 }
