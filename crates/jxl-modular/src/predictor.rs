@@ -1,7 +1,5 @@
 use jxl_bitstream::define_bundle;
 
-use crate::Result;
-
 define_bundle! {
     #[derive(Debug, Clone)]
     pub struct WpHeader error(crate::Error) {
@@ -437,17 +435,38 @@ pub struct Properties<'p, 's> {
     predictor: &'p mut PredictorState,
     prev_channel_samples: &'s [i32],
     sc_prediction: Option<PredictionResult>,
-    grad: i32,
+    prop_cache: [i32; 16],
 }
 
 impl<'p, 's> Properties<'p, 's> {
-    fn new(predictor: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
-        let grad = (predictor.w as i64 + predictor.n as i64 - predictor.nw as i64) as i32;
+    fn new(pred: &'p mut PredictorState, prev_channel_samples: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
+        let prop_cache = [
+            pred.channel_index as i32,
+            pred.stream_index as i32,
+            pred.y as i32,
+            pred.curr_row.len() as i32,
+            pred.n.abs(),
+            pred.w.abs(),
+            pred.n,
+            pred.w,
+            pred.w.wrapping_sub(pred.prev_grad),
+            (pred.w as i64 + pred.n as i64 - pred.nw as i64) as i32,
+            pred.w.wrapping_sub(pred.nw),
+            pred.nw.wrapping_sub(pred.n),
+            pred.n.wrapping_sub(pred.ne()),
+            pred.n.wrapping_sub(pred.nn()),
+            pred.w.wrapping_sub(pred.ww()),
+            if let Some(prediction) = &sc_prediction {
+                prediction.max_error
+            } else {
+                0
+            },
+        ];
         Self {
-            predictor,
+            predictor: pred,
             prev_channel_samples,
             sc_prediction,
-            grad,
+            prop_cache,
         }
     }
 }
@@ -457,62 +476,39 @@ impl Properties<'_, '_> {
         self.sc_prediction.as_ref().map(|pred| pred.prediction)
     }
 
-    pub fn get(&self, property: usize) -> Result<i32> {
-        let property_count = 16 + self.prev_channel_samples.len() * 4;
-        if property >= property_count {
-            return Ok(0);
-        }
+    #[inline]
+    fn get_extra(&self, prop_extra: usize) -> i32 {
+        let len = self.prev_channel_samples.len();
+        let rev_channel_idx = prop_extra / 4;
+        let prop_idx = prop_extra % 4;
+        let Some(prev_channel_idx) = len.checked_sub(rev_channel_idx + 1) else { return 0; };
 
-        let val = if let Some(property) = property.checked_sub(16) {
-            let rev_channel_idx = property / 4;
-            let prop_idx = property % 4;
-            let prev_channel_idx = self.prev_channel_samples.len() - rev_channel_idx - 1;
-            let c = self.prev_channel_samples[prev_channel_idx];
-            let prev_channel = &self.predictor.prev_channels[prev_channel_idx];
-            if prop_idx == 0 {
-                c.abs()
-            } else if prop_idx == 1 {
-                c
-            } else {
-                let w = prev_channel.w() as i64;
-                let n = prev_channel.n() as i64;
-                let nw = prev_channel.nw() as i64;
-                let g = (w + n - nw).clamp(w.min(n), w.max(n)) as i32;
-                if prop_idx == 2 {
-                    c.abs_diff(g) as i32
-                } else {
-                    c.wrapping_sub(g)
-                }
-            }
+        let c = self.prev_channel_samples[prev_channel_idx];
+        let prev_channel = &self.predictor.prev_channels[prev_channel_idx];
+        if prop_idx == 0 {
+            c.abs()
+        } else if prop_idx == 1 {
+            c
         } else {
-            let pred = &*self.predictor;
-            match property {
-                0 => pred.channel_index as i32,
-                1 => pred.stream_index as i32,
-                2 => pred.y as i32,
-                3 => pred.curr_row.len() as i32,
-                4 => pred.n.abs(),
-                5 => pred.w.abs(),
-                6 => pred.n,
-                7 => pred.w,
-                8 => pred.w.wrapping_sub(pred.prev_grad),
-                9 => self.grad,
-                10 => pred.w.wrapping_sub(pred.nw),
-                11 => pred.nw.wrapping_sub(pred.n),
-                12 => pred.n.wrapping_sub(pred.ne()),
-                13 => pred.n.wrapping_sub(pred.nn()),
-                14 => pred.w.wrapping_sub(pred.ww()),
-                15 => {
-                    if let Some(prediction) = &self.sc_prediction {
-                        prediction.max_error
-                    } else {
-                        0
-                    }
-                },
-                _ => unreachable!(),
+            let w = prev_channel.w() as i64;
+            let n = prev_channel.n() as i64;
+            let nw = prev_channel.nw() as i64;
+            let g = (w + n - nw).clamp(w.min(n), w.max(n)) as i32;
+            if prop_idx == 2 {
+                c.abs_diff(g) as i32
+            } else {
+                c.wrapping_sub(g)
             }
-        };
-        Ok(val)
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self, property: usize) -> i32 {
+        if let Some(property) = property.checked_sub(16) {
+            self.get_extra(property)
+        } else {
+            self.prop_cache[property]
+        }
     }
 
     pub fn record(self, sample: i32) {
@@ -536,7 +532,7 @@ impl Properties<'_, '_> {
             pred.w = n;
             pred.nw = n;
         } else {
-            pred.prev_grad = self.grad;
+            pred.prev_grad = self.prop_cache[9];
 
             pred.w = sample;
             if pred.prev_row.is_empty() {
