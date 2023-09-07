@@ -34,8 +34,7 @@ impl MaConfig {
     /// The method will evaluate the tree with the given information and prune branches which are
     /// always not taken.
     pub fn make_flat_tree(&self, channel: u32, stream_idx: u32) -> FlatMaTree {
-        let mut nodes = Vec::new();
-        self.tree.flatten(channel, stream_idx, &mut nodes);
+        let nodes = self.tree.flatten(channel, stream_idx);
         FlatMaTree::new(nodes)
     }
 }
@@ -162,12 +161,14 @@ pub struct FlatMaTree {
 }
 
 #[derive(Debug)]
+#[repr(u32)]
 enum FlatMaTreeNode {
-    Decision {
-        property: u32,
-        value: i32,
-        left_idx: u32,
-        right_idx: u32,
+    FusedDecision {
+        prop_level0: u32,
+        value_level0: i32,
+        props_level1: (u32, u32),
+        values_level1: (i32, i32),
+        index_base: u32,
     },
     Leaf(MaTreeLeafClustered),
 }
@@ -183,23 +184,35 @@ pub(crate) struct MaTreeLeafClustered {
 impl FlatMaTree {
     fn new(nodes: Vec<FlatMaTreeNode>) -> Self {
         let need_self_correcting = nodes.iter().any(|node| match *node {
-            FlatMaTreeNode::Decision { property, .. } => property == 15,
+            FlatMaTreeNode::FusedDecision { prop_level0: p, props_level1: (pl, pr), .. } => p == 15 || pl == 15 || pr == 15,
             FlatMaTreeNode::Leaf(MaTreeLeafClustered { predictor, .. }) => predictor == Predictor::SelfCorrecting,
         });
 
         Self { nodes, need_self_correcting }
     }
 
-    fn get_leaf(&self, properties: &Properties) -> Result<&MaTreeLeafClustered> {
+    #[inline]
+    fn get_leaf(&self, properties: &Properties) -> &MaTreeLeafClustered {
         let mut current_node = &self.nodes[0];
         loop {
             match current_node {
-                &FlatMaTreeNode::Decision { property, value, left_idx, right_idx } => {
-                    let prop_value = properties.get(property as usize)?;
-                    let next_node = if prop_value > value { left_idx } else { right_idx };
+                &FlatMaTreeNode::FusedDecision {
+                    prop_level0: p,
+                    value_level0: v,
+                    props_level1: (pl, pr),
+                    values_level1: (vl, vr),
+                    index_base,
+                } => {
+                    let p0v = properties.get(p as usize);
+                    let plv = properties.get(pl as usize);
+                    let prv = properties.get(pr as usize);
+                    let high_bit = p0v <= v;
+                    let l = (plv <= vl) as u32;
+                    let r = 2 | (prv <= vr) as u32;
+                    let next_node = index_base + if high_bit { r } else { l };
                     current_node = &self.nodes[next_node as usize];
                 },
-                FlatMaTreeNode::Leaf(leaf) => return Ok(leaf),
+                FlatMaTreeNode::Leaf(leaf) => return leaf,
             }
         }
     }
@@ -222,7 +235,7 @@ impl FlatMaTree {
         properties: &Properties,
         dist_multiplier: u32,
     ) -> Result<(i32, super::predictor::Predictor)> {
-        let leaf = self.get_leaf(properties)?;
+        let leaf = self.get_leaf(properties);
         let diff = decoder.read_varint_with_multiplier_clustered(bitstream, leaf.cluster, dist_multiplier)?;
         let diff = unpack_signed(diff) * leaf.multiplier as i32 + leaf.offset;
         Ok((diff, leaf.predictor))
@@ -234,7 +247,7 @@ impl FlatMaTree {
         next: &mut impl FnMut(u8) -> Result<i32>,
         properties: &Properties,
     ) -> Result<(i32, super::predictor::Predictor)> {
-        let leaf = self.get_leaf(properties)?;
+        let leaf = self.get_leaf(properties);
         let diff = next(leaf.cluster)?;
         let diff = diff * leaf.multiplier as i32 + leaf.offset;
         Ok((diff, leaf.predictor))
@@ -261,46 +274,56 @@ enum MaTreeNode {
 }
 
 impl MaTreeNode {
-    fn flatten(&self, channel: u32, stream_idx: u32, out: &mut Vec<FlatMaTreeNode>) {
-        let idx = out.len();
+    fn next_decision_node(&self, channel: u32, stream_idx: u32) -> &MaTreeNode {
         match *self {
-            MaTreeNode::Decision { property, value, ref left, ref right } => {
-                if property == 0 || property == 1 {
-                    let target = if property == 0 { channel } else { stream_idx };
-                    let branch = if target as i32 > value { left } else { right };
-                    return branch.flatten(channel, stream_idx, out);
-                }
-
-                out.push(FlatMaTreeNode::Decision {
-                    property,
-                    value,
-                    left_idx: 0,
-                    right_idx: 0,
-                });
-                left.flatten(channel, stream_idx, out);
-                let right_idx = out.len();
-                right.flatten(channel, stream_idx, out);
-                if right_idx == idx + 2 && out.len() == right_idx + 1 {
-                    let Some(FlatMaTreeNode::Leaf(right)) = out.pop() else { panic!() };
-                    let Some(FlatMaTreeNode::Leaf(left)) = out.pop() else { panic!() };
-                    if left == right {
-                        out[idx] = FlatMaTreeNode::Leaf(left);
-                        return;
-                    }
-                    out.push(FlatMaTreeNode::Leaf(left));
-                    out.push(FlatMaTreeNode::Leaf(right));
-                }
-
-                out[idx] = FlatMaTreeNode::Decision {
-                    property,
-                    value,
-                    left_idx: (idx + 1) as u32,
-                    right_idx: right_idx as u32,
-                };
+            MaTreeNode::Decision { property, value, ref left, ref right } if property == 0 || property == 1 => {
+                let target = if property == 0 { channel } else { stream_idx };
+                let node = if target as i32 > value { left } else { right };
+                node.next_decision_node(channel, stream_idx)
             },
-            MaTreeNode::Leaf(ref leaf) => {
-                out.push(FlatMaTreeNode::Leaf(leaf.clone()));
-            },
+            ref node => node,
         }
+    }
+
+    fn flatten(&self, channel: u32, stream_idx: u32) -> Vec<FlatMaTreeNode> {
+        let target = self.next_decision_node(channel, stream_idx);
+        let mut q = std::collections::VecDeque::new();
+        q.push_back(target);
+
+        let mut out = Vec::new();
+        let mut next_base = 1u32;
+        while let Some(target) = q.pop_front() {
+            match *target {
+                MaTreeNode::Decision { property, value, ref left, ref right } => {
+                    let left = left.next_decision_node(channel, stream_idx);
+                    let (lp, lv, ll, lr) = match left {
+                        &MaTreeNode::Decision { property, value, ref left, ref right } => (property, value, &**left, &**right),
+                        node => (0, 0, node, node),
+                    };
+                    let right = right.next_decision_node(channel, stream_idx);
+                    let (rp, rv, rl, rr) = match right {
+                        &MaTreeNode::Decision { property, value, ref left, ref right } => (property, value, &**left, &**right),
+                        node => (0, 0, node, node),
+                    };
+                    out.push(FlatMaTreeNode::FusedDecision {
+                        prop_level0: property,
+                        value_level0: value,
+                        props_level1: (lp, rp),
+                        values_level1: (lv, rv),
+                        index_base: next_base,
+                    });
+                    q.push_back(ll);
+                    q.push_back(lr);
+                    q.push_back(rl);
+                    q.push_back(rr);
+                    next_base += 4;
+                },
+                MaTreeNode::Leaf(ref leaf) => {
+                    out.push(FlatMaTreeNode::Leaf(leaf.clone()));
+                },
+            }
+        }
+
+        out
     }
 }
