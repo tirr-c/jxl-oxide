@@ -172,14 +172,18 @@ impl DecoderRleMode<'_> {
         bitstream: &mut Bitstream<R>,
         cluster: u8,
     ) -> Result<RleToken> {
-        let token = self.inner.code.read_symbol(bitstream, cluster)? as u32;
-        Ok(if token >= self.min_symbol {
-            let length = self.inner.read_uint(bitstream, &self.len_config, token - self.min_symbol)? + self.min_length;
-            RleToken::Repeat(length)
-        } else {
-            let value = self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token)?;
-            RleToken::Value(value)
-        })
+        self.inner.code
+            .read_symbol(bitstream, cluster)
+            .and_then(|token| {
+                let token = token as u32;
+                if let Some(token) = token.checked_sub(self.min_symbol) {
+                    self.inner.read_uint(bitstream, &self.len_config, token)
+                        .map(|v| RleToken::Repeat(v + self.min_length))
+                } else {
+                    self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token)
+                        .map(RleToken::Value)
+                }
+            })
     }
 }
 
@@ -474,7 +478,9 @@ impl DecoderInner {
         let token = token >> lsb_in_token;
         let token = token & ((1 << msb_in_token) - 1);
         let token = token | (1 << msb_in_token);
-        Ok((((token << n) | bitstream.read_bits(n)?) << lsb_in_token) | low_bits)
+        bitstream.read_bits(n)
+            .map_err(From::from)
+            .map(|rest_bits| (((token << n) | rest_bits) << lsb_in_token) | low_bits)
     }
 
     #[inline]

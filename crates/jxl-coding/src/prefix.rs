@@ -276,7 +276,12 @@ impl Histogram {
         let mut prev_len = 0u8;
         for config in configs {
             for _ in prev_len..config.bits {
-                bits = (bits << 1) | (bitstream.read_bool()? as u32);
+                match bitstream.read_bool() {
+                    Ok(b) => {
+                        bits = (bits << 1) | (b as u32);
+                    },
+                    Err(e) => return Err(e.into()),
+                }
             }
             prev_len = config.bits;
             if config.from <= bits && bits < config.to {

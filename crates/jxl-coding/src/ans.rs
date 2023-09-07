@@ -249,7 +249,12 @@ impl Histogram {
         let (symbol, offset) = self.map_alias(idx);
         *state = (*state >> 12) * (self.buckets[symbol as usize].dist as u32) + offset as u32;
         if *state < (1 << 16) {
-            *state = (*state << 16) | bitstream.read_bits(16)?;
+            match bitstream.read_bits(16) {
+                Ok(bits) => {
+                    *state = (*state << 16) | bits;
+                },
+                Err(e) => return Err(e.into()),
+            }
         }
         Ok(symbol)
     }
