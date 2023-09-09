@@ -63,17 +63,17 @@ pub fn decode_pass_group<R: std::io::Read>(
         let block_height = (block_info.height() - block_top).min(group_dim_blocks);
 
         let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let block_info = block_info.subgrid(block_left, block_top, block_width, block_height);
+        let block_info = block_info.subgrid(block_left..(block_left + block_width), block_top..(block_top + block_height));
         let lf_quant: Option<[_; 3]> = lf_group.lf_coeff.as_ref().map(|lf_coeff| {
             let lf_quant_channels = lf_coeff.lf_quant.image().channel_data();
             std::array::from_fn(|idx| {
-                let lf_quant = &lf_quant_channels[[1, 0, 2][idx]];
+                let lf_quant = lf_quant_channels[[1, 0, 2][idx]].as_simple().unwrap();
                 let shift = ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx);
 
                 let block_left = block_left >> shift.hshift();
                 let block_top = block_top >> shift.vshift();
                 let (block_width, block_height) = shift.shift_size((block_width as u32, block_height as u32));
-                lf_quant.subgrid(block_left, block_top, block_width as usize, block_height as usize)
+                lf_quant.subgrid(block_left..(block_left + block_width as usize), block_top..(block_top + block_height as usize))
             })
         });
 

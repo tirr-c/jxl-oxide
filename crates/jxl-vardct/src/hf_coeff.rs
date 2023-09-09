@@ -1,5 +1,5 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{Subgrid, CutGrid, SimpleGrid};
+use jxl_grid::{CutGrid, SimpleGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 
 use crate::{
@@ -14,9 +14,9 @@ use crate::{
 pub struct HfCoeffParams<'a> {
     pub num_hf_presets: u32,
     pub hf_block_ctx: &'a HfBlockContext,
-    pub block_info: Subgrid<'a, BlockInfo>,
+    pub block_info: SharedSubgrid<'a, BlockInfo>,
     pub jpeg_upsampling: [u32; 3],
-    pub lf_quant: Option<[Subgrid<'a, i32>; 3]>,
+    pub lf_quant: Option<[SharedSubgrid<'a, i32>; 3]>,
     pub hf_pass: &'a HfPass,
     pub coeff_shift: u32,
 }
@@ -91,7 +91,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
 
     for y in 0..height {
         for x in 0..width {
-            let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y).unwrap() else {
+            let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y) else {
                 continue;
             };
             let (w8, h8) = dct_select.dct_select_size();
@@ -102,7 +102,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
                     let shift = upsampling_shifts[idx];
                     let x = x >> shift.hshift();
                     let y = y >> shift.vshift();
-                    *lf_quant[idx].get(x, y).unwrap()
+                    *lf_quant[idx].get(x, y)
                 })
             });
 

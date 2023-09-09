@@ -1,5 +1,5 @@
 use jxl_bitstream::{Bundle, Bitstream};
-use jxl_grid::{SimpleGrid, Grid};
+use jxl_grid::SimpleGrid;
 use jxl_modular::{MaConfig, ModularChannelParams, ModularParams, Modular};
 
 use crate::{Result, TransformType};
@@ -26,7 +26,7 @@ pub struct HfMetadata {
     /// Chroma-from-luma correlation grid for B channel.
     pub b_from_y: SimpleGrid<i32>,
     /// Varblock information in an LF group.
-    pub block_info: Grid<BlockInfo>,
+    pub block_info: SimpleGrid<BlockInfo>,
     /// Sigma parameter grid for edge-preserving filter.
     pub epf_sigma: SimpleGrid<f32>,
 }
@@ -107,7 +107,7 @@ impl Bundle<HfMetadataParams<'_>> for HfMetadata {
             (quant_mul * 65536.0 / quantizer_global_scale as f32, sharp_lut)
         });
 
-        let mut block_info = Grid::<BlockInfo>::new_usize(bw, bh, 0, 0);
+        let mut block_info = SimpleGrid::<BlockInfo>::new(bw, bh);
         let mut x;
         let mut y = 0usize;
         let mut data_idx = 0usize;
@@ -155,14 +155,14 @@ impl Bundle<HfMetadataParams<'_>> for HfMetadata {
                                 .into());
                             };
 
-                            block_info.set(x + dx, y + dy, if dx == 0 && dy == 0 {
+                            *block_info.get_mut(x + dx, y + dy).unwrap() = if dx == 0 && dy == 0 {
                                 BlockInfo::Data {
                                     dct_select,
                                     hf_mul,
                                 }
                             } else {
                                 BlockInfo::Occupied
-                            });
+                            };
 
                             if let Some((sigma, sharp_lut)) = epf {
                                 let sharpness = sharpness[(y + dy) * bw + (x + dx)];

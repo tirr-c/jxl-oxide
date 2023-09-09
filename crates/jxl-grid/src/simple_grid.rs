@@ -1,6 +1,6 @@
-use std::ptr::NonNull;
+use std::{ptr::NonNull, ops::RangeBounds};
 
-use crate::SimdVector;
+use crate::{SimdVector, SharedSubgrid};
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -92,6 +92,11 @@ impl<S> SimpleGrid<S> {
     #[inline]
     pub(crate) fn into_buf_iter(self) -> impl Iterator<Item = S> {
         self.buf.into_iter().skip(self.offset)
+    }
+
+    #[inline]
+    pub fn subgrid(&self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> crate::SharedSubgrid<'_, S> {
+        SharedSubgrid::from(self).subgrid(range_x, range_y)
     }
 }
 
@@ -250,6 +255,8 @@ impl<V: Copy> CutGrid<'_, V> {
 
 impl<'g> CutGrid<'g, f32> {
     pub fn as_vectored<V: SimdVector>(&mut self) -> Option<CutGrid<'_, V>> {
+        assert!(V::available(), "Vector type `{}` is not supported by current CPU", std::any::type_name::<V>());
+
         let mask = V::SIZE - 1;
         let align_mask = std::mem::align_of::<V>() - 1;
 
