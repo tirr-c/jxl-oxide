@@ -1,5 +1,5 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{Subgrid, Grid, CutGrid};
+use jxl_grid::{Subgrid, CutGrid, SimpleGrid};
 use jxl_modular::ChannelShift;
 
 use crate::{
@@ -71,9 +71,9 @@ pub fn write_hf_coeff<R: std::io::Read>(
     let height = block_info.height();
     let mut non_zeros_grid = upsampling_shifts.map(|shift| {
         let (width, height) = shift.shift_size((width as u32, height as u32));
-        Grid::new(width, height, width, height)
+        SimpleGrid::new(width as usize, height as usize)
     });
-    let predict_non_zeros = |grid: &Grid<u32>, x: usize, y: usize| {
+    let predict_non_zeros = |grid: &SimpleGrid<u32>, x: usize, y: usize| {
         if x == 0 && y == 0 {
             32u32
         } else if x == 0 {
@@ -160,7 +160,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
                 let non_zeros_grid = &mut non_zeros_grid[c];
                 for dy in 0..h8 as usize {
                     for dx in 0..w8 as usize {
-                        non_zeros_grid.set(sx + dx, sy + dy, non_zeros_val);
+                        *non_zeros_grid.get_mut(sx + dx, sy + dy).unwrap() = non_zeros_val;
                     }
                 }
 

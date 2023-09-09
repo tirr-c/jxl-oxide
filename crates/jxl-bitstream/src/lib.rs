@@ -181,13 +181,6 @@ impl<R: Read> Bitstream<R> {
 
     #[inline]
     fn read_bits_inner(&mut self, n: u32) -> u64 {
-        if n == 0 {
-            return 0;
-        }
-        if n == 1 {
-            return self.read_single_bit_inner();
-        }
-
         debug_assert!(self.bits_left >= n);
         let mask = (1 << n) - 1;
         let data = self.current & mask;
