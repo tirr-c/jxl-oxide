@@ -43,7 +43,6 @@ fn dct4_vec_forward(v: Lane) -> Lane {
 
     let v_rev = unsafe { _mm_shuffle_ps::<0b00011011>(v, v) };
     let mul = Lane::set([1.0, 1.0, -1.0, -1.0]);
-    // sum03, sum12, tmp1, tmp0
     let addsub = v.muladd(mul, v_rev);
 
     let a = unsafe { _mm_shuffle_ps::<0b10011100>(addsub, addsub) };
@@ -269,7 +268,7 @@ fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     let mut output1 = dct4_forward(input1);
     output1[0] = output1[0].mul(sqrt2);
     for idx in 0..3 {
-        *io.get_mut(0, idx * 2) = output1[idx].add(output1[idx + 1]);
+        *io.get_mut(0, idx * 2 + 1) = output1[idx].add(output1[idx + 1]);
     }
     *io.get_mut(0, 7) = output1[3];
 }
