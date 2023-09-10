@@ -27,21 +27,6 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    const SPECIAL_DISTANCES: [[i8; 2]; 120] = [
-        [0, 1], [1, 0],  [1, 1], [-1, 1], [0, 2], [2, 0], [1, 2], [-1, 2], [2, 1], [-2, 1], [2, 2],
-        [-2, 2], [0, 3], [3, 0], [1, 3], [-1, 3], [3, 1], [-3, 1], [2, 3], [-2, 3], [3, 2],
-        [-3, 2], [0, 4], [4, 0], [1, 4], [-1, 4], [4, 1], [-4, 1], [3, 3], [-3, 3], [2, 4],
-        [-2, 4], [4, 2], [-4, 2], [0, 5], [3, 4],  [-3, 4], [4, 3], [-4, 3], [5, 0], [1, 5],
-        [-1, 5], [5, 1], [-5, 1], [2, 5], [-2, 5], [5, 2], [-5, 2], [4, 4], [-4, 4], [3, 5],
-        [-3, 5], [5, 3], [-5, 3], [0, 6], [6, 0], [1, 6], [-1, 6], [6, 1], [-6, 1], [2, 6],
-        [-2, 6], [6, 2], [-6, 2], [4, 5], [-4, 5], [5, 4], [-5, 4], [3, 6], [-3, 6], [6, 3],
-        [-6, 3], [0, 7], [7, 0],  [1, 7], [-1, 7], [5, 5], [-5, 5], [7, 1], [-7, 1], [4, 6],
-        [-4, 6], [6, 4], [-6, 4], [2, 7], [-2, 7], [7, 2], [-7, 2], [3, 7], [-3, 7], [7, 3],
-        [-7, 3], [5, 6], [-5, 6], [6, 5], [-6, 5], [8, 0], [4, 7],  [-4, 7], [7, 4], [-7, 4],
-        [8, 1], [8, 2], [6, 6], [-6, 6], [8, 3], [5, 7], [-5, 7], [7, 5], [-7, 5], [8, 4], [6, 7],
-        [-6, 7], [7, 6], [-7, 6], [8, 5], [7, 7], [-7, 7], [8, 6], [8, 7],
-    ];
-
     /// Create a decoder by reading symbol distribution, integer configurations and LZ77
     /// configuration from the bitstream.
     pub fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
@@ -65,11 +50,13 @@ impl Decoder {
     }
 
     /// Read an integer from the bitstream with the given context.
+    #[inline]
     pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32) -> Result<u32> {
         self.read_varint_with_multiplier(bitstream, ctx, 0)
     }
 
     /// Read an integer from the bitstream with the given context and LZ77 distance multiplier.
+    #[inline]
     pub fn read_varint_with_multiplier<R: std::io::Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -83,54 +70,25 @@ impl Decoder {
     /// Read an integer from the bitstream with the given *cluster* and LZ77 distance multiplier.
     ///
     /// Contexts can be converted to clusters using [the cluster map][Self::cluster_map].
+    #[inline]
     pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
         cluster: u8,
         dist_multiplier: u32,
     ) -> Result<u32> {
-        Ok(if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
-            let min_symbol = min_symbol as u16;
-            let r;
-            if state.num_to_copy > 0 {
-                r = state.window[(state.copy_pos & 0xfffff) as usize];
-                state.copy_pos += 1;
-                state.num_to_copy -= 1;
-            } else {
-                let token = self.inner.code.read_symbol(bitstream, cluster)?;
-                if token >= min_symbol {
-                    let lz_dist_cluster = self.inner.lz_dist_cluster();
-
-                    state.num_to_copy = self.inner.read_uint(bitstream, &state.lz_len_conf, (token - min_symbol) as u32)? + min_length;
-                    let token = self.inner.code.read_symbol(bitstream, lz_dist_cluster)?;
-                    let distance = self.inner.read_uint(bitstream, &self.inner.configs[lz_dist_cluster as usize], token as u32)?;
-                    let distance = if dist_multiplier == 0 {
-                        distance + 1
-                    } else if distance < 120 {
-                        let [offset, dist] = Self::SPECIAL_DISTANCES[distance as usize];
-                        let dist = offset as i32 + dist_multiplier as i32 * dist as i32;
-                        dist.max(1) as u32
-                    } else {
-                        distance - 119
-                    };
-
-                    let distance = (1 << 20).min(distance).min(state.num_decoded);
-                    state.copy_pos = state.num_decoded - distance;
-
-                    r = state.window[(state.copy_pos & 0xfffff) as usize];
-                    state.copy_pos += 1;
-                    state.num_to_copy -= 1;
-                } else {
-                    r = self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token as u32)?;
-                }
-            }
-            state.window[(state.num_decoded & 0xfffff) as usize] = r;
-            state.num_decoded += 1;
-            r
+        if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
+            self.inner.read_varint_with_multiplier_clustered_lz77(
+                bitstream,
+                cluster,
+                dist_multiplier,
+                state,
+                min_symbol as u16,
+                min_length,
+            )
         } else {
-            let token = self.inner.code.read_symbol(bitstream, cluster)?;
-            self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token as u32)?
-        })
+            self.inner.read_varint_with_multiplier_clustered(bitstream, cluster)
+        }
     }
 
     pub fn as_rle(&mut self) -> Option<DecoderRleMode<'_>> {
@@ -146,6 +104,22 @@ impl Decoder {
         })
     }
 
+    pub fn as_with_lz77(&mut self) -> Option<DecoderWithLz77<'_>> {
+        if let Lz77::Enabled { ref mut state, min_symbol, min_length } = self.lz77 {
+            Some(DecoderWithLz77 { inner: &mut self.inner, state, min_symbol, min_length })
+        } else {
+            None
+        }
+    }
+
+    pub fn as_no_lz77(&mut self) -> Option<DecoderNoLz77<'_>> {
+        if let Lz77::Disabled = self.lz77 {
+            Some(DecoderNoLz77(&mut self.inner))
+        } else {
+            None
+        }
+    }
+
     #[inline]
     pub fn single_token(&self, cluster: u8) -> Option<u32> {
         self.inner.single_token(cluster)
@@ -155,6 +129,7 @@ impl Decoder {
     ///
     /// This involves reading an initial state for the ANS stream. It's okay to skip this method,
     /// as the state will be initialized on the first read.
+    #[inline]
     pub fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
         self.inner.code.begin(bitstream)
     }
@@ -163,11 +138,13 @@ impl Decoder {
     ///
     /// For prefix code stream, this method will always succeed. For ANS streams, this method
     /// checks if the final state matches expected state, which is specified in the specification.
+    #[inline]
     pub fn finalize(&self) -> Result<()> {
         self.inner.code.finalize()
     }
 
     /// Returns the cluster mapping of distributions.
+    #[inline]
     pub fn cluster_map(&self) -> &[u8] {
         &self.inner.clusters
     }
@@ -195,14 +172,64 @@ impl DecoderRleMode<'_> {
         bitstream: &mut Bitstream<R>,
         cluster: u8,
     ) -> Result<RleToken> {
-        let token = self.inner.code.read_symbol(bitstream, cluster)? as u32;
-        Ok(if token >= self.min_symbol {
-            let length = self.inner.read_uint(bitstream, &self.len_config, token - self.min_symbol)? + self.min_length;
-            RleToken::Repeat(length)
-        } else {
-            let value = self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token)?;
-            RleToken::Value(value)
-        })
+        self.inner.code
+            .read_symbol(bitstream, cluster)
+            .and_then(|token| {
+                let token = token as u32;
+                if let Some(token) = token.checked_sub(self.min_symbol) {
+                    self.inner.read_uint(bitstream, &self.len_config, token)
+                        .map(|v| RleToken::Repeat(v + self.min_length))
+                } else {
+                    self.inner.read_uint(bitstream, &self.inner.configs[cluster as usize], token)
+                        .map(RleToken::Value)
+                }
+            })
+    }
+}
+
+#[derive(Debug)]
+pub struct DecoderWithLz77<'dec> {
+    inner: &'dec mut DecoderInner,
+    state: &'dec mut Lz77State,
+    min_symbol: u32,
+    min_length: u32,
+}
+
+impl DecoderWithLz77<'_> {
+    #[inline]
+    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+        dist_multiplier: u32,
+    ) -> Result<u32> {
+        self.inner.read_varint_with_multiplier_clustered_lz77(
+            bitstream,
+            cluster,
+            dist_multiplier,
+            self.state,
+            self.min_symbol as u16,
+            self.min_length,
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct DecoderNoLz77<'dec>(&'dec mut DecoderInner);
+
+impl DecoderNoLz77<'_> {
+    #[inline]
+    pub fn read_varint_clustered<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+    ) -> Result<u32> {
+        self.0.read_varint_with_multiplier_clustered(bitstream, cluster)
+    }
+
+    #[inline]
+    pub fn single_token(&self, cluster: u8) -> Option<u32> {
+        self.0.single_token(cluster)
     }
 }
 
@@ -366,6 +393,79 @@ impl DecoderInner {
         (single_symbol < split).then_some(single_symbol)
     }
 
+    #[inline]
+    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+    ) -> Result<u32> {
+        let token = self.code.read_symbol(bitstream, cluster)?;
+        self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)
+    }
+
+    fn read_varint_with_multiplier_clustered_lz77<R: std::io::Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        cluster: u8,
+        dist_multiplier: u32,
+        state: &mut Lz77State,
+        min_symbol: u16,
+        min_length: u32,
+    ) -> Result<u32> {
+        const SPECIAL_DISTANCES: [[i8; 2]; 120] = [
+            [0, 1], [1, 0],  [1, 1], [-1, 1], [0, 2], [2, 0], [1, 2], [-1, 2], [2, 1], [-2, 1], [2, 2],
+            [-2, 2], [0, 3], [3, 0], [1, 3], [-1, 3], [3, 1], [-3, 1], [2, 3], [-2, 3], [3, 2],
+            [-3, 2], [0, 4], [4, 0], [1, 4], [-1, 4], [4, 1], [-4, 1], [3, 3], [-3, 3], [2, 4],
+            [-2, 4], [4, 2], [-4, 2], [0, 5], [3, 4],  [-3, 4], [4, 3], [-4, 3], [5, 0], [1, 5],
+            [-1, 5], [5, 1], [-5, 1], [2, 5], [-2, 5], [5, 2], [-5, 2], [4, 4], [-4, 4], [3, 5],
+            [-3, 5], [5, 3], [-5, 3], [0, 6], [6, 0], [1, 6], [-1, 6], [6, 1], [-6, 1], [2, 6],
+            [-2, 6], [6, 2], [-6, 2], [4, 5], [-4, 5], [5, 4], [-5, 4], [3, 6], [-3, 6], [6, 3],
+            [-6, 3], [0, 7], [7, 0],  [1, 7], [-1, 7], [5, 5], [-5, 5], [7, 1], [-7, 1], [4, 6],
+            [-4, 6], [6, 4], [-6, 4], [2, 7], [-2, 7], [7, 2], [-7, 2], [3, 7], [-3, 7], [7, 3],
+            [-7, 3], [5, 6], [-5, 6], [6, 5], [-6, 5], [8, 0], [4, 7],  [-4, 7], [7, 4], [-7, 4],
+            [8, 1], [8, 2], [6, 6], [-6, 6], [8, 3], [5, 7], [-5, 7], [7, 5], [-7, 5], [8, 4], [6, 7],
+            [-6, 7], [7, 6], [-7, 6], [8, 5], [7, 7], [-7, 7], [8, 6], [8, 7],
+        ];
+
+        let r;
+        if state.num_to_copy > 0 {
+            r = state.window[(state.copy_pos & 0xfffff) as usize];
+            state.copy_pos += 1;
+            state.num_to_copy -= 1;
+        } else {
+            let token = self.code.read_symbol(bitstream, cluster)?;
+            if token >= min_symbol {
+                let lz_dist_cluster = self.lz_dist_cluster();
+
+                state.num_to_copy = self.read_uint(bitstream, &state.lz_len_conf, (token - min_symbol) as u32)? + min_length;
+                let token = self.code.read_symbol(bitstream, lz_dist_cluster)?;
+                let distance = self.read_uint(bitstream, &self.configs[lz_dist_cluster as usize], token as u32)?;
+                let distance = if dist_multiplier == 0 {
+                    distance + 1
+                } else if distance < 120 {
+                    let [offset, dist] = SPECIAL_DISTANCES[distance as usize];
+                    let dist = offset as i32 + dist_multiplier as i32 * dist as i32;
+                    dist.max(1) as u32
+                } else {
+                    distance - 119
+                };
+
+                let distance = (1 << 20).min(distance).min(state.num_decoded);
+                state.copy_pos = state.num_decoded - distance;
+
+                r = state.window[(state.copy_pos & 0xfffff) as usize];
+                state.copy_pos += 1;
+                state.num_to_copy -= 1;
+            } else {
+                r = self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)?;
+            }
+        }
+        state.window[(state.num_decoded & 0xfffff) as usize] = r;
+        state.num_decoded += 1;
+        Ok(r)
+    }
+
+    #[inline]
     fn read_uint<R: std::io::Read>(&self, bitstream: &mut Bitstream<R>, config: &IntegerConfig, token: u32) -> Result<u32> {
         let &IntegerConfig { split_exponent, split, msb_in_token, lsb_in_token, .. } = config;
         if token < split {
@@ -378,9 +478,12 @@ impl DecoderInner {
         let token = token >> lsb_in_token;
         let token = token & ((1 << msb_in_token) - 1);
         let token = token | (1 << msb_in_token);
-        Ok((((token << n) | bitstream.read_bits(n)?) << lsb_in_token) | low_bits)
+        bitstream.read_bits(n)
+            .map_err(From::from)
+            .map(|rest_bits| (((token << n) | rest_bits) << lsb_in_token) | low_bits)
     }
 
+    #[inline]
     fn lz_dist_cluster(&self) -> u8 {
         *self.clusters.last().unwrap()
     }
@@ -397,6 +500,7 @@ enum Coder {
 }
 
 impl Coder {
+    #[inline]
     fn read_symbol<R: Read>(&mut self, bitstream: &mut Bitstream<R>, cluster: u8) -> Result<u16> {
         match self {
             Self::PrefixCode(dist) => {

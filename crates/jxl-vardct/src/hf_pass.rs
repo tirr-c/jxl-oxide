@@ -78,14 +78,10 @@ impl HfPass {
             type Item = (u8, u8);
 
             fn next(&mut self) -> Option<(u8, u8)> {
-                let idx = if self.permutation.is_empty() {
-                    self.idx
-                } else {
-                    *self.permutation.get(self.idx)?
-                };
-                let ret = *self.natural_order.get(idx)?;
+                let idx = self.permutation.get(self.idx).copied().unwrap_or(self.idx);
+                let ret = self.natural_order.get(idx).copied();
                 self.idx += 1;
-                Some(ret)
+                ret
             }
         }
 

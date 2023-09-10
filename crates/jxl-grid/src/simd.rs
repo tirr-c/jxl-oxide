@@ -3,6 +3,9 @@ pub trait SimdVector: Copy {
     /// The number of `f32` lanes in a single SIMD vector.
     const SIZE: usize;
 
+    /// Return whether this vector type is supported by current CPU.
+    fn available() -> bool;
+
     /// Initialize a SIMD vector with zeroes.
     fn zero() -> Self;
     /// Initialize a SIMD vector with given floats.
@@ -49,6 +52,12 @@ pub trait SimdVector: Copy {
 #[cfg(target_arch = "x86_64")]
 impl SimdVector for std::arch::x86_64::__m128 {
     const SIZE: usize = 4;
+
+    #[inline]
+    fn available() -> bool {
+        // x86_64 always supports 128-bit vector (SSE2).
+        true
+    }
 
     #[inline]
     fn zero() -> Self {

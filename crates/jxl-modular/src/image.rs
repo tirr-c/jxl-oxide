@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use jxl_bitstream::{Bitstream, unpack_signed};
-use jxl_coding::{DecoderRleMode, RleToken};
+use jxl_coding::{DecoderRleMode, RleToken, DecoderWithLz77};
 use jxl_grid::Grid;
 
 use crate::{
@@ -69,6 +69,32 @@ impl Image {
         }
     }
 
+    fn decode_channel_loop(
+        &mut self,
+        mut loop_fn: impl FnMut(usize, &mut Grid<i32>, &[&Grid<i32>]) -> Result<()>,
+    ) -> Result<()> {
+        let mut prev: Vec<(&ModularChannelInfo, &mut Grid<i32>)> = Vec::new();
+        for (i, (info, grid)) in self.channels.info.iter().zip(&mut self.data).enumerate() {
+            let mut filtered_prev = prev
+                .iter()
+                .filter(|&(prev_info, _)| {
+                    info.width == prev_info.width &&
+                        info.height == prev_info.height &&
+                        info.hshift == prev_info.hshift &&
+                        info.vshift == prev_info.vshift
+                })
+                .map(|(_, g)| &**g)
+                .collect::<Vec<_>>();
+            filtered_prev.reverse();
+
+            loop_fn(i, grid, &filtered_prev)?;
+
+            prev.push((info, grid));
+        }
+
+        Ok(())
+    }
+
     pub(super) fn decode_channels<R: Read>(
         &mut self,
         bitstream: &mut Bitstream<R>,
@@ -81,31 +107,20 @@ impl Image {
 
         let mut decoder = ma_ctx.decoder().clone();
         decoder.begin(bitstream)?;
+
         if let Some(rle_decoder) = decoder.as_rle() {
             self.decode_image_rle(bitstream, stream_index, wp_header, ma_ctx, rle_decoder)?;
             decoder.finalize()?;
             return Ok(());
         }
+        if let Some(lz77_decoder) = decoder.as_with_lz77() {
+            self.decode_image_lz77(bitstream, stream_index, wp_header, ma_ctx, lz77_decoder)?;
+            decoder.finalize()?;
+            return Ok(());
+        }
+        let mut no_lz77_decoder = decoder.as_no_lz77().unwrap();
 
-        let dist_multiplier = self.channels.info.iter()
-            .skip(self.channels.nb_meta_channels as usize)
-            .map(|info| info.width)
-            .max()
-            .unwrap_or(0);
-
-        let mut prev: Vec<(&ModularChannelInfo, &mut Grid<i32>)> = Vec::new();
-        for (i, (info, grid)) in self.channels.info.iter().zip(&mut self.data).enumerate() {
-            let filtered_prev = prev
-                .iter()
-                .filter(|&(prev_info, _)| {
-                    info.width == prev_info.width &&
-                        info.height == prev_info.height &&
-                        info.hshift == prev_info.hshift &&
-                        info.vshift == prev_info.vshift
-                })
-                .map(|(_, g)| &**g)
-                .collect::<Vec<_>>();
-
+        self.decode_channel_loop(|i, grid, prev_rev| {
             let width = grid.width();
             let height = grid.height();
 
@@ -113,7 +128,7 @@ impl Image {
             if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
-                    if let Some(token) = decoder.single_token(cluster) {
+                    if let Some(token) = no_lz77_decoder.single_token(cluster) {
                         tracing::trace!("Single token in cluster: hyper fast path");
                         let value = unpack_signed(token) * multiplier as i32 + offset;
                         for y in 0..height {
@@ -125,13 +140,80 @@ impl Image {
                         tracing::trace!("Fast path");
                         for y in 0..height {
                             for x in 0..width {
-                                let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+                                let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                                 let value = unpack_signed(token) * multiplier as i32 + offset;
                                 grid.set(x, y, value);
                             }
                         }
                     }
-                    continue;
+                    return Ok(());
+                }
+                if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
+                    tracing::trace!("Quite fast path");
+                    let mut prev_row = vec![0i32; width];
+                    for y in 0..height {
+                        let mut w = prev_row[0] as i64;
+                        let mut nw = w;
+                        for (x, prev) in prev_row.iter_mut().enumerate() {
+                            let n = if y == 0 { w } else { *prev as i64 };
+                            let pred = (n + w - nw).clamp(w.min(n), w.max(n));
+
+                            let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                            let value = ((unpack_signed(token) as i64) + pred) as i32;
+                            grid.set(x, y, value);
+                            *prev = value;
+                            nw = n;
+                            w = value as i64;
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+
+            let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
+            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
+            let mut next = |cluster: u8| -> Result<i32> {
+                let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                Ok(unpack_signed(token))
+            };
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+        })?;
+
+        decoder.finalize()?;
+        Ok(())
+    }
+
+    fn decode_image_lz77<R: Read>(
+        &mut self,
+        bitstream: &mut Bitstream<R>,
+        stream_index: u32,
+        wp_header: &WpHeader,
+        ma_ctx: &MaConfig,
+        mut decoder: DecoderWithLz77<'_>,
+    ) -> Result<()> {
+        let dist_multiplier = self.channels.info.iter()
+            .skip(self.channels.nb_meta_channels as usize)
+            .map(|info| info.width)
+            .max()
+            .unwrap_or(0);
+
+        self.decode_channel_loop(|i, grid, prev_rev| {
+            let width = grid.width();
+            let height = grid.height();
+
+            let ma_tree = ma_ctx.make_flat_tree(i as u32, stream_index);
+            if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
+                tracing::trace!(cluster, ?predictor, "Single MA tree node");
+                if predictor == Predictor::Zero {
+                    tracing::trace!("Fast path");
+                    for y in 0..height {
+                        for x in 0..width {
+                            let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+                            let value = unpack_signed(token) * multiplier as i32 + offset;
+                            grid.set(x, y, value);
+                        }
+                    }
+                    return Ok(());
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("Quite fast path");
@@ -151,22 +233,18 @@ impl Image {
                             w = value as i64;
                         }
                     }
-                    continue;
+                    return Ok(());
                 }
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, filtered_prev.len(), wp_header);
+            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
             let mut next = |cluster: u8| -> Result<i32> {
                 let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
                 Ok(unpack_signed(token))
             };
-            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, &filtered_prev)?;
-            prev.push((info, grid));
-        }
-
-        decoder.finalize()?;
-        Ok(())
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+        })
     }
 
     fn decode_image_rle<R: Read>(
@@ -198,19 +276,7 @@ impl Image {
             })
         };
 
-        let mut prev: Vec<(&ModularChannelInfo, &mut Grid<i32>)> = Vec::new();
-        for (i, (info, grid)) in self.channels.info.iter().zip(&mut self.data).enumerate() {
-            let filtered_prev = prev
-                .iter()
-                .filter(|&(prev_info, _)| {
-                    info.width == prev_info.width &&
-                        info.height == prev_info.height &&
-                        info.hshift == prev_info.hshift &&
-                        info.vshift == prev_info.vshift
-                })
-                .map(|(_, g)| &**g)
-                .collect::<Vec<_>>();
-
+        self.decode_channel_loop(|i, grid, prev_rev| {
             let width = grid.width();
             let height = grid.height();
 
@@ -226,7 +292,7 @@ impl Image {
                             grid.set(x, y, value);
                         }
                     }
-                    continue;
+                    return Ok(());
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("libjxl fast-lossless: quite fast path");
@@ -246,16 +312,14 @@ impl Image {
                             w = value as i64;
                         }
                     }
-                    continue;
+                    return Ok(());
                 }
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, filtered_prev.len(), wp_header);
-            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, &filtered_prev)?;
-            prev.push((info, grid));
-        }
-        Ok(())
+            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+        })
     }
 }
 
@@ -264,20 +328,20 @@ fn decode_channel_slow(
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState,
     grid: &mut Grid<i32>,
-    prev: &[&Grid<i32>],
+    prev_rev: &[&Grid<i32>],
 ) -> Result<()> {
     let width = grid.width();
     let height = grid.height();
 
-    let mut prev_channel_samples = vec![0i32; prev.len()];
+    let mut prev_channel_samples_rev = vec![0i32; prev_rev.len()];
 
     for y in 0..height {
         for x in 0..width {
-            for (grid, sample) in prev.iter().zip(&mut prev_channel_samples) {
+            for (grid, sample) in prev_rev.iter().zip(&mut prev_channel_samples_rev) {
                 *sample = *grid.get(x, y).unwrap();
             }
 
-            let properties = predictor.properties(&prev_channel_samples);
+            let properties = predictor.properties(&prev_channel_samples_rev);
             let (diff, predictor) = ma_tree.decode_sample_rle(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
             let true_value = (diff as i64 + sample_prediction) as i32;

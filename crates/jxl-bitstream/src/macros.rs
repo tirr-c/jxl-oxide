@@ -264,21 +264,19 @@ macro_rules! define_bundle {
 }
 
 /// Perform `UnpackSigned` for `u32`, as specified in the JPEG XL specification.
+#[inline]
 pub fn unpack_signed(x: u32) -> i32 {
-    let base = (x >> 1) as i32;
-    if x & 1 == 0 {
-        base
-    } else {
-        -base - 1
-    }
+    let bit = x & 1;
+    let base = x >> 1;
+    let flip = 0u32.wrapping_sub(bit);
+    (base ^ flip) as i32
 }
 
 /// Perform `UnpackSigned` for `u64`, as specified in the JPEG XL specification.
+#[inline]
 pub fn unpack_signed_u64(x: u64) -> i64 {
-    let base = (x >> 1) as i64;
-    if x & 1 == 0 {
-        base
-    } else {
-        -base - 1
-    }
+    let bit = x & 1;
+    let base = x >> 1;
+    let flip = 0u64.wrapping_sub(bit);
+    (base ^ flip) as i64
 }

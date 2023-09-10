@@ -1,5 +1,4 @@
 //! Prefix code based on Brotli
-use std::collections::BTreeMap;
 use std::io::Read;
 
 use jxl_bitstream::{Bitstream, read_bits};
@@ -14,7 +13,6 @@ pub struct Histogram {
 
 #[derive(Debug)]
 struct TreeConfig {
-    bits: u8,
     from: u32,
     to: u32,
     offset: usize,
@@ -22,29 +20,26 @@ struct TreeConfig {
 
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> Result<Self> {
-        let mut syms_for_length = BTreeMap::new();
+        let mut syms_for_length = Vec::with_capacity(15);
         for (sym, len) in code_lengths.into_iter().enumerate() {
             let sym = sym as u16;
             if len > 0 {
-                syms_for_length
-                    .entry(len)
-                    .or_insert_with(Vec::new)
-                    .push(sym);
+                if syms_for_length.len() < len as usize {
+                    syms_for_length.resize_with(len as usize, Vec::new);
+                }
+                syms_for_length[len as usize - 1].push(sym);
             }
         }
+        let max_length = syms_for_length.len();
 
         let mut configs = Vec::new();
         let mut symbols = Vec::new();
-        let mut current_len = 0u8;
         let mut current_bits = 0u32;
-        for (len, syms) in syms_for_length {
-            let len_diff = len - current_len;
-
+        for syms in syms_for_length.into_iter() {
             let sym_count = syms.len() as u32;
-            current_bits <<= len_diff;
+            current_bits <<= 1;
 
             configs.push(TreeConfig {
-                bits: len,
                 from: current_bits,
                 to: current_bits + sym_count,
                 offset: symbols.len(),
@@ -52,10 +47,9 @@ impl Histogram {
             symbols.extend(syms);
 
             current_bits += sym_count;
-            current_len = len;
         }
 
-        if current_bits.checked_shl((15 - current_len) as u32) == Some(1 << 15) {
+        if current_bits.checked_shl((15 - max_length) as u32) == Some(1 << 15) {
             Ok(Self {
                 configs,
                 symbols
@@ -67,7 +61,7 @@ impl Histogram {
 
     fn with_single_symbol(symbol: u16) -> Self {
         Self {
-            configs: vec![TreeConfig { bits: 0, from: 0, to: 1, offset: 0 }],
+            configs: Vec::new(),
             symbols: vec![symbol],
         }
     }
@@ -273,19 +267,20 @@ impl Histogram {
     pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<u16> {
         let Self { configs, symbols } = self;
         let mut bits = 0u32;
-        let mut prev_len = 0u8;
         for config in configs {
-            for _ in prev_len..config.bits {
-                bits = (bits << 1) | (bitstream.read_bool()? as u32);
+            match bitstream.read_bool() {
+                Ok(b) => {
+                    bits = (bits << 1) | (b as u32);
+                },
+                Err(e) => return Err(e.into()),
             }
-            prev_len = config.bits;
             if config.from <= bits && bits < config.to {
                 let diff = bits - config.from;
                 let idx = config.offset + diff as usize;
                 return Ok(symbols[idx]);
             }
         }
-        unreachable!()
+        Ok(symbols[0])
     }
 
     #[inline]

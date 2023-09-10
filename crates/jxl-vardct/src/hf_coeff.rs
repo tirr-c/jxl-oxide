@@ -1,5 +1,5 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{Subgrid, Grid, CutGrid};
+use jxl_grid::{CutGrid, SimpleGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 
 use crate::{
@@ -14,9 +14,9 @@ use crate::{
 pub struct HfCoeffParams<'a> {
     pub num_hf_presets: u32,
     pub hf_block_ctx: &'a HfBlockContext,
-    pub block_info: Subgrid<'a, BlockInfo>,
+    pub block_info: SharedSubgrid<'a, BlockInfo>,
     pub jpeg_upsampling: [u32; 3],
-    pub lf_quant: Option<[Subgrid<'a, i32>; 3]>,
+    pub lf_quant: Option<[SharedSubgrid<'a, i32>; 3]>,
     pub hf_pass: &'a HfPass,
     pub coeff_shift: u32,
 }
@@ -71,9 +71,9 @@ pub fn write_hf_coeff<R: std::io::Read>(
     let height = block_info.height();
     let mut non_zeros_grid = upsampling_shifts.map(|shift| {
         let (width, height) = shift.shift_size((width as u32, height as u32));
-        Grid::new(width, height, width, height)
+        SimpleGrid::new(width as usize, height as usize)
     });
-    let predict_non_zeros = |grid: &Grid<u32>, x: usize, y: usize| {
+    let predict_non_zeros = |grid: &SimpleGrid<u32>, x: usize, y: usize| {
         if x == 0 && y == 0 {
             32u32
         } else if x == 0 {
@@ -91,7 +91,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
 
     for y in 0..height {
         for x in 0..width {
-            let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y).unwrap() else {
+            let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y) else {
                 continue;
             };
             let (w8, h8) = dct_select.dct_select_size();
@@ -102,7 +102,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
                     let shift = upsampling_shifts[idx];
                     let x = x >> shift.hshift();
                     let y = y >> shift.vshift();
-                    *lf_quant[idx].get(x, y).unwrap()
+                    *lf_quant[idx].get(x, y)
                 })
             });
 
@@ -160,7 +160,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
                 let non_zeros_grid = &mut non_zeros_grid[c];
                 for dy in 0..h8 as usize {
                     for dx in 0..w8 as usize {
-                        non_zeros_grid.set(sx + dx, sy + dy, non_zeros_val);
+                        *non_zeros_grid.get_mut(sx + dx, sy + dy).unwrap() = non_zeros_val;
                     }
                 }
 
