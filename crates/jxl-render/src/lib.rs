@@ -8,7 +8,6 @@ use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ExtraChannelType};
 
 mod blend;
-mod cut_grid;
 mod dct;
 mod error;
 mod features;
