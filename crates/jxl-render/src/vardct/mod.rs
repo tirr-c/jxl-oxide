@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jxl_frame::{data::{LfGroup, LfGlobal, HfGlobal}, FrameHeader};
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{CutGrid, SimpleGrid, Grid};
 use jxl_image::ImageHeader;
 use jxl_modular::ChannelShift;
 use jxl_vardct::{
@@ -26,26 +26,40 @@ mod generic;
 #[cfg(not(target_arch = "x86_64"))]
 use generic as impls;
 
-pub fn dequant_lf(
-    in_out_xyb: &mut [CutGrid<'_, f32>; 3],
-    lf_dequant: &LfChannelDequantization,
+pub fn copy_lf_dequant(
+    out: &mut SimpleGrid<f32>,
+    left: usize,
+    top: usize,
     quantizer: &Quantizer,
+    m_lf: f32,
+    channel_data: &Grid<i32>,
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
-    let precision_scale = (1 << (9 - extra_precision)) as f32;
+    let precision_scale = 1i32 << (9 - extra_precision);
     let scale_inv = quantizer.global_scale * quantizer.quant_lf;
-    let lf_x = lf_dequant.m_x_lf * precision_scale / scale_inv as f32;
-    let lf_y = lf_dequant.m_y_lf * precision_scale / scale_inv as f32;
-    let lf_b = lf_dequant.m_b_lf * precision_scale / scale_inv as f32;
-    let lf_scaled = [lf_x, lf_y, lf_b];
+    let scale = m_lf * precision_scale as f32 / scale_inv as f32;
 
-    for (out, lf_scaled) in in_out_xyb.iter_mut().zip(lf_scaled) {
-        let height = out.height();
+    let width = channel_data.width();
+    let height = channel_data.height();
+    let stride = out.width();
+    let buf = &mut out.buf_mut()[top * stride + left..];
+    let mut grid = CutGrid::from_buf(buf, width, height, stride);
+    if let Some(channel_data) = channel_data.as_simple() {
+        let buf = channel_data.buf();
         for y in 0..height {
-            let row = out.get_row_mut(y);
-            for out in row {
-                *out *= lf_scaled;
+            let row = grid.get_row_mut(y);
+            let quant = &buf[y * width..][..width];
+            for (out, &q) in row.iter_mut().zip(quant) {
+                *out = q as f32 * scale;
+            }
+        }
+    } else {
+        for y in 0..height {
+            let row = grid.get_row_mut(y);
+            for (x, out) in row.iter_mut().enumerate() {
+                let q = *channel_data.get(x, y).unwrap();
+                *out = q as f32 * scale;
             }
         }
     }
@@ -181,7 +195,7 @@ pub fn dequant_hf_varblock(
 }
 
 pub fn chroma_from_luma_lf(
-    coeff_xyb: &mut [CutGrid<'_, f32>; 3],
+    coeff_xyb: &mut [SimpleGrid<f32>],
     lf_chan_corr: &LfChannelCorrelation,
 ) {
     let LfChannelCorrelation {
@@ -198,80 +212,51 @@ pub fn chroma_from_luma_lf(
     let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
     let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-    let [x, y, b] = coeff_xyb;
-    let height = x.height();
-    for row in 0..height {
-        let x = x.get_row_mut(row);
-        let y = y.get_row(row);
-        let b = b.get_row_mut(row);
-        for ((x, y), b) in x.iter_mut().zip(y).zip(b) {
-            let y = *y;
-            *x += kx * y;
-            *b += kb * y;
-        }
+    let [x, y, b] = coeff_xyb else { panic!("coeff_xyb should be three-channel image") };
+    for ((x, y), b) in x.buf_mut().iter_mut().zip(y.buf()).zip(b.buf_mut()) {
+        let y = *y;
+        *x += kx * y;
+        *b += kb * y;
     }
 }
 
 pub fn chroma_from_luma_hf(
     coeff_xyb: &mut ImageWithRegion,
-    frame_header: &FrameHeader,
-    lf_global: &LfGlobal,
-    lf_groups: &HashMap<u32, LfGroup>,
+    cfl_grid: &ImageWithRegion,
 ) {
-    let LfChannelCorrelation {
-        colour_factor,
-        base_correlation_x,
-        base_correlation_b,
-        ..
-    } = lf_global.vardct.as_ref().unwrap().lf_chan_corr;
     let region = coeff_xyb.region();
+    let cfl_grid_region = cfl_grid.region();
     let coeff_xyb = coeff_xyb.buffer_mut();
+    let cfl_grid = cfl_grid.buffer();
 
     let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
-    let lf_group_dim = frame_header.lf_group_dim() as usize;
+    let [x_from_y, b_from_y] = cfl_grid else { panic!() };
+    let stride = cfl_grid_region.width as usize;
 
-    for lf_group_idx in 0..frame_header.num_lf_groups() {
-        let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-        let hf_meta = lf_group.hf_meta.as_ref().unwrap();
-        let x_from_y = &hf_meta.x_from_y;
-        let b_from_y = &hf_meta.b_from_y;
+    for y in 0..region.height {
+        let cy = (y as i32 + region.top) / 64 - cfl_grid_region.top;
+        debug_assert!(cy >= 0);
+        let cy = cy as usize;
+        let y = y as usize;
 
-        let lf_left = ((lf_group_idx % frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
-        let lf_top = ((lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim()) as usize;
-        let lf_group_region = Region {
-            left: lf_left as i32,
-            top: lf_top as i32,
-            width: lf_group_dim as u32,
-            height: lf_group_dim as u32,
-        };
-        let intersection_region = region.intersection(lf_group_region);
-        if intersection_region.is_empty() {
-            continue;
-        }
+        let x_from_y = &x_from_y.buf()[cy * stride..][..stride];
+        let b_from_y = &b_from_y.buf()[cy * stride..][..stride];
 
-        let begin_x = intersection_region.left as usize - lf_left;
-        let begin_y = intersection_region.top as usize - lf_top;
-        let end_x = begin_x + intersection_region.width as usize;
-        let end_y = begin_y + intersection_region.height as usize;
+        let mut x = cfl_grid_region.left * 64 - region.left - 1;
+        'outer: for (kx, kb) in x_from_y.iter().zip(b_from_y) {
+            for _ in 0..64 {
+                x += 1;
+                if x < 0 {
+                    continue;
+                }
+                if x >= region.width as i32 {
+                    break 'outer;
+                }
+                let x = x as usize;
 
-        for cy in begin_y..end_y {
-            for cx in begin_x..end_x {
-                let x = lf_left + cx;
-                let y = lf_top + cy;
-                let fx = x.saturating_add_signed(-region.left as isize);
-                let fy = y.saturating_add_signed(-region.top as isize);
-                let cfactor_x = cx / 64;
-                let cfactor_y = cy / 64;
-
-                let Some(&coeff_y) = coeff_y.get(fx, fy) else { continue; };
-
-                let x_factor = *x_from_y.get(cfactor_x, cfactor_y).unwrap();
-                let b_factor = *b_from_y.get(cfactor_x, cfactor_y).unwrap();
-                let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
-                let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
-
-                *coeff_x.get_mut(fx, fy).unwrap() += kx * coeff_y;
-                *coeff_b.get_mut(fx, fy).unwrap() += kb * coeff_y;
+                let coeff_y = *coeff_y.get(x, y).unwrap();
+                *coeff_x.get_mut(x, y).unwrap() += kx * coeff_y;
+                *coeff_b.get_mut(x, y).unwrap() += kb * coeff_y;
             }
         }
     }
@@ -339,6 +324,8 @@ pub fn transform_with_lf(
 
                     let bw = bw as usize;
                     let bh = bh as usize;
+                    let logbw = bw.trailing_zeros() as usize;
+                    let logbh = bh.trailing_zeros() as usize;
 
                     let lf_x = left / 8 - (lf_region.left as usize >> hshift);
                     let lf_y = top / 8 - (lf_region.top as usize >> vshift);
@@ -361,7 +348,7 @@ pub fn transform_with_lf(
                         dct::dct_2d(&mut out, dct::DctDirection::Forward);
                         for y in 0..bh {
                             for x in 0..bw {
-                                *out.get_mut(x, y) *= scale_f(y, bh * 8) * scale_f(x, bw * 8);
+                                *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
                             }
                         }
                     }
@@ -379,7 +366,7 @@ pub fn transform_with_lf(
     }
 }
 
-fn scale_f(c: usize, b: usize) -> f32 {
+fn scale_f(c: usize, logb: usize) -> f32 {
     // Precomputed for c = 0..32, b = 256
     #[allow(clippy::excessive_precision)]
     const SCALE_F: [f32; 32] = [
@@ -400,6 +387,5 @@ fn scale_f(c: usize, b: usize) -> f32 {
         0.7171081282466044, 0.6985543251889097,
         0.6796228528314652, 0.6603391026591464,
     ];
-    let c = c * (256 / b);
-    SCALE_F[c].recip()
+    SCALE_F[c << logb]
 }

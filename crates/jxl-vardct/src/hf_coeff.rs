@@ -26,18 +26,20 @@ pub fn write_hf_coeff<R: std::io::Read>(
     params: HfCoeffParams,
     hf_coeff_output: &mut [CutGrid<'_, f32>; 3],
 ) -> Result<()> {
-    const COEFF_FREQ_CONTEXT: [u32; 64] = [
-        0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
+    const COEFF_FREQ_CONTEXT: [u32; 63] = [
+        0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
         15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22,
         23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26,
         27, 27, 27, 27, 28, 28, 28, 28, 29, 29, 29, 29, 30, 30, 30, 30,
     ];
-    const COEFF_NUM_NONZERO_CONTEXT: [u32; 64] = [
-        0,     0,  31,  62,  62,  93,  93,  93,  93, 123, 123, 123, 123,
-        152, 152, 152, 152, 152, 152, 152, 152, 180, 180, 180, 180, 180,
-        180, 180, 180, 180, 180, 180, 180, 206, 206, 206, 206, 206, 206,
-        206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
-        206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
+    const COEFF_NUM_NONZERO_CONTEXT: [u32; 63] = [
+          0,  31,  62,  62,  93,  93,  93,  93, 123,
+        123, 123, 123, 152, 152, 152, 152, 152, 152,
+        152, 152, 180, 180, 180, 180, 180, 180, 180,
+        180, 180, 180, 180, 180, 206, 206, 206, 206,
+        206, 206, 206, 206, 206, 206, 206, 206, 206,
+        206, 206, 206, 206, 206, 206, 206, 206, 206,
+        206, 206, 206, 206, 206, 206, 206, 206, 206,
     ];
 
     let HfCoeffParams {
@@ -50,8 +52,6 @@ pub fn write_hf_coeff<R: std::io::Read>(
         coeff_shift,
     } = params;
     let mut dist = hf_pass.clone_decoder();
-    let span = tracing::span!(tracing::Level::TRACE, "HfCoeff::parse");
-    let _guard = span.enter();
 
     let HfBlockContext {
         qf_thresholds,
@@ -59,11 +59,15 @@ pub fn write_hf_coeff<R: std::io::Read>(
         block_ctx_map,
         num_block_clusters,
     } = hf_block_ctx;
+    let lf_idx_mul = (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
     let upsampling_shifts: [_; 3] = std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
+    let hshifts = upsampling_shifts.map(|shift| shift.hshift());
+    let vshifts = upsampling_shifts.map(|shift| shift.vshift());
 
     let hfp_bits = num_hf_presets.next_power_of_two().trailing_zeros();
     let hfp = bitstream.read_bits(hfp_bits)?;
-    let ctx_offset = 495 * *num_block_clusters * hfp;
+    let ctx_size = 495 * *num_block_clusters;
+    let cluster_map = dist.cluster_map()[(ctx_size * hfp) as usize..][..ctx_size as usize].to_vec();
 
     dist.begin(bitstream)?;
 
@@ -95,33 +99,19 @@ pub fn write_hf_coeff<R: std::io::Read>(
                 continue;
             };
             let (w8, h8) = dct_select.dct_select_size();
-            let num_blocks = w8 * h8;
+            let num_blocks = w8 * h8; // power of 2
+            let num_blocks_log = num_blocks.trailing_zeros();
             let order_id = dct_select.order_id();
-            let qdc: Option<[_; 3]> = lf_quant.as_ref().map(|lf_quant| {
-                std::array::from_fn(|idx| {
-                    let shift = upsampling_shifts[idx];
-                    let x = x >> shift.hshift();
-                    let y = y >> shift.vshift();
-                    *lf_quant[idx].get(x, y)
-                })
-            });
 
-            let hf_idx = {
-                let mut idx = 0usize;
-                for &threshold in qf_thresholds {
-                    if qf > threshold as i32 {
-                        idx += 1;
-                    }
-                }
-                idx
-            };
-            let lf_idx = if let Some(qdc) = qdc {
+            let lf_idx = if let Some(lf_quant) = &lf_quant {
                 let mut idx = 0usize;
                 for c in [0, 2, 1] {
                     let lf_thresholds = &lf_thresholds[c];
                     idx *= lf_thresholds.len() + 1;
 
-                    let q = qdc[c];
+                    let x = x >> hshifts[c];
+                    let y = y >> vshifts[c];
+                    let q = *lf_quant[c].get(x, y);
                     for &threshold in lf_thresholds {
                         if q > threshold {
                             idx += 1;
@@ -132,13 +122,23 @@ pub fn write_hf_coeff<R: std::io::Read>(
             } else {
                 0
             };
-            let lf_idx_mul = (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
+
+            let hf_idx = {
+                let mut idx = 0usize;
+                for &threshold in qf_thresholds {
+                    if qf > threshold as i32 {
+                        idx += 1;
+                    }
+                }
+                idx
+            };
 
             for c in [1, 0, 2] { // y, x, b
-                let shift = upsampling_shifts[c];
-                let sx = x >> shift.hshift();
-                let sy = y >> shift.vshift();
-                if sx << shift.hshift() != x || sy << shift.vshift() != y {
+                let hshift = hshifts[c];
+                let vshift = vshifts[c];
+                let sx = x >> hshift;
+                let sy = y >> vshift;
+                if sx << hshift != x || sy << vshift != y {
                     continue;
                 }
 
@@ -155,8 +155,8 @@ pub fn write_hf_coeff<R: std::io::Read>(
                     block_ctx + idx * num_block_clusters
                 };
 
-                let mut non_zeros = dist.read_varint(bitstream, ctx_offset + non_zeros_ctx)?;
-                let non_zeros_val = (non_zeros + num_blocks - 1) / num_blocks;
+                let mut non_zeros = dist.read_varint_with_multiplier_clustered(bitstream, cluster_map[non_zeros_ctx as usize], 0)?;
+                let non_zeros_val = (non_zeros + num_blocks - 1) >> num_blocks_log;
                 let non_zeros_grid = &mut non_zeros_grid[c];
                 for dy in 0..h8 as usize {
                     for dx in 0..w8 as usize {
@@ -166,22 +166,28 @@ pub fn write_hf_coeff<R: std::io::Read>(
 
                 let size = (w8 * 8) * (h8 * 8);
                 let coeff_grid = &mut hf_coeff_output[c];
-                let mut prev_coeff = (non_zeros <= size / 16) as i32;
+                let mut is_prev_coeff_nonzero = non_zeros <= size / 16;
                 let order_it = hf_pass.order(order_id as usize, c);
-                for (idx, coeff_coord) in order_it.enumerate().skip(num_blocks as usize) {
+
+                let coeff_ctx_base = block_ctx * 458 + 37 * num_block_clusters;
+                let cluster_map = &cluster_map[coeff_ctx_base as usize..];
+                for (idx, coeff_coord) in order_it.skip(num_blocks as usize).enumerate() {
                     if non_zeros == 0 {
                         break;
                     }
 
-                    let idx = idx as u32;
                     let coeff_ctx = {
-                        let prev = (prev_coeff != 0) as u32;
-                        let non_zeros = (non_zeros + num_blocks - 1) / num_blocks;
-                        let idx = idx / num_blocks;
-                        (COEFF_NUM_NONZERO_CONTEXT[non_zeros as usize] + COEFF_FREQ_CONTEXT[idx as usize]) * 2 +
-                            prev + block_ctx * 458 + 37 * num_block_clusters
+                        let prev = is_prev_coeff_nonzero as u32;
+                        let non_zeros = (non_zeros - 1) >> num_blocks_log;
+                        let idx = idx >> num_blocks_log;
+                        (COEFF_NUM_NONZERO_CONTEXT[non_zeros as usize] + COEFF_FREQ_CONTEXT[idx]) * 2 + prev
                     };
-                    let ucoeff = dist.read_varint(bitstream, ctx_offset + coeff_ctx)?;
+                    let ucoeff = dist.read_varint_with_multiplier_clustered(bitstream, cluster_map[coeff_ctx as usize], 0)?;
+                    if ucoeff == 0 {
+                        is_prev_coeff_nonzero = false;
+                        continue;
+                    }
+
                     let coeff = jxl_bitstream::unpack_signed(ucoeff) << coeff_shift;
                     let (x, y) = if dct_select.need_transpose() {
                         (sx * 8 + coeff_coord.1 as usize, sy * 8 + coeff_coord.0 as usize)
@@ -189,11 +195,8 @@ pub fn write_hf_coeff<R: std::io::Read>(
                         (sx * 8 + coeff_coord.0 as usize, sy * 8 + coeff_coord.1 as usize)
                     };
                     *coeff_grid.get_mut(x, y) += coeff as f32;
-                    prev_coeff = coeff;
-
-                    if coeff != 0 {
-                        non_zeros -= 1;
-                    }
+                    is_prev_coeff_nonzero = true;
+                    non_zeros -= 1;
                 }
             }
         }
