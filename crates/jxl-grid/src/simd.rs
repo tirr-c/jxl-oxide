@@ -44,6 +44,7 @@ pub trait SimdVector: Copy {
     fn sub(self, lhs: Self) -> Self;
     fn mul(self, lhs: Self) -> Self;
     fn div(self, lhs: Self) -> Self;
+    fn abs(self) -> Self;
 
     fn muladd(self, mul: Self, add: Self) -> Self;
     fn mulsub(self, mul: Self, sub: Self) -> Self;
@@ -120,6 +121,16 @@ impl SimdVector for std::arch::x86_64::__m128 {
     #[inline]
     fn div(self, lhs: Self) -> Self {
         unsafe { std::arch::x86_64::_mm_div_ps(self, lhs) }
+    }
+
+    #[inline]
+    fn abs(self) -> Self {
+        unsafe {
+            std::arch::x86_64::_mm_andnot_ps(
+                Self::splat_f32(f32::from_bits(0x80000000)),
+                self,
+            )
+        }
     }
 
     #[inline]
