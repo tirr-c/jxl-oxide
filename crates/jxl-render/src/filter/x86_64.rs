@@ -59,9 +59,10 @@ macro_rules! define_epf_sse2 {
                             continue;
                         }
 
+                        // SAFETY: Indexing doesn't go out of bounds since we have padding after image region.
                         let mut sum_weights = Vector::splat_f32(1.0);
                         let mut sum_channels = input_buf.map(|buf| {
-                            unsafe { Vector::load(buf[idx_base..][..Vector::SIZE].as_ptr()) }
+                            unsafe { Vector::load(buf.as_ptr().add(idx_base)) }
                         });
 
                         for kdiff in $kernel_diff {
@@ -72,8 +73,8 @@ macro_rules! define_epf_sse2 {
                                 for diff in $dist_diff {
                                     unsafe {
                                         dist = scale.muladd(
-                                            Vector::load(buf[idx_base.wrapping_add_signed(diff)..][..Vector::SIZE].as_ptr()).sub(
-                                                Vector::load(buf[kernel_base.wrapping_add_signed(diff)..][..Vector::SIZE].as_ptr())
+                                            Vector::load(buf.as_ptr().add(idx_base.wrapping_add_signed(diff))).sub(
+                                                Vector::load(buf.as_ptr().add(kernel_base.wrapping_add_signed(diff)))
                                             ).abs(),
                                             dist,
                                         );
@@ -95,13 +96,13 @@ macro_rules! define_epf_sse2 {
                             sum_weights = sum_weights.add(weight);
 
                             for (sum, buf) in sum_channels.iter_mut().zip(input_buf) {
-                                *sum = weight.muladd(unsafe { Vector::load(buf[kernel_base..][..Vector::SIZE].as_ptr()) }, *sum);
+                                *sum = weight.muladd(unsafe { Vector::load(buf.as_ptr().add(kernel_base)) }, *sum);
                             }
                         }
 
                         for (buf, sum) in output_buf.iter_mut().zip(sum_channels) {
                             let val = sum.div(sum_weights);
-                            unsafe { val.store(buf[idx_base..][..Vector::SIZE].as_mut_ptr()); }
+                            unsafe { val.store(buf.as_mut_ptr().add(idx_base)); }
                         }
                     }
                 }
