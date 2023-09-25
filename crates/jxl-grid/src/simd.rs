@@ -286,6 +286,7 @@ impl SimdVector for std::arch::x86_64::__m256 {
     }
 
     #[inline]
+    #[target_feature(enable = "avx2")]
     unsafe fn abs(self) -> Self {
         let x = std::arch::x86_64::_mm256_undefined_si256();
         let mask = std::arch::x86_64::_mm256_srli_epi32::<1>(
