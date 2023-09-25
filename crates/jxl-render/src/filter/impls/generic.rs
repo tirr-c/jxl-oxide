@@ -95,12 +95,12 @@ pub fn epf_step0(
     step_multiplier: f32,
 ) {
     epf_step(
-        &fb_in,
-        &mut fb_out,
+        input,
+        output,
         sigma_grid,
         channel_scale,
-        sigma.border_sad_mul,
-        sigma.pass0_sigma_scale,
+        border_sad_mul,
+        step_multiplier,
         &[
             (0, -1), (-1, 0), (1, 0), (0, 1),
             (0, -2), (-1, -1), (1, -1), (-2, 0), (2, 0), (-1, 1), (1, 1), (0, 2),
@@ -118,12 +118,12 @@ pub fn epf_step1(
     step_multiplier: f32,
 ) {
     epf_step(
-        &fb_in,
-        &mut fb_out,
+        input,
+        output,
         sigma_grid,
         channel_scale,
-        sigma.border_sad_mul,
-        sigma.pass0_sigma_scale,
+        border_sad_mul,
+        step_multiplier,
         &[(0, -1), (-1, 0), (1, 0), (0, 1)],
         &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
     );
@@ -138,12 +138,12 @@ pub fn epf_step2(
     step_multiplier: f32,
 ) {
     epf_step(
-        &fb_in,
-        &mut fb_out,
+        input,
+        output,
         sigma_grid,
         channel_scale,
-        sigma.border_sad_mul,
-        sigma.pass0_sigma_scale,
+        border_sad_mul,
+        step_multiplier,
         &[(0, -1), (-1, 0), (1, 0), (0, 1)],
         &[(0, 0)],
     );
