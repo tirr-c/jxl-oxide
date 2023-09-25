@@ -148,3 +148,9 @@ pub fn epf_step2(
         &[(0, 0)],
     );
 }
+
+pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+    for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
+        super::run_gabor_inner(fb, weight1, weight2);
+    }
+}
