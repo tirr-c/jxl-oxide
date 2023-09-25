@@ -15,6 +15,10 @@ fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2: f3
 
     let width = fb.width();
     let height = fb.height();
+    if width * height <= 1 {
+        return;
+    }
+
     let mut input = vec![0f32; width * (height + 2)];
     input[width..][..width * height].copy_from_slice(fb.buf());
     input[..width].copy_from_slice(&fb.buf()[..width]);
@@ -22,6 +26,17 @@ fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2: f3
 
     let input = &*input;
     let output = fb.buf_mut();
+
+    if width == 1 {
+        for idx in 0..height {
+            output[idx] = (
+                input[idx + 1] +
+                (input[idx] + input[idx + 1] + input[idx + 1] + input[idx + 2]) * weight1 +
+                (input[idx] + input[idx + 2]) * weight2 * 2.0
+            ) * global_weight;
+        }
+        return;
+    }
 
     let len = width * height - 2;
     let center = &input[width + 1..][..len];
