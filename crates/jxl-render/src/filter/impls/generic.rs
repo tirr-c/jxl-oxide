@@ -7,7 +7,7 @@ fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn epf_step(
+fn epf_step(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     sigma_grid: &SimpleGrid<f32>,
@@ -84,4 +84,67 @@ pub fn epf_step(
             }
         }
     }
+}
+
+pub fn epf_step0(
+    input: &[SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
+    sigma_grid: &SimpleGrid<f32>,
+    channel_scale: [f32; 3],
+    border_sad_mul: f32,
+    step_multiplier: f32,
+) {
+    epf_step(
+        &fb_in,
+        &mut fb_out,
+        sigma_grid,
+        channel_scale,
+        sigma.border_sad_mul,
+        sigma.pass0_sigma_scale,
+        &[
+            (0, -1), (-1, 0), (1, 0), (0, 1),
+            (0, -2), (-1, -1), (1, -1), (-2, 0), (2, 0), (-1, 1), (1, 1), (0, 2),
+        ],
+        &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
+    );
+}
+
+pub fn epf_step1(
+    input: &[SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
+    sigma_grid: &SimpleGrid<f32>,
+    channel_scale: [f32; 3],
+    border_sad_mul: f32,
+    step_multiplier: f32,
+) {
+    epf_step(
+        &fb_in,
+        &mut fb_out,
+        sigma_grid,
+        channel_scale,
+        sigma.border_sad_mul,
+        sigma.pass0_sigma_scale,
+        &[(0, -1), (-1, 0), (1, 0), (0, 1)],
+        &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
+    );
+}
+
+pub fn epf_step2(
+    input: &[SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
+    sigma_grid: &SimpleGrid<f32>,
+    channel_scale: [f32; 3],
+    border_sad_mul: f32,
+    step_multiplier: f32,
+) {
+    epf_step(
+        &fb_in,
+        &mut fb_out,
+        sigma_grid,
+        channel_scale,
+        sigma.border_sad_mul,
+        sigma.pass0_sigma_scale,
+        &[(0, -1), (-1, 0), (1, 0), (0, 1)],
+        &[(0, 0)],
+    );
 }

@@ -119,33 +119,14 @@ pub fn apply_epf(
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            super::x86_64::epf_step0_sse2(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                sigma.pass0_sigma_scale,
-            );
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            super::generic::epf_step(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                sigma.pass0_sigma_scale,
-                &[
-                    (0, -1), (-1, 0), (1, 0), (0, 1),
-                    (0, -2), (-1, -1), (1, -1), (-2, 0), (2, 0), (-1, 1), (1, 1), (0, 2),
-                ],
-                &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
-            );
-        }
+        super::impls::epf_step0(
+            &fb_in,
+            &mut fb_out,
+            sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            sigma.pass0_sigma_scale,
+        );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
@@ -176,30 +157,14 @@ pub fn apply_epf(
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            super::x86_64::epf_step1_sse2(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                1.0,
-            );
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            super::generic::epf_step(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                1.0,
-                &[(0, -1), (-1, 0), (1, 0), (0, 1)],
-                &[(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)],
-            );
-        }
+        super::impls::epf_step1(
+            &fb_in,
+            &mut fb_out,
+            sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            1.0,
+        );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
@@ -230,30 +195,14 @@ pub fn apply_epf(
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            super::x86_64::epf_step2_sse2(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                sigma.pass2_sigma_scale,
-            );
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            super::generic::epf_step(
-                &fb_in,
-                &mut fb_out,
-                sigma_grid,
-                channel_scale,
-                sigma.border_sad_mul,
-                sigma.pass2_sigma_scale,
-                &[(0, -1), (-1, 0), (1, 0), (0, 1)],
-                &[(0, 0)],
-            );
-        }
+        super::impls::epf_step2(
+            &fb_in,
+            &mut fb_out,
+            sigma_grid,
+            channel_scale,
+            sigma.border_sad_mul,
+            sigma.pass2_sigma_scale,
+        );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
