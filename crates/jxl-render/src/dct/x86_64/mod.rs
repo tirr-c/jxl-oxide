@@ -22,7 +22,9 @@ pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
     };
 
     if io.width() == 2 && io.height() == 8 {
-        return dct8x8(&mut io, direction);
+        unsafe {
+            return dct8x8(&mut io, direction);
+        }
     }
 
     dct_2d_lane(&mut io, direction);
@@ -37,7 +39,7 @@ fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     }
 }
 
-fn dct4_vec_forward(v: Lane) -> Lane {
+unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
 
@@ -62,7 +64,7 @@ fn dct4_vec_forward(v: Lane) -> Lane {
     a.muladd(mul_a, b.mul(mul_b))
 }
 
-fn dct4_vec_inverse(v: Lane) -> Lane {
+unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
 
@@ -87,7 +89,7 @@ fn dct4_vec_inverse(v: Lane) -> Lane {
     tmp_b.muladd(mul, tmp_a)
 }
 
-fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
+unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
         0.2548977895520796,
@@ -109,7 +111,7 @@ fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     )
 }
 
-fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
+unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
         0.5097955791041592,
@@ -132,7 +134,7 @@ fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     )
 }
 
-fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
+unsafe fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     let (mut col0, mut col1) = io.split_horizontal(1);
 
     if direction == DctDirection::Forward {
@@ -156,7 +158,7 @@ fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     }
 }
 
-fn column_dct_lane(
+unsafe fn column_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
     direction: DctDirection,
@@ -178,7 +180,7 @@ fn column_dct_lane(
     }
 }
 
-fn row_dct_lane(
+unsafe fn row_dct_lane(
     io: &mut CutGrid<'_, Lane>,
     scratch: &mut [Lane],
     direction: DctDirection,
@@ -202,7 +204,7 @@ fn row_dct_lane(
     }
 }
 
-fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
+unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961 / 4.0);
     let sec1 = Lane::splat_f32(1.306563 / 4.0);
     let quarter = Lane::splat_f32(0.25);
@@ -223,7 +225,7 @@ fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
-fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
+unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961);
     let sec1 = Lane::splat_f32(1.306563);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
@@ -243,7 +245,7 @@ fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
-fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
+unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let half = Lane::splat_f32(0.5);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
@@ -273,7 +275,7 @@ fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     *io.get_mut(0, 7) = output1[3];
 }
 
-fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
+unsafe fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
     let sec = consts::sec_half_small(8);
@@ -294,7 +296,7 @@ fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
     }
 }
 
-fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
+unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
     let n = io.len();
     assert!(scratch.len() == n);
 

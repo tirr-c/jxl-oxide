@@ -1,7 +1,4 @@
-#[cfg(not(target_arch = "x86_64"))]
-mod generic;
-#[cfg(target_arch = "x86_64")]
-mod x86_64;
+mod impls;
 
 mod epf;
 mod gabor;
