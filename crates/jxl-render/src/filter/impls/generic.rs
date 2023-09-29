@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use jxl_grid::SimpleGrid;
 
 #[inline]
