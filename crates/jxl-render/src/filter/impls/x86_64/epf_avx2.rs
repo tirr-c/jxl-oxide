@@ -19,7 +19,7 @@ unsafe fn weight_avx2(scaled_distance: Vector, sigma: f32, step_multiplier: Vect
 }
 
 macro_rules! define_epf_avx2 {
-    { $($v:vis unsafe fn $name:ident ($width:ident, $kernel_diff:expr, $dist_diff:expr $(,)?); )* } => {
+    { $($v:vis unsafe fn $name:ident ($width:ident, $kernel_offsets:expr, $dist_offsets:expr $(,)?); )* } => {
         $(
             #[target_feature(enable = "avx2")]
             #[target_feature(enable = "fma")]
@@ -34,58 +34,72 @@ macro_rules! define_epf_avx2 {
                 let width = input[0].width();
                 let $width = width as isize;
                 let height = input[0].height();
-                assert_eq!(input[1].width(), width);
-                assert_eq!(input[2].width(), width);
-                assert_eq!(input[1].height(), height);
-                assert_eq!(input[2].height(), height);
-                assert_eq!(output[0].width(), width);
-                assert_eq!(output[1].width(), width);
-                assert_eq!(output[2].width(), width);
-                assert_eq!(output[0].height(), height);
-                assert_eq!(output[1].height(), height);
-                assert_eq!(output[2].height(), height);
+                assert!(width % 8 == 0);
 
                 let input_buf = [input[0].buf(), input[1].buf(), input[2].buf()];
                 let mut output_buf = {
                     let [a, b, c] = output;
                     [a.buf_mut(), b.buf_mut(), c.buf_mut()]
                 };
+                assert_eq!(input_buf[0].len(), width * height);
+                assert_eq!(input_buf[1].len(), width * height);
+                assert_eq!(input_buf[2].len(), width * height);
+                assert_eq!(output_buf[0].len(), width * height);
+                assert_eq!(output_buf[1].len(), width * height);
+                assert_eq!(output_buf[2].len(), width * height);
 
-                let sm_y_edge = Vector::splat_f32(border_sad_mul * step_multiplier);
-                let sm = Vector::set([
-                    border_sad_mul * step_multiplier, step_multiplier, step_multiplier, step_multiplier,
-                    step_multiplier, step_multiplier, step_multiplier, border_sad_mul * step_multiplier,
-                ]);
+                let height = height - 6;
 
-                for y in 3..height - 4 {
-                    let sigma_row = &sigma_grid.buf()[(y - 3) / 8 * sigma_grid.width()..][..(width + 1) / 8];
-                    for (vx, &sigma) in sigma_row.iter().enumerate() {
-                        let x = 3 + vx * 8;
-                        let idx_base = y * width + x;
+                for y in 0..height {
+                    let y8 = y / 8;
+                    let is_y_border = (y % 8) == 0 || (y % 8) == 7;
+                    let sm = if is_y_border {
+                        Vector::splat_f32(border_sad_mul * step_multiplier)
+                    } else {
+                        Vector::set([
+                            border_sad_mul * step_multiplier,
+                            step_multiplier,
+                            step_multiplier,
+                            step_multiplier,
+                            step_multiplier,
+                            step_multiplier,
+                            step_multiplier,
+                            border_sad_mul * step_multiplier,
+                        ])
+                    };
+
+                    for x8 in 1..width / 8 {
+                        let Some(&sigma) = sigma_grid.get(x8 - 1, y8) else { break; };
+
+                        let base_x = x8 * 8;
+                        let base_idx = (y + 3) * width + base_x;
 
                         // SAFETY: Indexing doesn't go out of bounds since we have padding after image region.
+                        // SAFETY: Every row is aligned to 32 bytes.
                         let mut sum_weights = Vector::splat_f32(1.0);
                         let mut sum_channels = input_buf.map(|buf| {
-                            Vector::load(buf.as_ptr().add(idx_base))
+                            Vector::load_aligned(buf.as_ptr().add(base_idx))
                         });
 
                         if sigma < 0.3 {
                             for (buf, sum) in output_buf.iter_mut().zip(sum_channels) {
-                                sum.store(buf.as_mut_ptr().add(idx_base));
+                                sum.store_aligned(buf.as_mut_ptr().add(base_idx));
                             }
                             continue;
                         }
 
-                        for kdiff in $kernel_diff {
-                            let kernel_base = idx_base.wrapping_add_signed(kdiff);
+                        for offset in $kernel_offsets {
+                            let kernel_idx = base_idx.wrapping_add_signed(offset);
                             let mut dist = Vector::zero();
                             for (buf, scale) in input_buf.into_iter().zip(channel_scale) {
                                 let scale = Vector::splat_f32(scale);
-                                for diff in $dist_diff {
+                                for offset in $dist_offsets {
+                                    let base_idx = base_idx.wrapping_add_signed(offset);
+                                    let kernel_idx = kernel_idx.wrapping_add_signed(offset);
                                     dist = _mm256_fmadd_ps(
                                         scale,
-                                        Vector::load(buf.as_ptr().add(idx_base.wrapping_add_signed(diff))).sub(
-                                            Vector::load(buf.as_ptr().add(kernel_base.wrapping_add_signed(diff)))
+                                        Vector::load(buf.as_ptr().add(base_idx)).sub(
+                                            Vector::load(buf.as_ptr().add(kernel_idx))
                                         ).abs(),
                                         dist,
                                     );
@@ -95,18 +109,14 @@ macro_rules! define_epf_avx2 {
                             let weight = weight_avx2(
                                 dist,
                                 sigma,
-                                if (y - 3) % 8 == 0 || (y - 3) % 8 == 7 {
-                                    sm_y_edge
-                                } else {
-                                    sm
-                                },
+                                sm,
                             );
                             sum_weights = sum_weights.add(weight);
 
                             for (sum, buf) in sum_channels.iter_mut().zip(input_buf) {
                                 *sum = _mm256_fmadd_ps(
                                     weight,
-                                    Vector::load(buf.as_ptr().add(kernel_base)),
+                                    Vector::load(buf.as_ptr().add(kernel_idx)),
                                     *sum,
                                 );
                             }
@@ -114,7 +124,7 @@ macro_rules! define_epf_avx2 {
 
                         for (buf, sum) in output_buf.iter_mut().zip(sum_channels) {
                             let val = sum.div(sum_weights);
-                            val.store(buf.as_mut_ptr().add(idx_base));
+                            val.store_aligned(buf.as_mut_ptr().add(base_idx));
                         }
                     }
                 }

@@ -28,22 +28,24 @@ pub fn apply_epf(
 
     let width = region.width as usize;
     let height = region.height as usize;
-    // Extra padding for SIMD
+    // Mirror padding, extra padding for SIMD
+    let padded_width = (width + 8 + 3 + 7) & !7;
+    let padded_height = height + 6;
     let mut fb_in = [
-        SimpleGrid::new(width + 6, height + 7),
-        SimpleGrid::new(width + 6, height + 7),
-        SimpleGrid::new(width + 6, height + 7),
+        SimpleGrid::new(padded_width, padded_height),
+        SimpleGrid::new(padded_width, padded_height),
+        SimpleGrid::new(padded_width, padded_height),
     ];
     let mut fb_out = [
-        SimpleGrid::new(width + 6, height + 7),
-        SimpleGrid::new(width + 6, height + 7),
-        SimpleGrid::new(width + 6, height + 7),
+        SimpleGrid::new(padded_width, padded_height),
+        SimpleGrid::new(padded_width, padded_height),
+        SimpleGrid::new(padded_width, padded_height),
     ];
     for (output, input) in fb_in.iter_mut().zip(&*fb) {
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {
-            output[(y + 3) * (width + 6) + 3..][..width].copy_from_slice(&input[y * width..][..width]);
+            output[(y + 3) * padded_width + 8..][..width].copy_from_slice(&input[y * width..][..width]);
         }
     }
 
@@ -98,23 +100,23 @@ pub fn apply_epf(
         for output in &mut fb_in {
             let output = output.buf_mut();
 
-            for y in 3..height + 3 {
-                output[y * (width + 6)] = output[y * (width + 6) + 5];
-                output[y * (width + 6) + 1] = output[y * (width + 6) + 4];
-                output[y * (width + 6) + 2] = output[y * (width + 6) + 3];
-                output[(y + 1) * (width + 6) - 3] = output[(y + 1) * (width + 6) - 4];
-                output[(y + 1) * (width + 6) - 2] = output[(y + 1) * (width + 6) - 5];
-                output[(y + 1) * (width + 6) - 1] = output[(y + 1) * (width + 6) - 6];
+            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
+                row[7] = row[8];
+                row[8 + width] = row[8 + width - 1];
+                row[6] = row[9];
+                row[8 + width + 1] = row[8 + width - 2];
+                row[5] = row[10];
+                row[8 + width + 2] = row[8 + width - 3];
             }
 
-            let (out_chunk, in_chunk) = output.split_at_mut((width + 6) * 3);
-            let in_chunk = &in_chunk[..(width + 6) * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
+            let in_chunk = &in_chunk[..padded_width * 3];
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
 
-            let (in_chunk, out_chunk) = output.split_at_mut((width + 6) * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -136,23 +138,23 @@ pub fn apply_epf(
         for output in &mut fb_in {
             let output = output.buf_mut();
 
-            for y in 3..height + 3 {
-                output[y * (width + 6)] = output[y * (width + 6) + 5];
-                output[y * (width + 6) + 1] = output[y * (width + 6) + 4];
-                output[y * (width + 6) + 2] = output[y * (width + 6) + 3];
-                output[(y + 1) * (width + 6) - 3] = output[(y + 1) * (width + 6) - 4];
-                output[(y + 1) * (width + 6) - 2] = output[(y + 1) * (width + 6) - 5];
-                output[(y + 1) * (width + 6) - 1] = output[(y + 1) * (width + 6) - 6];
+            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
+                row[7] = row[8];
+                row[8 + width] = row[8 + width - 1];
+                row[6] = row[9];
+                row[8 + width + 1] = row[8 + width - 2];
+                row[5] = row[10];
+                row[8 + width + 2] = row[8 + width - 3];
             }
 
-            let (out_chunk, in_chunk) = output.split_at_mut((width + 6) * 3);
-            let in_chunk = &in_chunk[..(width + 6) * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
+            let in_chunk = &in_chunk[..padded_width * 3];
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
 
-            let (in_chunk, out_chunk) = output.split_at_mut((width + 6) * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -174,23 +176,23 @@ pub fn apply_epf(
         for output in &mut fb_in {
             let output = output.buf_mut();
 
-            for y in 3..height + 3 {
-                output[y * (width + 6)] = output[y * (width + 6) + 5];
-                output[y * (width + 6) + 1] = output[y * (width + 6) + 4];
-                output[y * (width + 6) + 2] = output[y * (width + 6) + 3];
-                output[(y + 1) * (width + 6) - 3] = output[(y + 1) * (width + 6) - 4];
-                output[(y + 1) * (width + 6) - 2] = output[(y + 1) * (width + 6) - 5];
-                output[(y + 1) * (width + 6) - 1] = output[(y + 1) * (width + 6) - 6];
+            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
+                row[7] = row[8];
+                row[8 + width] = row[8 + width - 1];
+                row[6] = row[9];
+                row[8 + width + 1] = row[8 + width - 2];
+                row[5] = row[10];
+                row[8 + width + 2] = row[8 + width - 3];
             }
 
-            let (out_chunk, in_chunk) = output.split_at_mut((width + 6) * 3);
-            let in_chunk = &in_chunk[..(width + 6) * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
+            let in_chunk = &in_chunk[..padded_width * 3];
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
 
-            let (in_chunk, out_chunk) = output.split_at_mut((width + 6) * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(width + 6).zip(in_chunk.chunks_exact(width + 6).rev()) {
+            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
+            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -210,7 +212,7 @@ pub fn apply_epf(
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {
-            output[y * width..][..width].copy_from_slice(&input[(y + 3) * (width + 6) + 3..][..width]);
+            output[y * width..][..width].copy_from_slice(&input[(y + 3) * padded_width + 8..][..width]);
         }
     }
 }
