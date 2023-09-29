@@ -11,28 +11,46 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/cache@v3
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
+      - name: Install cross
+        run: cargo install cross --version 0.2.5
       - name: Run tests
-        run: cargo test --release
+        run: cross test --release
 
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v3
         with:
@@ -40,6 +58,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
         with:
+          targets: ${{ matrix.target }}
           components: 'llvm-tools-preview'
       - uses: actions/cache@v3
         with:
@@ -50,21 +69,23 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.18-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.18-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - name: Install grcov
-        run: cargo install grcov --version 0.8.18
+        run: cargo install grcov --version 0.8.19
+      - name: Install cross
+        run: cargo install cross --version 0.2.5
       - name: Build
-        run: cargo build
+        run: cross build
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
       - name: Run tests
-        run: cargo test --no-fail-fast
+        run: cross test --no-fail-fast
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
