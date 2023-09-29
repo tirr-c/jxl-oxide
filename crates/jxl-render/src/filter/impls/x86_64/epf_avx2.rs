@@ -96,7 +96,8 @@ macro_rules! define_epf_avx2 {
                                 for offset in $dist_offsets {
                                     let base_idx = base_idx.wrapping_add_signed(offset);
                                     let kernel_idx = kernel_idx.wrapping_add_signed(offset);
-                                    dist = scale.muladd(
+                                    dist = _mm256_fmadd_ps(
+                                        scale,
                                         Vector::load(buf.as_ptr().add(base_idx)).sub(
                                             Vector::load(buf.as_ptr().add(kernel_idx))
                                         ).abs(),
@@ -113,7 +114,11 @@ macro_rules! define_epf_avx2 {
                             sum_weights = sum_weights.add(weight);
 
                             for (sum, buf) in sum_channels.iter_mut().zip(input_buf) {
-                                *sum = weight.muladd(Vector::load(buf.as_ptr().add(kernel_idx)), *sum);
+                                *sum = _mm256_fmadd_ps(
+                                    weight,
+                                    Vector::load(buf.as_ptr().add(kernel_idx)),
+                                    *sum,
+                                );
                             }
                         }
 
