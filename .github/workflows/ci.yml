@@ -98,7 +98,7 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage.lcov
-          flags: rust
+          flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
