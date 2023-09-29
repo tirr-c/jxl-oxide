@@ -71,7 +71,7 @@ macro_rules! define_epf {
                                     for offset in $dist_offsets {
                                         let base_idx = base_idx.wrapping_add_signed(offset);
                                         let kernel_idx = kernel_idx.wrapping_add_signed(offset);
-                                        dist += (ch[base_idx] - ch[kernel_idx]).abs() * scale;
+                                        dist = scale.mul_add((ch[base_idx] - ch[kernel_idx]).abs(), dist);
                                     }
                                 }
 
@@ -84,7 +84,7 @@ macro_rules! define_epf {
 
                                 for (sum, ch) in sum_channels.iter_mut().zip(input) {
                                     let ch = ch.buf();
-                                    *sum += ch[kernel_idx] * weight;
+                                    *sum = weight.mul_add(ch[kernel_idx], *sum);
                                 }
                             }
 

@@ -322,3 +322,89 @@ impl SimdVector for std::arch::x86_64::__m256 {
         self.mul(mul).sub(sub)
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+impl SimdVector for std::arch::aarch64::float32x4_t {
+    const SIZE: usize = 4;
+
+    #[inline]
+    fn available() -> bool {
+        std::arch::is_aarch64_feature_detected!("neon")
+    }
+
+    #[inline]
+    unsafe fn zero() -> Self {
+        std::arch::aarch64::vdupq_n_f32(0f32)
+    }
+
+    #[inline]
+    unsafe fn set<const N: usize>(val: [f32; N]) -> Self {
+        assert_eq!(N, Self::SIZE);
+        std::arch::aarch64::vld1q_f32(val.as_ptr())
+    }
+
+    #[inline]
+    unsafe fn splat_f32(val: f32) -> Self {
+        std::arch::aarch64::vdupq_n_f32(val)
+    }
+
+    #[inline]
+    unsafe fn load(ptr: *const f32) -> Self {
+        std::arch::aarch64::vld1q_f32(ptr)
+    }
+
+    #[inline]
+    unsafe fn load_aligned(ptr: *const f32) -> Self {
+        std::arch::aarch64::vld1q_f32(ptr)
+    }
+
+    #[inline]
+    unsafe fn extract_f32<const N: i32>(self) -> f32 {
+        std::arch::aarch64::vgetq_lane_f32::<N>(self)
+    }
+
+    #[inline]
+    unsafe fn store(self, ptr: *mut f32) {
+        std::arch::aarch64::vst1q_f32(ptr, self)
+    }
+
+    #[inline]
+    unsafe fn store_aligned(self, ptr: *mut f32) {
+        std::arch::aarch64::vst1q_f32(ptr, self)
+    }
+
+    #[inline]
+    unsafe fn add(self, lhs: Self) -> Self {
+        std::arch::aarch64::vaddq_f32(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn sub(self, lhs: Self) -> Self {
+        std::arch::aarch64::vsubq_f32(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn mul(self, lhs: Self) -> Self {
+        std::arch::aarch64::vmulq_f32(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn div(self, lhs: Self) -> Self {
+        std::arch::aarch64::vdivq_f32(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn abs(self) -> Self {
+        std::arch::aarch64::vabsq_f32(self)
+    }
+
+    #[inline]
+    unsafe fn muladd(self, mul: Self, add: Self) -> Self {
+        std::arch::aarch64::vfmaq_f32(add, self, mul)
+    }
+
+    #[inline]
+    unsafe fn mulsub(self, mul: Self, sub: Self) -> Self {
+        std::arch::aarch64::vfmsq_f32(sub, self, mul)
+    }
+}

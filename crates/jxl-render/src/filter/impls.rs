@@ -1,13 +1,17 @@
-#[cfg(not(target_arch = "x86_64"))]
 mod generic;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub use generic::*;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::*;
 
 #[inline(always)]
 fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2: f32) {
