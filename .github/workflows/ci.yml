@@ -40,7 +40,7 @@ jobs:
       - name: Install cross
         run: cargo install cross --version 0.2.5
       - name: Run tests
-        run: cross test --release
+        run: cross test --release --target ${{ matrix.target }}
 
   coverage:
     name: Coverage
@@ -80,12 +80,12 @@ jobs:
       - name: Install cross
         run: cargo install cross --version 0.2.5
       - name: Build
-        run: cross build
+        run: cross build --target ${{ matrix.target }}
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
       - name: Run tests
-        run: cross test --no-fail-fast
+        run: cross test --no-fail-fast --target ${{ matrix.target }}
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
