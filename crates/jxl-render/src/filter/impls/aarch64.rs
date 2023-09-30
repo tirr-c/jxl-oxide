@@ -4,8 +4,6 @@ use jxl_grid::SimpleGrid;
 
 mod epf;
 
-pub use super::generic::apply_gabor_like;
-
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
@@ -100,4 +98,25 @@ pub fn epf_step2(
         border_sad_mul,
         step_multiplier,
     )
+}
+
+pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+    if is_aarch64_feature_detected!("neon") {
+        // SAFETY: Features are checked above.
+        unsafe {
+            for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
+                run_gabor_inner_neon(fb, weight1, weight2)
+            }
+        }
+        return;
+    }
+
+    for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
+        super::generic::run_gabor_inner(fb, weight1, weight2);
+    }
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: f32) {
+    super::generic::run_gabor_inner(fb, weight1, weight2)
 }
