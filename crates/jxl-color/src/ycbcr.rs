@@ -17,6 +17,14 @@ pub fn ycbcr_to_rgb(fb_cbycr: [&mut SimpleGrid<f32>; 3]) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            // SAFETY: Feature set is checked above.
+            return unsafe { run_aarch64_neon([cb, y, cr]) };
+        }
+    }
+
     run_generic([cb, y, cr])
 }
 
@@ -24,6 +32,12 @@ pub fn ycbcr_to_rgb(fb_cbycr: [&mut SimpleGrid<f32>; 3]) {
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
 unsafe fn run_x86_64_avx2(buf_cbycr: [&mut [f32]; 3]) {
+    run_generic(buf_cbycr)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn run_aarch64_neon(buf_cbycr: [&mut [f32]; 3]) {
     run_generic(buf_cbycr)
 }
 

@@ -26,6 +26,14 @@ pub fn xyb_to_linear_srgb(
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            // SAFETY: Feature set is checked above.
+            return unsafe { run_aarch64_neon(xyb, ob, inv_mat, itscale) };
+        }
+    }
+
     run_generic(xyb, ob, inv_mat, itscale)
 }
 
@@ -33,6 +41,17 @@ pub fn xyb_to_linear_srgb(
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
 unsafe fn run_x86_64_avx2(
+    xyb: [&mut [f32]; 3],
+    ob: [f32; 3],
+    inv_mat: [[f32; 3]; 3],
+    itscale: f32,
+) {
+    run_generic(xyb, ob, inv_mat, itscale)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn run_aarch64_neon(
     xyb: [&mut [f32]; 3],
     ob: [f32; 3],
     inv_mat: [[f32; 3]; 3],
