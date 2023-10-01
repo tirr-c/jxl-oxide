@@ -37,6 +37,18 @@ pub fn linear_to_gamma(samples: &mut [f32], gamma: f32) {
     }
 }
 
+#[repr(align(16))]
+struct Aligned([u8; 16]);
+
+const SRGB_POWTABLE_UPPER: Aligned = Aligned([
+    0x00, 0x0a, 0x19, 0x26, 0x32, 0x41, 0x4d, 0x5c,
+    0x68, 0x75, 0x83, 0x8f, 0xa0, 0xaa, 0xb9, 0xc6,
+]);
+const SRGB_POWTABLE_LOWER: Aligned = Aligned([
+    0x00, 0xb7, 0x04, 0x0d, 0xcb, 0xe7, 0x41, 0x68,
+    0x51, 0xd1, 0xeb, 0xf2, 0x00, 0xb7, 0x04, 0x0d,
+]);
+
 /// Converts the linear samples with the sRGB transfer curve.
 // Fast linear to sRGB conversion, ported from libjxl.
 pub fn linear_to_srgb(samples: &mut [f32]) {
@@ -47,14 +59,12 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
         }
     }
 
-    const POWTABLE_UPPER: [u8; 16] = [
-        0x00, 0x0a, 0x19, 0x26, 0x32, 0x41, 0x4d, 0x5c,
-        0x68, 0x75, 0x83, 0x8f, 0xa0, 0xaa, 0xb9, 0xc6,
-    ];
-    const POWTABLE_LOWER: [u8; 16] = [
-        0x00, 0xb7, 0x04, 0x0d, 0xcb, 0xe7, 0x41, 0x68,
-        0x51, 0xd1, 0xeb, 0xf2, 0x00, 0xb7, 0x04, 0x0d,
-    ];
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { linear_to_srgb_aarch64_neon(samples) };
+        }
+    }
 
     for s in samples {
         let v = s.to_bits() & 0x7fff_ffff;
@@ -66,7 +76,7 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
 
         // `mul` won't be used when `v` is small.
         let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
-        let mul = 0x4000_0000 | (u32::from(POWTABLE_UPPER[idx]) << 18) | (u32::from(POWTABLE_LOWER[idx]) << 10);
+        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
         let small = v * 12.92;
@@ -82,23 +92,11 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
 unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
     use std::arch::x86_64::*;
 
-    #[repr(align(16))]
-    struct Aligned([u8; 16]);
-
-    const POWTABLE_UPPER: Aligned = Aligned([
-        0x00, 0x0a, 0x19, 0x26, 0x32, 0x41, 0x4d, 0x5c,
-        0x68, 0x75, 0x83, 0x8f, 0xa0, 0xaa, 0xb9, 0xc6,
-    ]);
-    const POWTABLE_LOWER: Aligned = Aligned([
-        0x00, 0xb7, 0x04, 0x0d, 0xcb, 0xe7, 0x41, 0x68,
-        0x51, 0xd1, 0xeb, 0xf2, 0x00, 0xb7, 0x04, 0x0d,
-    ]);
-
     let powtable_upper = _mm256_castps_si256(
-        _mm256_broadcast_ps(&*(POWTABLE_UPPER.0.as_ptr() as *const _))
+        _mm256_broadcast_ps(&*(SRGB_POWTABLE_UPPER.0.as_ptr() as *const _))
     );
     let powtable_lower = _mm256_castps_si256(
-        _mm256_broadcast_ps(&*(POWTABLE_LOWER.0.as_ptr() as *const _))
+        _mm256_broadcast_ps(&*(SRGB_POWTABLE_LOWER.0.as_ptr() as *const _))
     );
 
     let mut chunks = samples.chunks_exact_mut(8);
@@ -159,11 +157,81 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
         let pow = pow.mul_add(v_adj, 0.018092343);
 
         let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
-        let mul = 0x4000_0000 | (u32::from(POWTABLE_UPPER.0[idx]) << 18) | (u32::from(POWTABLE_LOWER.0[idx]) << 10);
+        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
         let small = v * 12.92;
         let acc = pow.mul_add(f32::from_bits(mul), -0.055);
+
+        *s = if v <= 0.0031308 { small } else { acc }.copysign(*s);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let mut it = samples.chunks_exact_mut(4);
+    for chunk in &mut it {
+        let v = vld1q_u32(chunk.as_ptr() as *const _);
+        let sign = vandq_u32(v, vdupq_n_u32(0x8000_0000));
+        let v = vandq_u32(v, vdupq_n_u32(0x7fff_ffff));
+
+        let v_adj = vandq_u32(
+            vorrq_u32(v, vdupq_n_u32(0x3e80_0000)),
+            vdupq_n_u32(0x3eff_ffff),
+        );
+        let v_adj = vreinterpretq_f32_u32(v_adj);
+        let pow = vfmaq_n_f32(vdupq_n_f32(-0.10889456), v_adj, 0.059914046);
+        let pow = vfmaq_f32(vdupq_n_f32(0.107963754), v_adj, pow);
+        let pow = vfmaq_f32(vdupq_n_f32(0.018092343), v_adj, pow);
+
+        let exp_idx = vsubq_u32(
+            vshrq_n_u32::<23>(v),
+            vdupq_n_u32(118),
+        );
+        let pow_upper = vqtbl1q_u8(
+            vld1q_u8(SRGB_POWTABLE_UPPER.0.as_ptr()),
+            vreinterpretq_u8_u32(exp_idx),
+        );
+        let pow_lower = vqtbl1q_u8(
+            vld1q_u8(SRGB_POWTABLE_LOWER.0.as_ptr()),
+            vreinterpretq_u8_u32(exp_idx),
+        );
+        let mul = vorrq_u32(
+            vorrq_u32(
+                vshlq_n_u32::<18>(vreinterpretq_u32_u8(pow_upper)),
+                vshlq_n_u32::<10>(vreinterpretq_u32_u8(pow_lower)),
+            ),
+            vdupq_n_u32(0x4000_0000),
+        );
+        let mul = vreinterpretq_f32_u32(mul);
+
+        let v = vreinterpretq_f32_u32(v);
+        let small = vmulq_n_f32(v, 12.92);
+        let acc = vfmaq_f32(vdupq_n_f32(-0.055), mul, pow);
+
+        let mask = vcleq_f32(v, vdupq_n_f32(0.0031308));
+        let ret = vbslq_f32(mask, small, acc);
+        let ret = vorrq_u32(vreinterpretq_u32_f32(ret), sign);
+        vst1q_u32(chunk.as_mut_ptr() as *mut _, ret);
+    }
+
+    for s in it.into_remainder() {
+        let v = s.to_bits() & 0x7fff_ffff;
+        let v_adj = f32::from_bits((v | 0x3e80_0000) & 0x3eff_ffff);
+        let pow = 0.059914046f32;
+        let pow = pow * v_adj - 0.10889456;
+        let pow = pow * v_adj + 0.107963754;
+        let pow = pow * v_adj + 0.018092343;
+
+        let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
+        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
+
+        let v = f32::from_bits(v);
+        let small = v * 12.92;
+        let acc = pow * f32::from_bits(mul) - 0.055;
 
         *s = if v <= 0.0031308 { small } else { acc }.copysign(*s);
     }
