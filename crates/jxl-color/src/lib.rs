@@ -17,6 +17,7 @@ mod ciexyz;
 pub mod consts;
 mod convert;
 mod error;
+mod fastmath;
 pub mod header;
 pub mod icc;
 mod tf;

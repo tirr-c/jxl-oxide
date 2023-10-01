@@ -1,8 +1,39 @@
 /// Converts the linear samples with the given gamma.
 pub fn linear_to_gamma(samples: &mut [f32], gamma: f32) {
-    for s in samples {
-        let a = s.abs();
-        *s = a.powf(gamma).copysign(*s);
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            let mut it = samples.chunks_exact_mut(4);
+            for chunk in &mut it {
+                unsafe {
+                    let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
+                    let mask = std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(1e-5));
+                    let exp = crate::fastmath::fast_powf_aarch64_neon(v, gamma);
+                    let v = std::arch::aarch64::vbslq_f32(mask, std::arch::aarch64::vdupq_n_f32(0.0), exp);
+                    std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
+                }
+            }
+
+            for x in it.into_remainder() {
+                let a = *x;
+                *x = if a <= 1e-5 {
+                    0.0
+                } else {
+                    crate::fastmath::fast_powf_generic(a, gamma)
+                };
+            }
+
+            return;
+        }
+    }
+
+    for x in samples {
+        let a = *x;
+        *x = if a <= 1e-5 {
+            0.0
+        } else {
+            crate::fastmath::fast_powf_generic(a, gamma)
+        };
     }
 }
 
@@ -140,12 +171,41 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
 
 /// Converts the linear samples with the BT.709 transfer curve.
 pub fn linear_to_bt709(samples: &mut [f32]) {
-    for s in samples {
-        let a = *s;
-        *s = if a <= 0.018f32 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            let mut it = samples.chunks_exact_mut(4);
+            for chunk in &mut it {
+                unsafe {
+                    let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
+                    let mask = std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(0.018));
+                    let lin = std::arch::aarch64::vmulq_n_f32(v, 4.5);
+                    let exp = crate::fastmath::fast_powf_aarch64_neon(v, 0.45);
+                    let exp = std::arch::aarch64::vfmaq_n_f32(std::arch::aarch64::vdupq_n_f32(-0.099), exp, 1.099);
+                    let v = std::arch::aarch64::vbslq_f32(mask, lin, exp);
+                    std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
+                }
+            }
+
+            for x in it.into_remainder() {
+                let a = *x;
+                *x = if a <= 0.018 {
+                    4.5 * a
+                } else {
+                    crate::fastmath::fast_powf_generic(a, 0.45).mul_add(1.099, -0.099)
+                };
+            }
+
+            return;
+        }
+    }
+
+    for x in samples {
+        let a = *x;
+        *x = if a <= 0.018 {
             4.5 * a
         } else {
-            a.powf(0.45).mul_add(1.099, -0.099)
+            crate::fastmath::fast_powf_generic(a, 0.45).mul_add(1.099, -0.099)
         };
     }
 }
