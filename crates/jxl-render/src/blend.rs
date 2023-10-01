@@ -351,7 +351,6 @@ pub fn patch(
 }
 
 fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {
-    tracing::trace!(blend_params = format_args!("{:?}", blend_params));
     let &BlendParams {
         ref mode,
         base_topleft: (base_x, base_y),
