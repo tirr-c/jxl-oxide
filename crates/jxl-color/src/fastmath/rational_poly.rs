@@ -9,6 +9,65 @@ pub fn eval_generic<const P: usize, const Q: usize>(
     yp / yq
 }
 
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub fn eval_x86_64_sse2<const P: usize, const Q: usize>(
+    x: std::arch::x86_64::__m128,
+    p: [f32; P],
+    q: [f32; Q],
+) -> std::arch::x86_64::__m128 {
+    use std::arch::x86_64::*;
+
+    unsafe {
+        let yp = p.into_iter().rev().map(|p| _mm_set1_ps(p)).reduce(|yp, p| {
+            _mm_add_ps(_mm_mul_ps(yp, x), p)
+        }).unwrap();
+        let yq = q.into_iter().rev().map(|q| _mm_set1_ps(q)).reduce(|yq, q| {
+            _mm_add_ps(_mm_mul_ps(yq, x), q)
+        }).unwrap();
+        _mm_div_ps(yp, yq)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "fma")]
+#[inline]
+pub unsafe fn eval_x86_64_fma<const P: usize, const Q: usize>(
+    x: std::arch::x86_64::__m128,
+    p: [f32; P],
+    q: [f32; Q],
+) -> std::arch::x86_64::__m128 {
+    use std::arch::x86_64::*;
+
+    let yp = p.into_iter().rev().map(|p| _mm_set1_ps(p)).reduce(|yp, p| {
+        _mm_fmadd_ps(yp, x, p)
+    }).unwrap();
+    let yq = q.into_iter().rev().map(|q| _mm_set1_ps(q)).reduce(|yq, q| {
+        _mm_fmadd_ps(yq, x, q)
+    }).unwrap();
+    _mm_div_ps(yp, yq)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "fma")]
+#[inline]
+pub unsafe fn eval_x86_64_avx2<const P: usize, const Q: usize>(
+    x: std::arch::x86_64::__m256,
+    p: [f32; P],
+    q: [f32; Q],
+) -> std::arch::x86_64::__m256 {
+    use std::arch::x86_64::*;
+
+    let yp = p.into_iter().rev().map(|p| _mm256_set1_ps(p)).reduce(|yp, p| {
+        _mm256_fmadd_ps(yp, x, p)
+    }).unwrap();
+    let yq = q.into_iter().rev().map(|q| _mm256_set1_ps(q)).reduce(|yq, q| {
+        _mm256_fmadd_ps(yq, x, q)
+    }).unwrap();
+    _mm256_div_ps(yp, yq)
+}
+
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 #[inline]
