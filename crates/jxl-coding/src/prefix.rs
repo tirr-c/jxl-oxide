@@ -5,15 +5,8 @@ use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Histogram {
-    configs: Vec<TreeConfig>,
+    configs: Vec<u32>,
     symbols: Vec<u16>,
-}
-
-#[derive(Debug)]
-struct TreeConfig {
-    from: u32,
-    to: u32,
-    offset: usize,
 }
 
 impl Histogram {
@@ -28,26 +21,20 @@ impl Histogram {
                 syms_for_length[len as usize - 1].push(sym);
             }
         }
-        let max_length = syms_for_length.len();
 
         let mut configs = Vec::new();
         let mut symbols = Vec::new();
-        let mut current_bits = 0u32;
-        for syms in syms_for_length.into_iter() {
-            let sym_count = syms.len() as u32;
-            current_bits <<= 1;
+        let mut current_bits = 0u16;
+        for (idx, syms) in syms_for_length.into_iter().enumerate() {
+            let shifts = 14 - idx;
+            let sym_count = syms.len() as u16;
+            current_bits += sym_count << shifts;
 
-            configs.push(TreeConfig {
-                from: current_bits,
-                to: current_bits + sym_count,
-                offset: symbols.len(),
-            });
+            configs.push(((current_bits as u32) << 16) | (symbols.len() as u32));
             symbols.extend(syms);
-
-            current_bits += sym_count;
         }
 
-        if current_bits.checked_shl((15 - max_length) as u32) == Some(1 << 15) {
+        if current_bits == 1 << 15 {
             Ok(Self {
                 configs,
                 symbols
@@ -264,20 +251,20 @@ impl Histogram {
     #[inline]
     pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u16> {
         let Self { configs, symbols } = self;
-        let mut bits = 0u32;
-        for config in configs {
-            match bitstream.read_bool() {
-                Ok(b) => {
-                    bits = (bits << 1) | (b as u32);
-                },
-                Err(e) => return Err(e.into()),
+        let peeked = bitstream.peek_bits(15);
+        let bits = (peeked.reverse_bits() >> 1) | 0xffff;
+        let mut prev = 0u32;
+        for (count, &config) in configs.iter().enumerate() {
+            if bits < config {
+                bitstream.consume_bits(count + 1)?;
+                let offset = ((bits - prev) >> (30 - count)) + (config & 0xffff);
+                // SAFETY: `offset` is in bounds for valid prefix code histogram.
+                let symbol = unsafe { *symbols.get_unchecked(offset as usize) };
+                return Ok(symbol);
             }
-            if config.from <= bits && bits < config.to {
-                let diff = bits - config.from;
-                let idx = config.offset + diff as usize;
-                return Ok(symbols[idx]);
-            }
+            prev = config;
         }
+        bitstream.consume_bits(configs.len())?;
         Ok(symbols[0])
     }
 

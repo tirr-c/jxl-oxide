@@ -63,10 +63,12 @@ impl Bundle<HfPassParams<'_>> for HfPass {
 }
 
 impl HfPass {
+    #[inline]
     pub(crate) fn clone_decoder(&self) -> Decoder {
         self.hf_dist.clone()
     }
 
+    #[inline]
     pub(crate) fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
         struct OrderIter<'a> {
             permutation: &'a [usize],
@@ -77,6 +79,7 @@ impl HfPass {
         impl Iterator for OrderIter<'_> {
             type Item = (u8, u8);
 
+            #[inline]
             fn next(&mut self) -> Option<(u8, u8)> {
                 let idx = self.permutation.get(self.idx).copied().unwrap_or(self.idx);
                 let ret = self.natural_order.get(idx).copied();

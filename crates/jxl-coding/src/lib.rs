@@ -69,7 +69,7 @@ impl Decoder {
     /// Read an integer from the bitstream with the given *cluster* and LZ77 distance multiplier.
     ///
     /// Contexts can be converted to clusters using [the cluster map][Self::cluster_map].
-    #[inline]
+    #[inline(always)]
     pub fn read_varint_with_multiplier_clustered(
         &mut self,
         bitstream: &mut Bitstream,
