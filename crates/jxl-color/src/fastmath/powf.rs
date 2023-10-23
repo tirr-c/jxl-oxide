@@ -1,19 +1,22 @@
 #![allow(clippy::excessive_precision)]
 
+const POW2F_NUMER_COEFFS: [f32; 3] = [1.01749063e1, 4.88687798e1, 9.85506591e1];
+const POW2F_DENOM_COEFFS: [f32; 4] = [2.10242958e-1, -2.22328856e-2, -1.94414990e1, 9.85506633e1];
+
 #[inline]
 fn fast_pow2f_generic(x: f32) -> f32 {
     let x_floor = x.floor();
     let exp = f32::from_bits(((x_floor as i32 + 127) as u32) << 23);
     let frac = x - x_floor;
 
-    let num = frac + 1.01749063e1;
-    let num = num * frac + 4.88687798e1;
-    let num = num * frac + 9.85506591e1;
+    let num = frac + POW2F_NUMER_COEFFS[0];
+    let num = num * frac + POW2F_NUMER_COEFFS[1];
+    let num = num * frac + POW2F_NUMER_COEFFS[2];
     let num = num * exp;
 
-    let den = 2.10242958e-1 * frac - 2.22328856e-2;
-    let den = den * frac - 1.94414990e1;
-    let den = den * frac + 9.85506633e1;
+    let den = POW2F_DENOM_COEFFS[0] * frac + POW2F_DENOM_COEFFS[1];
+    let den = den * frac + POW2F_DENOM_COEFFS[2];
+    let den = den * frac + POW2F_DENOM_COEFFS[3];
 
     num / den
 }
@@ -29,14 +32,14 @@ fn fast_pow2f_x86_64_sse2(x: std::arch::x86_64::__m128) -> std::arch::x86_64::__
         let exp = _mm_castsi128_ps(_mm_slli_epi32::<23>(exp));
         let frac = _mm_sub_ps(x, x_floor);
 
-        let num = _mm_add_ps(_mm_set1_ps(1.01740963e1), frac);
-        let num = _mm_add_ps(_mm_set1_ps(4.88687798e1), _mm_mul_ps(frac, num));
-        let num = _mm_add_ps(_mm_set1_ps(9.85506591e1), _mm_mul_ps(frac, num));
+        let num = _mm_add_ps(_mm_set1_ps(POW2F_NUMER_COEFFS[0]), frac);
+        let num = _mm_add_ps(_mm_set1_ps(POW2F_NUMER_COEFFS[1]), _mm_mul_ps(frac, num));
+        let num = _mm_add_ps(_mm_set1_ps(POW2F_NUMER_COEFFS[2]), _mm_mul_ps(frac, num));
         let num = _mm_mul_ps(exp, num);
 
-        let den = _mm_add_ps(_mm_set1_ps(-2.22328856e-2), _mm_mul_ps(frac, _mm_set1_ps(2.10242958e-1)));
-        let den = _mm_add_ps(_mm_set1_ps(-1.94414990e1), _mm_mul_ps(frac, den));
-        let den = _mm_add_ps(_mm_set1_ps(9.85506633e1), _mm_mul_ps(frac, den));
+        let den = _mm_add_ps(_mm_set1_ps(POW2F_DENOM_COEFFS[1]), _mm_mul_ps(frac, _mm_set1_ps(POW2F_DENOM_COEFFS[0])));
+        let den = _mm_add_ps(_mm_set1_ps(POW2F_DENOM_COEFFS[2]), _mm_mul_ps(frac, den));
+        let den = _mm_add_ps(_mm_set1_ps(POW2F_DENOM_COEFFS[3]), _mm_mul_ps(frac, den));
 
         _mm_div_ps(num, den)
     }
@@ -53,14 +56,14 @@ unsafe fn fast_pow2f_x86_64_fma(x: std::arch::x86_64::__m128) -> std::arch::x86_
     let exp = _mm_castsi128_ps(_mm_slli_epi32::<23>(exp));
     let frac = _mm_sub_ps(x, x_floor);
 
-    let num = _mm_add_ps(_mm_set1_ps(1.01740963e1), frac);
-    let num = _mm_fmadd_ps(frac, num, _mm_set1_ps(4.88687798e1));
-    let num = _mm_fmadd_ps(frac, num, _mm_set1_ps(9.85506591e1));
+    let num = _mm_add_ps(_mm_set1_ps(POW2F_NUMER_COEFFS[0]), frac);
+    let num = _mm_fmadd_ps(frac, num, _mm_set1_ps(POW2F_NUMER_COEFFS[1]));
+    let num = _mm_fmadd_ps(frac, num, _mm_set1_ps(POW2F_NUMER_COEFFS[2]));
     let num = _mm_mul_ps(exp, num);
 
-    let den = _mm_fmadd_ps(frac, _mm_set1_ps(2.10242958e-1), _mm_set1_ps(-2.22328856e-2));
-    let den = _mm_fmadd_ps(frac, den, _mm_set1_ps(-1.94414990e1));
-    let den = _mm_fmadd_ps(frac, den, _mm_set1_ps(9.85506633e1));
+    let den = _mm_fmadd_ps(frac, _mm_set1_ps(POW2F_DENOM_COEFFS[0]), _mm_set1_ps(POW2F_DENOM_COEFFS[1]));
+    let den = _mm_fmadd_ps(frac, den, _mm_set1_ps(POW2F_DENOM_COEFFS[2]));
+    let den = _mm_fmadd_ps(frac, den, _mm_set1_ps(POW2F_DENOM_COEFFS[3]));
 
     _mm_div_ps(num, den)
 }
@@ -77,14 +80,14 @@ unsafe fn fast_pow2f_x86_64_avx2(x: std::arch::x86_64::__m256) -> std::arch::x86
     let exp = _mm256_castsi256_ps(_mm256_slli_epi32::<23>(exp));
     let frac = _mm256_sub_ps(x, x_floor);
 
-    let num = _mm256_add_ps(_mm256_set1_ps(1.01740963e1), frac);
-    let num = _mm256_fmadd_ps(frac, num, _mm256_set1_ps(4.88687798e1));
-    let num = _mm256_fmadd_ps(frac, num, _mm256_set1_ps(9.85506591e1));
+    let num = _mm256_add_ps(_mm256_set1_ps(POW2F_NUMER_COEFFS[0]), frac);
+    let num = _mm256_fmadd_ps(frac, num, _mm256_set1_ps(POW2F_NUMER_COEFFS[1]));
+    let num = _mm256_fmadd_ps(frac, num, _mm256_set1_ps(POW2F_NUMER_COEFFS[2]));
     let num = _mm256_mul_ps(exp, num);
 
-    let den = _mm256_fmadd_ps(frac, _mm256_set1_ps(2.10242958e-1), _mm256_set1_ps(-2.22328856e-2));
-    let den = _mm256_fmadd_ps(frac, den, _mm256_set1_ps(-1.94414990e1));
-    let den = _mm256_fmadd_ps(frac, den, _mm256_set1_ps(9.85506633e1));
+    let den = _mm256_fmadd_ps(frac, _mm256_set1_ps(POW2F_DENOM_COEFFS[0]), _mm256_set1_ps(POW2F_DENOM_COEFFS[1]));
+    let den = _mm256_fmadd_ps(frac, den, _mm256_set1_ps(POW2F_DENOM_COEFFS[2]));
+    let den = _mm256_fmadd_ps(frac, den, _mm256_set1_ps(POW2F_DENOM_COEFFS[3]));
 
     _mm256_div_ps(num, den)
 }
@@ -100,14 +103,14 @@ unsafe fn fast_pow2f_aarch64_neon(x: std::arch::aarch64::float32x4_t) -> std::ar
     let exp = vreinterpretq_f32_s32(vshlq_n_s32(exp, 23));
     let frac = vsubq_f32(x, x_floor);
 
-    let num = vaddq_f32(vdupq_n_f32(1.01749063e1), frac);
-    let num = vfmaq_f32(vdupq_n_f32(4.88687798e1), frac, num);
-    let num = vfmaq_f32(vdupq_n_f32(9.85506591e1), frac, num);
+    let num = vaddq_f32(vdupq_n_f32(POW2F_NUMER_COEFFS[0]), frac);
+    let num = vfmaq_f32(vdupq_n_f32(POW2F_NUMER_COEFFS[1]), frac, num);
+    let num = vfmaq_f32(vdupq_n_f32(POW2F_NUMER_COEFFS[2]), frac, num);
     let num = vmulq_f32(exp, num);
 
-    let den = vfmaq_n_f32(vdupq_n_f32(-2.22328856e-2), frac, 2.10242958e-1);
-    let den = vfmaq_f32(vdupq_n_f32(-1.94414990e1), frac, den);
-    let den = vfmaq_f32(vdupq_n_f32(9.85506633e1), frac, den);
+    let den = vfmaq_n_f32(vdupq_n_f32(POW2F_DENOM_COEFFS[1]), frac, POW2F_DENOM_COEFFS[0]);
+    let den = vfmaq_f32(vdupq_n_f32(POW2F_DENOM_COEFFS[2]), frac, den);
+    let den = vfmaq_f32(vdupq_n_f32(POW2F_DENOM_COEFFS[3]), frac, den);
 
     vdivq_f32(num, den)
 }
