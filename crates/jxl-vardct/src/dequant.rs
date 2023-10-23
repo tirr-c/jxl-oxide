@@ -375,7 +375,7 @@ impl<'a> DequantMatrixSetParams<'a> {
 impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: DequantMatrixSetParams) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams) -> Result<Self> {
         use DequantMatrixParamsEncoding::*;
 
         let span = tracing::span!(
@@ -385,7 +385,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
         );
         let _guard = span.enter();
 
-        fn read_fixed<const N: usize, R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<[[f32; N]; 3]> {
+        fn read_fixed<const N: usize>(bitstream: &mut Bitstream) -> Result<[[f32; N]; 3]> {
             let mut out = [[0.0f32; N]; 3];
             for val in out.iter_mut().flatten() {
                 *val = bitstream.read_f16_as_f32()?;
@@ -393,7 +393,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
             Ok(out)
         }
 
-        fn read_dct_params<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<[Vec<f32>; 3]> {
+        fn read_dct_params(bitstream: &mut Bitstream) -> Result<[Vec<f32>; 3]> {
             let num_params = bitstream.read_bits(4)? as usize + 1;
             let mut params = [
                 vec![0.0f32; num_params],
@@ -439,7 +439,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                 dct_params: read_dct_params(bitstream)?,
             },
             5 => {
-                let mut params = read_fixed::<9, _>(bitstream)?;
+                let mut params = read_fixed::<9>(bitstream)?;
                 for params in &mut params {
                     for param in &mut params[..6] {
                         *param *= 64.0;
@@ -494,7 +494,7 @@ pub struct DequantMatrixSet {
 impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: DequantMatrixSetParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams<'_>) -> Result<Self> {
         use TransformType::*;
         const DCT_SELECT_LIST: [TransformType; 17] = [
             Dct8,

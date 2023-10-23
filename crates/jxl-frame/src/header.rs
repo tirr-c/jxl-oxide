@@ -1,4 +1,3 @@
-use std::io::Read;
 use jxl_bitstream::{
     define_bundle,
     read_bits,
@@ -347,7 +346,7 @@ impl FrameType {
 impl<Ctx> Bundle<Ctx> for FrameType {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(2)? {
             0 => Self::RegularFrame,
             1 => Self::LfFrame,
@@ -369,7 +368,7 @@ pub enum Encoding {
 impl<Ctx> Bundle<Ctx> for Encoding {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         Ok(match bitstream.read_bits(1)? {
             0 => Self::VarDct,
             1 => Self::Modular,
@@ -412,7 +411,7 @@ impl FrameFlags {
 impl<Ctx> Bundle<Ctx> for FrameFlags {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         Ok(Self(bitstream.read_u64()?))
     }
 }
@@ -431,7 +430,7 @@ pub enum BlendMode {
 impl<Ctx> Bundle<Ctx> for BlendMode {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         Ok(match read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
             0 => Self::Replace,
             1 => Self::Add,

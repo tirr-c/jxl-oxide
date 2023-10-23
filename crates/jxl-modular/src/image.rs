@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, unpack_signed};
 use jxl_coding::{DecoderRleMode, RleToken, DecoderWithLz77};
 use jxl_grid::Grid;
@@ -95,9 +93,9 @@ impl Image {
         Ok(())
     }
 
-    pub(super) fn decode_channels<R: Read>(
+    pub(super) fn decode_channels(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         stream_index: u32,
         wp_header: &WpHeader,
         ma_ctx: &MaConfig,
@@ -183,9 +181,9 @@ impl Image {
         Ok(())
     }
 
-    fn decode_image_lz77<R: Read>(
+    fn decode_image_lz77(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         stream_index: u32,
         wp_header: &WpHeader,
         ma_ctx: &MaConfig,
@@ -247,9 +245,9 @@ impl Image {
         })
     }
 
-    fn decode_image_rle<R: Read>(
+    fn decode_image_rle(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         stream_index: u32,
         wp_header: &WpHeader,
         ma_ctx: &MaConfig,

@@ -1,5 +1,4 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
-use std::io::Read;
 use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
@@ -59,50 +58,38 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    /// Load all frames in the bitstream.
-    pub fn load_all_frames<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-    ) -> Result<()> {
-        loop {
-            let frame = self.inner.load_single(bitstream)?;
-
-            let is_last = frame.header().is_last;
-            let toc = frame.toc();
-            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-            self.inner.preserve_current_frame();
-            self.state.preserve_current_frame();
-            if is_last {
-                break;
+    pub fn load_frame_header(&mut self, bitstream: &mut Bitstream) -> Result<&mut IndexedFrame> {
+        if let Some(loading_frame) = &self.inner.loading_frame {
+            if !loading_frame.is_loading_done() {
+                panic!("another frame is still loading");
             }
 
-            bitstream.skip_to_bookmark(bookmark)?;
+            self.inner.preserve_current_frame();
+            self.state.preserve_current_frame();
         }
 
-        Ok(())
+        self.inner.load_frame_header(bitstream)
     }
 
-    /// Load a single keyframe from the bitstream.
-    pub fn load_until_keyframe<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-    ) -> Result<()> {
-        loop {
-            let frame = self.inner.load_single(bitstream)?;
-
-            let is_keyframe = frame.header().is_keyframe();
-            let toc = frame.toc();
-            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-            self.inner.preserve_current_frame();
-            self.state.preserve_current_frame();
-            if is_keyframe {
-                break;
+    pub fn current_loading_frame(&mut self) -> Option<&mut IndexedFrame> {
+        if let Some(loading_frame) = &self.inner.loading_frame {
+            if loading_frame.is_loading_done() {
+                self.inner.preserve_current_frame();
+                self.state.preserve_current_frame();
             }
-
-            bitstream.skip_to_bookmark(bookmark)?;
         }
+        self.inner.loading_frame.as_mut()
+    }
 
-        Ok(())
+    pub fn finalize_current_frame(&mut self) {
+        if let Some(loading_frame) = &self.inner.loading_frame {
+            if loading_frame.is_loading_done() {
+                self.inner.preserve_current_frame();
+                self.state.preserve_current_frame();
+                return;
+            }
+        }
+        panic!("frame is not fully loaded");
     }
 }
 

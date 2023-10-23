@@ -1,8 +1,6 @@
-use std::io::Read;
 use jxl_bitstream::{
     read_bits,
     Bitstream,
-    Bookmark,
     Bundle,
 };
 use crate::Result;
@@ -52,7 +50,7 @@ pub struct TocGroup {
     /// Kind of the group.
     pub kind: TocGroupKind,
     /// Offset within the bitstream.
-    pub offset: Bookmark,
+    pub offset: u64,
     /// Size of the group.
     pub size: u32,
 }
@@ -97,7 +95,7 @@ impl PartialOrd for TocGroupKind {
 
 impl Toc {
     /// Returns the offset to the beginning of the data.
-    pub fn bookmark(&self) -> Bookmark {
+    pub fn bookmark(&self) -> u64 {
         let idx = self.bitstream_to_original.first().copied().unwrap_or(0);
         self.groups[idx].offset
     }
@@ -144,7 +142,7 @@ impl Toc {
 impl Bundle<&crate::FrameHeader> for Toc {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, ctx: &crate::FrameHeader) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, ctx: &crate::FrameHeader) -> Result<Self> {
         let num_groups = ctx.num_groups();
         let num_passes = ctx.passes.num_passes;
 
@@ -178,7 +176,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
         bitstream.zero_pad_to_byte()?;
 
         let mut offsets = Vec::with_capacity(sizes.len());
-        let mut acc = bitstream.bookmark();
+        let mut acc = bitstream.num_read_bits() as u64;
         let mut total_size = 0u64;
         for &size in &sizes {
             offsets.push(acc);

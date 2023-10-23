@@ -61,7 +61,7 @@ pub struct HfBlockContext {
 impl<Ctx> Bundle<Ctx> for HfBlockContext {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> crate::Result<Self> {
         let mut qf_thresholds = Vec::new();
         let mut lf_thresholds = [Vec::new(), Vec::new(), Vec::new()];
         let (num_block_clusters, block_ctx_map) = if bitstream.read_bool()? {
@@ -132,7 +132,7 @@ pub struct LfCoeff {
 impl Bundle<LfCoeffParams<'_>> for LfCoeff {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: LfCoeffParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfCoeffParams<'_>) -> Result<Self> {
         let LfCoeffParams {
             lf_group_idx,
             lf_width,

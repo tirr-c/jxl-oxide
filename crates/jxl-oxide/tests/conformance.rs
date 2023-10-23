@@ -68,8 +68,8 @@ fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
     }
 }
 
-fn run_test<R: std::io::Read>(
-    mut image: JxlImage<R>,
+fn run_test(
+    mut image: JxlImage,
     target_icc: Option<Vec<u8>>,
     expected: Vec<Vec<f32>>,
     expected_peak_error: f32,
@@ -102,17 +102,11 @@ fn run_test<R: std::io::Read>(
         }
     });
 
-    let mut num_keyframes = 0usize;
-    loop {
-        let result = image.render_next_frame().expect("failed to render frame");
-        let render = match result {
-            jxl_oxide::RenderResult::Done(render) => render,
-            jxl_oxide::RenderResult::NeedMoreData => panic!("unexpected end of file"),
-            jxl_oxide::RenderResult::NoMoreFrames => break,
-        };
+    let num_keyframes = image.num_loaded_keyframes();
+    for idx in 0..num_keyframes {
+        let render = image.render_frame(idx).expect("failed to render frame");
         let keyframe_idx = render.keyframe_index();
         let expected = &expected[keyframe_idx];
-        num_keyframes += 1;
 
         eprintln!("Testing keyframe #{keyframe_idx}");
 
@@ -176,6 +170,7 @@ fn run_test<R: std::io::Read>(
     }
 
     assert_eq!(expected.len(), num_keyframes);
+    assert!(image.is_loading_done());
 }
 
 macro_rules! conformance_test {

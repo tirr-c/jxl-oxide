@@ -53,22 +53,18 @@
 //! # Ok(())
 //! # }
 //! ```
-use std::{
-    fs::File,
-    io::Read,
-    path::Path,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 mod fb;
 
+use bitstream::ContainerDetectingReader;
 pub use jxl_bitstream as bitstream;
 pub use jxl_color::header as color;
 pub use jxl_image as image;
 pub use jxl_frame::header as frame;
 
 pub use jxl_bitstream::{Bitstream, Bundle};
-use jxl_bitstream::{ContainerDetectingReader, Name};
+use jxl_bitstream::Name;
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::SimpleGrid;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
@@ -78,62 +74,159 @@ pub use fb::FrameBuffer;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
-/// JPEG XL image.
-#[derive(Debug)]
-pub struct JxlImage<R> {
-    bitstream: Bitstream<ContainerDetectingReader<R>>,
-    image_header: Arc<ImageHeader>,
-    embedded_icc: Option<Vec<u8>>,
-    ctx: RenderContext,
-    render_spot_colour: bool,
-    end_of_image: bool,
+#[derive(Default)]
+pub struct UninitializedJxlImage {
+    reader: ContainerDetectingReader,
+    buffer: Vec<u8>,
 }
 
-impl<R: Read> JxlImage<R> {
-    /// Creates a `JxlImage` from the reader.
-    pub fn from_reader(reader: R) -> Result<Self> {
-        let mut bitstream = Bitstream::new_detect(reader);
-        let image_header = Arc::new(ImageHeader::parse(&mut bitstream, ())?);
+impl UninitializedJxlImage {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-        let embedded_icc = image_header.metadata.colour_encoding.want_icc.then(|| {
+    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
+        self.reader.feed_bytes(buf)?;
+        self.buffer.extend(self.reader.take_bytes());
+        Ok(())
+    }
+
+    pub fn try_init(mut self) -> Result<InitializeResult> {
+        let mut bitstream = Bitstream::new(&self.buffer);
+        let image_header = match ImageHeader::parse(&mut bitstream, ()) {
+            Ok(x) => x,
+            Err(e) if e.unexpected_eof() => {
+                return Ok(InitializeResult::NeedMoreData(self));
+            },
+            Err(e) => {
+                return Err(e.into());
+            },
+        };
+
+        let embedded_icc = if image_header.metadata.colour_encoding.want_icc {
             tracing::debug!("Image has an embedded ICC profile");
-            let icc = jxl_color::icc::read_icc(&mut bitstream)?;
-            jxl_color::icc::decode_icc(&icc)
-        }).transpose()?;
+            let icc = match jxl_color::icc::read_icc(&mut bitstream) {
+                Ok(x) => x,
+                Err(e) if e.unexpected_eof() => {
+                    return Ok(InitializeResult::NeedMoreData(self));
+                },
+                Err(e) => {
+                    return Err(e.into());
+                },
+            };
+            let icc = jxl_color::icc::decode_icc(&icc)?;
+            Some(icc)
+        } else {
+            None
+        };
+        bitstream.zero_pad_to_byte()?;
 
-        if image_header.metadata.preview.is_some() {
-            tracing::debug!("Skipping preview frame");
-            bitstream.zero_pad_to_byte()?;
+        let image_header = Arc::new(image_header);
+        let skip_bytes = if image_header.metadata.preview.is_some() {
+            let frame = match Frame::parse(&mut bitstream, image_header.clone()) {
+                Ok(x) => x,
+                Err(e) if e.unexpected_eof() => {
+                    return Ok(InitializeResult::NeedMoreData(self));
+                },
+                Err(e) => {
+                    return Err(e.into());
+                },
+            };
 
-            let frame = Frame::parse(&mut bitstream, image_header.clone())?;
-            let toc = frame.toc();
-            let bookmark = toc.bookmark() + (toc.total_byte_size() * 8);
-            bitstream.skip_to_bookmark(bookmark)?;
-        }
+            let bytes_read = bitstream.num_read_bits() / 8;
+            let x = frame.toc().total_byte_size() as usize;
+            if self.buffer.len() < bytes_read + x {
+                return Ok(InitializeResult::NeedMoreData(self));
+            }
+
+            x
+        } else {
+            0usize
+        };
+
+        let bytes_read = bitstream.num_read_bits() / 8 + skip_bytes;
+        self.buffer.drain(..bytes_read);
 
         let render_spot_colour = !image_header.metadata.grayscale();
 
-        Ok(Self {
-            bitstream,
+        let mut image = JxlImage {
             image_header: image_header.clone(),
             embedded_icc,
             ctx: RenderContext::new(image_header),
             render_spot_colour,
             end_of_image: false,
-        })
+            buffer: Vec::new(),
+        };
+        image.feed_bytes(&self.buffer)?;
+
+        Ok(InitializeResult::Initialized(image))
     }
 }
 
-impl JxlImage<File> {
-    /// Creates a `JxlImage` from the filesystem.
-    #[inline]
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let file = File::open(path)?;
+pub enum InitializeResult {
+    NeedMoreData(UninitializedJxlImage),
+    Initialized(JxlImage),
+}
+
+/// JPEG XL image.
+#[derive(Debug)]
+pub struct JxlImage {
+    image_header: Arc<ImageHeader>,
+    embedded_icc: Option<Vec<u8>>,
+    ctx: RenderContext,
+    render_spot_colour: bool,
+    end_of_image: bool,
+    buffer: Vec<u8>,
+}
+
+impl JxlImage {
+    pub fn new_uninit() -> UninitializedJxlImage {
+        UninitializedJxlImage::new()
+    }
+
+    pub fn from_reader(mut reader: impl std::io::Read) -> Result<Self> {
+        let mut uninit = Self::new_uninit();
+        let mut buf = vec![0u8; 4096];
+        let mut image = loop {
+            let count = reader.read(&mut buf)?;
+            if count == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "reader ended before parsing image header",
+                ).into());
+            }
+            let buf = &buf[..count];
+            uninit.feed_bytes(buf)?;
+
+            match uninit.try_init()? {
+                InitializeResult::NeedMoreData(x) => {
+                    uninit = x;
+                },
+                InitializeResult::Initialized(x) => {
+                    break x;
+                },
+            }
+        };
+
+        while !image.end_of_image {
+            let count = reader.read(&mut buf)?;
+            if count == 0 {
+                break;
+            }
+            let buf = &buf[..count];
+            image.feed_bytes(buf)?;
+        }
+
+        Ok(image)
+    }
+
+    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
         Self::from_reader(file)
     }
 }
 
-impl<R> JxlImage<R> {
+impl JxlImage {
     /// Returns the image header.
     #[inline]
     pub fn image_header(&self) -> &ImageHeader {
@@ -213,21 +306,74 @@ impl<R> JxlImage<R> {
     }
 }
 
-impl<R: Read> JxlImage<R> {
-    /// Loads the next keyframe, and returns the result with the keyframe index.
-    ///
-    /// Unlike [`render_next_frame`][Self::render_next_frame], this method does not render the
-    /// loaded frame. Use [`render_frame`][Self::render_frame] to render the loaded frame.
-    pub fn load_next_frame(&mut self) -> Result<LoadResult> {
+impl JxlImage {
+    pub fn feed_bytes(&mut self, mut buf: &[u8]) -> Result<()> {
         if self.end_of_image {
-            return Ok(LoadResult::NoMoreFrames);
+            self.buffer.extend_from_slice(buf);
+            return Ok(());
         }
 
-        self.ctx.load_until_keyframe(&mut self.bitstream)?;
+        if let Some(loading_frame) = self.ctx.current_loading_frame() {
+            debug_assert!(self.buffer.is_empty());
+            buf = loading_frame.feed_bytes(buf);
+            if loading_frame.is_loading_done() {
+                let is_last = loading_frame.header().is_last;
+                self.ctx.finalize_current_frame();
+                if is_last {
+                    self.end_of_image = true;
+                    self.buffer = buf.to_vec();
+                    return Ok(());
+                }
+            }
+            if buf.is_empty() {
+                return Ok(());
+            }
+        }
 
-        let keyframe_index = self.ctx.loaded_keyframes() - 1;
-        self.end_of_image = self.frame_header(keyframe_index).unwrap().is_last;
-        Ok(LoadResult::Done(keyframe_index))
+        self.buffer.extend_from_slice(buf);
+        let mut buf = &*self.buffer;
+        while !buf.is_empty() {
+            let mut bitstream = Bitstream::new(buf);
+            let frame = match self.ctx.load_frame_header(&mut bitstream) {
+                Ok(x) => x,
+                Err(e) if e.unexpected_eof() => {
+                    self.buffer = buf.to_vec();
+                    return Ok(());
+                },
+                Err(e) => {
+                    return Err(e.into());
+                },
+            };
+            let read_bytes = bitstream.num_read_bits() / 8;
+            buf = &buf[read_bytes..];
+            buf = frame.feed_bytes(buf);
+
+            if frame.is_loading_done() {
+                let is_last = frame.header().is_last;
+                self.ctx.finalize_current_frame();
+                if is_last {
+                    self.end_of_image = true;
+                    self.buffer = buf.to_vec();
+                    return Ok(());
+                }
+            }
+        }
+
+        self.buffer.clear();
+        Ok(())
+    }
+
+    pub fn try_take_buffer(&mut self) -> Option<Vec<u8>> {
+        if self.end_of_image {
+            Some(std::mem::take(&mut self.buffer))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn is_loading_done(&self) -> bool {
+        self.end_of_image
     }
 
     /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
@@ -285,24 +431,6 @@ impl<R: Read> JxlImage<R> {
     /// Renders the given keyframe.
     pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
         self.render_frame_cropped(keyframe_index, None)
-    }
-
-    /// Loads and renders the next keyframe with optional cropping region.
-    pub fn render_next_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<RenderResult> {
-        let load_result = self.load_next_frame()?;
-        match load_result {
-            LoadResult::Done(keyframe_index) => {
-                let render = self.render_frame_cropped(keyframe_index, image_region)?;
-                Ok(RenderResult::Done(render))
-            },
-            LoadResult::NeedMoreData => Ok(RenderResult::NeedMoreData),
-            LoadResult::NoMoreFrames => Ok(RenderResult::NoMoreFrames),
-        }
-    }
-
-    /// Loads and renders the next keyframe.
-    pub fn render_next_frame(&mut self) -> Result<RenderResult> {
-        self.render_next_frame_cropped(None)
     }
 }
 

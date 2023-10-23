@@ -40,7 +40,7 @@ pub struct LfGroup {
 impl Bundle<LfGroupParams<'_>> for LfGroup {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: LfGroupParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_>) -> Result<Self> {
         let LfGroupParams { frame_header, gmodular, lf_group_idx, .. } = params;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 

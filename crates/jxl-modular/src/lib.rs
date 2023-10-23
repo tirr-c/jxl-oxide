@@ -3,8 +3,6 @@
 //! A Modular image represents a set of grids (two-dimensional arrays) of integer values. Modular
 //! images are used mainly for lossless images, but lossy VarDCT images also use them to store
 //! various information, such as quantized LF images and varblock configurations.
-use std::io::Read;
-
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
 mod error;
@@ -44,8 +42,8 @@ struct ModularData {
 impl Bundle<ModularParams<'_>> for Modular {
     type Error = crate::Error;
 
-    fn parse<R: Read>(
-        bitstream: &mut Bitstream<R>,
+    fn parse(
+        bitstream: &mut Bitstream,
         params: ModularParams<'_>,
     ) -> Result<Self> {
         let inner = if params.channels.is_empty() {
@@ -77,7 +75,7 @@ impl Modular {
 }
 
 impl Modular {
-    pub fn decode_image_gmodular<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn decode_image_gmodular(&mut self, bitstream: &mut Bitstream) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
@@ -87,7 +85,7 @@ impl Modular {
         Ok(())
     }
 
-    pub fn decode_image<R: Read>(&mut self, bitstream: &mut Bitstream<R>, stream_index: u32) -> Result<()> {
+    pub fn decode_image(&mut self, bitstream: &mut Bitstream, stream_index: u32) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
@@ -253,8 +251,8 @@ impl Modular {
 impl Bundle<ModularParams<'_>> for ModularData {
     type Error = crate::Error;
 
-    fn parse<R: Read>(
-        bitstream: &mut Bitstream<R>,
+    fn parse(
+        bitstream: &mut Bitstream,
         params: ModularParams<'_>,
     ) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;

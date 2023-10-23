@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::Read,
     sync::Arc,
 };
 
@@ -145,43 +144,26 @@ impl ContextInner {
 }
 
 impl ContextInner {
-    pub fn load_single<R: Read>(
-        &mut self,
-        bitstream: &mut Bitstream<R>,
-    ) -> Result<&IndexedFrame> {
+    pub(crate) fn load_frame_header(&mut self, bitstream: &mut Bitstream) -> Result<&mut IndexedFrame> {
         let image_header = &self.image_header;
 
-        let frame = match &mut self.loading_frame {
-            Some(frame) => frame,
-            slot => {
-                let mut bitstream = bitstream.rewindable();
-                let frame = Frame::parse(&mut bitstream, image_header.clone())?;
-                bitstream.commit();
-                *slot = Some(IndexedFrame::new(frame, self.frames.len()));
-                slot.as_mut().unwrap()
+        let bitstream_original = bitstream.clone();
+        let frame = match Frame::parse(bitstream, image_header.clone()) {
+            Ok(frame) => frame,
+            Err(e) => {
+                *bitstream = bitstream_original;
+                return Err(e.into());
             },
         };
 
         let header = frame.header();
-        tracing::debug!(
-            index = self.frames.len(),
-            width = header.color_sample_width(),
-            height = header.color_sample_height(),
-            frame_type = ?header.frame_type,
-            encoding = ?header.encoding,
-            jpeg_upsampling = ?header.do_ycbcr.then_some(header.jpeg_upsampling),
-            upsampling = header.upsampling,
-            lf_level = header.lf_level,
-            "Loading frame"
-        );
-
         // Check if LF frame exists
         if header.flags.use_lf_frame() && self.lf_frame[header.lf_level as usize] == usize::MAX {
             return Err(Error::UninitializedLfFrame(header.lf_level));
         }
 
-        frame.read_all(bitstream)?;
-        Ok(frame)
+        self.loading_frame = Some(IndexedFrame::new(frame, self.frames.len()));
+        Ok(self.loading_frame.as_mut().unwrap())
     }
 }
 

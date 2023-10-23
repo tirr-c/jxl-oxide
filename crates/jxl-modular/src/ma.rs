@@ -1,4 +1,4 @@
-use std::{io::Read, collections::VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
@@ -56,7 +56,7 @@ impl MaConfig {
 impl<Ctx> Bundle<Ctx> for MaConfig {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> crate::Result<Self> {
         struct FoldingTreeLeaf {
             ctx: u32,
             predictor: super::predictor::Predictor,
@@ -228,9 +228,9 @@ impl FlatMaTree {
     }
 
     /// Decode a sample with the given state.
-    pub fn decode_sample<R: Read>(
+    pub fn decode_sample(
         &self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         decoder: &mut Decoder,
         properties: &Properties,
         dist_multiplier: u32,

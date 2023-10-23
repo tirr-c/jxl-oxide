@@ -50,7 +50,7 @@ impl TransformInfo {
 impl Bundle<&WpHeader> for TransformInfo {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, wp_header: &WpHeader) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> crate::Result<Self> {
         let tr = bitstream.read_bits(2)?;
         match tr {
             0 => read_bits!(bitstream, Bundle(Rct)).map(Self::Rct),
@@ -99,7 +99,7 @@ pub struct Palette {
 impl Bundle<&WpHeader> for Palette {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, wp_header: &WpHeader) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> Result<Self> {
         let begin_c = read_bits!(bitstream, U32(u(3), 8 + u(6), 72 + u(10), 1096 + u(13)))?;
         let num_c = read_bits!(bitstream, U32(1, 3, 4, 1 + u(13)))?;
         let nb_colours = read_bits!(bitstream, U32(u(8), 256 + u(10), 1280 + u(12), 5376 + u(16)))?;

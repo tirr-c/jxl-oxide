@@ -33,7 +33,7 @@ fn main() {
     let span = tracing::span!(tracing::Level::TRACE, "jxl-info");
     let _guard = span.enter();
 
-    let mut image = JxlImage::open(&args.input).expect("Failed to open file");
+    let image = JxlImage::open(&args.input).expect("Failed to open file");
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
 
@@ -119,16 +119,9 @@ fn main() {
     }
 
     let animated = image_meta.animation.is_some();
-    loop {
-        let result = image.load_next_frame().expect("loading frames failed");
-        let frame_header = match result {
-            jxl_oxide::LoadResult::Done(idx) => {
-                println!("Frame #{idx}");
-                image.frame_header(idx).unwrap()
-            }
-            jxl_oxide::LoadResult::NeedMoreData => panic!("Unexpected end of file"),
-            jxl_oxide::LoadResult::NoMoreFrames => break,
-        };
+    for idx in 0..image.num_loaded_keyframes() {
+        println!("Keyframe #{idx}");
+        let frame_header = image.frame_header(idx).unwrap();
 
         if !frame_header.name.is_empty() {
             println!("  Name: {}", &*frame_header.name);
@@ -144,5 +137,9 @@ fn main() {
         if animated {
             println!("  Duration: {} tick{}", frame_header.duration, if frame_header.duration == 1 { "" } else { "s" });
         }
+    }
+
+    if !image.is_loading_done() {
+        println!("Partial file");
     }
 }

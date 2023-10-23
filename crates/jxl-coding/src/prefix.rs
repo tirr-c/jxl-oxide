@@ -1,6 +1,4 @@
 //! Prefix code based on Brotli
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, read_bits};
 
 use crate::{Error, Result};
@@ -66,7 +64,7 @@ impl Histogram {
         }
     }
 
-    pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
+    pub fn parse(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
         if alphabet_size == 1 {
             return Ok(Self::with_single_symbol(0));
         }
@@ -79,8 +77,8 @@ impl Histogram {
         }
     }
 
-    fn parse_simple<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
-        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros();
+    fn parse_simple(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
+        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros() as usize;
         let nsym = read_bits!(bitstream, u(2))? + 1;
         let it = match nsym {
             1 => {
@@ -139,7 +137,7 @@ impl Histogram {
         Self::with_code_lengths(code_lengths)
     }
 
-    fn parse_complex<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32, hskip: u32) -> Result<Self> {
+    fn parse_complex(bitstream: &mut Bitstream, alphabet_size: u32, hskip: u32) -> Result<Self> {
         const CODE_LENGTH_ORDER: [usize; 18] = [
             1, 2, 3, 4, 0, 5,
             17, 6, 16, 7, 8, 9,
@@ -264,7 +262,7 @@ impl Histogram {
 
 impl Histogram {
     #[inline]
-    pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<u16> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u16> {
         let Self { configs, symbols } = self;
         let mut bits = 0u32;
         for config in configs {

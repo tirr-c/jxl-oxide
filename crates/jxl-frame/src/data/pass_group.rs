@@ -29,8 +29,8 @@ pub struct PassGroupParamsVardct<'frame, 'buf, 'g> {
     pub hf_coeff_output: &'buf mut [CutGrid<'g, f32>; 3],
 }
 
-pub fn decode_pass_group<R: std::io::Read>(
-    bitstream: &mut Bitstream<R>,
+pub fn decode_pass_group(
+    bitstream: &mut Bitstream,
     params: PassGroupParams,
 ) -> Result<()> {
     let PassGroupParams {

@@ -27,7 +27,7 @@ pub struct HfPass {
 impl Bundle<HfPassParams<'_>> for HfPass {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: HfPassParams<'_>) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: HfPassParams<'_>) -> crate::Result<Self> {
         let HfPassParams { hf_block_ctx, num_hf_presets } = params;
         let mut used_orders = read_bits!(bitstream, U32(0x5F, 0x13, 0x00, u(13)))?;
         let mut decoder = (used_orders != 0)

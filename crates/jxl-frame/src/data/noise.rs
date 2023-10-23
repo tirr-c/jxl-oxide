@@ -6,8 +6,8 @@ pub struct NoiseParameters {
 impl<Ctx> jxl_bitstream::Bundle<Ctx> for NoiseParameters {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(
-        bitstream: &mut jxl_bitstream::Bitstream<R>,
+    fn parse(
+        bitstream: &mut jxl_bitstream::Bitstream,
         _: Ctx,
     ) -> crate::Result<Self> {
         let mut lut = [0.0f32; 8];

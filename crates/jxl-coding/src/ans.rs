@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, read_bits};
 
 use crate::{Error, Result};
@@ -20,7 +18,7 @@ struct Bucket {
 }
 
 impl Histogram {
-    pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, log_alphabet_size: u32) -> Result<Self> {
+    pub fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> Result<Self> {
         let table_size = (1u16 << log_alphabet_size) as usize;
         let log_bucket_size = 12 - log_alphabet_size;
         let bucket_size = 1u16 << log_bucket_size;
@@ -66,7 +64,7 @@ impl Histogram {
             dist[leftover..alphabet_size].fill(base as u16);
         } else {
             // compressed distribution info
-            let mut len = 0u32;
+            let mut len = 0usize;
             while len < 3 {
                 if read_bits!(bitstream, Bool)? {
                     len += 1;
@@ -145,7 +143,7 @@ impl Histogram {
                 if *code > 1 {
                     let zeros = (*code - 1) as i16;
                     let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
-                    *code = (1 << zeros) + ((bitstream.read_bits(bitcount as u32)? as u16) << (zeros - bitcount));
+                    *code = (1 << zeros) + ((bitstream.read_bits(bitcount as usize)? as u16) << (zeros - bitcount));
                 }
                 prev_dist = *code;
                 acc += *code;
@@ -222,9 +220,9 @@ impl Histogram {
         })
     }
 
-    fn read_u8<R: Read>(bitstream: &mut Bitstream<R>) -> Result<u8> {
+    fn read_u8(bitstream: &mut Bitstream) -> Result<u8> {
         Ok(if read_bits!(bitstream, Bool)? {
-            let n = bitstream.read_bits(3)?;
+            let n = bitstream.read_bits(3)? as usize;
             ((1 << n) + bitstream.read_bits(n)?) as u8
         } else {
             0
@@ -244,7 +242,7 @@ impl Histogram {
         }
     }
 
-    pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>, state: &mut u32) -> Result<u16> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u16> {
         let idx = (*state & 0xfff) as u16;
         let (symbol, offset) = self.map_alias(idx);
         *state = (*state >> 12) * (self.buckets[symbol as usize].dist as u32) + offset as u32;
@@ -265,7 +263,7 @@ impl Histogram {
     }
 }
 
-fn read_prefix<R: Read>(bitstream: &mut Bitstream<R>) -> Result<u16> {
+fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
     Ok(match bitstream.read_bits(3)? {
         0 => 10,
         1 => {

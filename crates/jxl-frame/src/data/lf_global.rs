@@ -33,7 +33,7 @@ pub struct LfGlobal {
 impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
         let patches = header.flags.patches().then(|| -> Result<_> {
             let span = tracing::span!(tracing::Level::TRACE, "Decode Patches");
             let _guard = span.enter();
@@ -114,7 +114,7 @@ impl GlobalModular {
 impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
         let _guard = span.enter();
 

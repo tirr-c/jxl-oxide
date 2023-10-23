@@ -5,7 +5,6 @@
 //!
 //! Image header is at the beginning of the bitstream. One can parse [`ImageHeader`] from the
 //! bitstream to retrieve information about the image.
-use std::io::Read;
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Result, Name};
 use jxl_color::header::*;
 
@@ -23,7 +22,7 @@ pub struct ImageHeader {
 impl<Ctx> Bundle<Ctx> for ImageHeader {
     type Error = jxl_bitstream::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> Result<Self> {
         let signature = bitstream.read_bits(16)?;
         if signature != 0xaff {
             return Err(jxl_bitstream::Error::ValidationFailed(
@@ -267,7 +266,7 @@ pub struct ExtraChannelInfo {
 impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
     type Error = jxl_bitstream::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> Result<Self> {
         let default_alpha_channel = bitstream.read_bool()?;
         if default_alpha_channel {
             return Ok(Self::default());
@@ -473,7 +472,7 @@ impl BitDepth {
 impl<Ctx> Bundle<Ctx> for BitDepth {
     type Error = jxl_bitstream::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         if bitstream.read_bool()? { // float_sample
             let bits_per_sample = read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
             let exp_bits = read_bits!(bitstream, 1 + u(4))?;

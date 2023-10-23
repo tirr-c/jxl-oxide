@@ -76,4 +76,13 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl Error {
+    pub fn unexpected_eof(&self) -> bool {
+        if let Error::Io(e) = self {
+            return e.kind() == std::io::ErrorKind::UnexpectedEof;
+        }
+        false
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
