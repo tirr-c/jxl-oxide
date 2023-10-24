@@ -22,8 +22,13 @@ mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use x86_64 as impls;
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+use aarch64 as impls;
+
 mod generic;
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 use generic as impls;
 
 pub fn copy_lf_dequant(

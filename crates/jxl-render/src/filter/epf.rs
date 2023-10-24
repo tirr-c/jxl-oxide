@@ -18,7 +18,7 @@ pub fn apply_epf(
         ..
     } = frame_header.restoration_filter.epf else { return; };
 
-    let span = tracing::span!(tracing::Level::TRACE, "apply_epf");
+    let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
 
     let region = fb.region();

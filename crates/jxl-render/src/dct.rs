@@ -8,7 +8,7 @@ pub enum DctDirection {
 }
 
 #[cfg(
-    not(target_arch = "x86_64")
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
 )]
 pub use generic::*;
 
@@ -16,3 +16,8 @@ pub use generic::*;
 mod x86_64;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::*;

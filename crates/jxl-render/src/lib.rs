@@ -116,7 +116,7 @@ impl RenderContext {
 
 impl RenderContext {
     fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
-        let span = tracing::span!(tracing::Level::TRACE, "RenderContext::render_by_index", index);
+        let span = tracing::span!(tracing::Level::TRACE, "Render by index", index);
         let _guard = span.enter();
 
         let frame = &self.inner.frames[index];
@@ -168,8 +168,16 @@ impl RenderContext {
         }
 
         let deps = self.inner.frame_deps[index];
-        for dep in deps.indices() {
-            self.render_by_index(dep, image_region)?;
+        let indices: Vec<_> = deps.indices().collect();
+        if !indices.is_empty() {
+            tracing::trace!(
+                "Depends on {} {}",
+                indices.len(),
+                if indices.len() == 1 { "frame" } else { "frames" },
+            );
+            for dep in indices {
+                self.render_by_index(dep, image_region)?;
+            }
         }
 
         tracing::debug!(index, ?image_region, ?frame_region, "Rendering frame");
