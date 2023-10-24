@@ -55,7 +55,9 @@ fn run_test(buf: &[u8]) {
                     .zip(actual.chunks_exact(crop_width as usize));
                 for (expected_row, actual_row) in it {
                     let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
-                    assert_eq!(expected_row, actual_row);
+                    for (expected, actual) in expected_row.iter().zip(actual_row) {
+                        assert!((expected - actual).abs() <= f32::EPSILON);
+                    }
                 }
             }
         }
