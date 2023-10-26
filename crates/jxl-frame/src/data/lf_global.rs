@@ -168,7 +168,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
             ma_config.as_ref(),
         );
         let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
-        modular.decode_image_gmodular(bitstream)?;
+        modular.decode_image_gmodular(bitstream, false)?;
 
         Ok(Self {
             ma_config,

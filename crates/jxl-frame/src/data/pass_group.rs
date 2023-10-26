@@ -20,6 +20,7 @@ pub struct PassGroupParams<'frame, 'buf, 'g> {
     pub shift: Option<(i32, i32)>,
     pub gmodular: &'g mut GlobalModular,
     pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
+    pub allow_partial: bool,
 }
 
 #[derive(Debug)]
@@ -41,6 +42,7 @@ pub fn decode_pass_group(
         shift,
         gmodular,
         vardct,
+        allow_partial,
     } = params;
 
     if let (Some(PassGroupParamsVardct { lf_vardct, hf_global, hf_coeff_output }), Some(hf_meta)) = (vardct, &lf_group.hf_meta) {
@@ -87,13 +89,20 @@ pub fn decode_pass_group(
             coeff_shift,
         };
 
-        write_hf_coeff(bitstream, params, hf_coeff_output)?;
+        match write_hf_coeff(bitstream, params, hf_coeff_output) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded HfCoeff");
+                return Ok(());
+            },
+            Err(e) => return Err(e.into()),
+            Ok(_) => {},
+        };
     }
 
     if let Some((minshift, maxshift)) = shift {
         let modular_params = gmodular.modular.make_subimage_params_pass_group(gmodular.ma_config.as_ref(), group_idx, minshift, maxshift);
         let mut modular = Modular::parse(bitstream, modular_params)?;
-        modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx)?;
+        modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx, allow_partial)?;
         modular.inverse_transform();
         gmodular.modular.copy_from_modular(modular);
     }

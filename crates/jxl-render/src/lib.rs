@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
-use jxl_frame::{Frame, data::TocGroupKind, header::FrameType};
+use jxl_frame::{Frame, header::FrameType};
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ExtraChannelType};
 
@@ -102,14 +102,10 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
-        let span = tracing::span!(tracing::Level::TRACE, "Render by index", index);
-        let _guard = span.enter();
-
-        let frame = &self.inner.frames[index];
+    fn image_region_to_frame(frame: &Frame, image_region: Option<Region>) -> Region {
         let image_header = frame.image_header();
         let frame_header = frame.header();
-        let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
+        if frame_header.frame_type == FrameType::ReferenceOnly {
             Region::with_size(frame_header.width, frame_header.height)
         } else if let Some(image_region) = image_region {
             let image_width = image_header.width_with_orientation();
@@ -146,7 +142,15 @@ impl RenderContext {
         } else {
             Region::with_size(image_header.size.width, image_header.size.height)
                 .translate(-frame_header.x0, -frame_header.y0)
-        }.downsample(frame_header.lf_level * 3);
+        }.downsample(frame_header.lf_level * 3)
+    }
+
+    fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
+        let span = tracing::span!(tracing::Level::TRACE, "Render by index", index);
+        let _guard = span.enter();
+
+        let frame = &self.inner.frames[index];
+        let frame_region = Self::image_region_to_frame(frame, image_region);
 
         if let FrameRender::Done(image) = &self.state.renders[index] {
             if image.region().contains(frame_region) {
@@ -222,11 +226,10 @@ impl RenderContext {
             let frame = &self.inner.frames[idx];
             (frame, grid.clone_intersection(frame_region))
         } else {
-            // TODO: apply crop region to loading frame.
             let mut current_frame_grid = None;
             if let Some(frame) = &self.inner.loading_frame {
                 if frame.header().frame_type.is_normal_frame() {
-                    let ret = self.render_loading_frame();
+                    let ret = self.render_loading_frame(image_region);
                     match ret {
                         Ok(grid) => current_frame_grid = Some(grid),
                         Err(Error::IncompleteFrame) => {},
@@ -263,25 +266,25 @@ impl RenderContext {
         Ok(grid)
     }
 
-    fn render_loading_frame(&mut self) -> Result<ImageWithRegion> {
+    fn render_loading_frame(&mut self, image_region: Option<Region>) -> Result<ImageWithRegion> {
         let frame = self.inner.loading_frame.as_ref().unwrap();
         let header = frame.header();
-        let region = Region::with_size(header.width, header.height);
-        if frame.data(TocGroupKind::LfGlobal).is_none() {
+        let frame_region = Self::image_region_to_frame(frame, image_region);
+        if frame.try_parse_lf_global().is_none() {
             return Err(Error::IncompleteFrame);
         }
 
-        let lf_frame = if header.flags.use_lf_frame() {
-            let lf_frame_idx = self.inner.lf_frame[header.lf_level as usize];
-            self.render_by_index(lf_frame_idx, None)?;
-            Some(Reference {
-                frame: &self.inner.frames[lf_frame_idx],
-                image: self.state.renders[lf_frame_idx].as_grid().unwrap(),
-            })
-        } else {
-            None
-        };
+        let lf_frame_idx = self.inner.lf_frame[header.lf_level as usize];
+        if header.flags.use_lf_frame() {
+            self.render_by_index(lf_frame_idx, image_region)?;
+        }
+        for idx in self.inner.reference {
+            if idx != usize::MAX {
+                self.render_by_index(idx, image_region)?;
+            }
+        }
 
+        tracing::debug!(?image_region, ?frame_region, "Rendering loading frame");
         let frame = self.inner.loading_frame.as_ref().unwrap();
         if self.state.loading_render_cache.is_none() {
             self.state.loading_render_cache = Some(RenderCache::new(frame));
@@ -289,11 +292,17 @@ impl RenderContext {
         let Some(cache) = &mut self.state.loading_render_cache else { unreachable!() };
 
         let reference_frames = ReferenceFrames {
-            lf: lf_frame,
-            refs: [None; 4],
+            lf: (lf_frame_idx != usize::MAX).then(|| Reference {
+                frame: &self.inner.frames[lf_frame_idx],
+                image: self.state.renders[lf_frame_idx].as_grid().unwrap(),
+            }),
+            refs: self.inner.reference.map(|r| (r != usize::MAX).then(|| Reference {
+                frame: &self.inner.frames[r],
+                image: self.state.renders[r].as_grid().unwrap(),
+            })),
         };
 
-        self.inner.render_frame(frame, reference_frames, cache, region)
+        self.inner.render_frame(frame, reference_frames, cache, frame_region)
     }
 }
 

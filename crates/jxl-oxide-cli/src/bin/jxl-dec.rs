@@ -171,12 +171,21 @@ fn main() {
         let frame = image.render_frame(idx).expect("rendering frames failed");
         keyframes.push(frame);
     }
+    if let Ok(frame) = image.render_frame(image.num_loaded_keyframes()) {
+        tracing::warn!("Rendered partially loaded frame");
+        keyframes.push(frame);
+    }
 
     let elapsed = decode_start.elapsed();
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     tracing::info!("Took {:.2} ms", elapsed_ms);
 
     if let Some(output) = &args.output {
+        if keyframes.is_empty() {
+            tracing::warn!("No keyframes are decoded");
+            return;
+        }
+
         tracing::debug!(output_format = format_args!("{:?}", args.output_format));
         let pixel_format = image.pixel_format();
         let output = std::fs::File::create(output).expect("failed to open output file");

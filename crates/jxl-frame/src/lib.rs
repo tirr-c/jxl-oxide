@@ -204,7 +204,7 @@ impl Frame {
         let mut bitstream = Bitstream::new(&group.bytes);
         let result = (|| -> Result<_> {
             let lf_global = LfGlobal::parse(&mut bitstream, (&self.image_header, &self.header))?;
-            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, &lf_global, 0))?;
+            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, &lf_global, 0, false))?;
             let hf_global = (self.header.encoding == header::Encoding::VarDct).then(|| {
                 HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global))
             }).transpose()?;
@@ -230,6 +230,10 @@ impl Frame {
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGlobal);
             let group = self.data.get(idx)?;
+            if group.bytes.len() < group.toc_group.size as usize {
+                return None;
+            }
+
             let mut bitstream = Bitstream::new(&group.bytes);
             LfGlobal::parse(&mut bitstream, (&self.image_header, &self.header))
         })
@@ -244,6 +248,8 @@ impl Frame {
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
             let group = self.data.get(idx)?;
+            let allow_partial = group.bytes.len() < group.toc_group.size as usize;
+
             let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = if cached_lf_global.is_none() {
                 match self.try_parse_lf_global()? {
@@ -254,7 +260,11 @@ impl Frame {
                 None
             };
             let lf_global = cached_lf_global.or(lf_global.as_ref()).unwrap();
-            Some(LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, lf_global, lf_group_idx)))
+            let result = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, lf_global, lf_group_idx, allow_partial));
+            if allow_partial && result.is_err() {
+                return None;
+            }
+            Some(result)
         }
     }
 
@@ -268,6 +278,10 @@ impl Frame {
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::HfGlobal);
             let group = self.data.get(idx)?;
+            if group.bytes.len() < group.toc_group.size as usize {
+                return None;
+            }
+
             let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = if cached_lf_global.is_none() {
                 match self.try_parse_lf_global()? {
@@ -283,15 +297,29 @@ impl Frame {
         }
     }
 
-    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<Bitstream>> {
-        if self.toc.is_single_entry() {
-            Some(self.try_parse_all()?.map(|x| x.pass_group_bitstream))
+    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<PassGroupBitstream>> {
+        Some(if self.toc.is_single_entry() {
+            self.try_parse_all()?.map(|group| PassGroupBitstream {
+                bitstream: group.pass_group_bitstream,
+                partial: self.data[0].bytes.len() < self.data[0].toc_group.size as usize,
+            })
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::GroupPass { pass_idx, group_idx });
             let group = self.data.get(idx)?;
-            Some(Ok(Bitstream::new(&group.bytes)))
-        }
+            let partial = group.bytes.len() < group.toc_group.size as usize;
+
+            Ok(PassGroupBitstream {
+                bitstream: Bitstream::new(&group.bytes),
+                partial,
+            })
+        })
     }
+}
+
+#[derive(Debug)]
+pub struct PassGroupBitstream<'buf> {
+    pub bitstream: Bitstream<'buf>,
+    pub partial: bool,
 }
 
 impl Frame {

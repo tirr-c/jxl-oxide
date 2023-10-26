@@ -10,6 +10,15 @@ pub struct ContainerDetectingReader {
     next_jxlp_index: u32,
 }
 
+impl std::fmt::Debug for ContainerDetectingReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContainerDetectingReader")
+            .field("state", &self.state)
+            .field("next_jxlp_index", &self.next_jxlp_index)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Default)]
 enum DetectState {
     #[default]

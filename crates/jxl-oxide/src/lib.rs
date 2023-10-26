@@ -150,6 +150,7 @@ impl UninitializedJxlImage {
         let render_spot_colour = !image_header.metadata.grayscale();
 
         let mut image = JxlImage {
+            reader: self.reader,
             image_header: image_header.clone(),
             embedded_icc,
             ctx: RenderContext::new(image_header),
@@ -157,7 +158,7 @@ impl UninitializedJxlImage {
             end_of_image: false,
             buffer: Vec::new(),
         };
-        image.feed_bytes(&self.buffer)?;
+        image.feed_bytes_inner(&self.buffer)?;
 
         Ok(InitializeResult::Initialized(image))
     }
@@ -171,6 +172,7 @@ pub enum InitializeResult {
 /// JPEG XL image.
 #[derive(Debug)]
 pub struct JxlImage {
+    reader: ContainerDetectingReader,
     image_header: Arc<ImageHeader>,
     embedded_icc: Option<Vec<u8>>,
     ctx: RenderContext,
@@ -307,7 +309,17 @@ impl JxlImage {
 }
 
 impl JxlImage {
-    pub fn feed_bytes(&mut self, mut buf: &[u8]) -> Result<()> {
+    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
+        self.reader.feed_bytes(buf)?;
+        let buf = &*self.reader.take_bytes();
+        self.feed_bytes_inner(buf)
+    }
+
+    fn feed_bytes_inner(&mut self, mut buf: &[u8]) -> Result<()> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+
         if self.end_of_image {
             self.buffer.extend_from_slice(buf);
             return Ok(());
@@ -369,6 +381,14 @@ impl JxlImage {
         } else {
             None
         }
+    }
+
+    pub fn reader(&self) -> &ContainerDetectingReader {
+        &self.reader
+    }
+
+    pub fn reader_mut(&mut self) -> &mut ContainerDetectingReader {
+        &mut self.reader
     }
 
     #[inline]

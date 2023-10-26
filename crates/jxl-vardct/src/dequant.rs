@@ -466,7 +466,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                     global_ma_config,
                 );
                 let mut params = Modular::parse(bitstream, modular_params)?;
-                params.decode_image(bitstream, stream_index)?;
+                params.decode_image(bitstream, stream_index, false)?;
                 params.inverse_transform();
 
                 Raw { denominator, params }

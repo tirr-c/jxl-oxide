@@ -75,21 +75,34 @@ impl Modular {
 }
 
 impl Modular {
-    pub fn decode_image_gmodular(&mut self, bitstream: &mut Bitstream) -> Result<()> {
+    pub fn decode_image_gmodular(&mut self, bitstream: &mut Bitstream, allow_partial: bool) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
         let (mut subimage, channel_mapping) = image.image.for_global_modular();
-        subimage.decode_channels(bitstream, 0, wp_header, ma_ctx)?;
+        match subimage.decode_channels(bitstream, 0, wp_header, ma_ctx) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded Modular image");
+            },
+            Err(e) => return Err(e),
+            Ok(_) => {},
+        }
         image.image.copy_from_image(subimage, &channel_mapping);
         Ok(())
     }
 
-    pub fn decode_image(&mut self, bitstream: &mut Bitstream, stream_index: u32) -> Result<()> {
+    pub fn decode_image(&mut self, bitstream: &mut Bitstream, stream_index: u32, allow_partial: bool) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
-        image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx)
+        match image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded Modular image");
+                Ok(())
+            },
+            Err(e) => Err(e),
+            Ok(_) => Ok(()),
+        }
     }
 
     /// Apply inverse transforms to the decoded image.

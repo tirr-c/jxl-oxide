@@ -17,15 +17,17 @@ pub struct LfGroupParams<'a> {
     quantizer: Option<&'a Quantizer>,
     gmodular: &'a GlobalModular,
     lf_group_idx: u32,
+    allow_partial: bool,
 }
 
 impl<'a> LfGroupParams<'a> {
-    pub fn new(frame_header: &'a FrameHeader, lf_global: &'a LfGlobal, lf_group_idx: u32) -> Self {
+    pub fn new(frame_header: &'a FrameHeader, lf_global: &'a LfGlobal, lf_group_idx: u32, allow_partial: bool) -> Self {
         Self {
             frame_header,
             quantizer: lf_global.vardct.as_ref().map(|vardct| &vardct.quantizer),
             gmodular: &lf_global.gmodular,
             lf_group_idx,
+            allow_partial,
         }
     }
 }
@@ -42,6 +44,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
 
     fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_>) -> Result<Self> {
         let LfGroupParams { frame_header, gmodular, lf_group_idx, .. } = params;
+        let allow_partial = frame_header.encoding != Encoding::VarDct && params.allow_partial;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 
         let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
@@ -53,6 +56,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
                     jpeg_upsampling: frame_header.jpeg_upsampling,
                     bits_per_sample: frame_header.bit_depth.bits_per_sample(),
                     global_ma_config: gmodular.ma_config(),
+                    allow_partial,
                 };
                 LfCoeff::parse(bitstream, lf_coeff_params)
             })
@@ -61,7 +65,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
         let mlf_group_params = gmodular.modular
             .make_subimage_params_lf_group(gmodular.ma_config.as_ref(), lf_group_idx);
         let mut mlf_group = read_bits!(bitstream, Bundle(Modular), mlf_group_params.clone())?;
-        mlf_group.decode_image(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx)?;
+        mlf_group.decode_image(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
         mlf_group.inverse_transform();
 
         let hf_meta = (frame_header.encoding == Encoding::VarDct)

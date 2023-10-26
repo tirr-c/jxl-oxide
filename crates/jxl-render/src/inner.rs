@@ -513,7 +513,9 @@ impl ContextInner {
             for group_idx in 0..frame_header.num_groups() {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-                let Some(mut bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                let allow_partial = bitstream.partial;
+                let mut bitstream = bitstream.bitstream;
 
                 let group_x = group_idx % groups_per_row;
                 let group_y = group_idx / groups_per_row;
@@ -531,7 +533,7 @@ impl ContextInner {
                 }
 
                 let shift = frame.pass_shifts(pass_idx);
-                decode_pass_group(
+                let result = decode_pass_group(
                     &mut bitstream,
                     PassGroupParams {
                         frame_header,
@@ -541,8 +543,12 @@ impl ContextInner {
                         shift,
                         gmodular: &mut gmodular,
                         vardct: None,
+                        allow_partial,
                     },
-                )?;
+                );
+                if !allow_partial {
+                    result?;
+                }
             }
         }
 
@@ -686,14 +692,6 @@ impl ContextInner {
         let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
         let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
 
-        let hf_global = if let Some(x) = &cache.hf_global {
-            x
-        } else {
-            let hf_global = frame.try_parse_hf_global(Some(lf_global)).ok_or(Error::IncompleteFrame)??;
-            cache.hf_global = Some(hf_global);
-            cache.hf_global.as_ref().unwrap()
-        };
-
         let mut fb_xyb = ImageWithRegion::from_region(3, aligned_region);
         let fb_stride = aligned_region.width as usize;
 
@@ -820,13 +818,23 @@ impl ContextInner {
             }
         }
 
+        let hf_global = if let Some(x) = &cache.hf_global {
+            Some(x)
+        } else {
+            cache.hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
+            cache.hf_global.as_ref()
+        };
+
         tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
+            let Some(hf_global) = hf_global else { return Ok(()); };
             let groups_per_row = frame_header.groups_per_row();
             for pass_idx in 0..frame_header.passes.num_passes {
                 for group_idx in 0..frame_header.num_groups() {
                     let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                     let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-                    let Some(mut bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                    let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                    let allow_partial = bitstream.partial;
+                    let mut bitstream = bitstream.bitstream;
 
                     let group_x = group_idx % groups_per_row;
                     let group_y = group_idx / groups_per_row;
@@ -872,7 +880,7 @@ impl ContextInner {
                     };
 
                     let shift = frame.pass_shifts(pass_idx);
-                    decode_pass_group(
+                    let result = decode_pass_group(
                         &mut bitstream,
                         PassGroupParams {
                             frame_header,
@@ -882,8 +890,12 @@ impl ContextInner {
                             shift,
                             gmodular: &mut gmodular,
                             vardct,
+                            allow_partial,
                         },
-                    )?;
+                    );
+                    if !allow_partial {
+                        result?;
+                    }
                 }
             }
             Ok(())
@@ -894,6 +906,7 @@ impl ContextInner {
         });
 
         tracing::trace_span!("Dequant HF").in_scope(|| {
+            let Some(hf_global) = hf_global else { return; };
             vardct::dequant_hf_varblock(
                 &mut fb_xyb,
                 &self.image_header,
@@ -906,6 +919,9 @@ impl ContextInner {
 
         if let Some(cfl) = hf_cfl_data {
             tracing::trace_span!("HF CfL").in_scope(|| {
+                if hf_global.is_none() {
+                    return;
+                }
                 vardct::chroma_from_luma_hf(&mut fb_xyb, &cfl);
             });
         }
