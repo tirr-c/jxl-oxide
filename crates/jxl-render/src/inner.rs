@@ -138,7 +138,7 @@ impl ContextInner {
     }
 
     pub(crate) fn loading_frame(&self) -> Option<&IndexedFrame> {
-        let search_from = self.keyframe_in_progress.unwrap_or(0);
+        let search_from = self.keyframe_in_progress.or_else(|| self.keyframes.last().map(|x| x + 1)).unwrap_or(0);
         self.frames[search_from..].iter().chain(self.loading_frame.as_ref()).rev().find(|x| x.header().frame_type.is_progressive_frame())
     }
 }
