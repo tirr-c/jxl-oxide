@@ -71,7 +71,7 @@ jobs:
           RUSTDOCFLAGS: '-Cpanic=abort'
       - name: Run grcov
         run: |
-          zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" \) -print`
+          zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" -or -name "crop-*.gc*" \) -print`
           grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore '../**' --ignore "/*" -o coverage.lcov
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
