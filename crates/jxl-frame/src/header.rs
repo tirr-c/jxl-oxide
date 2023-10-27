@@ -341,6 +341,10 @@ impl FrameType {
     pub fn is_normal_frame(&self) -> bool {
         matches!(self, Self::RegularFrame | Self::SkipProgressive)
     }
+
+    pub fn is_progressive_frame(&self) -> bool {
+        matches!(self, Self::RegularFrame | Self::LfFrame)
+    }
 }
 
 impl<Ctx> Bundle<Ctx> for FrameType {

@@ -86,16 +86,16 @@ impl Modular {
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
         let (mut subimage, channel_mapping) = image.image.for_global_modular();
-        let partial = channel_mapping.len() < image.channels.info.len();
         match subimage.decode_channels(bitstream, 0, wp_header, ma_ctx) {
             Err(e) if e.unexpected_eof() && allow_partial => {
                 tracing::debug!("Partially decoded Modular image");
             },
             Err(e) => return Err(e),
-            Ok(_) => {},
+            Ok(_) => {
+                self.partial = false;
+            },
         }
         image.image.copy_from_image(subimage, &channel_mapping);
-        self.partial = partial;
         Ok(())
     }
 

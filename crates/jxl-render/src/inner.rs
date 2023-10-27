@@ -76,17 +76,12 @@ impl ContextInner {
 
     #[inline]
     pub fn loaded_keyframes(&self) -> usize {
-        self.keyframes.len() + (self.keyframe_in_progress.is_some() as usize)
+        self.keyframes.len()
     }
 
     pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame> {
         if keyframe_idx == self.keyframes.len() {
-            if let Some(idx) = self.keyframe_in_progress {
-                Some(&self.frames[idx])
-            } else {
-                let Some(frame) = &self.loading_frame else { return None; };
-                frame.header().is_keyframe().then_some(frame)
-            }
+            self.loading_frame()
         } else if let Some(&idx) = self.keyframes.get(keyframe_idx) {
             Some(&self.frames[idx])
         } else {
@@ -140,6 +135,11 @@ impl ContextInner {
 
         self.frames.push(frame);
         self.frame_deps.push(deps);
+    }
+
+    pub(crate) fn loading_frame(&self) -> Option<&IndexedFrame> {
+        let search_from = self.keyframe_in_progress.unwrap_or(0);
+        self.frames[search_from..].iter().chain(self.loading_frame.as_ref()).rev().find(|x| x.header().frame_type.is_progressive_frame())
     }
 }
 
@@ -226,9 +226,21 @@ impl ContextInner {
         color_padded_region = color_padded_region.intersection(full_frame_region);
 
         let (mut fb, gmodular) = match frame_header.encoding {
-            Encoding::Modular => self.render_modular(frame, cache, color_padded_region),
-            Encoding::VarDct => self.render_vardct(frame, reference_frames.lf, cache, color_padded_region),
-        }?;
+            Encoding::Modular => {
+                let (grid, gmodular) = self.render_modular(frame, cache, color_padded_region)?;
+                (grid, Some(gmodular))
+            },
+            Encoding::VarDct => {
+                let result = self.render_vardct(frame, reference_frames.lf, cache, color_padded_region);
+                match (result, reference_frames.lf) {
+                    (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
+                    (Err(e), Some(lf)) if e.unexpected_eof() => {
+                        (super::upsample_lf(lf.image, lf.frame, frame_region), None)
+                    },
+                    (Err(e), _) => return Err(e),
+                }
+            },
+        };
         if fb.region().intersection(full_frame_region) != fb.region() {
             let mut new_fb = fb.clone_intersection(full_frame_region);
             std::mem::swap(&mut fb, &mut new_fb);
@@ -244,7 +256,9 @@ impl ContextInner {
         filter::apply_epf(&mut fb, &cache.lf_groups, frame_header);
 
         self.upsample_color_channels(&mut fb, frame_header, frame_region);
-        self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
+        if let Some(gmodular) = gmodular {
+            self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
+        }
 
         self.render_features(frame, &mut fb, reference_frames.refs, cache)?;
 

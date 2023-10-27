@@ -102,10 +102,10 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn image_region_to_frame(frame: &Frame, image_region: Option<Region>) -> Region {
+    fn image_region_to_frame(frame: &Frame, image_region: Option<Region>, ignore_lf_level: bool) -> Region {
         let image_header = frame.image_header();
         let frame_header = frame.header();
-        if frame_header.frame_type == FrameType::ReferenceOnly {
+        let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
             Region::with_size(frame_header.width, frame_header.height)
         } else if let Some(image_region) = image_region {
             let image_width = image_header.width_with_orientation();
@@ -142,7 +142,13 @@ impl RenderContext {
         } else {
             Region::with_size(image_header.size.width, image_header.size.height)
                 .translate(-frame_header.x0, -frame_header.y0)
-        }.downsample(frame_header.lf_level * 3)
+        };
+
+        if ignore_lf_level {
+            frame_region
+        } else {
+            frame_region.downsample(frame_header.lf_level * 3)
+        }
     }
 
     fn render_by_index(&mut self, index: usize, image_region: Option<Region>) -> Result<Region> {
@@ -150,7 +156,7 @@ impl RenderContext {
         let _guard = span.enter();
 
         let frame = &self.inner.frames[index];
-        let frame_region = Self::image_region_to_frame(frame, image_region);
+        let frame_region = Self::image_region_to_frame(frame, image_region, false);
 
         if let FrameRender::Done(image) = &self.state.renders[index] {
             if image.region().contains(frame_region) {
@@ -227,19 +233,17 @@ impl RenderContext {
             (frame, grid.clone_intersection(frame_region))
         } else {
             let mut current_frame_grid = None;
-            if let Some(frame) = &self.inner.loading_frame {
-                if frame.header().frame_type.is_normal_frame() {
-                    let ret = self.render_loading_frame(image_region);
-                    match ret {
-                        Ok(grid) => current_frame_grid = Some(grid),
-                        Err(Error::IncompleteFrame) => {},
-                        Err(e) => return Err(e),
-                    }
+            if self.inner.loading_frame().is_some() {
+                let ret = self.render_loading_frame(image_region);
+                match ret {
+                    Ok(grid) => current_frame_grid = Some(grid),
+                    Err(Error::IncompleteFrame) => {},
+                    Err(e) => return Err(e),
                 }
             }
 
             if let Some(grid) = current_frame_grid {
-                let frame = self.inner.loading_frame.as_ref().unwrap();
+                let frame = self.inner.loading_frame().unwrap();
                 (frame, grid)
             } else if let Some(idx) = self.inner.keyframe_in_progress {
                 let frame_region = self.render_by_index(idx, image_region)?;
@@ -267,9 +271,13 @@ impl RenderContext {
     }
 
     fn render_loading_frame(&mut self, image_region: Option<Region>) -> Result<ImageWithRegion> {
-        let frame = self.inner.loading_frame.as_ref().unwrap();
+        let frame = self.inner.loading_frame().unwrap();
+        if !frame.header().frame_type.is_progressive_frame() {
+            return Err(Error::IncompleteFrame);
+        }
+
         let header = frame.header();
-        let frame_region = Self::image_region_to_frame(frame, image_region);
+        let frame_region = Self::image_region_to_frame(frame, image_region, false);
         if frame.try_parse_lf_global().is_none() {
             return Err(Error::IncompleteFrame);
         }
@@ -285,7 +293,7 @@ impl RenderContext {
         }
 
         tracing::debug!(?image_region, ?frame_region, "Rendering loading frame");
-        let frame = self.inner.loading_frame.as_ref().unwrap();
+        let frame = self.inner.loading_frame().unwrap();
         if self.state.loading_render_cache.is_none() {
             self.state.loading_render_cache = Some(RenderCache::new(frame));
         }
@@ -302,8 +310,40 @@ impl RenderContext {
             })),
         };
 
-        self.inner.render_frame(frame, reference_frames, cache, frame_region)
+        let image = self.inner.render_frame(frame, reference_frames, cache, frame_region)?;
+        if frame.header().lf_level > 0 {
+            let frame_region = Self::image_region_to_frame(frame, image_region, true);
+            Ok(upsample_lf(&image, frame, frame_region))
+        } else {
+            Ok(image)
+        }
     }
+}
+
+fn upsample_lf(image: &ImageWithRegion, frame: &IndexedFrame, frame_region: Region) -> ImageWithRegion {
+    let factor = frame.header().lf_level * 3;
+    let step = 1usize << factor;
+    let new_region = image.region().upsample(factor);
+    let mut new_image = ImageWithRegion::from_region(image.channels(), new_region);
+    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
+        let height = original.height();
+        let width = original.width();
+        let stride = target.width();
+
+        let original = original.buf();
+        let target = target.buf_mut();
+        for y in 0..height {
+            let original = &original[y * width..];
+            let target = &mut target[y * step * stride..];
+            for (x, &value) in original[..width].iter().enumerate() {
+                target[x * step..][..step].fill(value);
+            }
+            for row in 1..step {
+                target.copy_within(..stride, stride * row);
+            }
+        }
+    }
+    new_image.clone_intersection(frame_region)
 }
 
 #[derive(Debug)]

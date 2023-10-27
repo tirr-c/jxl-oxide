@@ -30,10 +30,28 @@ pub struct LfGlobal {
     pub gmodular: GlobalModular,
 }
 
-impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
+#[derive(Debug, Clone, Copy)]
+pub struct LfGlobalParams<'a> {
+    pub image_header: &'a ImageHeader,
+    pub frame_header: &'a FrameHeader,
+    pub allow_partial: bool,
+}
+
+impl<'a> LfGlobalParams<'a> {
+    pub fn new(image_header: &'a ImageHeader, frame_header: &'a FrameHeader, allow_partial: bool) -> Self {
+        Self {
+            image_header,
+            frame_header,
+            allow_partial,
+        }
+    }
+}
+
+impl Bundle<LfGlobalParams<'_>> for LfGlobal {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfGlobalParams<'_>) -> Result<Self> {
+        let LfGlobalParams { image_header, frame_header: header, .. } = params;
         let patches = header.flags.patches().then(|| -> Result<_> {
             let span = tracing::span!(tracing::Level::TRACE, "Decode Patches");
             let _guard = span.enter();
@@ -72,7 +90,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for LfGlobal {
         let vardct = (header.encoding == crate::header::Encoding::VarDct).then(|| {
             read_bits!(bitstream, Bundle(LfGlobalVarDct))
         }).transpose()?;
-        let gmodular = read_bits!(bitstream, Bundle(GlobalModular), (image_header, header))?;
+        let gmodular = read_bits!(bitstream, Bundle(GlobalModular), params)?;
 
         Ok(Self {
             patches,
@@ -111,10 +129,11 @@ impl GlobalModular {
     }
 }
 
-impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
+impl Bundle<LfGlobalParams<'_>> for GlobalModular {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, (image_header, header): (&ImageHeader, &FrameHeader)) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfGlobalParams<'_>) -> Result<Self> {
+        let LfGlobalParams { image_header, frame_header: header, allow_partial } = params;
         let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
         let _guard = span.enter();
 
@@ -168,7 +187,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for GlobalModular {
             ma_config.as_ref(),
         );
         let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
-        modular.decode_image_gmodular(bitstream, false)?;
+        modular.decode_image_gmodular(bitstream, allow_partial)?;
 
         Ok(Self {
             ma_config,
