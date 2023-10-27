@@ -769,9 +769,10 @@ impl ContextInner {
                     );
                 }
 
+                let Some(hf_meta) = &lf_group.hf_meta else { continue; };
+
                 if let Some(cfl) = &mut hf_cfl_data {
                     let corr = &lf_global_vardct.lf_chan_corr;
-                    let hf_meta = lf_group.hf_meta.as_ref().unwrap();
                     let [x_from_y, b_from_y] = cfl.buffer_mut() else { panic!() };
                     let group_x_from_y = &hf_meta.x_from_y;
                     let group_b_from_y = &hf_meta.b_from_y;
@@ -832,6 +833,9 @@ impl ContextInner {
                 for group_idx in 0..frame_header.num_groups() {
                     let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                     let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
+                    if lf_group.hf_meta.is_none() {
+                        continue;
+                    }
                     let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
                     let allow_partial = bitstream.partial;
                     let mut bitstream = bitstream.bitstream;

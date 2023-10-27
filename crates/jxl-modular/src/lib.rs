@@ -27,6 +27,7 @@ pub use param::*;
 #[derive(Debug, Clone, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
+    partial: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +52,8 @@ impl Bundle<ModularParams<'_>> for Modular {
         } else {
             Some(read_bits!(bitstream, Bundle(ModularData), params)?)
         };
-        Ok(Self { inner })
+        let partial = inner.is_some();
+        Ok(Self { inner, partial })
     }
 }
 
@@ -63,6 +65,10 @@ impl Modular {
 }
 
 impl Modular {
+    pub fn is_partial(&self) -> bool {
+        self.partial
+    }
+
     pub fn has_palette(&self) -> bool {
         let Some(image) = &self.inner else { return false; };
         image.header.transform.iter().any(|tr| tr.is_palette())
@@ -80,6 +86,7 @@ impl Modular {
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
         let (mut subimage, channel_mapping) = image.image.for_global_modular();
+        let partial = channel_mapping.len() < image.channels.info.len();
         match subimage.decode_channels(bitstream, 0, wp_header, ma_ctx) {
             Err(e) if e.unexpected_eof() && allow_partial => {
                 tracing::debug!("Partially decoded Modular image");
@@ -88,6 +95,7 @@ impl Modular {
             Ok(_) => {},
         }
         image.image.copy_from_image(subimage, &channel_mapping);
+        self.partial = partial;
         Ok(())
     }
 
@@ -101,7 +109,10 @@ impl Modular {
                 Ok(())
             },
             Err(e) => Err(e),
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                self.partial = false;
+                Ok(())
+            },
         }
     }
 

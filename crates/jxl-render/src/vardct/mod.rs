@@ -285,10 +285,39 @@ pub fn transform_with_lf(
 
     for lf_group_idx in 0..frame_header.num_lf_groups() {
         let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-        let hf_meta = lf_group.hf_meta.as_ref().unwrap();
-
         let lf_left = (lf_group_idx % frame_header.lf_groups_per_row()) * frame_header.lf_group_dim();
         let lf_top = (lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim();
+
+        let Some(hf_meta) = &lf_group.hf_meta else {
+            for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
+                let shift = shifts_cbycr[channel];
+                let vshift = shift.vshift();
+                let hshift = shift.hshift();
+
+                let (width, height) = frame_header.lf_group_size_for(lf_group_idx);
+                let left = (lf_left >> hshift) as usize;
+                let top = (lf_top >> vshift) as usize;
+                let width = (width >> hshift) as usize;
+                let height = (height >> vshift) as usize;
+                let stride = coeff.width();
+                let lf_stride = lf.width();
+
+                let coeff = coeff.buf_mut();
+                let lf = lf.buf();
+                for y8 in 0..height / 8 {
+                    let coeff_base = &mut coeff[(top + y8 * 8) * stride + left..];
+                    for x8 in 0..width / 8 {
+                        let v = lf[(top / 8 + y8) * lf_stride + (left / 8 + x8)];
+                        let count = (width - x8 * 8).min(8);
+                        coeff_base[x8 * 8..][..count].fill(v);
+                    }
+                    for row in 1..(height - y8 * 8).min(8) {
+                        coeff_base.copy_within(..width, stride * row);
+                    }
+                }
+            }
+            continue;
+        };
 
         let block_info = &hf_meta.block_info;
         let w8 = block_info.width();

@@ -43,8 +43,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_>) -> Result<Self> {
-        let LfGroupParams { frame_header, gmodular, lf_group_idx, .. } = params;
-        let allow_partial = frame_header.encoding != Encoding::VarDct && params.allow_partial;
+        let LfGroupParams { frame_header, gmodular, lf_group_idx, allow_partial, .. } = params;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 
         let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
@@ -62,13 +61,19 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
             })
             .transpose()?;
 
+        if let Some(lf_coeff_inner) = &lf_coeff {
+            if lf_coeff_inner.lf_quant.is_partial() {
+                return Ok(Self { lf_coeff, mlf_group: Modular::empty(), hf_meta: None });
+            }
+        }
+
         let mlf_group_params = gmodular.modular
             .make_subimage_params_lf_group(gmodular.ma_config.as_ref(), lf_group_idx);
         let mut mlf_group = read_bits!(bitstream, Bundle(Modular), mlf_group_params.clone())?;
         mlf_group.decode_image(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
         mlf_group.inverse_transform();
 
-        let hf_meta = (frame_header.encoding == Encoding::VarDct)
+        let hf_meta = (frame_header.encoding == Encoding::VarDct && !mlf_group.is_partial())
             .then(|| {
                 let hf_meta_params = HfMetadataParams {
                     num_lf_groups: frame_header.num_lf_groups(),
@@ -88,8 +93,14 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
                 };
                 HfMetadata::parse(bitstream, hf_meta_params)
             })
-            .transpose()?;
-
-        Ok(Self { lf_coeff, mlf_group, hf_meta })
+            .transpose();
+        match hf_meta {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Decoded partial HfMeta");
+                Ok(Self { lf_coeff, mlf_group, hf_meta: None })
+            },
+            Err(e) => Err(e.into()),
+            Ok(hf_meta) => Ok(Self { lf_coeff, mlf_group, hf_meta }),
+        }
     }
 }
