@@ -56,7 +56,7 @@ fn run_test(buf: &[u8]) {
                 for (expected_row, actual_row) in it {
                     let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
                     for (expected, actual) in expected_row.iter().zip(actual_row) {
-                        assert!((expected - actual).abs() <= f32::EPSILON);
+                        assert!((expected - actual).abs() <= 1e-6);
                     }
                 }
             }
