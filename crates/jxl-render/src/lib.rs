@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
-use jxl_frame::{Frame, header::FrameType};
+use jxl_frame::{Frame, header::FrameType, data::{GlobalModular, LfGroup, LfGlobal}};
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ExtraChannelType};
 
@@ -12,6 +12,7 @@ mod error;
 mod features;
 mod filter;
 mod inner;
+mod modular;
 mod region;
 mod vardct;
 pub use error::{Error, Result};
@@ -446,5 +447,42 @@ pub fn render_spot_colour(
             channel[i] = mix * color + (1.0 - mix) * channel[i];
         });
     });
+    Ok(())
+}
+
+fn load_lf_groups(
+    frame: &IndexedFrame,
+    lf_global: &LfGlobal,
+    lf_groups: &mut std::collections::HashMap<u32, LfGroup>,
+    lf_region: Region,
+    gmodular: &mut GlobalModular,
+) -> Result<()> {
+    let frame_header = frame.header();
+    let lf_groups_per_row = frame_header.lf_groups_per_row();
+    let group_dim = frame_header.group_dim();
+    for idx in 0..frame_header.num_lf_groups() {
+        let left = (idx % lf_groups_per_row) * group_dim;
+        let top = (idx / lf_groups_per_row) * group_dim;
+        let lf_group_region = Region {
+            left: left as i32,
+            top: top as i32,
+            width: group_dim,
+            height: group_dim,
+        };
+        if lf_region.intersection(lf_group_region).is_empty() {
+            continue;
+        }
+
+        let lf_group = lf_groups.entry(idx);
+        let lf_group = match lf_group {
+            std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
+            std::collections::hash_map::Entry::Vacant(x) => {
+                let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
+                &*x.insert(lf_group)
+            },
+        };
+        gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
+    }
+
     Ok(())
 }
