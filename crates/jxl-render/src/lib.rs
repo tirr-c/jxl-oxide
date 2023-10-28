@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
 use jxl_frame::{Frame, header::FrameType, data::{GlobalModular, LfGroup, LfGlobal}};
-use jxl_grid::SimpleGrid;
-use jxl_image::{ImageHeader, ExtraChannelType};
+use jxl_image::ImageHeader;
 
 mod blend;
 mod dct;
@@ -14,12 +13,15 @@ mod filter;
 mod inner;
 mod modular;
 mod region;
+mod state;
 mod vardct;
 pub use error::{Error, Result};
+pub use features::render_spot_color;
 pub use region::Region;
 
 use inner::*;
 use region::ImageWithRegion;
+use state::*;
 
 /// Render context that tracks loaded and rendered frames.
 #[derive(Debug)]
@@ -321,74 +323,6 @@ impl RenderContext {
     }
 }
 
-fn upsample_lf(image: &ImageWithRegion, frame: &IndexedFrame, frame_region: Region) -> ImageWithRegion {
-    let factor = frame.header().lf_level * 3;
-    let step = 1usize << factor;
-    let new_region = image.region().upsample(factor);
-    let mut new_image = ImageWithRegion::from_region(image.channels(), new_region);
-    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
-        let height = original.height();
-        let width = original.width();
-        let stride = target.width();
-
-        let original = original.buf();
-        let target = target.buf_mut();
-        for y in 0..height {
-            let original = &original[y * width..];
-            let target = &mut target[y * step * stride..];
-            for (x, &value) in original[..width].iter().enumerate() {
-                target[x * step..][..step].fill(value);
-            }
-            for row in 1..step {
-                target.copy_within(..stride, stride * row);
-            }
-        }
-    }
-    new_image.clone_intersection(frame_region)
-}
-
-#[derive(Debug)]
-struct RenderState {
-    renders: Vec<FrameRender>,
-    loading_render_cache: Option<RenderCache>,
-}
-
-impl RenderState {
-    fn new() -> Self {
-        Self {
-            renders: Vec::new(),
-            loading_render_cache: None,
-        }
-    }
-}
-
-impl RenderState {
-    fn preserve_current_frame(&mut self) {
-        if let Some(cache) = self.loading_render_cache.take() {
-            self.renders.push(FrameRender::InProgress(Box::new(cache)));
-        } else {
-            self.renders.push(FrameRender::None);
-        }
-    }
-}
-
-#[derive(Debug)]
-enum FrameRender {
-    None,
-    InProgress(Box<RenderCache>),
-    Done(ImageWithRegion),
-}
-
-impl FrameRender {
-    fn as_grid(&self) -> Option<&ImageWithRegion> {
-        if let Self::Done(grid) = self {
-            Some(grid)
-        } else {
-            None
-        }
-    }
-}
-
 /// Frame with its index in the image.
 #[derive(Debug)]
 pub struct IndexedFrame {
@@ -419,35 +353,6 @@ impl std::ops::DerefMut for IndexedFrame {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.f
     }
-}
-
-/// Renders a spot color channel onto color_channels
-pub fn render_spot_colour(
-    color_channels: &mut [SimpleGrid<f32>],
-    ec_grid: &SimpleGrid<f32>,
-    ec_ty: &ExtraChannelType,
-) -> Result<()> {
-    let ExtraChannelType::SpotColour { red, green, blue, solidity } = ec_ty else {
-        return Err(Error::NotSupported("not a spot colour ec"));
-    };
-    if color_channels.len() != 3 {
-        return Ok(())
-    }
-
-    let spot_colors = [red, green, blue];
-    let s = ec_grid.buf();
-
-    (0..3).for_each(|c| {
-        let channel = color_channels[c].buf_mut();
-        let color = spot_colors[c];
-        assert_eq!(channel.len(), s.len());
-
-        (0..channel.len()).for_each(|i| {
-            let mix = s[i] * solidity;
-            channel[i] = mix * color + (1.0 - mix) * channel[i];
-        });
-    });
-    Ok(())
 }
 
 fn load_lf_groups(
@@ -485,4 +390,30 @@ fn load_lf_groups(
     }
 
     Ok(())
+}
+
+fn upsample_lf(image: &ImageWithRegion, frame: &IndexedFrame, frame_region: Region) -> ImageWithRegion {
+    let factor = frame.header().lf_level * 3;
+    let step = 1usize << factor;
+    let new_region = image.region().upsample(factor);
+    let mut new_image = ImageWithRegion::from_region(image.channels(), new_region);
+    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
+        let height = original.height();
+        let width = original.width();
+        let stride = target.width();
+
+        let original = original.buf();
+        let target = target.buf_mut();
+        for y in 0..height {
+            let original = &original[y * width..];
+            let target = &mut target[y * step * stride..];
+            for (x, &value) in original[..width].iter().enumerate() {
+                target[x * step..][..step].fill(value);
+            }
+            for row in 1..step {
+                target.copy_within(..stride, stride * row);
+            }
+        }
+    }
+    new_image.clone_intersection(frame_region)
 }

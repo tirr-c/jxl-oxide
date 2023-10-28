@@ -17,7 +17,8 @@ use crate::{
     region::ImageWithRegion,
     Region,
     IndexedFrame,
-    inner::{Reference, RenderCache},
+    inner::Reference,
+    RenderCache,
     Error,
     Result, modular,
 };

@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::{
@@ -12,7 +9,6 @@ use jxl_frame::{
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ImageMetadata};
-use jxl_modular::ChannelShift;
 
 use crate::{
     blend,
@@ -24,6 +20,7 @@ use crate::{
     Result,
     Error,
     region::{Region, ImageWithRegion},
+    state::RenderCache,
 };
 
 #[derive(Debug)]
@@ -473,35 +470,4 @@ pub struct ReferenceFrames<'state> {
 pub struct Reference<'state> {
     pub(crate) frame: &'state IndexedFrame,
     pub(crate) image: &'state ImageWithRegion,
-}
-
-#[derive(Debug)]
-pub struct RenderCache {
-    pub(crate) lf_global: Option<LfGlobal>,
-    pub(crate) hf_global: Option<HfGlobal>,
-    pub(crate) lf_groups: HashMap<u32, LfGroup>,
-}
-
-impl RenderCache {
-    pub fn new(frame: &IndexedFrame) -> Self {
-        let frame_header = frame.header();
-        let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-            ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
-        });
-
-        let lf_width = (frame_header.color_sample_width() + 7) / 8;
-        let lf_height = (frame_header.color_sample_height() + 7) / 8;
-        let mut whd = [(lf_width, lf_height); 3];
-        for ((w, h), shift) in whd.iter_mut().zip(shifts_cbycr) {
-            let (shift_w, shift_h) = shift.shift_size((lf_width, lf_height));
-            *w = shift_w;
-            *h = shift_h;
-        }
-        Self {
-            lf_global: None,
-            hf_global: None,
-            lf_groups: HashMap::new(),
-        }
-    }
 }

@@ -520,7 +520,7 @@ impl JxlImage {
         if self.render_spot_colour {
             for ec in &extra_channels {
                 if ec.is_spot_colour() {
-                    jxl_render::render_spot_colour(&mut color_channels, &ec.grid, &ec.ty)?;
+                    jxl_render::render_spot_color(&mut color_channels, &ec.grid, &ec.ty)?;
                 }
             }
         }

@@ -5,7 +5,7 @@ use jxl_modular::ChannelShift;
 
 use crate::{
     Region,
-    inner::RenderCache,
+    RenderCache,
     IndexedFrame,
     region::ImageWithRegion,
     Error,
