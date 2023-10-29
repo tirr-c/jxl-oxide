@@ -139,6 +139,20 @@ impl Toc {
     }
 }
 
+impl Toc {
+    pub(crate) fn adjust_offsets(&mut self, global_frame_offset: usize) {
+        if global_frame_offset == 0 {
+            return;
+        }
+
+        for group in &mut self.groups {
+            group.offset = group.offset
+                .checked_sub(global_frame_offset)
+                .expect("group offset is smaller than global frame offset");
+        }
+    }
+}
+
 impl Bundle<&crate::FrameHeader> for Toc {
     type Error = crate::Error;
 

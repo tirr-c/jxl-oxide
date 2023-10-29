@@ -66,6 +66,7 @@ impl Bundle<Arc<ImageHeader>> for Frame {
 
     fn parse(bitstream: &mut Bitstream, image_header: Arc<ImageHeader>) -> Result<Self> {
         bitstream.zero_pad_to_byte()?;
+        let base_offset = bitstream.num_read_bits() / 8;
         let header = read_bits!(bitstream, Bundle(FrameHeader), &image_header)?;
 
         for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
@@ -109,7 +110,8 @@ impl Bundle<Arc<ImageHeader>> for Frame {
             ).into());
         }
 
-        let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
+        let mut toc = read_bits!(bitstream, Bundle(Toc), &header)?;
+        toc.adjust_offsets(base_offset);
         let data = toc.iter_bitstream_order().map(GroupData::from).collect();
 
         let passes = &header.passes;
