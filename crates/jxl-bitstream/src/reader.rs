@@ -30,8 +30,24 @@ enum DetectState {
         data: Vec<u8>,
         bytes_left: Option<usize>,
     },
-    InCodestream(Option<usize>),
-    Done,
+    InCodestream {
+        kind: BitstreamKind,
+        bytes_left: Option<usize>,
+    },
+    Done(BitstreamKind),
+}
+
+/// Structure of the decoded bitstream.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BitstreamKind {
+    /// Decoder can't determine structure of the bitstream.
+    Unknown,
+    /// Bitstream is a direct JPEG XL codestream without box structure.
+    BareCodestream,
+    /// Bitstream is a JPEG XL container with box structure.
+    Container,
+    /// Bitstream is not a valid JPEG XL image.
+    Invalid,
 }
 
 impl ContainerDetectingReader {
@@ -40,6 +56,17 @@ impl ContainerDetectingReader {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn kind(&self) -> BitstreamKind {
+        match self.state {
+            | DetectState::WaitingSignature => BitstreamKind::Unknown,
+            | DetectState::WaitingBoxHeader
+            | DetectState::WaitingJxlpIndex(..)
+            | DetectState::InAuxBox { .. } => BitstreamKind::Container,
+            | DetectState::InCodestream { kind, .. }
+            | DetectState::Done(kind) => kind,
+        }
     }
 
     pub fn feed_bytes(&mut self, input: &[u8]) -> std::io::Result<()> {
@@ -52,7 +79,10 @@ impl ContainerDetectingReader {
                 DetectState::WaitingSignature => {
                     if buf.starts_with(&Self::CODESTREAM_SIG) {
                         tracing::debug!("Codestream signature found");
-                        *state = DetectState::InCodestream(None);
+                        *state = DetectState::InCodestream {
+                            kind: BitstreamKind::BareCodestream,
+                            bytes_left: None,
+                        };
                         continue;
                     }
                     if buf.starts_with(&Self::CONTAINER_SIG) {
@@ -63,7 +93,10 @@ impl ContainerDetectingReader {
                     }
                     if !Self::CODESTREAM_SIG.starts_with(buf) && !Self::CONTAINER_SIG.starts_with(buf) {
                         tracing::error!("Invalid signature");
-                        *state = DetectState::InCodestream(None);
+                        *state = DetectState::InCodestream {
+                            kind: BitstreamKind::Invalid,
+                            bytes_left: None,
+                        };
                         continue;
                     }
                     return Ok(());
@@ -89,7 +122,10 @@ impl ContainerDetectingReader {
                                 }
 
                                 self.next_jxlp_index = u32::MAX;
-                                *state = DetectState::InCodestream(header.size().map(|x| x as usize));
+                                *state = DetectState::InCodestream {
+                                    kind: BitstreamKind::Container,
+                                    bytes_left: header.size().map(|x| x as usize),
+                                };
                             } else if tbox == ContainerBoxType::PARTIAL_CODESTREAM {
                                 if self.next_jxlp_index == u32::MAX {
                                     tracing::error!("jxlp box found after jxlc box");
@@ -152,14 +188,17 @@ impl ContainerDetectingReader {
                         self.next_jxlp_index += 1;
                     }
 
-                    *state = DetectState::InCodestream(header.size().map(|x| x as usize - 4));
+                    *state = DetectState::InCodestream {
+                        kind: BitstreamKind::Container,
+                        bytes_left: header.size().map(|x| x as usize - 4),
+                    };
                 },
-                DetectState::InCodestream(None) => {
+                DetectState::InCodestream { bytes_left: None, .. } => {
                     self.codestream.extend_from_slice(buf);
                     buf.clear();
                     return Ok(());
                 },
-                DetectState::InCodestream(Some(bytes_left)) => {
+                DetectState::InCodestream { bytes_left: Some(bytes_left), .. } => {
                     if *bytes_left <= buf.len() {
                         self.codestream.extend(buf.drain(..*bytes_left));
                         *state = DetectState::WaitingBoxHeader;
@@ -187,7 +226,7 @@ impl ContainerDetectingReader {
                         return Ok(());
                     }
                 },
-                DetectState::Done => return Ok(()),
+                DetectState::Done(_) => return Ok(()),
             }
         }
     }
@@ -200,6 +239,6 @@ impl ContainerDetectingReader {
         if let DetectState::InAuxBox { header, data, .. } = &mut self.state {
             self.aux_boxes.push((header.box_type(), std::mem::take(data)));
         }
-        self.state = DetectState::Done;
+        self.state = DetectState::Done(self.kind());
     }
 }
