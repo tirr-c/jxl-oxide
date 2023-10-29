@@ -49,7 +49,7 @@ impl std::fmt::Debug for Toc {
 pub struct TocGroup {
     /// Kind of the group.
     pub kind: TocGroupKind,
-    /// Offset within the bitstream.
+    /// Offset from the beginning of frame header.
     pub offset: usize,
     /// Size of the group.
     pub size: u32,

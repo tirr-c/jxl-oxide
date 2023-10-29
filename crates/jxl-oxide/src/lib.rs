@@ -515,14 +515,17 @@ impl JxlImage {
         Some(frame.header())
     }
 
+    /// Returns frame data by keyframe index.
     pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
         self.ctx.keyframe(keyframe_index)
     }
 
+    /// Returns frame data by frame index, including frames that are not displayed directly.
     pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
         self.ctx.frame(frame_idx)
     }
 
+    /// Returns the offset of frame within codestream, in bytes.
     pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
         self.frame_offsets.get(frame_index).copied()
     }
@@ -532,6 +535,8 @@ impl JxlImage {
         self.ctx.loaded_keyframes()
     }
 
+    /// Returns the number of currently loaded frames, including frames that are not displayed
+    /// directly.
     pub fn num_loaded_frames(&self) -> usize {
         self.ctx.loaded_frames()
     }
