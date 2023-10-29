@@ -4,10 +4,12 @@ coverage:
     project:
       default: false
       cli:
-        paths: 'crates/jxl-oxide-cli'
+        paths:
+          - 'crates/jxl-oxide-cli/'
         informational: true
       lib:
-        paths: '!crates/jxl-oxide-cli'
+        paths:
+          - '!crates/jxl-oxide-cli/'
         informational: true
     patch:
       default:
