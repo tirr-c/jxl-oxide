@@ -61,7 +61,7 @@ pub struct HfBlockContext {
 impl<Ctx> Bundle<Ctx> for HfBlockContext {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, _: Ctx) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> crate::Result<Self> {
         let mut qf_thresholds = Vec::new();
         let mut lf_thresholds = [Vec::new(), Vec::new(), Vec::new()];
         let (num_block_clusters, block_ctx_map) = if bitstream.read_bool()? {
@@ -120,6 +120,7 @@ pub struct LfCoeffParams<'ma> {
     pub jpeg_upsampling: [u32; 3],
     pub bits_per_sample: u32,
     pub global_ma_config: Option<&'ma MaConfig>,
+    pub allow_partial: bool,
 }
 
 /// Quantized LF image.
@@ -132,7 +133,7 @@ pub struct LfCoeff {
 impl Bundle<LfCoeffParams<'_>> for LfCoeff {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: LfCoeffParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfCoeffParams<'_>) -> Result<Self> {
         let LfCoeffParams {
             lf_group_idx,
             lf_width,
@@ -140,6 +141,7 @@ impl Bundle<LfCoeffParams<'_>> for LfCoeff {
             jpeg_upsampling,
             bits_per_sample,
             global_ma_config,
+            allow_partial,
         } = params;
 
         let extra_precision = bitstream.read_bits(2)? as u8;
@@ -159,7 +161,7 @@ impl Bundle<LfCoeffParams<'_>> for LfCoeff {
             global_ma_config,
         );
         let mut lf_quant = Modular::parse(bitstream, lf_quant_params)?;
-        lf_quant.decode_image(bitstream, 1 + lf_group_idx)?;
+        lf_quant.decode_image(bitstream, 1 + lf_group_idx, allow_partial)?;
         lf_quant.inverse_transform();
         Ok(Self { extra_precision, lf_quant })
     }

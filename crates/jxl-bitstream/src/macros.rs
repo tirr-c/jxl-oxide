@@ -177,7 +177,7 @@ macro_rules! make_parse {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+            fn parse(bitstream: &mut $crate::Bitstream, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;
@@ -212,7 +212,7 @@ macro_rules! make_parse {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
             #[allow(unused_variables)]
-            fn parse<R: ::std::io::Read>(bitstream: &mut $crate::Bitstream<R>, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+            fn parse(bitstream: &mut $crate::Bitstream, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;

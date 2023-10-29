@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, read_bits};
 
 use crate::{Error, Result};
@@ -11,17 +9,32 @@ pub struct Histogram {
     single_symbol: Option<u16>,
 }
 
-#[derive(Debug)]
+// Ported from libjxl. log_alphabet_size <= 8 and log_bucket_size <= 7, so u8 is sufficient for
+// symbols and cutoffs. alias_dist_xor allows branchless dist computation for alias symbol.
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
 struct Bucket {
+    alias_symbol: u8,
+    alias_cutoff: u8,
     dist: u16,
-    alias_symbol: u16,
     alias_offset: u16,
-    alias_cutoff: u16,
+    alias_dist_xor: u16,
 }
 
 impl Histogram {
-    pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, log_alphabet_size: u32) -> Result<Self> {
+    // log_alphabet_size: 5 + u(2)
+    pub fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> Result<Self> {
+        #[derive(Debug)]
+        struct WorkingBucket {
+            dist: u16,
+            alias_symbol: u16,
+            alias_offset: u16,
+            alias_cutoff: u16,
+        }
+
+        debug_assert!((5..=8).contains(&log_alphabet_size));
         let table_size = (1u16 << log_alphabet_size) as usize;
+        // 4 <= log_bucket_size <= 7
         let log_bucket_size = 12 - log_alphabet_size;
         let bucket_size = 1u16 << log_bucket_size;
 
@@ -66,7 +79,7 @@ impl Histogram {
             dist[leftover..alphabet_size].fill(base as u16);
         } else {
             // compressed distribution info
-            let mut len = 0u32;
+            let mut len = 0usize;
             while len < 3 {
                 if read_bits!(bitstream, Bool)? {
                     len += 1;
@@ -145,7 +158,7 @@ impl Histogram {
                 if *code > 1 {
                     let zeros = (*code - 1) as i16;
                     let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
-                    *code = (1 << zeros) + ((bitstream.read_bits(bitcount as u32)? as u16) << (zeros - bitcount));
+                    *code = (1 << zeros) + ((bitstream.read_bits(bitcount as usize)? as u16) << (zeros - bitcount));
                 }
                 prev_dist = *code;
                 acc += *code;
@@ -161,9 +174,10 @@ impl Histogram {
                 .enumerate()
                 .map(|(i, dist)| Bucket {
                     dist,
-                    alias_symbol: single_sym_idx as u16,
+                    alias_symbol: single_sym_idx as u8,
                     alias_offset: bucket_size * i as u16,
                     alias_cutoff: 0,
+                    alias_dist_xor: dist ^ (1 << 12),
                 })
                 .collect();
             return Ok(Self {
@@ -176,7 +190,7 @@ impl Histogram {
         let mut buckets: Vec<_> = dist
             .into_iter()
             .enumerate()
-            .map(|(i, dist)| Bucket {
+            .map(|(i, dist)| WorkingBucket {
                 dist,
                 alias_symbol: if i < alphabet_size { i as u16 } else { 0 },
                 alias_offset: 0,
@@ -186,7 +200,7 @@ impl Histogram {
 
         let mut underfull = Vec::new();
         let mut overfull = Vec::new();
-        for (idx, &Bucket { dist, .. }) in buckets.iter().enumerate() {
+        for (idx, &WorkingBucket { dist, .. }) in buckets.iter().enumerate() {
             match dist.cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(idx),
                 std::cmp::Ordering::Equal => {},
@@ -205,15 +219,29 @@ impl Histogram {
             }
         }
 
-        for (idx, bucket) in buckets.iter_mut().enumerate() {
-            if bucket.alias_cutoff == bucket_size {
-                bucket.alias_symbol = idx as u16;
-                bucket.alias_offset = 0;
-                bucket.alias_cutoff = 0;
-            } else {
-                bucket.alias_offset -= bucket.alias_cutoff;
-            }
-        }
+        let buckets = buckets
+            .iter()
+            .enumerate()
+            .map(|(idx, bucket)| {
+                if bucket.alias_cutoff == bucket_size {
+                    Bucket {
+                        dist: bucket.dist,
+                        alias_symbol: idx as u8,
+                        alias_offset: 0,
+                        alias_cutoff: 0,
+                        alias_dist_xor: 0,
+                    }
+                } else {
+                    Bucket {
+                        dist: bucket.dist,
+                        alias_symbol: bucket.alias_symbol as u8,
+                        alias_offset: bucket.alias_offset - bucket.alias_cutoff,
+                        alias_cutoff: bucket.alias_cutoff as u8,
+                        alias_dist_xor: bucket.dist ^ buckets[bucket.alias_symbol as usize].dist,
+                    }
+                }
+            })
+            .collect();
 
         Ok(Self {
             buckets,
@@ -222,10 +250,10 @@ impl Histogram {
         })
     }
 
-    fn read_u8<R: Read>(bitstream: &mut Bitstream<R>) -> Result<u8> {
+    fn read_u8(bitstream: &mut Bitstream) -> Result<u8> {
         Ok(if read_bits!(bitstream, Bool)? {
             let n = bitstream.read_bits(3)?;
-            ((1 << n) + bitstream.read_bits(n)?) as u8
+            ((1 << n) + bitstream.read_bits(n as usize)?) as u8
         } else {
             0
         })
@@ -233,29 +261,64 @@ impl Histogram {
 }
 
 impl Histogram {
-    fn map_alias(&self, idx: u16) -> (u16, u16) {
+    /// # Safety
+    ///
+    /// `idx` should be 12 bits.
+    #[inline]
+    unsafe fn map_alias(&self, idx: u32) -> (u16, u32, u32) {
+        assert_eq!(std::mem::size_of::<Bucket>(), 8);
+        let is_le = usize::from_le(1) == 1;
+
         let i = (idx >> self.log_bucket_size) as usize;
-        let pos = idx & ((1 << self.log_bucket_size) - 1);
-        let bucket = &self.buckets[i];
-        if pos >= bucket.alias_cutoff {
-            (bucket.alias_symbol, bucket.alias_offset + pos)
+        let pos = (idx & ((1 << self.log_bucket_size) - 1)) as usize;
+        // SAFETY: idx is 12 bits, buckets.len() << log_bucket_size == 1 << 12.
+        let bucket = *self.buckets.get_unchecked(i);
+        // SAFETY: all bit patterns are valid.
+        let bucket_int = std::mem::transmute::<Bucket, u64>(bucket);
+
+        // Ported from libjxl; this makes map_alias branchless.
+        let (alias_symbol, alias_cutoff, dist) = if is_le {
+            (
+                (bucket_int & 0xff) as usize,
+                ((bucket_int >> 8) & 0xff) as usize,
+                ((bucket_int >> 16) & 0xffff) as usize,
+            )
         } else {
-            (i as u16, pos)
-        }
+            (bucket.alias_symbol as usize, bucket.alias_cutoff as usize, bucket.dist as usize)
+        };
+
+        let map_to_alias = pos >= alias_cutoff;
+        let (offset, dist_xor) = if is_le {
+            let cond_bucket = if map_to_alias {
+                bucket_int
+            } else {
+                0
+            };
+            (
+                ((cond_bucket >> 32) & 0xffff) as usize,
+                (cond_bucket >> 48) as usize,
+            )
+        } else if map_to_alias {
+            (bucket.alias_offset as usize, bucket.alias_dist_xor as usize)
+        } else {
+            (0, 0)
+        };
+
+        let dist = dist ^ dist_xor;
+        let symbol = if map_to_alias { alias_symbol } else { i };
+        (symbol as u16, (offset + pos) as u32, dist as u32)
     }
 
-    pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>, state: &mut u32) -> Result<u16> {
-        let idx = (*state & 0xfff) as u16;
-        let (symbol, offset) = self.map_alias(idx);
-        *state = (*state >> 12) * (self.buckets[symbol as usize].dist as u32) + offset as u32;
-        if *state < (1 << 16) {
-            match bitstream.read_bits(16) {
-                Ok(bits) => {
-                    *state = (*state << 16) | bits;
-                },
-                Err(e) => return Err(e.into()),
-            }
-        }
+    #[inline]
+    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u16> {
+        let idx = *state & 0xfff;
+        // SAFETY: idx is 12 bits.
+        let (symbol, offset, dist) = unsafe { self.map_alias(idx) };
+        let next_state = (*state >> 12) * dist + offset;
+        let appended_state = (next_state << 16) | bitstream.peek_bits(16);
+        let select_appended = next_state < (1 << 16);
+        *state = if select_appended { appended_state } else { next_state };
+        bitstream.consume_bits(if select_appended { 16 } else { 0 })?;
         Ok(symbol)
     }
 
@@ -265,7 +328,7 @@ impl Histogram {
     }
 }
 
-fn read_prefix<R: Read>(bitstream: &mut Bitstream<R>) -> Result<u16> {
+fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
     Ok(match bitstream.read_bits(3)? {
         0 => 10,
         1 => {

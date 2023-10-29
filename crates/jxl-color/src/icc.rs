@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// Reads the encoded ICC profile stream from the given bitstream.
-pub fn read_icc<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Vec<u8>> {
+pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
 
     if enc_size > (1 << 28) {

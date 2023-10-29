@@ -122,6 +122,10 @@ fn main() {
     let _guard = span.enter();
 
     let mut image = JxlImage::open(&args.input).expect("Failed to open file");
+    if !image.is_loading_done() {
+        tracing::warn!("Partial image");
+    }
+
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
     tracing::info!("Image dimension: {}x{}", image.width(), image.height());
@@ -163,13 +167,13 @@ fn main() {
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
-    loop {
-        let result = image.render_next_frame_cropped(crop).expect("rendering frames failed");
-        match result {
-            jxl_oxide::RenderResult::Done(frame) => keyframes.push(frame),
-            jxl_oxide::RenderResult::NeedMoreData => panic!("Unexpected end of file"),
-            jxl_oxide::RenderResult::NoMoreFrames => break,
-        }
+    for idx in 0..image.num_loaded_keyframes() {
+        let frame = image.render_frame(idx).expect("rendering frames failed");
+        keyframes.push(frame);
+    }
+    if let Ok(frame) = image.render_frame(image.num_loaded_keyframes()) {
+        tracing::warn!("Rendered partially loaded frame");
+        keyframes.push(frame);
     }
 
     let elapsed = decode_start.elapsed();
@@ -177,6 +181,11 @@ fn main() {
     tracing::info!("Took {:.2} ms", elapsed_ms);
 
     if let Some(output) = &args.output {
+        if keyframes.is_empty() {
+            tracing::warn!("No keyframes are decoded");
+            return;
+        }
+
         tracing::debug!(output_format = format_args!("{:?}", args.output_format));
         let pixel_format = image.pixel_format();
         let output = std::fs::File::create(output).expect("failed to open output file");
@@ -233,9 +242,9 @@ fn main() {
     };
 }
 
-fn write_png<R: Read, W: Write>(
+fn write_png<W: Write>(
     output: W,
-    image: &JxlImage<R>,
+    image: &JxlImage,
     keyframes: &[Render],
     pixfmt: PixelFormat,
     force_bit_depth: Option<png::BitDepth>,
@@ -400,9 +409,9 @@ fn write_png<R: Read, W: Write>(
     writer.finish().expect("failed to finish writing png");
 }
 
-fn write_npy<R: Read, W: Write>(
+fn write_npy<W: Write>(
     output: W,
-    image: &JxlImage<R>,
+    image: &JxlImage,
     keyframes: &[Render],
     width: u32,
     height: u32,

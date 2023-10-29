@@ -48,4 +48,14 @@ impl std::error::Error for Error {
     }
 }
 
+impl Error {
+    pub fn unexpected_eof(&self) -> bool {
+        match self {
+            Error::Bitstream(e) => e.unexpected_eof(),
+            Error::Decoder(e) => e.unexpected_eof(),
+            Error::Modular(e) => e.unexpected_eof(),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

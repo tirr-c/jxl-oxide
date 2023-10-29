@@ -46,4 +46,13 @@ impl std::error::Error for Error {
     }
 }
 
+impl Error {
+    pub fn unexpected_eof(&self) -> bool {
+        if let Error::Bitstream(e) | Error::Decoder(jxl_coding::Error::Bitstream(e)) = self {
+            return e.unexpected_eof();
+        }
+        false
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

@@ -27,7 +27,7 @@ pub struct HfPass {
 impl Bundle<HfPassParams<'_>> for HfPass {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: HfPassParams<'_>) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: HfPassParams<'_>) -> crate::Result<Self> {
         let HfPassParams { hf_block_ctx, num_hf_presets } = params;
         let mut used_orders = read_bits!(bitstream, U32(0x5F, 0x13, 0x00, u(13)))?;
         let mut decoder = (used_orders != 0)
@@ -63,10 +63,12 @@ impl Bundle<HfPassParams<'_>> for HfPass {
 }
 
 impl HfPass {
+    #[inline]
     pub(crate) fn clone_decoder(&self) -> Decoder {
         self.hf_dist.clone()
     }
 
+    #[inline]
     pub(crate) fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
         struct OrderIter<'a> {
             permutation: &'a [usize],
@@ -77,6 +79,7 @@ impl HfPass {
         impl Iterator for OrderIter<'_> {
             type Item = (u8, u8);
 
+            #[inline]
             fn next(&mut self) -> Option<(u8, u8)> {
                 let idx = self.permutation.get(self.idx).copied().unwrap_or(self.idx);
                 let ret = self.natural_order.get(idx).copied();

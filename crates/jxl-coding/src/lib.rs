@@ -4,7 +4,6 @@
 //! This also provides [`read_permutation`] and [`read_clusters`], which are used in some parts of
 //! the specification.
 
-use std::io::Read;
 use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, read_bits};
@@ -29,7 +28,7 @@ pub struct Decoder {
 impl Decoder {
     /// Create a decoder by reading symbol distribution, integer configurations and LZ77
     /// configuration from the bitstream.
-    pub fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
+    pub fn parse(bitstream: &mut Bitstream, num_dist: u32) -> Result<Self> {
         let lz77 = Lz77::parse(bitstream)?;
         let num_dist = if let Lz77::Disabled = &lz77 {
             num_dist
@@ -40,7 +39,7 @@ impl Decoder {
         Ok(Self { lz77, inner })
     }
 
-    fn parse_assume_no_lz77<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
+    fn parse_assume_no_lz77(bitstream: &mut Bitstream, num_dist: u32) -> Result<Self> {
         let lz77_enabled = read_bits!(bitstream, Bool)?;
         if lz77_enabled {
             return Err(Error::Lz77NotAllowed);
@@ -51,15 +50,15 @@ impl Decoder {
 
     /// Read an integer from the bitstream with the given context.
     #[inline]
-    pub fn read_varint<R: std::io::Read>(&mut self, bitstream: &mut Bitstream<R>, ctx: u32) -> Result<u32> {
+    pub fn read_varint(&mut self, bitstream: &mut Bitstream, ctx: u32) -> Result<u32> {
         self.read_varint_with_multiplier(bitstream, ctx, 0)
     }
 
     /// Read an integer from the bitstream with the given context and LZ77 distance multiplier.
     #[inline]
-    pub fn read_varint_with_multiplier<R: std::io::Read>(
+    pub fn read_varint_with_multiplier(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         ctx: u32,
         dist_multiplier: u32,
     ) -> Result<u32> {
@@ -70,10 +69,10 @@ impl Decoder {
     /// Read an integer from the bitstream with the given *cluster* and LZ77 distance multiplier.
     ///
     /// Contexts can be converted to clusters using [the cluster map][Self::cluster_map].
-    #[inline]
-    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+    #[inline(always)]
+    pub fn read_varint_with_multiplier_clustered(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
         dist_multiplier: u32,
     ) -> Result<u32> {
@@ -130,7 +129,7 @@ impl Decoder {
     /// This involves reading an initial state for the ANS stream. It's okay to skip this method,
     /// as the state will be initialized on the first read.
     #[inline]
-    pub fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn begin(&mut self, bitstream: &mut Bitstream) -> Result<()> {
         self.inner.code.begin(bitstream)
     }
 
@@ -167,9 +166,9 @@ pub enum RleToken {
 
 impl DecoderRleMode<'_> {
     #[inline]
-    pub fn read_varint_clustered<R: std::io::Read>(
+    pub fn read_varint_clustered(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
     ) -> Result<RleToken> {
         self.inner.code
@@ -197,9 +196,9 @@ pub struct DecoderWithLz77<'dec> {
 
 impl DecoderWithLz77<'_> {
     #[inline]
-    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+    pub fn read_varint_with_multiplier_clustered(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
         dist_multiplier: u32,
     ) -> Result<u32> {
@@ -219,9 +218,9 @@ pub struct DecoderNoLz77<'dec>(&'dec mut DecoderInner);
 
 impl DecoderNoLz77<'_> {
     #[inline]
-    pub fn read_varint_clustered<R: std::io::Read>(
+    pub fn read_varint_clustered(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
     ) -> Result<u32> {
         self.0.read_varint_with_multiplier_clustered(bitstream, cluster)
@@ -244,7 +243,7 @@ enum Lz77 {
 }
 
 impl Lz77 {
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream) -> Result<Self> {
         Ok(if read_bits!(bitstream, Bool)? { // enabled
             let min_symbol = read_bits!(bitstream, U32(224, 512, 4096, 8 + u(15)))?;
             let min_length = read_bits!(bitstream, U32(3, 4, 5 + u(2), 9 + u(8)))?;
@@ -303,16 +302,16 @@ struct IntegerConfig {
 }
 
 impl IntegerConfig {
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, log_alphabet_size: u32) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> Result<Self> {
         let split_exponent_bits = add_log2_ceil(log_alphabet_size);
-        let split_exponent = bitstream.read_bits(split_exponent_bits)?;
+        let split_exponent = bitstream.read_bits(split_exponent_bits as usize)?;
         let (msb_in_token, lsb_in_token) = if split_exponent != log_alphabet_size {
-            let msb_bits = add_log2_ceil(split_exponent);
+            let msb_bits = add_log2_ceil(split_exponent) as usize;
             let msb_in_token = bitstream.read_bits(msb_bits)?;
             if msb_in_token > split_exponent {
                 return Err(Error::InvalidIntegerConfig);
             }
-            let lsb_bits = add_log2_ceil(split_exponent - msb_in_token);
+            let lsb_bits = add_log2_ceil(split_exponent - msb_in_token) as usize;
             let lsb_in_token = bitstream.read_bits(lsb_bits)?;
             (msb_in_token, lsb_in_token)
         } else {
@@ -338,13 +337,13 @@ struct DecoderInner {
 }
 
 impl DecoderInner {
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, num_dist: u32) -> Result<Self> {
         let (num_clusters, clusters) = read_clusters(bitstream, num_dist)?;
         let use_prefix_code = read_bits!(bitstream, Bool)?;
         let log_alphabet_size = if use_prefix_code {
             15
         } else {
-            read_bits!(bitstream, 5 + u(2))?
+            bitstream.read_bits(2)? + 5
         };
         let configs = (0..num_clusters)
             .map(|_| IntegerConfig::parse(bitstream, log_alphabet_size))
@@ -353,7 +352,7 @@ impl DecoderInner {
             let counts = (0..num_clusters)
                 .map(|_| -> Result<_> {
                     let count = if read_bits!(bitstream, Bool)? {
-                        let n = bitstream.read_bits(4)?;
+                        let n = bitstream.read_bits(4)? as usize;
                         1 + (1 << n) + bitstream.read_bits(n)?
                     } else {
                         1
@@ -394,18 +393,18 @@ impl DecoderInner {
     }
 
     #[inline]
-    pub fn read_varint_with_multiplier_clustered<R: std::io::Read>(
+    pub fn read_varint_with_multiplier_clustered(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
     ) -> Result<u32> {
         let token = self.code.read_symbol(bitstream, cluster)?;
         self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)
     }
 
-    fn read_varint_with_multiplier_clustered_lz77<R: std::io::Read>(
+    fn read_varint_with_multiplier_clustered_lz77(
         &mut self,
-        bitstream: &mut Bitstream<R>,
+        bitstream: &mut Bitstream,
         cluster: u8,
         dist_multiplier: u32,
         state: &mut Lz77State,
@@ -466,7 +465,7 @@ impl DecoderInner {
     }
 
     #[inline]
-    fn read_uint<R: std::io::Read>(&self, bitstream: &mut Bitstream<R>, config: &IntegerConfig, token: u32) -> Result<u32> {
+    fn read_uint(&self, bitstream: &mut Bitstream, config: &IntegerConfig, token: u32) -> Result<u32> {
         let &IntegerConfig { split_exponent, split, msb_in_token, lsb_in_token, .. } = config;
         if token < split {
             return Ok(token);
@@ -478,7 +477,7 @@ impl DecoderInner {
         let token = token >> lsb_in_token;
         let token = token & ((1 << msb_in_token) - 1);
         let token = token | (1 << msb_in_token);
-        bitstream.read_bits(n)
+        bitstream.read_bits(n as usize)
             .map_err(From::from)
             .map(|rest_bits| (((token << n) | rest_bits) << lsb_in_token) | low_bits)
     }
@@ -501,7 +500,7 @@ enum Coder {
 
 impl Coder {
     #[inline]
-    fn read_symbol<R: Read>(&mut self, bitstream: &mut Bitstream<R>, cluster: u8) -> Result<u16> {
+    fn read_symbol(&mut self, bitstream: &mut Bitstream, cluster: u8) -> Result<u16> {
         match self {
             Self::PrefixCode(dist) => {
                 let dist = &dist[cluster as usize];
@@ -526,7 +525,7 @@ impl Coder {
         }
     }
 
-    fn begin<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    fn begin(&mut self, bitstream: &mut Bitstream) -> Result<()> {
         match self {
             Self::PrefixCode(_) => Ok(()),
             Self::Ans { state, initial, .. } => {
@@ -556,14 +555,14 @@ fn add_log2_ceil(x: u32) -> u32 {
 }
 
 /// Read a clustering information of distributions from the bitstream.
-pub fn read_clusters<R: std::io::Read>(bitstream: &mut Bitstream<R>, num_dist: u32) -> Result<(u32, Vec<u8>)> {
+pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, Vec<u8>)> {
     if num_dist == 1 {
         return Ok((1, vec![0u8]));
     }
 
     Ok(if bitstream.read_bool()? {
         // simple dist
-        let nbits = bitstream.read_bits(2)?;
+        let nbits = bitstream.read_bits(2)? as usize;
         let ret = (0..num_dist)
             .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
             .collect::<std::result::Result<Vec<_>, _>>()?;

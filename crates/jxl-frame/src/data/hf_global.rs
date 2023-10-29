@@ -42,7 +42,7 @@ pub struct HfGlobal {
 impl Bundle<HfGlobalParams<'_>> for HfGlobal {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, params: HfGlobalParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: HfGlobalParams<'_>) -> Result<Self> {
         let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx } = params;
         let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
@@ -52,7 +52,7 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
 
         let num_groups = frame_header.num_groups();
-        let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros())? + 1;
+        let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros() as usize)? + 1;
 
         let hf_pass_params = HfPassParams::new(hf_block_ctx, num_hf_presets);
         let hf_passes = std::iter::repeat_with(|| HfPass::parse(bitstream, hf_pass_params))

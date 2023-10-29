@@ -3,8 +3,6 @@
 //! A Modular image represents a set of grids (two-dimensional arrays) of integer values. Modular
 //! images are used mainly for lossless images, but lossy VarDCT images also use them to store
 //! various information, such as quantized LF images and varblock configurations.
-use std::io::Read;
-
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 
 mod error;
@@ -29,6 +27,7 @@ pub use param::*;
 #[derive(Debug, Clone, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
+    partial: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,8 +43,8 @@ struct ModularData {
 impl Bundle<ModularParams<'_>> for Modular {
     type Error = crate::Error;
 
-    fn parse<R: Read>(
-        bitstream: &mut Bitstream<R>,
+    fn parse(
+        bitstream: &mut Bitstream,
         params: ModularParams<'_>,
     ) -> Result<Self> {
         let inner = if params.channels.is_empty() {
@@ -53,7 +52,8 @@ impl Bundle<ModularParams<'_>> for Modular {
         } else {
             Some(read_bits!(bitstream, Bundle(ModularData), params)?)
         };
-        Ok(Self { inner })
+        let partial = inner.is_some();
+        Ok(Self { inner, partial })
     }
 }
 
@@ -65,6 +65,10 @@ impl Modular {
 }
 
 impl Modular {
+    pub fn is_partial(&self) -> bool {
+        self.partial
+    }
+
     pub fn has_palette(&self) -> bool {
         let Some(image) = &self.inner else { return false; };
         image.header.transform.iter().any(|tr| tr.is_palette())
@@ -77,21 +81,39 @@ impl Modular {
 }
 
 impl Modular {
-    pub fn decode_image_gmodular<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
+    pub fn decode_image_gmodular(&mut self, bitstream: &mut Bitstream, allow_partial: bool) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
         let (mut subimage, channel_mapping) = image.image.for_global_modular();
-        subimage.decode_channels(bitstream, 0, wp_header, ma_ctx)?;
+        match subimage.decode_channels(bitstream, 0, wp_header, ma_ctx) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded Modular image");
+            },
+            Err(e) => return Err(e),
+            Ok(_) => {
+                self.partial = false;
+            },
+        }
         image.image.copy_from_image(subimage, &channel_mapping);
         Ok(())
     }
 
-    pub fn decode_image<R: Read>(&mut self, bitstream: &mut Bitstream<R>, stream_index: u32) -> Result<()> {
+    pub fn decode_image(&mut self, bitstream: &mut Bitstream, stream_index: u32, allow_partial: bool) -> Result<()> {
         let Some(image) = &mut self.inner else { return Ok(()); };
         let wp_header = &image.header.wp_params;
         let ma_ctx = &mut image.ma_ctx;
-        image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx)
+        match image.image.decode_channels(bitstream, stream_index, wp_header, ma_ctx) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded Modular image");
+                Ok(())
+            },
+            Err(e) => Err(e),
+            Ok(_) => {
+                self.partial = false;
+                Ok(())
+            },
+        }
     }
 
     /// Apply inverse transforms to the decoded image.
@@ -253,8 +275,8 @@ impl Modular {
 impl Bundle<ModularParams<'_>> for ModularData {
     type Error = crate::Error;
 
-    fn parse<R: Read>(
-        bitstream: &mut Bitstream<R>,
+    fn parse(
+        bitstream: &mut Bitstream,
         params: ModularParams<'_>,
     ) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;

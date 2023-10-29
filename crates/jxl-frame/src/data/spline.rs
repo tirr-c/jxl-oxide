@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
 
@@ -18,7 +16,7 @@ pub struct Splines {
 impl Bundle<&FrameHeader> for Splines {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, header: &FrameHeader) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, header: &FrameHeader) -> Result<Self> {
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 6)?;
         decoder.begin(bitstream)?;
         let num_pixels = (header.width * header.height) as usize;
@@ -87,7 +85,7 @@ pub struct QuantSpline {
 impl Bundle<QuantSplineParams<'_>> for QuantSpline {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, params: QuantSplineParams<'_>) -> std::result::Result<Self, Self::Error> {
+    fn parse(bitstream: &mut Bitstream, params: QuantSplineParams<'_>) -> std::result::Result<Self, Self::Error> {
         let QuantSplineParams { start_point, num_pixels, decoder } = params;
 
         let num_points = decoder.read_varint(bitstream, 3)? as usize;

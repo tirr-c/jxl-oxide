@@ -50,7 +50,7 @@ impl TransformInfo {
 impl Bundle<&WpHeader> for TransformInfo {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, wp_header: &WpHeader) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> crate::Result<Self> {
         let tr = bitstream.read_bits(2)?;
         match tr {
             0 => read_bits!(bitstream, Bundle(Rct)).map(Self::Rct),
@@ -99,7 +99,7 @@ pub struct Palette {
 impl Bundle<&WpHeader> for Palette {
     type Error = crate::Error;
 
-    fn parse<R: std::io::Read>(bitstream: &mut Bitstream<R>, wp_header: &WpHeader) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> Result<Self> {
         let begin_c = read_bits!(bitstream, U32(u(3), 8 + u(6), 72 + u(10), 1096 + u(13)))?;
         let num_c = read_bits!(bitstream, U32(1, 3, 4, 1 + u(13)))?;
         let nb_colours = read_bits!(bitstream, U32(u(8), 256 + u(10), 1280 + u(12), 5376 + u(16)))?;
@@ -297,15 +297,21 @@ impl Palette {
                 for x in 0..width {
                     let properties = predictor.properties(&[]);
                     let diff = d_pred.predict(&properties);
-                    let sample = grid.get_mut(x, y).unwrap();
+                    let sample = grid.get_mut(x, y);
+                    let mut sample_value = sample.as_ref().map(|x| **x).unwrap_or(0);
                     if need_delta[idx] == (x, y) {
-                        *sample = (*sample as i64 + diff) as i32;
+                        sample_value = (sample_value as i64 + diff) as i32;
+                        if let Some(sample) = sample {
+                            *sample = sample_value;
+                        } else {
+                            grid.set(x, y, diff as i32);
+                        }
                         idx += 1;
                         if idx >= need_delta.len() {
                             break 'outer;
                         }
                     }
-                    properties.record(*sample);
+                    properties.record(sample_value);
                 }
             }
         }
@@ -452,17 +458,13 @@ impl SqueezeParams {
         let mut output = Grid::new_usize(i0.width() + i1.width(), i1.height(), gw << 1, gh);
         for y in 0..height {
             for x in 0..width {
-                let values = (|| -> Option<_> {
-                    let avg = *i0.get(x, y)?;
-                    let residu = *i1.get(x, y)?;
-                    let next_avg = if x + 1 < w0 {
-                        *i0.get(x + 1, y)?
-                    } else {
-                        avg
-                    };
-                    Some((avg, residu, next_avg))
-                })();
-                let Some((avg, residu, next_avg)) = values else { continue; };
+                let avg = *i0.get(x, y).unwrap_or(&0);
+                let residu = *i1.get(x, y).unwrap_or(&0);
+                let next_avg = if x + 1 < w0 {
+                    *i0.get(x + 1, y).unwrap_or(&0)
+                } else {
+                    avg
+                };
                 let left = if x > 0 {
                     output.get(2 * x - 1, y).copied().unwrap_or(avg)
                 } else {
@@ -492,17 +494,13 @@ impl SqueezeParams {
         let mut output = Grid::new_usize(i1.width(), i0.height() + i1.height(), gw, gh << 1);
         for y in 0..height {
             for x in 0..width {
-                let values = (|| -> Option<_> {
-                    let avg = *i0.get(x, y)?;
-                    let residu = *i1.get(x, y)?;
-                    let next_avg = if y + 1 < h0 {
-                        *i0.get(x, y + 1)?
-                    } else {
-                        avg
-                    };
-                    Some((avg, residu, next_avg))
-                })();
-                let Some((avg, residu, next_avg)) = values else { continue; };
+                let avg = *i0.get(x, y).unwrap_or(&0);
+                let residu = *i1.get(x, y).unwrap_or(&0);
+                let next_avg = if y + 1 < h0 {
+                    *i0.get(x, y + 1).unwrap_or(&0)
+                } else {
+                    avg
+                };
                 let top = if y > 0 {
                     output.get(x, 2 * y - 1).copied().unwrap_or(avg)
                 } else {

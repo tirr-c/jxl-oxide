@@ -27,44 +27,31 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
 
     let mut image = jxl_oxide::JxlImage::from_reader(std::io::Cursor::new(data)).unwrap();
 
-    loop {
-        let result = image.render_next_frame().unwrap();
-        match result {
-            jxl_oxide::RenderResult::Done(frame) => {
-                let mut marker = 0u8;
-                expected.read_exact(std::slice::from_mut(&mut marker)).unwrap();
-                if marker != 0 {
-                    panic!();
-                }
+    for idx in 0..image.num_loaded_keyframes() {
+        let frame = image.render_frame(idx).unwrap();
+        let mut marker = 0u8;
+        expected.read_exact(std::slice::from_mut(&mut marker)).unwrap();
+        if marker != 0 {
+            panic!();
+        }
 
-                let color_channels = frame.color_channels();
-                let extra_channels = frame.extra_channels();
-                assert_eq!(fixture_header.channels as usize, color_channels.len() + extra_channels.len());
+        let color_channels = frame.color_channels();
+        let extra_channels = frame.extra_channels();
+        assert_eq!(fixture_header.channels as usize, color_channels.len() + extra_channels.len());
 
-                for grid in color_channels.iter().chain(extra_channels.iter().map(|ec| ec.grid())) {
-                    assert_eq!(fixture_header.width as usize, grid.width());
-                    assert_eq!(fixture_header.height as usize, grid.height());
-                    let buf = grid.buf();
-                    let mut expected_buf = vec![0u8; grid.width() * grid.height() * 2];
-                    expected.read_exact(&mut expected_buf).unwrap();
+        for grid in color_channels.iter().chain(extra_channels.iter().map(|ec| ec.grid())) {
+            assert_eq!(fixture_header.width as usize, grid.width());
+            assert_eq!(fixture_header.height as usize, grid.height());
+            let buf = grid.buf();
+            let mut expected_buf = vec![0u8; grid.width() * grid.height() * 2];
+            expected.read_exact(&mut expected_buf).unwrap();
 
-                    for (&actual_float, expected) in buf.iter().zip(expected_buf.chunks_exact(2)) {
-                        let expected = u16::from_le_bytes([expected[0], expected[1]]);
-                        let actual = (actual_float * 65535.0 + 0.5) as u16;
-                        let diff = actual.abs_diff(expected);
-                        assert!(diff < 4);
-                    }
-                }
-            },
-            jxl_oxide::RenderResult::NeedMoreData => panic!(),
-            jxl_oxide::RenderResult::NoMoreFrames => {
-                let mut marker = 0u8;
-                expected.read_exact(std::slice::from_mut(&mut marker)).unwrap();
-                if marker != 0xff {
-                    panic!();
-                }
-                break;
-            },
+            for (&actual_float, expected) in buf.iter().zip(expected_buf.chunks_exact(2)) {
+                let expected = u16::from_le_bytes([expected[0], expected[1]]);
+                let actual = (actual_float * 65535.0 + 0.5) as u16;
+                let diff = actual.abs_diff(expected);
+                assert!(diff < 4);
+            }
         }
     }
 }

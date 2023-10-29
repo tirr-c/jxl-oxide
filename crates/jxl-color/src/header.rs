@@ -1,6 +1,4 @@
 #![allow(clippy::excessive_precision)]
-use std::io::Read;
-
 use jxl_bitstream::{
     Bitstream,
     Bundle,
@@ -123,7 +121,7 @@ pub enum WhitePoint {
 impl<Ctx> Bundle<Ctx> for WhitePoint {
     type Error = Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
@@ -178,7 +176,7 @@ pub enum Primaries {
 impl<Ctx> Bundle<Ctx> for Primaries {
     type Error = Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         let d = read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
@@ -263,7 +261,7 @@ impl TryFrom<u32> for TransferFunction {
 impl<Ctx> Bundle<Ctx> for TransferFunction {
     type Error = Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         let has_gamma = bitstream.read_bool()?;
         if has_gamma {
             let gamma = bitstream.read_bits(24)?;

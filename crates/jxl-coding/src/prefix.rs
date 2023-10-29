@@ -1,21 +1,12 @@
 //! Prefix code based on Brotli
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, read_bits};
 
 use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Histogram {
-    configs: Vec<TreeConfig>,
+    configs: Vec<u32>,
     symbols: Vec<u16>,
-}
-
-#[derive(Debug)]
-struct TreeConfig {
-    from: u32,
-    to: u32,
-    offset: usize,
 }
 
 impl Histogram {
@@ -30,26 +21,20 @@ impl Histogram {
                 syms_for_length[len as usize - 1].push(sym);
             }
         }
-        let max_length = syms_for_length.len();
 
         let mut configs = Vec::new();
         let mut symbols = Vec::new();
-        let mut current_bits = 0u32;
-        for syms in syms_for_length.into_iter() {
-            let sym_count = syms.len() as u32;
-            current_bits <<= 1;
+        let mut current_bits = 0u16;
+        for (idx, syms) in syms_for_length.into_iter().enumerate() {
+            let shifts = 14 - idx;
+            let sym_count = syms.len() as u16;
+            current_bits += sym_count << shifts;
 
-            configs.push(TreeConfig {
-                from: current_bits,
-                to: current_bits + sym_count,
-                offset: symbols.len(),
-            });
+            configs.push(((current_bits as u32) << 16) | (symbols.len() as u32));
             symbols.extend(syms);
-
-            current_bits += sym_count;
         }
 
-        if current_bits.checked_shl((15 - max_length) as u32) == Some(1 << 15) {
+        if current_bits == 1 << 15 {
             Ok(Self {
                 configs,
                 symbols
@@ -66,7 +51,7 @@ impl Histogram {
         }
     }
 
-    pub fn parse<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
+    pub fn parse(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
         if alphabet_size == 1 {
             return Ok(Self::with_single_symbol(0));
         }
@@ -79,8 +64,8 @@ impl Histogram {
         }
     }
 
-    fn parse_simple<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32) -> Result<Self> {
-        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros();
+    fn parse_simple(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
+        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros() as usize;
         let nsym = read_bits!(bitstream, u(2))? + 1;
         let it = match nsym {
             1 => {
@@ -139,7 +124,7 @@ impl Histogram {
         Self::with_code_lengths(code_lengths)
     }
 
-    fn parse_complex<R: Read>(bitstream: &mut Bitstream<R>, alphabet_size: u32, hskip: u32) -> Result<Self> {
+    fn parse_complex(bitstream: &mut Bitstream, alphabet_size: u32, hskip: u32) -> Result<Self> {
         const CODE_LENGTH_ORDER: [usize; 18] = [
             1, 2, 3, 4, 0, 5,
             17, 6, 16, 7, 8, 9,
@@ -264,22 +249,22 @@ impl Histogram {
 
 impl Histogram {
     #[inline]
-    pub fn read_symbol<R: Read>(&self, bitstream: &mut Bitstream<R>) -> Result<u16> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u16> {
         let Self { configs, symbols } = self;
-        let mut bits = 0u32;
-        for config in configs {
-            match bitstream.read_bool() {
-                Ok(b) => {
-                    bits = (bits << 1) | (b as u32);
-                },
-                Err(e) => return Err(e.into()),
+        let peeked = bitstream.peek_bits(15);
+        let bits = (peeked.reverse_bits() >> 1) | 0xffff;
+        let mut prev = 0u32;
+        for (count, &config) in configs.iter().enumerate() {
+            if bits < config {
+                bitstream.consume_bits(count + 1)?;
+                let offset = ((bits - prev) >> (30 - count)) + (config & 0xffff);
+                // SAFETY: `offset` is in bounds for valid prefix code histogram.
+                let symbol = unsafe { *symbols.get_unchecked(offset as usize) };
+                return Ok(symbol);
             }
-            if config.from <= bits && bits < config.to {
-                let diff = bits - config.from;
-                let idx = config.offset + diff as usize;
-                return Ok(symbols[idx]);
-            }
+            prev = config;
         }
+        bitstream.consume_bits(configs.len())?;
         Ok(symbols[0])
     }
 

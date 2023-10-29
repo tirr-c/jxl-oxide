@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
 use jxl_image::ImageHeader;
 
@@ -77,8 +75,8 @@ impl PatchBlendMode {
 impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
     type Error = crate::Error;
 
-    fn parse<R: Read>(
-        bitstream: &mut Bitstream<R>,
+    fn parse(
+        bitstream: &mut Bitstream,
         (image_header, frame_header): (&ImageHeader, &FrameHeader),
     ) -> Result<Self> {
         let num_extra = image_header.metadata.ec_info.len();

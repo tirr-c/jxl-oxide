@@ -273,12 +273,12 @@ impl PredictorState {
         ];
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
-            let shift = floor_log2(err_sum as u64 + 1).saturating_sub(5);
+            let shift = ((err_sum as u64 + 1) >> 5).checked_ilog2().unwrap_or(0);
             *w = 4 + ((maxweight * Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1]) >> shift);
         }
 
         let sum_weights: u32 = weight.iter().copied().sum();
-        let log_weight = floor_log2(sum_weights as u64) - 4;
+        let log_weight = (sum_weights as u64 >> 4).ilog2();
         for w in &mut weight {
             *w >>= log_weight;
         }
@@ -546,8 +546,4 @@ impl Properties<'_, '_> {
             ch.record(*sample);
         }
     }
-}
-
-fn floor_log2(x: u64) -> u32 {
-    u64::BITS - 1 - x.leading_zeros()
 }

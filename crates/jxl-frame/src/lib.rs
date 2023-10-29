@@ -16,8 +16,7 @@
 //! [`num_lf_groups`]: FrameHeader::num_lf_groups
 //! [`num_groups`]: FrameHeader::num_groups
 //! [`num_passes`]: header::Passes::num_passes
-use std::{collections::BTreeMap, io::Cursor};
-use std::io::Read;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
@@ -33,8 +32,6 @@ pub use header::FrameHeader;
 
 use crate::data::*;
 
-type ByteSliceBitstream<'buf> = Bitstream<Cursor<&'buf [u8]>>;
-
 /// JPEG XL frame.
 ///
 /// A frame represents a single unit of image that can be displayed or referenced by other frames.
@@ -43,14 +40,31 @@ pub struct Frame {
     image_header: Arc<ImageHeader>,
     header: FrameHeader,
     toc: Toc,
-    data: Vec<Vec<u8>>,
+    data: Vec<GroupData>,
+    reading_data_index: usize,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
+}
+
+#[derive(Debug)]
+struct GroupData {
+    toc_group: TocGroup,
+    bytes: Vec<u8>,
+}
+
+impl From<TocGroup> for GroupData {
+    fn from(value: TocGroup) -> Self {
+        let cap = value.size as usize;
+        Self {
+            toc_group: value,
+            bytes: Vec::with_capacity(cap),
+        }
+    }
 }
 
 impl Bundle<Arc<ImageHeader>> for Frame {
     type Error = crate::Error;
 
-    fn parse<R: Read>(bitstream: &mut Bitstream<R>, image_header: Arc<ImageHeader>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, image_header: Arc<ImageHeader>) -> Result<Self> {
         bitstream.zero_pad_to_byte()?;
         let header = read_bits!(bitstream, Bundle(FrameHeader), &image_header)?;
 
@@ -96,6 +110,7 @@ impl Bundle<Arc<ImageHeader>> for Frame {
         }
 
         let toc = read_bits!(bitstream, Bundle(Toc), &header)?;
+        let data = toc.iter_bitstream_order().map(GroupData::from).collect();
 
         let passes = &header.passes;
         let mut pass_shifts = BTreeMap::new();
@@ -111,7 +126,8 @@ impl Bundle<Arc<ImageHeader>> for Frame {
             image_header,
             header,
             toc,
-            data: Vec::new(),
+            data,
+            reading_data_index: 0,
             pass_shifts,
         })
     }
@@ -144,25 +160,29 @@ impl Frame {
 
     pub fn data(&self, group: TocGroupKind) -> Option<&[u8]> {
         let idx = self.toc.group_index_bitstream_order(group);
-        self.data.get(idx).map(|b| &**b)
+        self.data.get(idx).map(|b| &*b.bytes)
     }
 }
 
 impl Frame {
-    pub fn read_all<R: Read>(&mut self, bitstream: &mut Bitstream<R>) -> Result<()> {
-        assert!(self.data.is_empty());
-
-        for group in self.toc.iter_bitstream_order() {
-            tracing::trace!(?group);
-            bitstream.zero_pad_to_byte()?;
-
-            let mut data = vec![0u8; group.size as usize];
-            bitstream.read_bytes_aligned(&mut data)?;
-
-            self.data.push(data);
+    pub fn feed_bytes<'buf>(&mut self, mut buf: &'buf [u8]) -> &'buf [u8] {
+        while let Some(group_data) = self.data.get_mut(self.reading_data_index) {
+            let bytes_left = group_data.toc_group.size as usize - group_data.bytes.len();
+            if buf.len() < bytes_left {
+                group_data.bytes.extend_from_slice(buf);
+                return &[];
+            }
+            let (l, r) = buf.split_at(bytes_left);
+            group_data.bytes.extend_from_slice(l);
+            buf = r;
+            self.reading_data_index += 1;
         }
+        buf
+    }
 
-        Ok(())
+    #[inline]
+    pub fn is_loading_done(&self) -> bool {
+        self.reading_data_index >= self.data.len()
     }
 }
 
@@ -171,7 +191,7 @@ struct AllParseResult<'buf> {
     lf_global: LfGlobal,
     lf_group: LfGroup,
     hf_global: Option<HfGlobal>,
-    pass_group_bitstream: ByteSliceBitstream<'buf>,
+    pass_group_bitstream: Bitstream<'buf>,
 }
 
 impl Frame {
@@ -181,10 +201,10 @@ impl Frame {
         }
 
         let group = self.data.get(0)?;
-        let mut bitstream = Bitstream::new(Cursor::new(&**group));
+        let mut bitstream = Bitstream::new(&group.bytes);
         let result = (|| -> Result<_> {
-            let lf_global = LfGlobal::parse(&mut bitstream, (&self.image_header, &self.header))?;
-            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, &lf_global, 0))?;
+            let lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))?;
+            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, &lf_global, 0, false))?;
             let hf_global = (self.header.encoding == header::Encoding::VarDct).then(|| {
                 HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global))
             }).transpose()?;
@@ -205,13 +225,15 @@ impl Frame {
     pub fn try_parse_lf_global(&self) -> Option<Result<LfGlobal>> {
         Some(if self.toc.is_single_entry() {
             let group = self.data.get(0)?;
-            let mut bitstream = Bitstream::new(Cursor::new(group));
-            LfGlobal::parse(&mut bitstream, (&self.image_header, &self.header))
+            let mut bitstream = Bitstream::new(&group.bytes);
+            LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGlobal);
             let group = self.data.get(idx)?;
-            let mut bitstream = Bitstream::new(Cursor::new(group));
-            LfGlobal::parse(&mut bitstream, (&self.image_header, &self.header))
+            let allow_partial = group.bytes.len() < group.toc_group.size as usize;
+
+            let mut bitstream = Bitstream::new(&group.bytes);
+            LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, allow_partial))
         })
     }
 
@@ -224,7 +246,9 @@ impl Frame {
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
             let group = self.data.get(idx)?;
-            let mut bitstream = Bitstream::new(Cursor::new(group));
+            let allow_partial = group.bytes.len() < group.toc_group.size as usize;
+
+            let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = if cached_lf_global.is_none() {
                 match self.try_parse_lf_global()? {
                     Ok(lf_global) => Some(lf_global),
@@ -234,7 +258,11 @@ impl Frame {
                 None
             };
             let lf_global = cached_lf_global.or(lf_global.as_ref()).unwrap();
-            Some(LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, lf_global, lf_group_idx)))
+            let result = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, lf_global, lf_group_idx, allow_partial));
+            if allow_partial && result.is_err() {
+                return None;
+            }
+            Some(result)
         }
     }
 
@@ -248,7 +276,11 @@ impl Frame {
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::HfGlobal);
             let group = self.data.get(idx)?;
-            let mut bitstream = Bitstream::new(Cursor::new(group));
+            if group.bytes.len() < group.toc_group.size as usize {
+                return None;
+            }
+
+            let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = if cached_lf_global.is_none() {
                 match self.try_parse_lf_global()? {
                     Ok(lf_global) => Some(lf_global),
@@ -263,15 +295,29 @@ impl Frame {
         }
     }
 
-    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<ByteSliceBitstream>> {
-        if self.toc.is_single_entry() {
-            Some(self.try_parse_all()?.map(|x| x.pass_group_bitstream))
+    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<PassGroupBitstream>> {
+        Some(if self.toc.is_single_entry() {
+            self.try_parse_all()?.map(|group| PassGroupBitstream {
+                bitstream: group.pass_group_bitstream,
+                partial: self.data[0].bytes.len() < self.data[0].toc_group.size as usize,
+            })
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::GroupPass { pass_idx, group_idx });
             let group = self.data.get(idx)?;
-            Some(Ok(Bitstream::new(Cursor::new(&**group))))
-        }
+            let partial = group.bytes.len() < group.toc_group.size as usize;
+
+            Ok(PassGroupBitstream {
+                bitstream: Bitstream::new(&group.bytes),
+                partial,
+            })
+        })
     }
+}
+
+#[derive(Debug)]
+pub struct PassGroupBitstream<'buf> {
+    pub bitstream: Bitstream<'buf>,
+    pub partial: bool,
 }
 
 impl Frame {

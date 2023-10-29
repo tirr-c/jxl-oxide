@@ -21,8 +21,8 @@ pub struct HfCoeffParams<'a> {
     pub coeff_shift: u32,
 }
 
-pub fn write_hf_coeff<R: std::io::Read>(
-    bitstream: &mut Bitstream<R>,
+pub fn write_hf_coeff(
+    bitstream: &mut Bitstream,
     params: HfCoeffParams,
     hf_coeff_output: &mut [CutGrid<'_, f32>; 3],
 ) -> Result<()> {
@@ -65,7 +65,7 @@ pub fn write_hf_coeff<R: std::io::Read>(
     let vshifts = upsampling_shifts.map(|shift| shift.vshift());
 
     let hfp_bits = num_hf_presets.next_power_of_two().trailing_zeros();
-    let hfp = bitstream.read_bits(hfp_bits)?;
+    let hfp = bitstream.read_bits(hfp_bits as usize)?;
     let ctx_size = 495 * *num_block_clusters;
     let cluster_map = dist.cluster_map()[(ctx_size * hfp) as usize..][..ctx_size as usize].to_vec();
 

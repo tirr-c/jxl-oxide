@@ -38,3 +38,12 @@ impl From<jxl_bitstream::Error> for Error {
         Self::Bitstream(err)
     }
 }
+
+impl Error {
+    pub fn unexpected_eof(&self) -> bool {
+        if let Error::Bitstream(e) = self {
+            return e.unexpected_eof();
+        }
+        false
+    }
+}

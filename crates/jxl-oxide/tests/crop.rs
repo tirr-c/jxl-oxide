@@ -15,14 +15,6 @@ fn run_test(buf: &[u8]) {
     let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
 
     let mut tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
-    loop {
-        match image.load_next_frame().expect("Failed to load frame") {
-            jxl_oxide::LoadResult::Done(_) => {},
-            jxl_oxide::LoadResult::NeedMoreData => panic!("Failed to load frame"),
-            jxl_oxide::LoadResult::NoMoreFrames => break,
-        }
-        tester_image.load_next_frame().unwrap();
-    }
 
     let num_frames = image.num_loaded_keyframes();
     for _ in 0..4 {
