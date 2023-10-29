@@ -9,6 +9,12 @@ use jxl_oxide::JxlImage;
 struct Args {
     /// Input file
     input: PathBuf,
+    /// Output information of all frames in addition to keyframes
+    #[arg(long)]
+    all_frames: bool,
+    /// Output group sizes and offsets
+    #[arg(long)]
+    with_offset: bool,
     /// Print debug information
     #[arg(short, long)]
     verbose: bool,
@@ -36,8 +42,9 @@ fn main() {
     let image = JxlImage::open(&args.input).expect("Failed to open file");
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
+    let image_reader = image.reader();
 
-    println!("JPEG XL image");
+    println!("JPEG XL image ({:?})", image_reader.kind());
 
     println!("  Image dimension: {}x{}", image.width(), image.height());
     if image_meta.orientation != 1 {
@@ -66,7 +73,7 @@ fn main() {
         if image_meta.grayscale() {
             print!("Grayscale, embedded ICC profile ({} bytes)", icc.len());
         } else {
-            println!("    Embedded ICC profile ({} bytes)", icc.len());
+            println!("Embedded ICC profile ({} bytes)", icc.len());
         }
     } else {
         let colour_encoding = &image_meta.colour_encoding;
@@ -119,9 +126,22 @@ fn main() {
     }
 
     let animated = image_meta.animation.is_some();
-    for idx in 0..image.num_loaded_keyframes() {
-        println!("Keyframe #{idx}");
-        let frame_header = image.frame_header(idx).unwrap();
+    for idx in 0..image.num_loaded_frames() + 1 {
+        let Some(frame) = image.frame(idx) else { break; };
+        let frame_header = frame.header();
+        let is_keyframe = frame_header.is_keyframe();
+        if !args.all_frames && !is_keyframe {
+            continue;
+        }
+
+        print!("Frame #{idx}");
+        if is_keyframe {
+            print!(" (keyframe)");
+        }
+        if !frame.is_loading_done() {
+            print!(" (partial)");
+        }
+        println!();
 
         if !frame_header.name.is_empty() {
             println!("  Name: {}", &*frame_header.name);
@@ -130,12 +150,55 @@ fn main() {
             jxl_oxide::frame::Encoding::VarDct => println!("  VarDCT (lossy)"),
             jxl_oxide::frame::Encoding::Modular => println!("  Modular (maybe lossless)"),
         }
-        println!("  {}x{}; ({}, {})", frame_header.width, frame_header.height, frame_header.x0, frame_header.y0);
+        print!("  Frame type: ");
+        match frame_header.frame_type {
+            jxl_oxide::frame::FrameType::RegularFrame => print!("Regular"),
+            jxl_oxide::frame::FrameType::LfFrame => print!("LF, level {} ({}x downsampled)", frame_header.lf_level, 1 << (frame_header.lf_level * 3)),
+            jxl_oxide::frame::FrameType::ReferenceOnly => print!("Reference only, slot {}", frame_header.save_as_reference),
+            jxl_oxide::frame::FrameType::SkipProgressive => print!("Regular (skip progressive rendering)"),
+        }
+        println!();
+
+        print!(
+            "  {}x{}",
+            frame_header.color_sample_width(),
+            frame_header.color_sample_height(),
+        );
+        if frame_header.frame_type.is_normal_frame() {
+            print!("; ({}, {})", frame_header.x0, frame_header.y0);
+        }
+        println!();
+
         if frame_header.do_ycbcr {
             println!("  YCbCr, upsampling factor: {:?}", frame_header.jpeg_upsampling);
         }
-        if animated {
-            println!("  Duration: {} tick{}", frame_header.duration, if frame_header.duration == 1 { "" } else { "s" });
+        if animated && is_keyframe {
+            if frame_header.duration == 0xffffffff {
+                println!("  End of a page");
+            } else {
+                println!("  Duration: {} tick{}", frame_header.duration, if frame_header.duration == 1 { "" } else { "s" });
+            }
+        }
+
+        if args.with_offset {
+            let offset = image.frame_offset(idx).unwrap();
+            println!("  Offset (in codestream): {offset} (0x{offset:x})", offset = offset);
+
+            let toc = frame.toc();
+            println!(
+                "  Frame header size: {size} (0x{size:x}) byte{plural}",
+                size = toc.bookmark(),
+                plural = if toc.bookmark() == 1 { "" } else { "s" },
+            );
+            println!("  Group sizes, in bitstream order:");
+            for group in toc.iter_bitstream_order() {
+                println!(
+                    "    {:?}: {size} (0x{size:x}) byte{plural}",
+                    group.kind,
+                    size = group.size,
+                    plural = if group.size == 1 { "" } else { "s" },
+                );
+            }
         }
     }
 
