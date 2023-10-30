@@ -103,7 +103,7 @@ use jxl_bitstream::Name;
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::SimpleGrid;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
-use jxl_render::RenderContext;
+use jxl_render::{RenderContext, IndexedFrame};
 
 pub use fb::FrameBuffer;
 
@@ -150,6 +150,10 @@ impl UninitializedJxlImage {
         self.reader.feed_bytes(buf)?;
         self.buffer.extend(self.reader.take_bytes());
         Ok(())
+    }
+
+    pub fn reader(&self) -> &ContainerDetectingReader {
+        &self.reader
     }
 
     /// Try to initialize an image with the data fed into so far.
@@ -202,7 +206,7 @@ impl UninitializedJxlImage {
             };
 
             let bytes_read = bitstream.num_read_bits() / 8;
-            let x = frame.toc().total_byte_size() as usize;
+            let x = frame.toc().total_byte_size();
             if self.buffer.len() < bytes_read + x {
                 return Ok(InitializeResult::NeedMoreData(self));
             }
@@ -225,6 +229,8 @@ impl UninitializedJxlImage {
             render_spot_colour,
             end_of_image: false,
             buffer: Vec::new(),
+            buffer_offset: bytes_read,
+            frame_offsets: Vec::new(),
         };
         image.feed_bytes_inner(&self.buffer)?;
 
@@ -250,6 +256,8 @@ pub struct JxlImage {
     render_spot_colour: bool,
     end_of_image: bool,
     buffer: Vec<u8>,
+    buffer_offset: usize,
+    frame_offsets: Vec<usize>,
 }
 
 impl JxlImage {
@@ -417,7 +425,11 @@ impl JxlImage {
 
         if let Some(loading_frame) = self.ctx.current_loading_frame() {
             debug_assert!(self.buffer.is_empty());
+            let len = buf.len();
             buf = loading_frame.feed_bytes(buf);
+            let count = len - buf.len();
+            self.buffer_offset += count;
+
             if loading_frame.is_loading_done() {
                 let is_last = loading_frame.header().is_last;
                 self.ctx.finalize_current_frame();
@@ -446,9 +458,16 @@ impl JxlImage {
                     return Err(e.into());
                 },
             };
+            let frame_index = frame.index();
+            assert_eq!(self.frame_offsets.len(), frame_index);
+            self.frame_offsets.push(self.buffer_offset);
+
             let read_bytes = bitstream.num_read_bits() / 8;
             buf = &buf[read_bytes..];
+            let len = buf.len();
             buf = frame.feed_bytes(buf);
+            let read_bytes = read_bytes + (len - buf.len());
+            self.buffer_offset += read_bytes;
 
             if frame.is_loading_done() {
                 let is_last = frame.header().is_last;
@@ -467,6 +486,7 @@ impl JxlImage {
 
     pub fn try_take_buffer(&mut self) -> Option<Vec<u8>> {
         if self.end_of_image {
+            self.buffer_offset += self.buffer.len();
             Some(std::mem::take(&mut self.buffer))
         } else {
             None
@@ -495,9 +515,30 @@ impl JxlImage {
         Some(frame.header())
     }
 
+    /// Returns frame data by keyframe index.
+    pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
+        self.ctx.keyframe(keyframe_index)
+    }
+
+    /// Returns frame data by frame index, including frames that are not displayed directly.
+    pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
+        self.ctx.frame(frame_idx)
+    }
+
+    /// Returns the offset of frame within codestream, in bytes.
+    pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
+        self.frame_offsets.get(frame_index).copied()
+    }
+
     /// Returns the number of currently loaded keyframes.
     pub fn num_loaded_keyframes(&self) -> usize {
         self.ctx.loaded_keyframes()
+    }
+
+    /// Returns the number of currently loaded frames, including frames that are not displayed
+    /// directly.
+    pub fn num_loaded_frames(&self) -> usize {
+        self.ctx.loaded_frames()
     }
 
     /// Renders the given keyframe with optional cropping region.

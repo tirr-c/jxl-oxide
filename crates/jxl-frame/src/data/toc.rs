@@ -15,7 +15,7 @@ pub struct Toc {
     groups: Vec<TocGroup>,
     bitstream_to_original: Vec<usize>,
     original_to_bitstream: Vec<usize>,
-    total_size: u64,
+    total_size: usize,
 }
 
 impl std::fmt::Debug for Toc {
@@ -49,8 +49,8 @@ impl std::fmt::Debug for Toc {
 pub struct TocGroup {
     /// Kind of the group.
     pub kind: TocGroupKind,
-    /// Offset within the bitstream.
-    pub offset: u64,
+    /// Offset from the beginning of frame header.
+    pub offset: usize,
     /// Size of the group.
     pub size: u32,
 }
@@ -95,7 +95,7 @@ impl PartialOrd for TocGroupKind {
 
 impl Toc {
     /// Returns the offset to the beginning of the data.
-    pub fn bookmark(&self) -> u64 {
+    pub fn bookmark(&self) -> usize {
         let idx = self.bitstream_to_original.first().copied().unwrap_or(0);
         self.groups[idx].offset
     }
@@ -125,7 +125,7 @@ impl Toc {
     }
 
     /// Returns the total size of the frame data in bytes.
-    pub fn total_byte_size(&self) -> u64 {
+    pub fn total_byte_size(&self) -> usize {
         self.total_size
     }
 
@@ -136,6 +136,20 @@ impl Toc {
             self.bitstream_to_original.iter().map(|&idx| self.groups[idx]).collect()
         };
         groups.into_iter()
+    }
+}
+
+impl Toc {
+    pub(crate) fn adjust_offsets(&mut self, global_frame_offset: usize) {
+        if global_frame_offset == 0 {
+            return;
+        }
+
+        for group in &mut self.groups {
+            group.offset = group.offset
+                .checked_sub(global_frame_offset)
+                .expect("group offset is smaller than global frame offset");
+        }
     }
 }
 
@@ -176,12 +190,12 @@ impl Bundle<&crate::FrameHeader> for Toc {
         bitstream.zero_pad_to_byte()?;
 
         let mut offsets = Vec::with_capacity(sizes.len());
-        let mut acc = bitstream.num_read_bits() as u64;
-        let mut total_size = 0u64;
+        let mut acc = bitstream.num_read_bits() / 8;
+        let mut total_size = 0usize;
         for &size in &sizes {
             offsets.push(acc);
-            acc += size as u64 * 8;
-            total_size += size as u64;
+            acc += size as usize;
+            total_size += size as usize;
         }
 
         let section_kinds = if entry_count == 1 {

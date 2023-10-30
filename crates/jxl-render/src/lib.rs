@@ -58,6 +58,11 @@ impl RenderContext {
     pub fn loaded_keyframes(&self) -> usize {
         self.inner.loaded_keyframes()
     }
+
+    #[inline]
+    pub fn loaded_frames(&self) -> usize {
+        self.inner.frames.len()
+    }
 }
 
 impl RenderContext {
@@ -101,6 +106,15 @@ impl RenderContext {
     #[inline]
     pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame> {
         self.inner.keyframe(keyframe_idx)
+    }
+
+    #[inline]
+    pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
+        if self.inner.frames.len() == frame_idx {
+            self.inner.loading_frame.as_ref()
+        } else {
+            self.inner.frames.get(frame_idx)
+        }
     }
 }
 
