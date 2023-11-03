@@ -1,4 +1,3 @@
-use honggfuzz::fuzz;
 use jxl_oxide::JxlImage;
 
 fn decode(data: &[u8]) {
@@ -17,10 +16,15 @@ fn decode(data: &[u8]) {
 }
 
 fn main() {
-    loop {
-        fuzz!(|data: &[u8]| {
-            decode(data);
-        });
+    // Honggfuzz does not support windows yet
+    #[cfg(not(target_os = "windows"))]
+    {
+        use honggfuzz::fuzz;
+        loop {
+            fuzz!(|data: &[u8]| {
+                decode(data);
+            });
+        }
     }
 }
 
