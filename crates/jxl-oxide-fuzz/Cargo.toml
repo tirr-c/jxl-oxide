@@ -9,11 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 honggfuzz = "0.5.55"
-jxl-oxide = {path = ".."}
-
-# Prevent this from interfering with workspaces
-[workspace]
-members = ["."]
+jxl-oxide = {path = "../jxl-oxide" }
 
 [profile.release]
 debug = 1
