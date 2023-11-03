@@ -1,0 +1,104 @@
+=====================================================================
+TIME: 2023-11-03.11:07:28
+=====================================================================
+FUZZER ARGS:
+ mutationsPerRun : 5
+ externalCmd     : NULL
+ fuzzStdin       : FALSE
+ timeout         : 1 (sec)
+ ignoreAddr      : (nil)
+ ASLimit         : 0 (MiB)
+ RSSLimit        : 0 (MiB)
+ DATALimit       : 0 (MiB)
+ wordlistFile    : NULL
+ dynFileMethod   : 
+ fuzzTarget      : hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode 
+CRASH:
+DESCRIPTION: 
+ORIG_FNAME: 97222c0678ba93ef3c4c8d04ce110748.0000002e.honggfuzz.cov
+FUZZ_FNAME: hfuzz_workspace/fuzz_decode/SIGABRT.PC.7ffff7d1383c.STACK.191f89ecd1.CODE.-6.ADDR.0.INSTR.mov____%eax,%ebx.fuzz
+PID: 87889
+SIGNAL: SIGABRT (6)
+PC: 0x7ffff7d1383c
+FAULT ADDRESS: 0x0
+INSTRUCTION: mov____%eax,%ebx
+STACK HASH: 000000191f89ecd1
+STACK:
+ <0x00007ffff7cc3668> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00007ffff7cab4b8> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00005555555f87b7> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555565d97> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555cb6a7> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f6358> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f6079> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f4d06> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f5e12> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555567045> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555670e3> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555a66cd> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555782b3> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555578c4e> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556dd12> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556cbfa> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555680ac> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c67b> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c951> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c8a5> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556821a> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555685e8> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f05d7> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555685bc> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00007ffff7caccd0> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00007ffff7cacd8a> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x0000555555567b95> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+=====================================================================
+=====================================================================
+TIME: 2023-11-03.11:17:26
+=====================================================================
+FUZZER ARGS:
+ mutationsPerRun : 5
+ externalCmd     : NULL
+ fuzzStdin       : FALSE
+ timeout         : 1 (sec)
+ ignoreAddr      : (nil)
+ ASLimit         : 0 (MiB)
+ RSSLimit        : 0 (MiB)
+ DATALimit       : 0 (MiB)
+ wordlistFile    : NULL
+ dynFileMethod   : 
+ fuzzTarget      : hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode 
+CRASH:
+DESCRIPTION: 
+ORIG_FNAME: e873e33ab71cd6ee8c21ad517ee55fc0.00000061.honggfuzz.cov
+FUZZ_FNAME: hfuzz_workspace/fuzz_decode/SIGABRT.PC.7ffff7d1383c.STACK.c9ec5b426.CODE.-6.ADDR.0.INSTR.mov____%eax,%ebx.fuzz
+PID: 145190
+SIGNAL: SIGABRT (6)
+PC: 0x7ffff7d1383c
+FAULT ADDRESS: 0x0
+INSTRUCTION: mov____%eax,%ebx
+STACK HASH: 0000000c9ec5b426
+STACK:
+ <0x00007ffff7cc3668> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00007ffff7cab4b8> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00005555555f87b7> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555565d97> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f8c6e> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f8c80> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555612bc0> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x0000555555566e57> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555ab7a9> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555a9276> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556e1a6> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556cbfa> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555680ac> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c67b> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c951> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556c8a5> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x000055555556821a> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555685e8> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555f05d7> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00005555555685bc> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+ <0x00007ffff7caccd0> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x00007ffff7cacd8a> [func:UNKNOWN file: line:0 module:/usr/lib/libc.so.6]
+ <0x0000555555567b95> [func:UNKNOWN file: line:0 module:/home/benedikt/RustroverProjects/jxl-oxide/crates/jxl-oxide/fuzz/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_decode]
+=====================================================================
