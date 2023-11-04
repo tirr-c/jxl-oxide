@@ -8,7 +8,7 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
-jxl-oxide = {path = "../jxl-oxide" }
+jxl-oxide = { path = "../jxl-oxide" }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 honggfuzz = "0.5.55"
