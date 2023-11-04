@@ -69,6 +69,27 @@ impl Bundle<Arc<ImageHeader>> for Frame {
         let base_offset = bitstream.num_read_bits() / 8;
         let header = read_bits!(bitstream, Bundle(FrameHeader), &image_header)?;
 
+        let width = header.width as u64;
+        let height = header.height as u64;
+        if width > (1 << 30) {
+            tracing::error!(width, "Frame width too large; limit is 2^30");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "frame width too large"
+            ).into());
+        }
+        if height > (1 << 30) {
+            tracing::error!(width, "Frame height too large; limit is 2^30");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "frame height too large"
+            ).into());
+        }
+        if (width * height) > (1 << 40) {
+            tracing::error!(area = width * height, "Frame area (width * height) too large; limit is 2^40");
+            return Err(jxl_bitstream::Error::ProfileConformance(
+                "frame area too large"
+            ).into());
+        }
+
         for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
             if blending_info.mode.use_alpha()
                 && blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()

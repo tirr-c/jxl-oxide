@@ -473,13 +473,27 @@ impl DecoderInner {
 
         let n = split_exponent - (msb_in_token + lsb_in_token) +
             ((token - split) >> (msb_in_token + lsb_in_token));
+        if n >= 32 {
+            return Err(Error::InvalidIntegerConfig);
+        }
+
         let low_bits = token & ((1 << lsb_in_token) - 1);
         let token = token >> lsb_in_token;
         let token = token & ((1 << msb_in_token) - 1);
         let token = token | (1 << msb_in_token);
         bitstream.read_bits(n as usize)
             .map_err(From::from)
-            .map(|rest_bits| (((token << n) | rest_bits) << lsb_in_token) | low_bits)
+            .and_then(|rest_bits| {
+                let rest_bits = rest_bits as u64;
+                let token = token as u64;
+                let low_bits = low_bits as u64;
+                let result = (((token << n) | rest_bits) << lsb_in_token) | low_bits;
+                if result >= (1 << 32) {
+                    Err(Error::InvalidIntegerConfig)
+                } else {
+                    Ok(result as u32)
+                }
+            })
     }
 
     #[inline]
