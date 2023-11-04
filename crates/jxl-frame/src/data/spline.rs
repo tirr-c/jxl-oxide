@@ -31,14 +31,19 @@ impl Bundle<&FrameHeader> for Splines {
             ).into());
         }
 
-        let mut start_points = vec![(0i32, 0i32); num_splines];
+        let mut start_points = vec![(0i64, 0i64); num_splines];
         for i in 0..num_splines {
-            let mut x = decoder.read_varint(bitstream, 1)? as i32;
-            let mut y = decoder.read_varint(bitstream, 1)? as i32;
-            if i != 0 {
-                x = unpack_signed(x as u32) + start_points[i - 1].0;
-                y = unpack_signed(y as u32) + start_points[i - 1].1;
-            }
+            let x = decoder.read_varint(bitstream, 1)?;
+            let y = decoder.read_varint(bitstream, 1)?;
+
+            let (x, y) = if i == 0 {
+                (x as i64, y as i64)
+            } else {
+                (
+                    unpack_signed(x) as i64 + start_points[i - 1].0,
+                    unpack_signed(y) as i64 + start_points[i - 1].1,
+                )
+            };
             start_points[i].0 = x;
             start_points[i].1 = y;
         }
@@ -62,13 +67,13 @@ impl Bundle<&FrameHeader> for Splines {
 }
 
 struct QuantSplineParams<'d> {
-    start_point: (i32, i32),
+    start_point: (i64, i64),
     num_pixels: usize,
     decoder: &'d mut Decoder,
 }
 
 impl<'d> QuantSplineParams<'d> {
-    fn new(start_point: (i32, i32), num_pixels: usize, decoder: &'d mut Decoder) -> Self {
+    fn new(start_point: (i64, i64), num_pixels: usize, decoder: &'d mut Decoder) -> Self {
         Self { start_point, num_pixels, decoder }
     }
 }
@@ -76,7 +81,7 @@ impl<'d> QuantSplineParams<'d> {
 /// Holds delta-endcoded control points coordinates (without starting point) and quantized DCT32 coefficients
 #[derive(Debug, Default, Clone)]
 pub struct QuantSpline {
-    pub quant_points: Vec<(i32, i32)>,
+    pub quant_points: Vec<(i64, i64)>,
     pub manhattan_distance: u64,
     pub xyb_dct: [[i32; 32]; 3],
     pub sigma_dct: [i32; 32],
@@ -104,14 +109,18 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
         let mut manhattan_distance = 0u64;
         quant_points.push(cur_value);
         for _ in 0..num_points {
-            let delta_x = unpack_signed(decoder.read_varint(bitstream, 4)?);
-            let delta_y = unpack_signed(decoder.read_varint(bitstream, 4)?);
+            let delta_x = unpack_signed(decoder.read_varint(bitstream, 4)?) as i64;
+            let delta_y = unpack_signed(decoder.read_varint(bitstream, 4)?) as i64;
 
             cur_delta.0 += delta_x;
             cur_delta.1 += delta_y;
             manhattan_distance += (cur_delta.0.abs() + cur_delta.1.abs()) as u64;
-            cur_value.0 += cur_delta.0;
-            cur_value.1 += cur_delta.1;
+            cur_value.0 = cur_value.0
+                .checked_add(cur_delta.0)
+                .ok_or(jxl_bitstream::Error::ValidationFailed("control point overflowed"))?;
+            cur_value.1 = cur_value.1
+                .checked_add(cur_delta.1)
+                .ok_or(jxl_bitstream::Error::ValidationFailed("control point overflowed"))?;
             quant_points.push(cur_value);
         }
 

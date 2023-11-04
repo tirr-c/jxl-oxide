@@ -30,4 +30,5 @@ test_by_include!(
     num_groups_overflow,
     extensions_overflow,
     hybrid_integer_bits,
+    spline_starting_point_overflow,
 );
