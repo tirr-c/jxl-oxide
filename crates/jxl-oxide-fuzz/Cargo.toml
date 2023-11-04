@@ -4,17 +4,11 @@ version = "0.0.0"
 publish = false
 edition = "2021"
 
-[package.metadata]
-cargo-fuzz = true
-
 [dependencies]
 jxl-oxide = { path = "../jxl-oxide" }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 honggfuzz = "0.5.55"
-
-[profile.release]
-debug = 1
 
 [[bin]]
 name = "fuzz_decode"

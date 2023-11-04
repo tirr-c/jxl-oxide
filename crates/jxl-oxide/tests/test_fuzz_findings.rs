@@ -11,10 +11,10 @@ fn fuzz_decode(data: &[u8]) {
 
 // Macro to simplify writing these tests. To use it write the name of the file in the fuzz_findings directory without the .fuzz extension.
 macro_rules! test_by_include {
-    ($($name:ident),* $(,)?) => {
+    ($($(#[$attr:meta])* $name:ident),* $(,)?) => {
         $(
-            #[ignore]
             #[test]
+            $(#[$attr])*
             fn $name() {
                 let data = include_bytes!(concat!("fuzz_findings/", stringify!($name), ".fuzz"));
                 fuzz_decode(data);
@@ -24,8 +24,11 @@ macro_rules! test_by_include {
 }
 
 test_by_include!(
-    large_output_size,
+    #[ignore] large_output_size,
     multiply_integer_overflow,
-    out_of_bounds_access,
+    #[ignore] out_of_bounds_access,
+    num_groups_overflow,
+    extensions_overflow,
+    hybrid_integer_bits,
     icc_output_size_alloc_failed,
 );

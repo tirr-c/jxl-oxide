@@ -196,13 +196,39 @@ define_bundle! {
         /// Whether keyframes in the image has their timecodes embedded.
         pub have_timecodes: ty(Bool) default(false),
     }
+}
 
-    #[derive(Debug)]
-    pub struct Extensions {
-        extensions: ty(U64) default(0),
-        extension_bits:
-            ty(Vec[U64]; (extensions + 7) / 8) cond(extensions != 0)
-            default(vec![0; ((extensions + 7) / 8) as usize]),
+#[derive(Debug, Default)]
+#[allow(unused)]
+pub struct Extensions {
+    extensions: u64,
+    extension_bits: Vec<u64>,
+}
+
+impl<Ctx> Bundle<Ctx> for Extensions {
+    type Error = jxl_bitstream::Error;
+
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> jxl_bitstream::Result<Self> {
+        let extensions = bitstream.read_u64()?;
+        if extensions > 64 {
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "too many extensions"
+            ));
+        }
+
+        let extension_bits = if extensions == 0 {
+            Vec::new()
+        } else {
+            let num_items = (extensions + 7) / 8;
+            std::iter::repeat_with(|| bitstream.read_u64())
+                .take(num_items as usize)
+                .collect::<jxl_bitstream::Result<Vec<_>>>()?
+        };
+
+        Ok(Self {
+            extensions,
+            extension_bits,
+        })
     }
 }
 
