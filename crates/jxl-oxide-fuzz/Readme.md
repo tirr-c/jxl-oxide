@@ -7,6 +7,11 @@ First install honggfuzz:
 cargo install honggfuzz
 ```
 
+To configure thread counts use this environment variable:
+```shell
+export HFUZZ_RUN_ARGS="-n 12" # 12 cores
+```
+
 ## Running
 ```shell
 cargo hfuzz run fuzz_decode
