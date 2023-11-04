@@ -1,2 +1,4 @@
 hfuzz_workspace/*/*
 hfuzz_workspace/HONGGFUZZ.REPORT.TXT
+hfuzz_target
+target
