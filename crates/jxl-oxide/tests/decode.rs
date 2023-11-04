@@ -26,6 +26,8 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
     let fixture_header = FixtureHeader::from_bytes(header);
 
     let mut image = jxl_oxide::JxlImage::from_reader(std::io::Cursor::new(data)).unwrap();
+    let image_header = &image.image_header().metadata;
+    let bit_depth = image_header.bit_depth.bits_per_sample();
 
     for idx in 0..image.num_loaded_keyframes() {
         let frame = image.render_frame(idx).unwrap();
@@ -39,7 +41,19 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
         let extra_channels = frame.extra_channels();
         assert_eq!(fixture_header.channels as usize, color_channels.len() + extra_channels.len());
 
-        for grid in color_channels.iter().chain(extra_channels.iter().map(|ec| ec.grid())) {
+        // Peak error threshold of Level 10 tests, from 18181-3
+        let frame_header = image.frame_header(idx).unwrap();
+        let color_peak_error_threshold = match frame_header.encoding {
+            jxl_frame::header::Encoding::VarDct => (0.004 * 65535.0) as u16,
+            jxl_frame::header::Encoding::Modular => 1u16 << 14u32.saturating_sub(bit_depth),
+        };
+
+        let channels_it = color_channels
+            .iter()
+            .map(|cc| (cc, color_peak_error_threshold))
+            .chain(extra_channels.iter().map(|ec| (ec.grid(), 1u16 << 14u32.saturating_sub(bit_depth))));
+
+        for (grid, peak_error_threshold) in channels_it {
             assert_eq!(fixture_header.width as usize, grid.width());
             assert_eq!(fixture_header.height as usize, grid.height());
             let buf = grid.buf();
@@ -50,7 +64,7 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
                 let expected = u16::from_le_bytes([expected[0], expected[1]]);
                 let actual = (actual_float * 65535.0 + 0.5) as u16;
                 let diff = actual.abs_diff(expected);
-                assert!(diff < 4);
+                assert!(diff < peak_error_threshold);
             }
         }
     }
