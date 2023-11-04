@@ -192,7 +192,10 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::InvalidIccStream("invalid commands_size"));
     }
 
-    let mut out = Vec::with_capacity(output_size as usize);
+    if output_size > (1 << 28) {
+        return Err(jxl_bitstream::Error::ProfileConformance("ICC output_size too large").into());
+    }
+
     let (commands, data) = stream[stream_offset as usize..].split_at(commands_size as usize);
     let header_size = output_size.min(128) as usize;
     if data.len() < header_size {
@@ -200,6 +203,7 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     }
     let (header_data, mut data) = data.split_at(header_size);
     let mut commands_stream = Cursor::new(commands);
+    let mut out = Vec::with_capacity(output_size as usize);
 
     // Header
     for (idx, &e) in header_data.iter().enumerate() {
