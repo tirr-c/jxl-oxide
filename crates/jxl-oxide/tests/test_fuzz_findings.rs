@@ -26,7 +26,7 @@ macro_rules! test_by_include {
 test_by_include!(
     #[ignore] large_output_size,
     multiply_integer_overflow,
-    #[ignore] out_of_bounds_access,
+    dequant_matrix_encoding_mode,
     num_groups_overflow,
     extensions_overflow,
     hybrid_integer_bits,
