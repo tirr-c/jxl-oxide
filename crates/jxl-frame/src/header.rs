@@ -230,7 +230,7 @@ impl FrameHeader {
         self.sample_height(self.upsampling)
     }
 
-    pub fn num_groups(&self) -> u32 {
+    pub fn num_groups(&self) -> std::result::Result<u32, jxl_bitstream::Error> {
         let width = self.color_sample_width();
         let height = self.color_sample_height();
         let group_dim = self.group_dim();
@@ -238,7 +238,7 @@ impl FrameHeader {
         let hgroups = (width + group_dim - 1) / group_dim;
         let vgroups = (height + group_dim - 1) / group_dim;
 
-        hgroups * vgroups
+        hgroups.checked_mul(vgroups).ok_or(jxl_bitstream::Error::ValidationFailed("Too many groups"))
     }
 
     pub fn num_lf_groups(&self) -> u32 {

@@ -51,7 +51,7 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
         );
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
 
-        let num_groups = frame_header.num_groups();
+        let num_groups = frame_header.num_groups()?;
         let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros() as usize)? + 1;
 
         let hf_pass_params = HfPassParams::new(hf_block_ctx, num_hf_presets);

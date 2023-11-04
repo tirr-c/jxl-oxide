@@ -157,7 +157,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, ctx: &crate::FrameHeader) -> Result<Self> {
-        let num_groups = ctx.num_groups();
+        let num_groups = ctx.num_groups()?;
         let num_passes = ctx.passes.num_passes;
 
         let entry_count = if num_groups == 1 && num_passes == 1 {

@@ -27,4 +27,5 @@ test_by_include!(
     large_output_size,
     multiply_integer_overflow,
     out_of_bounds_access,
+    overflow_num_groups,
 );

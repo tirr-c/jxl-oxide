@@ -243,7 +243,7 @@ pub fn render_vardct(
         let Some(hf_global) = hf_global else { return Ok(()); };
         let groups_per_row = frame_header.groups_per_row();
         for pass_idx in 0..frame_header.passes.num_passes {
-            for group_idx in 0..frame_header.num_groups() {
+            for group_idx in 0..frame_header.num_groups()? {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
                 if lf_group.hf_meta.is_none() {

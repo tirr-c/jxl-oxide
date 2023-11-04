@@ -102,7 +102,7 @@ pub fn decode_pass_group(
     if let Some((minshift, maxshift)) = shift {
         let modular_params = gmodular.modular.make_subimage_params_pass_group(gmodular.ma_config.as_ref(), group_idx, minshift, maxshift);
         let mut modular = Modular::parse(bitstream, modular_params)?;
-        modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx, allow_partial)?;
+        modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups()? + group_idx, allow_partial)?;
         modular.inverse_transform();
         gmodular.modular.copy_from_modular(modular);
     }
