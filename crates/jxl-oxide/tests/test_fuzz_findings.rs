@@ -30,5 +30,6 @@ test_by_include!(
     num_groups_overflow,
     extensions_overflow,
     hybrid_integer_bits,
+    icc_output_size_alloc_failed,
     spline_starting_point_overflow,
 );
