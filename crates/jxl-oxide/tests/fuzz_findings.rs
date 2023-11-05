@@ -36,4 +36,5 @@ test_by_include!(
     noise_on_invisible_frame,
     sharp_lut_oob,
     modular_zero_width,
+    hf_coeff_non_zeros,
 );
