@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jxl_frame::{data::{LfGroup, LfGlobal, HfGlobal, GlobalModular, PassGroupParamsVardct, PassGroupParams}, FrameHeader};
-use jxl_grid::{CutGrid, SimpleGrid, Grid};
+use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_image::ImageHeader;
 use jxl_modular::ChannelShift;
 use jxl_vardct::{
@@ -108,9 +108,27 @@ pub fn render_vardct(
     let mut fb_xyb = ImageWithRegion::from_region(3, aligned_region);
     let fb_stride = aligned_region.width as usize;
 
+    let mut modular_image = gmodular.modular.image_mut();
+    let groups = modular_image.as_mut().map(|x| x.prepare_groups(frame.pass_shifts())).transpose()?;
+    let (lf_group_image, pass_group_image) = groups.map(|x| (x.lf_groups, x.pass_groups)).unzip();
+    let lf_group_image = lf_group_image.unwrap_or_else(Vec::new);
+    let pass_group_image = pass_group_image.unwrap_or_else(|| {
+        let passes = frame_header.passes.num_passes as usize;
+        let mut ret = Vec::with_capacity(passes);
+        ret.resize_with(passes, Vec::new);
+        ret
+    });
+
     let lf_groups = &mut cache.lf_groups;
     tracing::trace_span!("Load LF groups").in_scope(|| {
-        crate::load_lf_groups(frame, lf_global, lf_groups, modular_lf_region, &mut gmodular)
+        crate::load_lf_groups(
+            frame,
+            lf_global.vardct.as_ref(),
+            lf_groups,
+            gmodular.ma_config.as_ref(),
+            lf_group_image,
+            modular_lf_region,
+        )
     })?;
 
     let group_dim = frame_header.group_dim();
@@ -151,7 +169,7 @@ pub fn render_vardct(
             if lf_frame.is_none() {
                 let quantizer = &lf_global_vardct.quantizer;
                 let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
-                let channel_data = lf_coeff.lf_quant.image().channel_data();
+                let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
                 let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else { panic!() };
                 copy_lf_dequant(
                     lf_x,
@@ -242,8 +260,12 @@ pub fn render_vardct(
     tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
         let Some(hf_global) = hf_global else { return Ok(()); };
         let groups_per_row = frame_header.groups_per_row();
-        for pass_idx in 0..frame_header.passes.num_passes {
+        for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
+            let pass_idx = pass_idx as u32;
+            let mut group_it = pass_image.into_iter().fuse();
             for group_idx in 0..frame_header.num_groups() {
+                let modular = group_it.next();
+
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
                 if lf_group.hf_meta.is_none() {
@@ -296,7 +318,6 @@ pub fn render_vardct(
                     })
                 };
 
-                let shift = frame.pass_shifts(pass_idx);
                 let result = jxl_frame::data::decode_pass_group(
                     &mut bitstream,
                     PassGroupParams {
@@ -304,8 +325,8 @@ pub fn render_vardct(
                         lf_group,
                         pass_idx,
                         group_idx,
-                        shift,
-                        gmodular: &mut gmodular,
+                        global_ma_config: gmodular.ma_config.as_ref(),
+                        modular,
                         vardct,
                         allow_partial,
                     },
@@ -318,9 +339,11 @@ pub fn render_vardct(
         Ok(())
     })?;
 
-    tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
-        gmodular.modular.inverse_transform();
-    });
+    if let Some(modular_image) = modular_image {
+        tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
+            modular_image.prepare_subimage().unwrap().finish();
+        });
+    }
 
     tracing::trace_span!("Dequant HF").in_scope(|| {
         let Some(hf_global) = hf_global else { return; };
@@ -361,7 +384,7 @@ pub fn copy_lf_dequant(
     top: usize,
     quantizer: &Quantizer,
     m_lf: f32,
-    channel_data: &Grid<i32>,
+    channel_data: &SimpleGrid<i32>,
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
@@ -374,22 +397,12 @@ pub fn copy_lf_dequant(
     let stride = out.width();
     let buf = &mut out.buf_mut()[top * stride + left..];
     let mut grid = CutGrid::from_buf(buf, width, height, stride);
-    if let Some(channel_data) = channel_data.as_simple() {
-        let buf = channel_data.buf();
-        for y in 0..height {
-            let row = grid.get_row_mut(y);
-            let quant = &buf[y * width..][..width];
-            for (out, &q) in row.iter_mut().zip(quant) {
-                *out = q as f32 * scale;
-            }
-        }
-    } else {
-        for y in 0..height {
-            let row = grid.get_row_mut(y);
-            for (x, out) in row.iter_mut().enumerate() {
-                let q = *channel_data.get(x, y).unwrap();
-                *out = q as f32 * scale;
-            }
+    let buf = channel_data.buf();
+    for y in 0..height {
+        let row = grid.get_row_mut(y);
+        let quant = &buf[y * width..][..width];
+        for (out, &q) in row.iter_mut().zip(quant) {
+            *out = q as f32 * scale;
         }
     }
 }

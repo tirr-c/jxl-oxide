@@ -323,9 +323,9 @@ impl DequantMatrixParams {
             },
             Raw { denominator, params } => {
                 let (width, height) = dct_select.dequant_matrix_size();
-                let channel_data = params.image().channel_data();
+                let channel_data = params.into_image().unwrap().into_image_channels();
                 [0usize, 1, 2].map(|c| {
-                    let channel = channel_data[c].as_simple().unwrap();
+                    let channel = &channel_data[c];
                     let mut ret = vec![0.0f32; width as usize * height as usize];
                     for (c, ret) in channel.buf().iter().zip(&mut ret) {
                         *ret = *c as f32 * denominator;
@@ -466,8 +466,10 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                     global_ma_config,
                 );
                 let mut params = Modular::parse(bitstream, modular_params)?;
-                params.decode_image(bitstream, stream_index, false)?;
-                params.inverse_transform();
+                let image = params.image_mut().unwrap();
+                let mut subimage = image.prepare_subimage()?;
+                subimage.decode(bitstream, stream_index, false)?;
+                subimage.finish();
 
                 Raw { denominator, params }
             },

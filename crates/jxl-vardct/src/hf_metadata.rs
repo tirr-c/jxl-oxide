@@ -89,11 +89,13 @@ impl Bundle<HfMetadataParams<'_>> for HfMetadata {
             global_ma_config,
         );
         let mut modular = Modular::parse(bitstream, params)?;
-        modular.decode_image(bitstream, 1 + 2 * num_lf_groups + lf_group_idx, false)?;
-        modular.inverse_transform();
+        let image = modular.image_mut().unwrap();
+        let mut subimage = image.prepare_subimage()?;
+        subimage.decode(bitstream, 1 + 2 * num_lf_groups + lf_group_idx, false)?;
+        subimage.finish();
 
-        let image = modular.into_image().into_channel_data();
-        let mut image_iter = image.into_iter().map(|g| g.into_simple().unwrap());
+        let image = modular.into_image().unwrap().into_image_channels();
+        let mut image_iter = image.into_iter();
         let x_from_y = image_iter.next().unwrap();
         let b_from_y = image_iter.next().unwrap();
         let block_info_raw = image_iter.next().unwrap();

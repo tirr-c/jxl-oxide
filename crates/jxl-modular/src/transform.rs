@@ -1,10 +1,10 @@
 use std::num::Wrapping;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_grid::Grid;
+use jxl_grid::{SimpleGrid, CutGrid};
 
-use crate::{Error, Result};
-use super::{ModularChannelInfo, Image, predictor::{Predictor, PredictorState, WpHeader}};
+use crate::{Error, Result, image::TransformedGrid};
+use super::{ModularChannelInfo, predictor::{Predictor, PredictorState, WpHeader}};
 
 #[derive(Debug, Clone)]
 pub enum TransformInfo {
@@ -14,27 +14,44 @@ pub enum TransformInfo {
 }
 
 impl TransformInfo {
-    pub(super) fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
+    pub(super) fn prepare_transform_info(&mut self, channels: &mut super::ModularChannels) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
-            Self::Palette(pal) => pal.transform_channel_info(channels),
-            Self::Squeeze(sq) => sq.transform_channel_info(channels),
+            Self::Palette(pal) => pal.transform_channel_info(channels, &mut Vec::new(), None),
+            Self::Squeeze(sq) => {
+                sq.set_default_params(channels);
+                sq.transform_channel_info(channels, None)
+            },
         }
     }
 
-    pub(super) fn or_default(&mut self, channels: &mut super::ModularChannels) {
-        match self {
-            Self::Rct(_) => {},
-            Self::Palette(_) => {},
-            Self::Squeeze(sq) => sq.or_default(channels),
+    pub(super) fn prepare_meta_channels(
+        &self,
+        meta_channels: &mut Vec<SimpleGrid<i32>>,
+    ) {
+        if let Self::Palette(pal) = self {
+            meta_channels.insert(0, SimpleGrid::new(pal.nb_colours as usize, pal.num_c as usize));
         }
     }
 
-    pub(super) fn inverse(&self, image: &mut Image) {
+    pub(super) fn transform_channels<'dest>(
+        &self,
+        channels: &mut super::ModularChannels,
+        meta_channel_grids: &mut Vec<CutGrid<'dest, i32>>,
+        grids: &mut Vec<TransformedGrid<'dest>>,
+    ) -> Result<()> {
         match self {
-            Self::Rct(rct) => rct.inverse(image),
-            Self::Palette(pal) => pal.inverse(image),
-            Self::Squeeze(sq) => sq.inverse(image),
+            Self::Rct(rct) => rct.transform_channel_info(channels),
+            Self::Palette(pal) => pal.transform_channel_info(channels, meta_channel_grids, Some(grids)),
+            Self::Squeeze(sq) => sq.transform_channel_info(channels, Some(grids)),
+        }
+    }
+
+    pub(super) fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, bit_depth: u32) {
+        match self {
+            Self::Rct(rct) => rct.inverse(grids),
+            Self::Palette(pal) => pal.inverse(grids, bit_depth),
+            Self::Squeeze(sq) => sq.inverse(grids),
         }
     }
 
@@ -121,7 +138,10 @@ impl Bundle<&WpHeader> for Palette {
 }
 
 impl Rct {
-    fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
+    fn transform_channel_info(
+        &self,
+        channels: &mut super::ModularChannels,
+    ) -> Result<()> {
         let begin_c = self.begin_c;
         let end_c = self.begin_c + 3;
         if end_c as usize > channels.info.len() {
@@ -138,51 +158,64 @@ impl Rct {
         Ok(())
     }
 
-    fn inverse(&self, image: &mut super::Image) {
+    fn inverse(&self, grids: &mut [TransformedGrid<'_>]) {
         let permutation = (self.rct_type / 7) as usize;
         let ty = self.rct_type % 7;
 
-        let channel_data = image.channel_data_mut();
         let begin_c = self.begin_c as usize;
-        let mut channels = channel_data
+        let mut channels = grids
             .iter_mut()
             .skip(begin_c);
-        let a = channels.next().unwrap();
-        let b = channels.next().unwrap();
-        let c = channels.next().unwrap();
+        let a = channels.next().unwrap().grid_mut();
+        let b = channels.next().unwrap().grid_mut();
+        let c = channels.next().unwrap().grid_mut();
 
-        a.zip3_mut(b, c, |a, b, c| {
-            let samples = [a, b, c];
-            let a = Wrapping(*samples[0]);
-            let b = Wrapping(*samples[1]);
-            let c = Wrapping(*samples[2]);
-            let d;
-            let e;
-            let f;
-            if ty == 6 {
-                let tmp = a - (c >> 1);
-                e = c + tmp;
-                f = tmp - (b >> 1);
-                d = f + b;
-            } else {
-                d = a;
-                f = if ty & 1 != 0 {
-                    c + a
+        let width = a.width();
+        let height = a.height();
+        assert_eq!(width, b.width());
+        assert_eq!(width, c.width());
+        assert_eq!(height, b.height());
+        assert_eq!(height, c.height());
+
+        for y in 0..height {
+            for x in 0..width {
+                let samples = [
+                    a.get_mut(x, y),
+                    b.get_mut(x, y),
+                    c.get_mut(x, y),
+                ];
+
+                let a = Wrapping(*samples[0]);
+                let b = Wrapping(*samples[1]);
+                let c = Wrapping(*samples[2]);
+                let d;
+                let e;
+                let f;
+                if ty == 6 {
+                    let tmp = a - (c >> 1);
+                    e = c + tmp;
+                    f = tmp - (b >> 1);
+                    d = f + b;
                 } else {
-                    c
-                };
-                e = if (ty >> 1) == 1 {
-                    b + a
-                } else if (ty >> 1) == 2 {
-                    b + ((a + f) >> 1)
-                } else {
-                    b
-                };
+                    d = a;
+                    f = if ty & 1 != 0 {
+                        c + a
+                    } else {
+                        c
+                    };
+                    e = if (ty >> 1) == 1 {
+                        b + a
+                    } else if (ty >> 1) == 2 {
+                        b + ((a + f) >> 1)
+                    } else {
+                        b
+                    };
+                }
+                *samples[permutation % 3] = d.0;
+                *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
+                *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
             }
-            *samples[permutation % 3] = d.0;
-            *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
-            *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
-        });
+        }
     }
 }
 
@@ -202,7 +235,12 @@ impl Palette {
         [45, -45, 24], [24, 45, -45], [64, 64, -64], [128, 128, 0], [0, 0, -128], [-24, 45, -45],
     ];
 
-    fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
+    fn transform_channel_info<'dest>(
+        &self,
+        channels: &mut super::ModularChannels,
+        meta_channel_grids: &mut Vec<CutGrid<'dest, i32>>,
+        grids: Option<&mut Vec<TransformedGrid<'dest>>>,
+    ) -> Result<()> {
         let begin_c = self.begin_c;
         let end_c = begin_c + self.num_c;
         if end_c as usize > channels.info.len() {
@@ -219,40 +257,48 @@ impl Palette {
 
         channels.info.drain((begin_c as usize + 1)..(end_c as usize));
         channels.info.insert(0, ModularChannelInfo::new_shifted(self.nb_colours, self.num_c, -1, -1));
+
+        if let Some(grids) = grids {
+            let members = grids.drain((begin_c as usize + 1)..(end_c as usize)).collect::<Vec<_>>();
+            grids[begin_c as usize].merge(members);
+
+            let palette_grid = meta_channel_grids.pop().unwrap();
+            grids.insert(0, TransformedGrid::from(palette_grid));
+        }
         Ok(())
     }
 
-    fn inverse(&self, image: &mut Image) {
-        let bit_depth = image.bit_depth();
-        let channel_data = image.channel_data_mut();
-        let begin_c = self.begin_c as usize;
-        let num_c = self.num_c as usize;
-
-        for i in 1..num_c {
-            let grid = channel_data[begin_c + 1].clone();
-            channel_data.insert(begin_c + 1 + i, grid);
-        }
-
-        let (palette_grid, left) = channel_data.split_first_mut().unwrap();
-        let palette_grid = &*palette_grid;
-        let output_grids = left.iter_mut().skip(begin_c).take(num_c).collect::<Vec<_>>();
-
+    fn inverse_once(
+        &self,
+        c: usize,
+        palette: &CutGrid<'_, i32>,
+        indices: Option<&CutGrid<'_, i32>>,
+        grid: &mut CutGrid<'_, i32>,
+        bit_depth: u32,
+    ) {
         let nb_deltas = self.nb_deltas as i32;
         let nb_colors = self.nb_colours as i32;
-        for (c, grid) in output_grids.into_iter().enumerate() {
-            let c = c as u32;
-            let mut need_delta = Vec::new();
-            grid.iter_init_mut(|x, y, sample| {
-                let index = *sample;
+
+        let mut need_delta = Vec::new();
+        let width = grid.width();
+        let height = grid.height();
+        for y in 0..height {
+            for x in 0..width {
+                let index = if let Some(indices) = indices {
+                    indices.get(x, y)
+                } else {
+                    grid.get(x, y)
+                };
+                let sample = grid.get_mut(x, y);
                 if index < nb_deltas {
                     need_delta.push((x, y));
                 }
                 if (0..nb_colors).contains(&index) {
-                    *sample = *palette_grid.get(index as usize, c as usize).unwrap();
+                    *sample = palette.get(index as usize, c);
                 } else if index >= nb_colors {
+                    let value = index;
                     let index = index - nb_colors;
                     if index < 64 {
-                        let value = *sample;
                         *sample = ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4 +
                             (1i32 << bit_depth.saturating_sub(3));
                     } else {
@@ -265,7 +311,7 @@ impl Palette {
                 } else if c < 3 {
                     let index = -(index + 1);
                     let index = (index % 143) as usize;
-                    *sample = Self::DELTA_PALETTE[(index + 1) >> 1][c as usize] as i32;
+                    *sample = Self::DELTA_PALETTE[(index + 1) >> 1][c] as i32;
                     if index & 1 == 0 {
                         *sample = -*sample;
                     }
@@ -275,63 +321,74 @@ impl Palette {
                 } else {
                     *sample = 0;
                 }
-            });
-
-            if need_delta.is_empty() {
-                continue;
-            }
-            need_delta.sort_by(|(lx, ly), (rx, ry)| ly.cmp(ry).then(lx.cmp(rx)));
-
-            let d_pred = self.d_pred;
-            let wp_header = if d_pred == Predictor::SelfCorrecting {
-                self.wp_header.as_ref()
-            } else {
-                None
-            };
-            let width = grid.width();
-            let height = grid.height();
-            let mut predictor = PredictorState::new(width as u32, 0, 0, 0, wp_header);
-
-            let mut idx = 0;
-            'outer: for y in 0..height {
-                for x in 0..width {
-                    let properties = predictor.properties(&[]);
-                    let diff = d_pred.predict(&properties);
-                    let sample = grid.get_mut(x, y);
-                    let mut sample_value = sample.as_ref().map(|x| **x).unwrap_or(0);
-                    if need_delta[idx] == (x, y) {
-                        sample_value = (sample_value as i64 + diff) as i32;
-                        if let Some(sample) = sample {
-                            *sample = sample_value;
-                        } else {
-                            grid.set(x, y, diff as i32);
-                        }
-                        idx += 1;
-                        if idx >= need_delta.len() {
-                            break 'outer;
-                        }
-                    }
-                    properties.record(sample_value);
-                }
             }
         }
 
-        channel_data.remove(0);
+        if need_delta.is_empty() {
+            return;
+        }
+
+        let d_pred = self.d_pred;
+        let wp_header = if d_pred == Predictor::SelfCorrecting {
+            self.wp_header.as_ref()
+        } else {
+            None
+        };
+        let mut predictor = PredictorState::new(width as u32, 0, 0, 0, wp_header);
+
+        let mut idx = 0;
+        for y in 0..height {
+            for x in 0..width {
+                let properties = predictor.properties(&[]);
+                let sample = grid.get_mut(x, y);
+                let mut sample_value = *sample;
+                if need_delta[idx] == (x, y) {
+                    let diff = d_pred.predict(&properties);
+                    sample_value = (sample_value as i64 + diff) as i32;
+                    *sample = sample_value;
+                    idx += 1;
+                    if idx >= need_delta.len() {
+                        return;
+                    }
+                }
+                properties.record(sample_value);
+            }
+        }
+    }
+
+    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, bit_depth: u32) {
+        let begin_c = self.begin_c as usize;
+        let num_c = self.num_c as usize;
+
+        let palette_grid = grids.remove(0);
+        let leader = &mut grids[begin_c];
+        let mut members = leader.unmerge(num_c - 1);
+        let index_grid = leader.grid();
+        let palette_grid = palette_grid.grid();
+
+        for (c, grid) in members.iter_mut().enumerate() {
+            self.inverse_once(c + 1, palette_grid, Some(index_grid), grid.grid_mut(), bit_depth);
+        }
+        self.inverse_once(0, palette_grid, None, leader.grid_mut(), bit_depth);
+
+        for (i, grid) in members.into_iter().enumerate() {
+            grids.insert(begin_c + 1 + i, grid);
+        }
     }
 }
 
 impl Squeeze {
-    fn or_default(&mut self, channels: &mut super::ModularChannels) {
+    fn set_default_params(&mut self, channels: &super::ModularChannels) {
         if !self.sp.is_empty() {
             return;
         }
 
         let first = channels.nb_meta_channels;
-
         let first_ch = &channels.info[first as usize];
         let mut w = first_ch.width;
         let mut h = first_ch.height;
-        if let Some(next_ch) = channels.info.get(first as usize + 1) {
+        if channels.info.len() as u32 - first >= 3 {
+            let next_ch = &channels.info[first as usize + 1];
             if next_ch.width == w && next_ch.height == h {
                 let param_base = SqueezeParams {
                     begin_c: first + 1,
@@ -367,7 +424,11 @@ impl Squeeze {
         }
     }
 
-    fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
+    fn transform_channel_info(
+        &self,
+        channels: &mut super::ModularChannels,
+        mut grids: Option<&mut Vec<TransformedGrid<'_>>>,
+    ) -> Result<()> {
         for sp in &self.sp {
             let SqueezeParams { horizontal, in_place, begin_c: begin, num_c } = *sp;
             let end = begin + num_c;
@@ -387,8 +448,9 @@ impl Squeeze {
                 residu_cap += channels.info.len() - end as usize;
             }
             let mut residu_channels = Vec::with_capacity(residu_cap);
+            let mut residu_grids = grids.is_some().then(|| Vec::with_capacity(residu_cap));
 
-            for ch in &mut channels.info[(begin as usize)..(end as usize)] {
+            for (idx, ch) in channels.info[(begin as usize)..(end as usize)].iter_mut().enumerate() {
                 let mut residu = ch.clone();
                 let super::ModularChannelInfo { width: w, height: h, hshift, vshift } = ch;
                 if *w == 0 || *h == 0 {
@@ -409,117 +471,120 @@ impl Squeeze {
                 }
 
                 residu_channels.push(residu);
+
+                if let Some(residu_grids) = &mut residu_grids {
+                    let grids = grids.as_mut().unwrap();
+                    let g = &mut grids[begin as usize + idx];
+                    let residu_grid = if horizontal {
+                        g.grid_mut().split_interleaved_horizontal_in_place()
+                    } else {
+                        g.grid_mut().split_interleaved_vertical_in_place()
+                    };
+                    residu_grids.push(TransformedGrid::from(residu_grid));
+                }
             }
 
             if in_place {
                 residu_channels.extend(channels.info.drain((end as usize)..));
             }
             channels.info.extend(residu_channels);
+
+            if let Some(grids) = &mut grids {
+                let mut residu_grids = residu_grids.unwrap();
+                if in_place {
+                    residu_grids.extend(grids.drain((end as usize)..));
+                }
+                grids.extend(residu_grids);
+            }
         }
         Ok(())
     }
 
-    fn inverse(&self, image: &mut Image) {
-        let channel_data = image.channel_data_mut();
+    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>) {
         for sp in self.sp.iter().rev() {
             let begin = sp.begin_c as usize;
             let channel_count = sp.num_c as usize;
             let end = begin + channel_count;
             let residual_channels: Vec<_> = if sp.in_place {
-                channel_data.drain(end..(end + channel_count)).collect()
+                grids.drain(end..(end + channel_count)).collect()
             } else {
-                channel_data.drain((channel_data.len() - channel_count)..).collect()
+                grids.drain((grids.len() - channel_count)..).collect()
             };
 
-            for (ch, residu) in channel_data[begin..end].iter_mut().zip(residual_channels) {
-                let output = sp.inverse(&*ch, &residu);
-                *ch = output;
+            for (ch, residu) in grids[begin..end].iter_mut().zip(residual_channels) {
+                sp.inverse(ch, residu);
             }
         }
     }
 }
 
 impl SqueezeParams {
-    fn inverse(&self, i0: &Grid<i32>, i1: &Grid<i32>) -> Grid<i32> {
+    fn inverse<'dest>(&self, i0: &mut TransformedGrid<'dest>, i1: TransformedGrid<'dest>) {
+        let i0 = i0.grid_mut();
+        let TransformedGrid::Single(i1) = i1 else { panic!("residual channel should be Single channel") };
         if self.horizontal {
-            self.inverse_h(i0, i1)
+            if !i0.merge_interleaved_horizontal(i1) {
+                panic!("two grids are not from same squeeze transform");
+            }
+            self.inverse_h(i0)
         } else {
-            self.inverse_v(i0, i1)
+            if !i0.merge_interleaved_vertical(i1) {
+                panic!("two grids are not from same squeeze transform");
+            }
+            self.inverse_v(i0)
         }
     }
 
-    fn inverse_h(&self, i0: &Grid<i32>, i1: &Grid<i32>) -> Grid<i32> {
-        assert_eq!(i0.height(), i1.height());
-
-        let height = i1.height();
-        let width = i1.width();
-        let w0 = i0.width();
-        let (gw, gh) = i0.group_dim();
-        let mut output = Grid::new_usize(i0.width() + i1.width(), i1.height(), gw << 1, gh);
+    fn inverse_h(&self, merged: &mut CutGrid<'_, i32>) {
+        let height = merged.height();
+        let width = merged.width();
+        let width_iters = width / 2;
         for y in 0..height {
-            for x in 0..width {
-                let avg = *i0.get(x, y).unwrap_or(&0);
-                let residu = *i1.get(x, y).unwrap_or(&0);
-                let next_avg = if x + 1 < w0 {
-                    *i0.get(x + 1, y).unwrap_or(&0)
-                } else {
-                    avg
-                };
-                let left = if x > 0 {
-                    output.get(2 * x - 1, y).copied().unwrap_or(avg)
+            let mut avg = merged.get(0, y);
+            let mut left = avg;
+            for x2 in 0..width_iters {
+                let x = x2 * 2;
+                let residu = merged.get(x + 1, y);
+                let next_avg = if x + 2 < width {
+                    merged.get(x + 2, y)
                 } else {
                     avg
                 };
                 let diff = residu + tendency(left, avg, next_avg);
                 let first = avg + diff / 2;
-                output.set(2 * x, y, first);
-                output.set(2 * x + 1, y, first - diff);
-            }
-            if w0 > width {
-                if let Some(&val) = i0.get(width, y) {
-                    output.set(2 * width, y, val);
-                }
+                *merged.get_mut(x, y) = first;
+                *merged.get_mut(x + 1, y) = first - diff;
+                avg = next_avg;
+                left = first - diff;
             }
         }
-        output
     }
 
-    fn inverse_v(&self, i0: &Grid<i32>, i1: &Grid<i32>) -> Grid<i32> {
-        assert_eq!(i0.width(), i1.width());
-
-        let width = i1.width();
-        let height = i1.height();
-        let h0 = i0.height();
-        let (gw, gh) = i0.group_dim();
-        let mut output = Grid::new_usize(i1.width(), i0.height() + i1.height(), gw, gh << 1);
-        for y in 0..height {
+    fn inverse_v(&self, merged: &mut CutGrid<'_, i32>) {
+        let width = merged.width();
+        let height = merged.height();
+        let height_iters = height / 2;
+        for y2 in 0..height_iters {
+            let y = y2 * 2;
             for x in 0..width {
-                let avg = *i0.get(x, y).unwrap_or(&0);
-                let residu = *i1.get(x, y).unwrap_or(&0);
-                let next_avg = if y + 1 < h0 {
-                    *i0.get(x, y + 1).unwrap_or(&0)
+                let avg = merged.get(x, y);
+                let residu = merged.get(x, y + 1);
+                let next_avg = if y + 2 < height {
+                    merged.get(x, y + 2)
                 } else {
                     avg
                 };
                 let top = if y > 0 {
-                    output.get(x, 2 * y - 1).copied().unwrap_or(avg)
+                    merged.get(x, y - 1)
                 } else {
                     avg
                 };
                 let diff = residu + tendency(top, avg, next_avg);
                 let first = avg + diff / 2;
-                output.set(x, 2 * y, first);
-                output.set(x, 2 * y + 1, first - diff);
+                *merged.get_mut(x, y) = first;
+                *merged.get_mut(x, y + 1) = first - diff;
             }
         }
-        if h0 > height {
-            for x in 0..width {
-                if let Some(&val) = i0.get(x, height) {
-                    output.set(x, 2 * height, val);
-                }
-            }
-        }
-        output
     }
 }
 

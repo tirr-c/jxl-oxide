@@ -29,6 +29,7 @@ pub mod header;
 
 pub use error::{Error, Result};
 pub use header::FrameHeader;
+use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 
 use crate::data::*;
 
@@ -177,8 +178,8 @@ impl Frame {
         &self.toc
     }
 
-    pub fn pass_shifts(&self, pass_idx: u32) -> Option<(i32, i32)> {
-        self.pass_shifts.get(&pass_idx).copied()
+    pub fn pass_shifts(&self) -> &BTreeMap<u32, (i32, i32)> {
+        &self.pass_shifts
     }
 
     pub fn data(&self, group: TocGroupKind) -> Option<&[u8]> {
@@ -226,8 +227,17 @@ impl Frame {
         let group = self.data.get(0)?;
         let mut bitstream = Bitstream::new(&group.bytes);
         let result = (|| -> Result<_> {
-            let lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))?;
-            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, &lf_global, 0, false))?;
+            let mut lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))?;
+            let groups = lf_global.gmodular.modular.image_mut().map(|x| x.prepare_groups(&self.pass_shifts)).transpose()?;
+            let mlf_group = groups.and_then(|mut x| x.lf_groups.pop());
+            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams {
+                frame_header: &self.header,
+                quantizer: lf_global.vardct.as_ref().map(|x| &x.quantizer),
+                global_ma_config: lf_global.gmodular.ma_config.as_ref(),
+                mlf_group,
+                lf_group_idx: 0,
+                allow_partial: false,
+            })?;
             let hf_global = (self.header.encoding == header::Encoding::VarDct).then(|| {
                 HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global))
             }).transpose()?;
@@ -260,7 +270,13 @@ impl Frame {
         })
     }
 
-    pub fn try_parse_lf_group(&self, cached_lf_global: Option<&LfGlobal>, lf_group_idx: u32) -> Option<Result<LfGroup>> {
+    pub fn try_parse_lf_group(
+        &self,
+        lf_global_vardct: Option<&LfGlobalVarDct>,
+        global_ma_config: Option<&MaConfig>,
+        mlf_group: Option<TransformedModularSubimage>,
+        lf_group_idx: u32,
+    ) -> Option<Result<LfGroup>> {
         if self.toc.is_single_entry() {
             if lf_group_idx != 0 {
                 return None;
@@ -272,16 +288,14 @@ impl Frame {
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
 
             let mut bitstream = Bitstream::new(&group.bytes);
-            let lf_global = if cached_lf_global.is_none() {
-                match self.try_parse_lf_global()? {
-                    Ok(lf_global) => Some(lf_global),
-                    Err(e) => return Some(Err(e)),
-                }
-            } else {
-                None
-            };
-            let lf_global = cached_lf_global.or(lf_global.as_ref()).unwrap();
-            let result = LfGroup::parse(&mut bitstream, LfGroupParams::new(&self.header, lf_global, lf_group_idx, allow_partial));
+            let result = LfGroup::parse(&mut bitstream, LfGroupParams {
+                frame_header: &self.header,
+                quantizer: lf_global_vardct.map(|x| &x.quantizer),
+                global_ma_config,
+                mlf_group,
+                lf_group_idx,
+                allow_partial,
+            });
             if allow_partial && result.is_err() {
                 return None;
             }

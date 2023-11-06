@@ -128,6 +128,7 @@ pub struct LfCoeffParams<'ma> {
 pub struct LfCoeff {
     pub extra_precision: u8,
     pub lf_quant: Modular,
+    pub partial: bool,
 }
 
 impl Bundle<LfCoeffParams<'_>> for LfCoeff {
@@ -161,8 +162,10 @@ impl Bundle<LfCoeffParams<'_>> for LfCoeff {
             global_ma_config,
         );
         let mut lf_quant = Modular::parse(bitstream, lf_quant_params)?;
-        lf_quant.decode_image(bitstream, 1 + lf_group_idx, allow_partial)?;
-        lf_quant.inverse_transform();
-        Ok(Self { extra_precision, lf_quant })
+        let image = lf_quant.image_mut().unwrap();
+        let mut subimage = image.prepare_subimage()?;
+        subimage.decode(bitstream, 1 + lf_group_idx, allow_partial)?;
+        let complete = subimage.finish();
+        Ok(Self { extra_precision, lf_quant, partial: !complete })
     }
 }
