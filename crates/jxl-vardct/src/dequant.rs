@@ -426,6 +426,14 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                 "Reading dequant matrix params"
             );
         }
+
+        if (1..=5).contains(&encoding_mode) && !matches!(dct_select.dequant_matrix_param_index(), 0 | 1 | 2 | 3 | 9 | 10) {
+            tracing::error!(?dct_select, encoding_mode, "Invalid encoding mode for DctSelect value");
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "invalid encoding mode for DctSelect value"
+            ).into());
+        }
+
         let encoding = match encoding_mode {
             0 => DequantMatrixParamsEncoding::default_with(dct_select),
             1 => Hornuss(read_fixed(bitstream)?),

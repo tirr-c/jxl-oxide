@@ -74,6 +74,30 @@ impl TransformType {
         }
     }
 
+    pub(crate) fn dequant_matrix_param_index(self) -> u32 {
+        use TransformType::*;
+
+        match self {
+            Dct8 => 0,
+            Hornuss => 1,
+            Dct2 => 2,
+            Dct4 => 3,
+            Dct16 => 4,
+            Dct32 => 5,
+            Dct16x8 | Dct8x16 => 6,
+            Dct32x8 | Dct8x32 => 7,
+            Dct32x16 | Dct16x32 => 8,
+            Dct4x8 | Dct8x4 => 9,
+            Afv0 | Afv1 | Afv2 | Afv3 => 10,
+            Dct64 => 11,
+            Dct64x32 | Dct32x64 => 12,
+            Dct128 => 13,
+            Dct128x64 | Dct64x128 => 14,
+            Dct256 => 15,
+            Dct256x128 | Dct128x256 => 16,
+        }
+    }
+
     pub(crate) fn dequant_matrix_size(self) -> (u32, u32) {
         use TransformType::*;
 
