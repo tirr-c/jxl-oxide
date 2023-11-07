@@ -11,6 +11,9 @@ pub struct SharedSubgrid<'g, V = f32> {
     _marker: std::marker::PhantomData<&'g [V]>,
 }
 
+unsafe impl<'g, V> Send for SharedSubgrid<'g, V> where &'g [V]: Send {}
+unsafe impl<'g, V> Sync for SharedSubgrid<'g, V> where &'g [V]: Sync {}
+
 impl<'g, V> From<&'g crate::SimpleGrid<V>> for SharedSubgrid<'g, V> {
     fn from(value: &'g crate::SimpleGrid<V>) -> Self {
         SharedSubgrid::from_buf(value.buf(), value.width(), value.height(), value.width())

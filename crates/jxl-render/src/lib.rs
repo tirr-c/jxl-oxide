@@ -378,41 +378,38 @@ fn load_lf_groups(
     mlf_groups: Vec<TransformedModularSubimage>,
     lf_region: Region,
 ) -> Result<()> {
+    use rayon::prelude::*;
+
     let frame_header = frame.header();
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
-    let mut mlf_groups_it = mlf_groups.into_iter();
-    for idx in 0..frame_header.num_lf_groups() {
-        let mlf_group = mlf_groups_it.next();
+    let mut mlf_groups = mlf_groups.into_iter().map(Some).collect::<Vec<_>>();
+    mlf_groups.resize_with(frame_header.num_lf_groups() as usize, || None);
 
-        let left = (idx % lf_groups_per_row) * group_dim;
-        let top = (idx / lf_groups_per_row) * group_dim;
-        let lf_group_region = Region {
-            left: left as i32,
-            top: top as i32,
-            width: group_dim,
-            height: group_dim,
-        };
-        if lf_region.intersection(lf_group_region).is_empty() {
-            continue;
-        }
+    let new_groups = mlf_groups.into_par_iter().enumerate()
+        .filter_map(|(idx, mlf_group)| {
+            let idx = idx as u32;
+            let left = (idx % lf_groups_per_row) * group_dim;
+            let top = (idx / lf_groups_per_row) * group_dim;
+            let lf_group_region = Region {
+                left: left as i32,
+                top: top as i32,
+                width: group_dim,
+                height: group_dim,
+            };
+            if lf_region.intersection(lf_group_region).is_empty() {
+                return None;
+            }
 
-        let lf_group = lf_groups.entry(idx);
-        match lf_group {
-            std::collections::hash_map::Entry::Occupied(x) => {
-                let lf_group_ref = x.into_mut();
-                if lf_group_ref.partial {
-                    let Some(lf_group) = frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx).transpose()? else { continue; };
-                    *lf_group_ref = lf_group;
-                }
-            },
-            std::collections::hash_map::Entry::Vacant(x) => {
-                let Some(lf_group) = frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx).transpose()? else { continue; };
-                x.insert(lf_group);
-            },
-        }
-    }
-
+            let lf_group_partial = lf_groups.get(&idx).map(|g| g.partial);
+            if lf_group_partial == Some(false) {
+                return None;
+            }
+            frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx)
+                .map(|o| o.map(|g| (idx, g)).map_err(From::from))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>>>()?;
+    lf_groups.extend(new_groups);
     Ok(())
 }
 

@@ -46,6 +46,8 @@ pub fn render_vardct(
     cache: &mut RenderCache,
     region: Region,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
+    use rayon::prelude::*;
+
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
 
@@ -106,7 +108,6 @@ pub fn render_vardct(
     let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
 
     let mut fb_xyb = ImageWithRegion::from_region(3, aligned_region);
-    let fb_stride = aligned_region.width as usize;
 
     let mut modular_image = gmodular.modular.image_mut();
     let groups = modular_image.as_mut().map(|x| x.prepare_groups(frame.pass_shifts())).transpose()?;
@@ -259,19 +260,39 @@ pub fn render_vardct(
 
     tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
         let Some(hf_global) = hf_global else { return Ok(()); };
+        let num_groups = frame_header.num_groups();
         let groups_per_row = frame_header.groups_per_row();
         for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
-            let pass_idx = pass_idx as u32;
-            let mut group_it = pass_image.into_iter().fuse();
-            for group_idx in 0..frame_header.num_groups() {
-                let modular = group_it.next();
+            let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
+            let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
+                let width = fb.width();
+                let height = fb.height();
+                let shifted = shifts_cbycr[idx].shift_size((width as u32, height as u32));
+                let fb = CutGrid::from_buf(fb.buf_mut(), shifted.0 as usize, shifted.1 as usize, width);
 
+                let hshift = shifts_cbycr[idx].hshift();
+                let vshift = shifts_cbycr[idx].vshift();
+                let group_dim = group_dim as usize;
+                fb.into_groups(group_dim >> hshift, group_dim >> vshift)
+            });
+
+            let pass_idx = pass_idx as u32;
+            let mut pass_image = pass_image.into_iter().map(Some).collect::<Vec<_>>();
+            pass_image.resize_with(num_groups as usize, || None);
+
+            fb_x.into_par_iter()
+                .zip(fb_y)
+                .zip(fb_b)
+                .zip(pass_image)
+                .enumerate()
+                .try_for_each(|(group_idx, (((fb_x, fb_y), fb_b), modular))| -> Result<_> {
+                let group_idx = group_idx as u32;
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return Ok(()); };
                 if lf_group.hf_meta.is_none() {
-                    continue;
+                    return Ok(());
                 }
-                let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { return Ok(()); };
                 let allow_partial = bitstream.partial;
                 let mut bitstream = bitstream.bitstream;
 
@@ -289,28 +310,14 @@ pub fn render_vardct(
                     height: group_height,
                 };
                 if group_region.intersection(modular_region).is_empty() {
-                    continue;
+                    return Ok(());
                 }
 
                 let mut grid_xyb;
                 let vardct = if group_region.intersection(aligned_region).is_empty() {
                     None
                 } else {
-                    let left = left - aligned_region.left as u32;
-                    let top = top - aligned_region.top as u32;
-
-                    let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
-                    grid_xyb = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
-                        let hshift = shifts_cbycr[idx].hshift();
-                        let vshift = shifts_cbycr[idx].vshift();
-                        let group_width = group_width >> hshift;
-                        let group_height = group_height >> vshift;
-                        let left = left >> hshift;
-                        let top = top >> vshift;
-                        let offset = top as usize * fb_stride + left as usize;
-                        CutGrid::from_buf(&mut fb.buf_mut()[offset..], group_width as usize, group_height as usize, fb_stride)
-                    });
-
+                    grid_xyb = [fb_x, fb_y, fb_b];
                     Some(PassGroupParamsVardct {
                         lf_vardct: lf_global_vardct,
                         hf_global,
@@ -334,7 +341,8 @@ pub fn render_vardct(
                 if !allow_partial {
                     result?;
                 }
-            }
+                Ok(())
+            })?;
         }
         Ok(())
     })?;
@@ -574,6 +582,7 @@ pub fn chroma_from_luma_hf(
     let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
     let [x_from_y, b_from_y] = cfl_grid else { panic!() };
     let stride = cfl_grid_region.width as usize;
+    let coeff_stride = coeff_x.width();
 
     for y in 0..region.height {
         let cy = (y as i32 + region.top) / 64 - cfl_grid_region.top;
@@ -585,6 +594,9 @@ pub fn chroma_from_luma_hf(
         let b_from_y = &b_from_y.buf()[cy * stride..][..stride];
 
         let mut x = cfl_grid_region.left * 64 - region.left - 1;
+        let coeff_y = &coeff_y.buf_mut()[y * coeff_stride..];
+        let coeff_x = &mut coeff_x.buf_mut()[y * coeff_stride..];
+        let coeff_b = &mut coeff_b.buf_mut()[y * coeff_stride..];
         'outer: for (kx, kb) in x_from_y.iter().zip(b_from_y) {
             for _ in 0..64 {
                 x += 1;
@@ -596,9 +608,9 @@ pub fn chroma_from_luma_hf(
                 }
                 let x = x as usize;
 
-                let coeff_y = *coeff_y.get(x, y).unwrap();
-                *coeff_x.get_mut(x, y).unwrap() += kx * coeff_y;
-                *coeff_b.get_mut(x, y).unwrap() += kb * coeff_y;
+                let coeff_y = coeff_y[x];
+                coeff_x[x] += kx * coeff_y;
+                coeff_b[x] += kb * coeff_y;
             }
         }
     }

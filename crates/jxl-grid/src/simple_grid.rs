@@ -107,6 +107,9 @@ pub struct CutGrid<'g, V: Copy = f32> {
     _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
+unsafe impl<'g, V: Copy> Send for CutGrid<'g, V> where &'g mut [V]: Send {}
+unsafe impl<'g, V: Copy> Sync for CutGrid<'g, V> where &'g mut [V]: Sync {}
+
 impl<'g, V: Copy> CutGrid<'g, V> {
     /// Create a `CutGrid` from raw pointer to the buffer, width, height and stride.
     ///
@@ -163,6 +166,12 @@ impl<'g, V: Copy> CutGrid<'g, V> {
                 stride,
             )
         }
+    }
+
+    pub fn from_simple_grid(grid: &'g mut SimpleGrid<V>) -> Self {
+        let width = grid.width();
+        let height = grid.height();
+        Self::from_buf(grid.buf_mut(), width, height, width)
     }
 
     #[inline]
