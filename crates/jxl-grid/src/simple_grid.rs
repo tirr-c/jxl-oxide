@@ -32,13 +32,14 @@ impl<S: Default + Clone> SimpleGrid<S> {
     const ALIGN: usize = compute_align::<S>();
 
     /// Create a new buffer.
+    #[inline]
     pub fn new(width: usize, height: usize) -> Self {
         let len = width * height;
-        let mut buf = Vec::with_capacity(len + Self::ALIGN / std::mem::size_of::<S>());
+        let mut buf = vec![S::default(); len + Self::ALIGN / std::mem::size_of::<S>()];
 
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
         let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize(len + offset, S::default());
+        buf.resize_with(len + offset, S::default);
         Self {
             width,
             height,
