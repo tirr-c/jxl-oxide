@@ -51,6 +51,7 @@ pub fn render_vardct(
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
 
+    let image_header = frame.image_header();
     let frame_header = frame.header();
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
@@ -101,7 +102,7 @@ pub fn render_vardct(
         }.container_aligned(frame_header.group_dim())
     };
 
-    let modular_region = modular::compute_modular_region(frame_header, &gmodular, aligned_region);
+    let _modular_region = modular::compute_modular_region(frame_header, &gmodular, aligned_region);
     let modular_lf_region = modular::compute_modular_region(frame_header, &gmodular, aligned_lf_region)
         .intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
     let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
@@ -258,103 +259,86 @@ pub fn render_vardct(
         cache.hf_global.as_ref()
     };
 
-    tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
+    tracing::trace_span!("Decode and transform").in_scope(|| -> Result<_> {
         let Some(hf_global) = hf_global else { return Ok(()); };
 
-        let base_group_x = aligned_region.left as u32 / group_dim;
-        let base_group_y = aligned_region.top as u32 / group_dim;
-        let width = aligned_region.width;
-        let height = aligned_region.height;
-        let frame_groups_per_row = frame_header.groups_per_row();
-        let groups_per_row = (width + group_dim - 1) / group_dim;
-        let group_rows = (height + group_dim - 1) / group_dim;
-        let num_groups = groups_per_row * group_rows;
+        let num_groups = frame_header.num_groups();
+        let num_passes = frame_header.passes.num_passes;
+
+        let mut group_passes = Vec::with_capacity(num_groups as usize);
+        group_passes.resize_with(num_groups as usize, HashMap::new);
         for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
-            let fb_groups = fb_xyb.groups_with_group_id(frame_header);
-            let pass_image = if pass_image.is_empty() {
-                let mut ret = Vec::with_capacity(num_groups as usize);
-                ret.resize_with(num_groups as usize, || None);
-                ret
-            } else {
-                pass_image
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(group_idx, modular)| {
-                        let group_idx = group_idx as u32;
-                        let group_x = group_idx % frame_groups_per_row;
-                        let group_y = group_idx / frame_groups_per_row;
-                        if !(base_group_x..base_group_x + groups_per_row).contains(&group_x) || !(base_group_y..base_group_y + group_rows).contains(&group_y) {
-                            return None;
-                        }
-                        Some(Some(modular))
-                    })
-                    .collect()
-            };
+            for (group_idx, modular) in pass_image.into_iter().enumerate() {
+                group_passes[group_idx].insert(pass_idx as u32, modular);
+            }
+        }
 
-            let pass_idx = pass_idx as u32;
-
-            fb_groups.into_par_iter()
-                .zip(pass_image)
-                .try_for_each(|((group_idx, [fb_x, fb_y, fb_b]), modular)| -> Result<_> {
-                let group_x = group_idx % frame_groups_per_row;
-                let group_y = group_idx / frame_groups_per_row;
-
+        fb_xyb
+            .groups_with_group_id(frame_header)
+            .into_par_iter()
+            .zip(group_passes)
+            .try_for_each(|((group_idx, mut grid_xyb), mut pass_modular)| -> Result<_> {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return Ok(()); };
                 if lf_group.hf_meta.is_none() {
                     return Ok(());
                 }
-                let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { return Ok(()); };
-                let allow_partial = bitstream.partial;
-                let mut bitstream = bitstream.bitstream;
 
-                let left = group_x * group_dim;
-                let top = group_y * group_dim;
-                let group_width = group_dim.min(width_rounded as u32 - left);
-                let group_height = group_dim.min(height_rounded as u32 - top);
+                for pass_idx in 0..num_passes {
+                    let modular = pass_modular.remove(&pass_idx);
 
-                let group_region = Region {
-                    left: left as i32,
-                    top: top as i32,
-                    width: group_width,
-                    height: group_height,
-                };
-                if group_region.intersection(modular_region).is_empty() {
-                    return Ok(());
-                }
+                    let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
+                    let allow_partial = bitstream.partial;
+                    let mut bitstream = bitstream.bitstream;
 
-                let mut grid_xyb;
-                let vardct = if group_region.intersection(aligned_region).is_empty() {
-                    None
-                } else {
-                    grid_xyb = [fb_x, fb_y, fb_b];
-                    Some(PassGroupParamsVardct {
+                    let vardct = Some(PassGroupParamsVardct {
                         lf_vardct: lf_global_vardct,
                         hf_global,
                         hf_coeff_output: &mut grid_xyb,
-                    })
-                };
+                    });
 
-                let result = jxl_frame::data::decode_pass_group(
-                    &mut bitstream,
-                    PassGroupParams {
-                        frame_header,
-                        lf_group,
-                        pass_idx,
-                        group_idx,
-                        global_ma_config: gmodular.ma_config.as_ref(),
-                        modular,
-                        vardct,
-                        allow_partial,
-                    },
-                );
-                if !allow_partial {
-                    result?;
+                    let result = jxl_frame::data::decode_pass_group(
+                        &mut bitstream,
+                        PassGroupParams {
+                            frame_header,
+                            lf_group,
+                            pass_idx,
+                            group_idx,
+                            global_ma_config: gmodular.ma_config.as_ref(),
+                            modular,
+                            vardct,
+                            allow_partial,
+                        },
+                    );
+                    if !allow_partial {
+                        result?;
+                    }
                 }
+
+                dequant_hf_varblock_grouped(
+                    &mut grid_xyb,
+                    group_idx,
+                    image_header,
+                    frame_header,
+                    lf_global,
+                    lf_groups,
+                    hf_global,
+                );
+
+                if let Some(cfl) = &hf_cfl_data {
+                    chroma_from_luma_hf_grouped(&mut grid_xyb, group_idx, frame_header, cfl);
+                }
+
+                transform_with_lf_grouped(
+                    &lf_xyb,
+                    &mut grid_xyb,
+                    group_idx,
+                    frame_header,
+                    &*lf_groups,
+                );
+
                 Ok(())
-            })?;
-        }
-        Ok(())
+            })
     })?;
 
     if let Some(modular_image) = modular_image {
@@ -362,36 +346,6 @@ pub fn render_vardct(
             modular_image.prepare_subimage().unwrap().finish();
         });
     }
-
-    tracing::trace_span!("Dequant HF").in_scope(|| {
-        let Some(hf_global) = hf_global else { return; };
-        dequant_hf_varblock(
-            &mut fb_xyb,
-            frame.image_header(),
-            frame_header,
-            lf_global,
-            &*lf_groups,
-            hf_global,
-        );
-    });
-
-    if let Some(cfl) = hf_cfl_data {
-        tracing::trace_span!("HF CfL").in_scope(|| {
-            if hf_global.is_none() {
-                return;
-            }
-            chroma_from_luma_hf(&mut fb_xyb, &cfl);
-        });
-    }
-
-    tracing::trace_span!("Transform varblocks").in_scope(|| {
-        transform_with_lf(
-            &lf_xyb,
-            &mut fb_xyb,
-            frame_header,
-            &*lf_groups,
-        );
-    });
 
     Ok((fb_xyb, gmodular))
 }
@@ -451,16 +405,15 @@ pub fn adaptive_lf_smoothing(
     );
 }
 
-pub fn dequant_hf_varblock(
-    out: &mut ImageWithRegion,
+pub fn dequant_hf_varblock_grouped(
+    out: &mut [CutGrid<'_, f32>; 3],
+    group_idx: u32,
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     lf_global: &LfGlobal,
     lf_groups: &HashMap<u32, LfGroup>,
     hf_global: &HfGlobal,
 ) {
-    use rayon::prelude::*;
-
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -478,77 +431,71 @@ pub fn dequant_hf_varblock(
 
     let group_dim = frame_header.group_dim();
     let groups_per_row = frame_header.groups_per_row();
-    let coeff_groups = out.groups_with_group_id(frame_header);
-    coeff_groups
-        .into_par_iter()
-        .for_each(|(group_idx, mut coeff_out)| {
-            let group_x = group_idx % groups_per_row;
-            let group_y = group_idx / groups_per_row;
 
-            let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-            let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
-            let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
-            let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
+    let group_x = group_idx % groups_per_row;
+    let group_y = group_idx / groups_per_row;
 
-            let Some(hf_meta) = &lf_group.hf_meta else { return; };
+    let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+    let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
+    let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
+    let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
 
-            let block_info = &hf_meta.block_info;
-            let lf_width = (block_info.width() - left_in_lf).min(group_dim as usize / 8);
-            let lf_height = (block_info.height() - top_in_lf).min(group_dim as usize / 8);
-            let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width), top_in_lf..(top_in_lf + lf_height));
-            let w8 = block_info.width();
-            let h8 = block_info.height();
+    let Some(hf_meta) = &lf_group.hf_meta else { return; };
 
-            for (channel, coeff) in coeff_out.iter_mut().enumerate() {
-                let quant_bias = oim.quant_bias[channel];
-                let shift = shifts_cbycr[channel];
-                let vshift = shift.vshift();
-                let hshift = shift.hshift();
+    let block_info = &hf_meta.block_info;
+    let lf_width = (block_info.width() - left_in_lf).min(group_dim as usize / 8);
+    let lf_height = (block_info.height() - top_in_lf).min(group_dim as usize / 8);
+    let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width), top_in_lf..(top_in_lf + lf_height));
 
-                for by in 0..h8 {
-                    for bx in 0..w8 {
-                        let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else { continue; };
-                        let shifted_bx = bx >> hshift;
-                        let shifted_by = by >> hshift;
-                        if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
-                            continue;
-                        }
+    for (channel, coeff) in out.iter_mut().enumerate() {
+        let quant_bias = oim.quant_bias[channel];
+        let shift = shifts_cbycr[channel];
+        let vshift = shift.vshift();
+        let hshift = shift.hshift();
 
-                        let (bw, bh) = dct_select.dct_select_size();
-                        let left = shifted_bx * 8;
-                        let top = shifted_by * 8;
+        for by in 0..lf_height {
+            for bx in 0..lf_width {
+                let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else { continue; };
+                let shifted_bx = bx >> hshift;
+                let shifted_by = by >> vshift;
+                if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
+                    continue;
+                }
 
-                        let bw = bw as usize;
-                        let bh = bh as usize;
-                        let width = bw * 8;
-                        let height = bh * 8;
+                let (bw, bh) = dct_select.dct_select_size();
+                let left = shifted_bx * 8;
+                let top = shifted_by * 8;
 
-                        let need_transpose = dct_select.need_transpose();
-                        let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
+                let bw = bw as usize;
+                let bh = bh as usize;
+                let width = bw * 8;
+                let height = bh * 8;
 
-                        let matrix = if need_transpose {
-                            dequant_matrices.get_transposed(channel, dct_select)
+                let need_transpose = dct_select.need_transpose();
+                let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
+
+                let matrix = if need_transpose {
+                    dequant_matrices.get_transposed(channel, dct_select)
+                } else {
+                    dequant_matrices.get(channel, dct_select)
+                };
+
+                let mut coeff = coeff.subgrid_mut(left..(left + width), top..(top + height));
+                for (y, matrix_row) in matrix.chunks_exact(width).enumerate() {
+                    let row = coeff.get_row_mut(y);
+                    for (q, &m) in row.iter_mut().zip(matrix_row) {
+                        if q.abs() <= 1.0f32 {
+                            *q *= quant_bias;
                         } else {
-                            dequant_matrices.get(channel, dct_select)
-                        };
-
-                        let mut coeff = coeff.subgrid_mut(left..(left + width), top..(top + height));
-                        for (y, matrix_row) in matrix.chunks_exact(width).enumerate() {
-                            let row = coeff.get_row_mut(y);
-                            for (q, &m) in row.iter_mut().zip(matrix_row) {
-                                if q.abs() <= 1.0f32 {
-                                    *q *= quant_bias;
-                                } else {
-                                    *q -= quant_bias_numerator / *q;
-                                }
-                                *q *= m;
-                                *q *= mul;
-                            }
+                            *q -= quant_bias_numerator / *q;
                         }
+                        *q *= m;
+                        *q *= mul;
                     }
                 }
             }
-        });
+        }
+    }
 }
 
 pub fn chroma_from_luma_lf(
@@ -577,44 +524,43 @@ pub fn chroma_from_luma_lf(
     }
 }
 
-pub fn chroma_from_luma_hf(
-    coeff_xyb: &mut ImageWithRegion,
+pub fn chroma_from_luma_hf_grouped(
+    coeff_xyb: &mut [CutGrid<'_, f32>; 3],
+    group_idx: u32,
+    frame_header: &FrameHeader,
     cfl_grid: &ImageWithRegion,
 ) {
-    let region = coeff_xyb.region();
+    let [coeff_x, coeff_y, coeff_b] = coeff_xyb;
+
     let cfl_grid_region = cfl_grid.region();
-    let coeff_xyb = coeff_xyb.buffer_mut();
     let cfl_grid = cfl_grid.buffer();
 
-    let [coeff_x, coeff_y, coeff_b] = coeff_xyb else { panic!() };
-    let [x_from_y, b_from_y] = cfl_grid else { panic!() };
-    let stride = cfl_grid_region.width as usize;
-    let coeff_stride = coeff_x.width();
+    let group_dim = frame_header.group_dim();
+    let groups_per_row = frame_header.groups_per_row();
 
-    for y in 0..region.height {
-        let cy = (y as i32 + region.top) / 64 - cfl_grid_region.top;
-        debug_assert!(cy >= 0);
-        let cy = cy as usize;
-        let y = y as usize;
+    let group_x = group_idx % groups_per_row;
+    let group_y = group_idx / groups_per_row;
+    let gw = coeff_x.width();
+    let gh = coeff_x.height();
 
-        let x_from_y = &x_from_y.buf()[cy * stride..][..stride];
-        let b_from_y = &b_from_y.buf()[cy * stride..][..stride];
+    let cfl_left = (group_x * group_dim / 64).checked_add_signed(-cfl_grid_region.left).unwrap() as usize;
+    let cfl_top = (group_y * group_dim / 64).checked_add_signed(-cfl_grid_region.top).unwrap() as usize;
+    let cfl_width = (gw + 63) / 64;
+    let cfl_height = (gh + 63) / 64;
+    let x_from_y = cfl_grid[0].subgrid(cfl_left..(cfl_left + cfl_width), cfl_top..(cfl_top + cfl_height));
+    let b_from_y = cfl_grid[1].subgrid(cfl_left..(cfl_left + cfl_width), cfl_top..(cfl_top + cfl_height));
 
-        let mut x = cfl_grid_region.left * 64 - region.left - 1;
-        let coeff_y = &coeff_y.buf_mut()[y * coeff_stride..];
-        let coeff_x = &mut coeff_x.buf_mut()[y * coeff_stride..];
-        let coeff_b = &mut coeff_b.buf_mut()[y * coeff_stride..];
-        'outer: for (kx, kb) in x_from_y.iter().zip(b_from_y) {
-            for _ in 0..64 {
-                x += 1;
-                if x < 0 {
-                    continue;
-                }
-                if x >= region.width as i32 {
-                    break 'outer;
-                }
-                let x = x as usize;
+    for y in 0..gh {
+        let x_from_y = x_from_y.get_row(y / 64);
+        let b_from_y = b_from_y.get_row(y / 64);
 
+        let coeff_x = coeff_x.get_row_mut(y);
+        let coeff_y = coeff_y.get_row_mut(y);
+        let coeff_b = coeff_b.get_row_mut(y);
+
+        for (x64, (kx, kb)) in x_from_y.iter().zip(b_from_y).enumerate() {
+            for dx in 0..((gw - x64 * 64).min(64)) {
+                let x = x64 * 64 + dx;
                 let coeff_y = coeff_y[x];
                 coeff_x[x] += kx * coeff_y;
                 coeff_b[x] += kb * coeff_y;
@@ -623,13 +569,13 @@ pub fn chroma_from_luma_hf(
     }
 }
 
-pub fn transform_with_lf(
+pub fn transform_with_lf_grouped(
     lf: &ImageWithRegion,
-    coeff_out: &mut ImageWithRegion,
+    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    group_idx: u32,
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup>,
 ) {
-    use rayon::prelude::*;
     use TransformType::*;
 
     let lf_region = lf.region();
@@ -641,96 +587,92 @@ pub fn transform_with_lf(
 
     let group_dim = frame_header.group_dim();
     let groups_per_row = frame_header.groups_per_row();
-    let coeff_groups = coeff_out.groups_with_group_id(frame_header);
-    coeff_groups
-        .into_par_iter()
-        .for_each(|(group_idx, mut coeff_out)| {
-            let group_x = group_idx % groups_per_row;
-            let group_y = group_idx / groups_per_row;
-            let lf_base_left = group_x * group_dim / 8;
-            let lf_base_top = group_y * group_dim / 8;
-            let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
-            let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
-            let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
-            let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
-            let lf_base_left = lf_base_left as usize;
-            let lf_base_top = lf_base_top as usize;
-            let lf = [(shifts_cbycr[0], lf_x), (shifts_cbycr[1], lf_y), (shifts_cbycr[2], lf_b)].map(|(shift, lf)| {
-                let lf_base_left = lf_base_left >> shift.hshift();
-                let lf_base_top = lf_base_top >> shift.vshift();
-                let (lf_width, lf_height) = shift.shift_size((lf_width, lf_height));
-                lf.subgrid(lf_base_left..(lf_base_left + lf_width as usize), lf_base_top..(lf_base_top + lf_height as usize))
-            });
 
-            let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-            let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
-            let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
-            let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
+    let group_x = group_idx % groups_per_row;
+    let group_y = group_idx / groups_per_row;
+    let lf_base_left = group_x * group_dim / 8;
+    let lf_base_top = group_y * group_dim / 8;
+    let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
+    let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
+    let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
+    let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
+    let lf_base_left = lf_base_left as usize;
+    let lf_base_top = lf_base_top as usize;
+    let lf = [(shifts_cbycr[0], lf_x), (shifts_cbycr[1], lf_y), (shifts_cbycr[2], lf_b)].map(|(shift, lf)| {
+        let lf_base_left = lf_base_left >> shift.hshift();
+        let lf_base_top = lf_base_top >> shift.vshift();
+        let (lf_width, lf_height) = shift.shift_size((lf_width, lf_height));
+        lf.subgrid(lf_base_left..(lf_base_left + lf_width as usize), lf_base_top..(lf_base_top + lf_height as usize))
+    });
 
-            let Some(hf_meta) = &lf_group.hf_meta else {
-                for (coeff, lf) in coeff_out.iter_mut().zip(lf) {
-                    for y in 0..coeff.height() {
-                        let coeff_row = coeff.get_row_mut(y);
-                        let lf_row = lf.get_row(y / 8);
-                        for (x, v) in coeff_row.iter_mut().enumerate() {
-                            *v = lf_row[x / 8];
-                        }
-                    }
-                }
-                return;
-            };
+    let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+    let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
+    let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
+    let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
 
-            let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width as usize), top_in_lf..(top_in_lf + lf_height as usize));
-            let w8 = block_info.width();
-            let h8 = block_info.height();
-
-            for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
-                let shift = shifts_cbycr[channel];
-                let vshift = shift.vshift();
-                let hshift = shift.hshift();
-
-                for by in 0..h8 {
-                    for bx in 0..w8 {
-                        let &BlockInfo::Data { dct_select, .. } = block_info.get(bx, by) else { continue; };
-                        let shifted_bx = bx >> hshift;
-                        let shifted_by = by >> hshift;
-                        if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
-                            continue;
-                        }
-
-                        let (bw, bh) = dct_select.dct_select_size();
-                        let left = shifted_bx * 8;
-                        let top = shifted_by * 8;
-
-                        let bw = bw as usize;
-                        let bh = bh as usize;
-                        let logbw = bw.trailing_zeros() as usize;
-                        let logbh = bh.trailing_zeros() as usize;
-
-                        let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
-                        if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
-                            debug_assert_eq!(bw * bh, 1);
-                            *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
-                        } else {
-                            for y in 0..bh {
-                                for x in 0..bw {
-                                    *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
-                                }
-                            }
-                            dct::dct_2d(&mut out, dct::DctDirection::Forward);
-                            for y in 0..bh {
-                                for x in 0..bw {
-                                    *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
-                                }
-                            }
-                        }
-
-                        let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
-                        transform(&mut block, dct_select);
-                    }
+    let Some(hf_meta) = &lf_group.hf_meta else {
+        for (coeff, lf) in coeff_out.iter_mut().zip(lf) {
+            for y in 0..coeff.height() {
+                let coeff_row = coeff.get_row_mut(y);
+                let lf_row = lf.get_row(y / 8);
+                for (x, v) in coeff_row.iter_mut().enumerate() {
+                    *v = lf_row[x / 8];
                 }
             }
-        });
+        }
+        return;
+    };
+
+    let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width as usize), top_in_lf..(top_in_lf + lf_height as usize));
+    let w8 = block_info.width();
+    let h8 = block_info.height();
+
+    for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
+        let shift = shifts_cbycr[channel];
+        let vshift = shift.vshift();
+        let hshift = shift.hshift();
+
+        for by in 0..h8 {
+            for bx in 0..w8 {
+                let &BlockInfo::Data { dct_select, .. } = block_info.get(bx, by) else { continue; };
+                let shifted_bx = bx >> hshift;
+                let shifted_by = by >> vshift;
+                if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
+                    continue;
+                }
+
+                let (bw, bh) = dct_select.dct_select_size();
+                let left = shifted_bx * 8;
+                let top = shifted_by * 8;
+
+                let bw = bw as usize;
+                let bh = bh as usize;
+                let logbw = bw.trailing_zeros() as usize;
+                let logbh = bh.trailing_zeros() as usize;
+
+                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
+                if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
+                    debug_assert_eq!(bw * bh, 1);
+                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
+                } else {
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
+                        }
+                    }
+                    dct::dct_2d(&mut out, dct::DctDirection::Forward);
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
+                        }
+                    }
+                }
+
+                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
+                transform(&mut block, dct_select);
+            }
+        }
+    }
 }
 
 fn scale_f(c: usize, logb: usize) -> f32 {
