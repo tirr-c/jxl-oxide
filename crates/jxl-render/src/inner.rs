@@ -314,15 +314,13 @@ impl ContextInner {
         let frame_header = frame.header();
 
         let extra_channel_from = gmodular.extra_channel_from();
-        let gmodular = &gmodular.modular;
+        let Some(gmodular) = gmodular.modular.into_image() else { return; };
+        let mut channel_data = gmodular.into_image_channels();
+        let channel_data = channel_data.drain(extra_channel_from..);
 
-        let channel_data = &gmodular.image().channel_data()[extra_channel_from..];
+        for (idx, g) in channel_data.enumerate() {
+            tracing::debug!(ec_idx = idx, "Attaching extra channels");
 
-        if !channel_data.is_empty() {
-            tracing::debug!("Attaching extra channels");
-        }
-
-        for (idx, g) in channel_data.iter().enumerate() {
             let upsampling = frame_header.ec_upsampling[idx];
             let ec_info = &self.image_header.metadata.ec_info[idx];
 
@@ -337,7 +335,7 @@ impl ContextInner {
             let width = region.width as usize;
             let height = region.height as usize;
             let mut out = SimpleGrid::new(width, height);
-            modular::copy_modular_groups(g, &mut out, region, bit_depth, false);
+            modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
 
             let upsampled_region = region.upsample(upsample_factor);
             features::upsample(&mut out, &self.image_header, frame_header, idx + 3);

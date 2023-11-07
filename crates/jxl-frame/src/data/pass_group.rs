@@ -1,11 +1,10 @@
-use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_grid::CutGrid;
-use jxl_modular::{ChannelShift, Modular};
+use jxl_modular::{ChannelShift, image::TransformedModularSubimage, MaConfig};
 use jxl_vardct::{HfCoeffParams, write_hf_coeff};
 
 use crate::{FrameHeader, Result};
 use super::{
-    GlobalModular,
     LfGlobalVarDct,
     LfGroup,
     HfGlobal,
@@ -17,8 +16,8 @@ pub struct PassGroupParams<'frame, 'buf, 'g> {
     pub lf_group: &'frame LfGroup,
     pub pass_idx: u32,
     pub group_idx: u32,
-    pub shift: Option<(i32, i32)>,
-    pub gmodular: &'g mut GlobalModular,
+    pub global_ma_config: Option<&'frame MaConfig>,
+    pub modular: Option<TransformedModularSubimage<'g>>,
     pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
     pub allow_partial: bool,
 }
@@ -39,8 +38,8 @@ pub fn decode_pass_group(
         lf_group,
         pass_idx,
         group_idx,
-        shift,
-        gmodular,
+        global_ma_config,
+        modular,
         vardct,
         allow_partial,
     } = params;
@@ -67,9 +66,9 @@ pub fn decode_pass_group(
         let jpeg_upsampling = frame_header.jpeg_upsampling;
         let block_info = block_info.subgrid(block_left..(block_left + block_width), block_top..(block_top + block_height));
         let lf_quant: Option<[_; 3]> = lf_group.lf_coeff.as_ref().map(|lf_coeff| {
-            let lf_quant_channels = lf_coeff.lf_quant.image().channel_data();
+            let lf_quant_channels = lf_coeff.lf_quant.image().unwrap().image_channels();
             std::array::from_fn(|idx| {
-                let lf_quant = lf_quant_channels[[1, 0, 2][idx]].as_simple().unwrap();
+                let lf_quant = &lf_quant_channels[[1, 0, 2][idx]];
                 let shift = ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx);
 
                 let block_left = block_left >> shift.hshift();
@@ -99,12 +98,11 @@ pub fn decode_pass_group(
         };
     }
 
-    if let Some((minshift, maxshift)) = shift {
-        let modular_params = gmodular.modular.make_subimage_params_pass_group(gmodular.ma_config.as_ref(), group_idx, minshift, maxshift);
-        let mut modular = Modular::parse(bitstream, modular_params)?;
-        modular.decode_image(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx, allow_partial)?;
-        modular.inverse_transform();
-        gmodular.modular.copy_from_modular(modular);
+    if let Some(modular) = modular {
+        let mut modular = modular.recursive(bitstream, global_ma_config)?;
+        let mut subimage = modular.prepare_subimage()?;
+        subimage.decode(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx, allow_partial)?;
+        subimage.finish();
     }
 
     Ok(())

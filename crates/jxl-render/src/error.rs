@@ -3,6 +3,7 @@
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
+    Modular(jxl_modular::Error),
     Frame(jxl_frame::Error),
     Color(jxl_color::Error),
     IncompleteFrame,
@@ -21,6 +22,12 @@ impl From<jxl_bitstream::Error> for Error {
 impl From<jxl_coding::Error> for Error {
     fn from(err: jxl_coding::Error) -> Self {
         Self::Decoder(err)
+    }
+}
+
+impl From<jxl_modular::Error> for Error {
+    fn from(err: jxl_modular::Error) -> Self {
+        Self::Modular(err)
     }
 }
 
@@ -43,6 +50,7 @@ impl std::fmt::Display for Error {
         match self {
             Bitstream(err) => write!(f, "bitstream error: {}", err),
             Decoder(err) => write!(f, "entropy decoder error: {}", err),
+            Modular(err) => write!(f, "modular subimage decode error: {}", err),
             Frame(err) => write!(f, "frame error: {}", err),
             Color(err) => write!(f, "color management error: {err}"),
             IncompleteFrame => write!(f, "frame data is incomplete"),

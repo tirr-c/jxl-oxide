@@ -187,7 +187,10 @@ impl Bundle<LfGlobalParams<'_>> for GlobalModular {
             ma_config.as_ref(),
         );
         let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
-        modular.decode_image_gmodular(bitstream, allow_partial)?;
+        if let Some(image) = modular.image_mut() {
+            let mut gmodular = image.prepare_gmodular()?;
+            gmodular.decode(bitstream, 0, allow_partial)?;
+        }
 
         Ok(Self {
             ma_config,

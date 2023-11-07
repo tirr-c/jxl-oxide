@@ -1,5 +1,5 @@
 use jxl_frame::{data::{GlobalModular, PassGroupParams}, FrameHeader};
-use jxl_grid::{SimpleGrid, Grid};
+use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
 use jxl_modular::ChannelShift;
 
@@ -41,16 +41,32 @@ pub fn render_modular(
     let bit_depth = metadata.bit_depth;
     let mut fb_xyb = ImageWithRegion::from_region(channels, region);
 
+    let modular_image = gmodular.modular.image_mut().unwrap();
+    let groups = modular_image.prepare_groups(frame.pass_shifts())?;
+    let lf_group_image = groups.lf_groups;
+    let pass_group_image = groups.pass_groups;
+
     let lf_groups = &mut cache.lf_groups;
     tracing::trace_span!("Load LF groups").in_scope(|| {
-        crate::load_lf_groups(frame, lf_global, lf_groups, modular_region.downsample(3), &mut gmodular)
+        crate::load_lf_groups(
+            frame,
+            lf_global.vardct.as_ref(),
+            lf_groups,
+            gmodular.ma_config.as_ref(),
+            lf_group_image,
+            modular_region.downsample(3),
+        )
     })?;
 
     let group_dim = frame_header.group_dim();
     let groups_per_row = frame_header.groups_per_row();
     tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
-        for pass_idx in 0..frame_header.passes.num_passes {
+        for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
+            let pass_idx = pass_idx as u32;
+            let mut group_it = pass_image.into_iter();
             for group_idx in 0..frame_header.num_groups() {
+                let modular = group_it.next();
+
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
                 let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
@@ -72,7 +88,6 @@ pub fn render_modular(
                     continue;
                 }
 
-                let shift = frame.pass_shifts(pass_idx);
                 let result = jxl_frame::data::decode_pass_group(
                     &mut bitstream,
                     PassGroupParams {
@@ -80,8 +95,8 @@ pub fn render_modular(
                         lf_group,
                         pass_idx,
                         group_idx,
-                        shift,
-                        gmodular: &mut gmodular,
+                        global_ma_config: gmodular.ma_config.as_ref(),
+                        modular,
                         vardct: None,
                         allow_partial,
                     },
@@ -95,11 +110,11 @@ pub fn render_modular(
     })?;
 
     tracing::trace_span!("Inverse Modular transform").in_scope(|| {
-        gmodular.modular.inverse_transform();
+        modular_image.prepare_subimage().unwrap().finish();
     });
 
     tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| {
-        let channel_data = gmodular.modular.image().channel_data();
+        let channel_data = modular_image.image_channels();
         for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.buffer_mut()) {
             let region = region.downsample_separate(shift.hshift() as u32, shift.vshift() as u32);
             copy_modular_groups(g, buffer, region, bit_depth, xyb_encoded);
@@ -146,48 +161,37 @@ pub fn compute_modular_region(
 }
 
 pub fn copy_modular_groups(
-    g: &Grid<i32>,
+    g: &SimpleGrid<i32>,
     buffer: &mut SimpleGrid<f32>,
     region: Region,
     bit_depth: BitDepth,
     xyb_encoded: bool,
 ) {
-    let stride = buffer.width();
-    let (gw, gh) = g.group_dim();
-    let group_stride = g.groups_per_row();
+    let width = g.width();
+    let height = g.height();
+
+    let g_stride = g.width();
+    let buffer_stride = buffer.width();
+    let g = g.buf();
     let buffer = buffer.buf_mut();
-    for (group_idx, g) in g.groups() {
-        let base_x = (group_idx % group_stride) * gw;
-        let base_y = (group_idx / group_stride) * gh;
-        let group_region = Region {
-            left: base_x as i32,
-            top: base_y as i32,
-            width: gw as u32,
-            height: gh as u32,
-        };
-        let region_intersection = region.intersection(group_region);
-        if region_intersection.is_empty() {
-            continue;
-        }
+    for y in region.top..region.top.wrapping_add_unsigned(region.height) {
+        let buffer_y = y.abs_diff(region.top) as usize;
+        for x in region.left..region.left.wrapping_add_unsigned(region.width) {
+            let buffer_x = x.abs_diff(region.left) as usize;
 
-        let group_x = region.left.abs_diff(region_intersection.left) as usize;
-        let group_y = region.top.abs_diff(region_intersection.top) as usize;
+            let s = if y < 0 || x < 0 {
+                0i32
+            } else {
+                let x = x as usize;
+                let y = y as usize;
+                if y >= height || x >= width {
+                    0i32
+                } else {
+                    g[y * g_stride + x]
+                }
+            };
 
-        let begin_x = region_intersection.left.abs_diff(group_region.left) as usize;
-        let begin_y = region_intersection.top.abs_diff(group_region.top) as usize;
-        let end_x = begin_x + region_intersection.width as usize;
-        let end_y = begin_y + region_intersection.height as usize;
-        for (idx, &s) in g.buf().iter().enumerate() {
-            let x = idx % g.width();
-            let y = idx / g.width();
-            if y >= end_y {
-                break;
-            }
-            if y < begin_y || !(begin_x..end_x).contains(&x) {
-                continue;
-            }
-
-            buffer[(group_y + y - begin_y) * stride + (group_x + x - begin_x)] = if xyb_encoded {
+            buffer[buffer_y * buffer_stride + buffer_x] = if xyb_encoded {
                 s as f32
             } else {
                 bit_depth.parse_integer_sample(s)

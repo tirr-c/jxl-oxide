@@ -1,78 +1,348 @@
 use jxl_bitstream::{Bitstream, unpack_signed};
 use jxl_coding::{DecoderRleMode, RleToken, DecoderWithLz77};
-use jxl_grid::Grid;
+use jxl_grid::{CutGrid, SimpleGrid};
 
 use crate::{
     ModularChannels,
-    predictor::{WpHeader, PredictorState, Predictor},
+    predictor::{PredictorState, Predictor},
     Result,
-    SubimageChannelInfo, MaConfig, ma::{MaTreeLeafClustered, FlatMaTree}, ModularChannelInfo,
+    MaConfig, ma::{MaTreeLeafClustered, FlatMaTree}, ModularChannelInfo, ModularHeader,
 };
 
-/// Decoded Modular image.
-///
-/// A decoded Modular image consists of multiple channels. Those channels may not be in the same
-/// size.
+#[derive(Debug)]
+pub enum TransformedGrid<'dest> {
+    Single(CutGrid<'dest, i32>),
+    Merged {
+        leader: CutGrid<'dest, i32>,
+        members: Vec<TransformedGrid<'dest>>,
+    },
+}
+
+impl<'dest> From<CutGrid<'dest, i32>> for TransformedGrid<'dest> {
+    fn from(value: CutGrid<'dest, i32>) -> Self {
+        Self::Single(value)
+    }
+}
+
+impl TransformedGrid<'_> {
+    fn reborrow(&mut self) -> TransformedGrid {
+        match self {
+            TransformedGrid::Single(g) => TransformedGrid::Single(g.split_horizontal(0).1),
+            TransformedGrid::Merged { leader, .. } => TransformedGrid::Single(leader.split_horizontal(0).1),
+        }
+    }
+}
+
+impl<'dest> TransformedGrid<'dest> {
+    pub(crate) fn grid(&self) -> &CutGrid<'dest, i32> {
+        match self {
+            Self::Single(g) => g,
+            Self::Merged { leader, .. } => leader,
+        }
+    }
+
+    pub(crate) fn grid_mut(&mut self) -> &mut CutGrid<'dest, i32> {
+        match self {
+            Self::Single(g) => g,
+            Self::Merged { leader, .. } => leader,
+        }
+    }
+
+    pub(crate) fn merge(&mut self, members: Vec<TransformedGrid<'dest>>) {
+        if members.is_empty() {
+            return;
+        }
+
+        match self {
+            Self::Single(leader) => {
+                let tmp = CutGrid::from_buf(&mut [], 0, 0, 0);
+                let leader = std::mem::replace(leader, tmp);
+                *self = Self::Merged { leader, members };
+            },
+            Self::Merged { members: original_members, .. } => {
+                original_members.extend(members);
+            },
+        }
+    }
+
+    pub(crate) fn unmerge(&mut self, count: usize) -> Vec<TransformedGrid<'dest>> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        match self {
+            Self::Single(_) => panic!("cannot unmerge TransformedGrid::Single"),
+            Self::Merged { leader, members } => {
+                let len = members.len();
+                let members = members.drain((len - count)..).collect();
+                if len == count {
+                    let tmp = CutGrid::from_buf(&mut [], 0, 0, 0);
+                    let leader = std::mem::replace(leader, tmp);
+                    *self = Self::Single(leader);
+                }
+                members
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Image {
+pub struct ModularImageDestination {
+    header: ModularHeader,
+    ma_ctx: MaConfig,
     group_dim: u32,
     bit_depth: u32,
     channels: ModularChannels,
-    data: Vec<Grid<i32>>,
+    meta_channels: Vec<SimpleGrid<i32>>,
+    image_channels: Vec<SimpleGrid<i32>>,
 }
 
-pub(crate) static EMPTY: Image = Image::empty();
-
-impl Image {
-    pub(super) const fn empty() -> Self {
-        Self {
-            group_dim: 128,
-            bit_depth: 8,
-            channels: ModularChannels {
-                base_size: Some((0, 0)),
-                info: Vec::new(),
-                nb_meta_channels: 0,
-            },
-            data: Vec::new(),
+impl ModularImageDestination {
+    pub(crate) fn new(header: ModularHeader, ma_ctx: MaConfig, group_dim: u32, bit_depth: u32, channels: ModularChannels) -> Self {
+        let mut meta_channels = Vec::new();
+        for tr in &header.transform {
+            tr.prepare_meta_channels(&mut meta_channels);
         }
-    }
 
-    pub(super) fn new(channels: ModularChannels, group_dim: u32, bit_depth: u32) -> Self {
-        let span = tracing::span!(tracing::Level::TRACE, "Image::new", group_dim, bit_depth);
-        let _guard = span.enter();
-
-        let data = channels.info
+        let image_channels = channels.info
             .iter()
-            .map(|info| {
-                tracing::trace!(info = format_args!("{:?}", info), "Creating modular channel");
-                if info.hshift < 0 || info.vshift < 0 {
-                    return Grid::new(info.width, info.height, info.width, info.height);
-                }
+            .map(|ch| SimpleGrid::new(ch.width as usize, ch.height as usize))
+            .collect();
 
-                let group_dim = if info.hshift >= 3 && info.vshift >= 3 {
-                    group_dim * 8
-                } else {
-                    group_dim
-                };
-                let gw = group_dim >> info.hshift;
-                let gh = group_dim >> info.vshift;
-                Grid::new(info.width, info.height, gw, gh)
-            })
-            .collect::<Vec<_>>();
         Self {
+            header,
+            ma_ctx,
             group_dim,
             bit_depth,
             channels,
-            data,
+            meta_channels,
+            image_channels,
         }
     }
 
+    pub fn image_channels(&self) -> &[SimpleGrid<i32>] {
+        &self.image_channels
+    }
+
+    pub fn into_image_channels(self) -> Vec<SimpleGrid<i32>> {
+        self.image_channels
+    }
+
+    pub fn has_palette(&self) -> bool {
+        self.header.transform.iter().any(|tr| tr.is_palette())
+    }
+
+    pub fn has_squeeze(&self) -> bool {
+        self.header.transform.iter().any(|tr| tr.is_squeeze())
+    }
+}
+
+impl ModularImageDestination {
+    pub fn prepare_gmodular(&mut self) -> Result<TransformedModularSubimage> {
+        assert_ne!(self.group_dim, 0);
+
+        let group_dim = self.group_dim;
+        let subimage = self.prepare_subimage()?;
+        let (channel_info, grids): (Vec<_>, Vec<_>) = subimage.channel_info
+            .into_iter()
+            .zip(subimage.grid)
+            .enumerate()
+            .take_while(|&(i, (ref info, _))| {
+                i < subimage.nb_meta_channels ||
+                    (info.width <= group_dim && info.height <= group_dim)
+            })
+            .map(|(_, x)| x)
+            .unzip();
+        let channel_indices = (0..channel_info.len()).collect();
+        Ok(TransformedModularSubimage {
+            channel_info,
+            channel_indices,
+            grid: grids,
+            ..subimage
+        })
+    }
+
+    pub fn prepare_groups(
+        &mut self,
+        pass_shifts: &std::collections::BTreeMap<u32, (i32, i32)>,
+    ) -> Result<TransformedGlobalModular> {
+        assert_ne!(self.group_dim, 0);
+
+        let num_passes = *pass_shifts.last_key_value().unwrap().0 as usize + 1;
+
+        let group_dim = self.group_dim;
+        let bit_depth = self.bit_depth;
+        let subimage = self.prepare_subimage()?;
+        let it = subimage.channel_info
+            .into_iter()
+            .zip(subimage.grid)
+            .enumerate()
+            .skip_while(|&(i, (ref info, _))| {
+                i < subimage.nb_meta_channels ||
+                    (info.width <= group_dim && info.height <= group_dim)
+            });
+
+        let mut lf_groups = Vec::new();
+        let mut pass_groups = Vec::with_capacity(num_passes);
+        pass_groups.resize_with(num_passes, Vec::new);
+        for (i, (info, grid)) in it {
+            let ModularChannelInfo { hshift, vshift, .. } = info;
+            let grid = match grid {
+                TransformedGrid::Single(g) => g,
+                TransformedGrid::Merged { leader, .. } => leader,
+            };
+            let (groups, grids) = if hshift < 3 || vshift < 3 {
+                let shift = hshift.min(vshift); // shift < 3
+                let pass_idx = *pass_shifts.iter()
+                    .find(|(_, &(minshift, maxshift))| {
+                        (minshift..maxshift).contains(&shift)
+                    })
+                    .unwrap()
+                    .0;
+                let pass_idx = pass_idx as usize;
+
+                let group_width = group_dim >> hshift;
+                let group_height = group_dim >> vshift;
+                let grids = grid.into_groups(group_width as usize, group_height as usize);
+                (&mut pass_groups[pass_idx], grids)
+            } else {
+                // hshift >= 3 && vshift >= 3
+                let lf_group_width = group_dim >> (hshift - 3);
+                let lf_group_height = group_dim >> (vshift - 3);
+                let grids = grid.into_groups(lf_group_width as usize, lf_group_height as usize);
+                (&mut lf_groups, grids)
+            };
+
+            if groups.is_empty() {
+                groups.resize_with(
+                    grids.len(),
+                    || TransformedModularSubimage::empty(&subimage.header, &subimage.ma_ctx, bit_depth),
+                );
+            } else if groups.len() != grids.len() {
+                panic!();
+            }
+
+            for (subimage, grid) in groups.iter_mut().zip(grids) {
+                let width = grid.width() as u32;
+                let height = grid.height() as u32;
+                subimage.channel_info.push(ModularChannelInfo { width, height, hshift, vshift });
+                subimage.channel_indices.push(i);
+                subimage.grid.push(grid.into());
+                subimage.partial = true;
+            }
+        }
+
+        Ok(TransformedGlobalModular { lf_groups, pass_groups })
+    }
+
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
+        let mut channels = self.channels.clone();
+        let mut meta_channel_grids = self.meta_channels.iter_mut()
+            .map(|g| {
+                let width = g.width();
+                let height = g.height();
+                CutGrid::from_buf(g.buf_mut(), width, height, width)
+            })
+            .collect::<Vec<_>>();
+        let mut grids = self.image_channels.iter_mut()
+            .map(|g| {
+                let width = g.width();
+                let height = g.height();
+                CutGrid::from_buf(g.buf_mut(), width, height, width).into()
+            })
+            .collect::<Vec<_>>();
+        for tr in &self.header.transform {
+            tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
+        }
+
+        let channel_info = channels.info;
+        let channel_indices = (0..channel_info.len()).collect();
+        Ok(TransformedModularSubimage {
+            header: self.header.clone(),
+            ma_ctx: self.ma_ctx.clone(),
+            bit_depth: self.bit_depth,
+            nb_meta_channels: channels.nb_meta_channels as usize,
+            channel_info,
+            channel_indices,
+            grid: grids,
+            partial: true,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct TransformedGlobalModular<'dest> {
+    pub lf_groups: Vec<TransformedModularSubimage<'dest>>,
+    pub pass_groups: Vec<Vec<TransformedModularSubimage<'dest>>>,
+}
+
+#[derive(Debug)]
+pub struct TransformedModularSubimage<'dest> {
+    header: ModularHeader,
+    ma_ctx: MaConfig,
+    bit_depth: u32,
+    nb_meta_channels: usize,
+    channel_info: Vec<ModularChannelInfo>,
+    channel_indices: Vec<usize>,
+    grid: Vec<TransformedGrid<'dest>>,
+    partial: bool,
+}
+
+impl<'dest> TransformedModularSubimage<'dest> {
+    fn empty(header: &ModularHeader, ma_ctx: &MaConfig, bit_depth: u32) -> Self {
+        Self {
+            header: header.clone(),
+            ma_ctx: ma_ctx.clone(),
+            bit_depth,
+            nb_meta_channels: 0,
+            channel_info: Vec::new(),
+            channel_indices: Vec::new(),
+            grid: Vec::new(),
+            partial: false,
+        }
+    }
+}
+
+impl<'dest> TransformedModularSubimage<'dest> {
+    pub fn recursive(self, bitstream: &mut Bitstream, global_ma_config: Option<&MaConfig>) -> Result<RecursiveModularImage<'dest>> {
+        let header = bitstream.read_bundle::<crate::ModularHeader>()?;
+        let ma_ctx = if header.use_global_tree {
+            global_ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.clone()
+        } else {
+            bitstream.read_bundle::<crate::MaConfig>()?
+        };
+
+        let mut image = RecursiveModularImage {
+            header,
+            ma_ctx,
+            bit_depth: self.bit_depth,
+            channels: ModularChannels { info: self.channel_info, nb_meta_channels: 0 },
+            meta_channels: Vec::new(),
+            image_channels: self.grid,
+        };
+        for tr in &image.header.transform {
+            tr.prepare_meta_channels(&mut image.meta_channels);
+        }
+        Ok(image)
+    }
+
+    pub fn finish(mut self) -> bool {
+        for tr in self.header.transform.iter().rev() {
+            tr.inverse(&mut self.grid, self.bit_depth);
+        }
+        !self.partial
+    }
+}
+
+impl<'dest> TransformedModularSubimage<'dest> {
     fn decode_channel_loop(
         &mut self,
-        mut loop_fn: impl FnMut(usize, &mut Grid<i32>, &[&Grid<i32>]) -> Result<()>,
+        stream_index: u32,
+        mut loop_fn: impl FnMut(usize, &mut CutGrid<i32>, &[&CutGrid<i32>], FlatMaTree, &crate::predictor::WpHeader) -> Result<()>,
     ) -> Result<()> {
-        let mut prev: Vec<(&ModularChannelInfo, &mut Grid<i32>)> = Vec::new();
-        for (i, (info, grid)) in self.channels.info.iter().zip(&mut self.data).enumerate() {
+        let wp_header = &self.header.wp_params;
+        let mut prev: Vec<(&ModularChannelInfo, &CutGrid<'dest, i32>)> = Vec::new();
+        for (i, (info, grid)) in self.channel_info.iter().zip(&mut self.grid).enumerate() {
             let mut filtered_prev = prev
                 .iter()
                 .filter(|&(prev_info, _)| {
@@ -81,48 +351,64 @@ impl Image {
                         info.hshift == prev_info.hshift &&
                         info.vshift == prev_info.vshift
                 })
-                .map(|(_, g)| &**g)
+                .map(|(_, g)| *g)
                 .collect::<Vec<_>>();
             filtered_prev.reverse();
 
-            loop_fn(i, grid, &filtered_prev)?;
+            let ma_tree = self.ma_ctx.make_flat_tree(i as u32, stream_index);
+            loop_fn(i, grid.grid_mut(), &filtered_prev, ma_tree, wp_header)?;
 
-            prev.push((info, grid));
+            prev.push((info, grid.grid()));
         }
 
         Ok(())
     }
 
-    pub(super) fn decode_channels(
+    pub fn decode(
         &mut self,
         bitstream: &mut Bitstream,
         stream_index: u32,
-        wp_header: &WpHeader,
-        ma_ctx: &MaConfig,
+        allow_partial: bool,
+    ) -> Result<()> {
+        match self.decode_channels_inner(bitstream, stream_index) {
+            Err(e) if e.unexpected_eof() && allow_partial => {
+                tracing::debug!("Partially decoded Modular image");
+            },
+            Err(e) => return Err(e),
+            Ok(_) => {
+                self.partial = false;
+            },
+        }
+        Ok(())
+    }
+
+    fn decode_channels_inner(
+        &mut self,
+        bitstream: &mut Bitstream,
+        stream_index: u32,
     ) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "decode channels", stream_index);
         let _guard = span.enter();
 
-        let mut decoder = ma_ctx.decoder().clone();
+        let mut decoder = self.ma_ctx.decoder().clone();
         decoder.begin(bitstream)?;
 
         if let Some(rle_decoder) = decoder.as_rle() {
-            self.decode_image_rle(bitstream, stream_index, wp_header, ma_ctx, rle_decoder)?;
+            self.decode_image_rle(bitstream, stream_index, rle_decoder)?;
             decoder.finalize()?;
             return Ok(());
         }
         if let Some(lz77_decoder) = decoder.as_with_lz77() {
-            self.decode_image_lz77(bitstream, stream_index, wp_header, ma_ctx, lz77_decoder)?;
+            self.decode_image_lz77(bitstream, stream_index, lz77_decoder)?;
             decoder.finalize()?;
             return Ok(());
         }
         let mut no_lz77_decoder = decoder.as_no_lz77().unwrap();
 
-        self.decode_channel_loop(|i, grid, prev_rev| {
+        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
-            let ma_tree = ma_ctx.make_flat_tree(i as u32, stream_index);
             if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
@@ -131,7 +417,7 @@ impl Image {
                         let value = unpack_signed(token) * multiplier as i32 + offset;
                         for y in 0..height {
                             for x in 0..width {
-                                grid.set(x, y, value);
+                                *grid.get_mut(x, y) = value;
                             }
                         }
                     } else {
@@ -140,7 +426,7 @@ impl Image {
                             for x in 0..width {
                                 let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                                 let value = unpack_signed(token) * multiplier as i32 + offset;
-                                grid.set(x, y, value);
+                                *grid.get_mut(x, y) = value;
                             }
                         }
                     }
@@ -158,7 +444,7 @@ impl Image {
 
                             let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            grid.set(x, y, value);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -185,21 +471,18 @@ impl Image {
         &mut self,
         bitstream: &mut Bitstream,
         stream_index: u32,
-        wp_header: &WpHeader,
-        ma_ctx: &MaConfig,
         mut decoder: DecoderWithLz77<'_>,
     ) -> Result<()> {
-        let dist_multiplier = self.channels.info.iter()
-            .skip(self.channels.nb_meta_channels as usize)
+        let dist_multiplier = self.channel_info.iter()
+            .skip_while(|ch| ch.hshift == -1 || ch.vshift == -1)
             .map(|info| info.width)
             .max()
             .unwrap_or(0);
 
-        self.decode_channel_loop(|i, grid, prev_rev| {
+        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
-            let ma_tree = ma_ctx.make_flat_tree(i as u32, stream_index);
             if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
@@ -208,7 +491,7 @@ impl Image {
                         for x in 0..width {
                             let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
                             let value = unpack_signed(token) * multiplier as i32 + offset;
-                            grid.set(x, y, value);
+                            *grid.get_mut(x, y) = value;
                         }
                     }
                     return Ok(());
@@ -225,7 +508,7 @@ impl Image {
 
                             let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            grid.set(x, y, value);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -249,8 +532,6 @@ impl Image {
         &mut self,
         bitstream: &mut Bitstream,
         stream_index: u32,
-        wp_header: &WpHeader,
-        ma_ctx: &MaConfig,
         mut decoder: DecoderRleMode<'_>,
     ) -> Result<()> {
         let mut rle_value = 0i32;
@@ -274,11 +555,10 @@ impl Image {
             })
         };
 
-        self.decode_channel_loop(|i, grid, prev_rev| {
+        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
-            let ma_tree = ma_ctx.make_flat_tree(i as u32, stream_index);
             if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
@@ -287,7 +567,7 @@ impl Image {
                         for x in 0..width {
                             let token = next(cluster)?;
                             let value = (token * multiplier as i32) + offset;
-                            grid.set(x, y, value);
+                            *grid.get_mut(x, y) = value;
                         }
                     }
                     return Ok(());
@@ -304,7 +584,7 @@ impl Image {
 
                             let token = next(cluster)?;
                             let value = ((token as i64) + pred) as i32;
-                            grid.set(x, y, value);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -325,8 +605,8 @@ fn decode_channel_slow(
     next: &mut impl FnMut(u8) -> Result<i32>,
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState,
-    grid: &mut Grid<i32>,
-    prev_rev: &[&Grid<i32>],
+    grid: &mut CutGrid<i32>,
+    prev_rev: &[&CutGrid<i32>],
 ) -> Result<()> {
     let width = grid.width();
     let height = grid.height();
@@ -336,14 +616,14 @@ fn decode_channel_slow(
     for y in 0..height {
         for x in 0..width {
             for (grid, sample) in prev_rev.iter().zip(&mut prev_channel_samples_rev) {
-                *sample = *grid.get(x, y).unwrap();
+                *sample = grid.get(x, y);
             }
 
             let properties = predictor.properties(&prev_channel_samples_rev);
             let (diff, predictor) = ma_tree.decode_sample_rle(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
             let true_value = (diff as i64 + sample_prediction) as i32;
-            grid.set(x, y, true_value);
+            *grid.get_mut(x, y) = true_value;
             properties.record(true_value);
         }
     }
@@ -351,54 +631,42 @@ fn decode_channel_slow(
     Ok(())
 }
 
-impl Image {
-    pub fn group_dim(&self) -> u32 {
-        self.group_dim
-    }
-
-    pub fn bit_depth(&self) -> u32 {
-        self.bit_depth
-    }
+#[derive(Debug)]
+pub struct RecursiveModularImage<'dest> {
+    header: ModularHeader,
+    ma_ctx: MaConfig,
+    bit_depth: u32,
+    channels: ModularChannels,
+    meta_channels: Vec<SimpleGrid<i32>>,
+    image_channels: Vec<TransformedGrid<'dest>>,
 }
 
-impl Image {
-    pub(super) fn for_global_modular(&self) -> (Image, Vec<SubimageChannelInfo>) {
-        let group_dim = self.group_dim;
-        let (channel_info, channel_mapping) = self.channels.info
-            .iter()
-            .enumerate()
-            .take_while(|&(i, info)| {
-                i < self.channels.nb_meta_channels as usize ||
-                    (info.width <= group_dim && info.height <= group_dim)
+impl<'dest> RecursiveModularImage<'dest> {
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
+        let mut channels = self.channels.clone();
+        let mut meta_channel_grids = self.meta_channels.iter_mut()
+            .map(|g| {
+                let width = g.width();
+                let height = g.height();
+                CutGrid::from_buf(g.buf_mut(), width, height, width)
             })
-            .map(|(i, info)| (info.clone(), SubimageChannelInfo::new(i, 0, 0)))
-            .unzip();
-        let channels = ModularChannels {
-            info: channel_info,
-            ..self.channels
-        };
-        (Image::new(channels, group_dim, self.bit_depth), channel_mapping)
-    }
-
-    pub(super) fn copy_from_image(&mut self, subimage: Image, mapping: &[super::SubimageChannelInfo]) -> &mut Self {
-        for (mut grid, mapping) in subimage.data.into_iter().zip(mapping) {
-            let SubimageChannelInfo { channel_id, base_x, base_y } = *mapping;
-            self.data[channel_id].insert_subgrid(&mut grid, base_x as isize, base_y as isize);
+            .collect::<Vec<_>>();
+        let mut grids = self.image_channels.iter_mut().map(|g| g.reborrow()).collect();
+        for tr in &self.header.transform {
+            tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
         }
-        self
-    }
 
-    /// Returns a reference to the list of channels.
-    pub fn channel_data(&self) -> &[Grid<i32>] {
-        &self.data
-    }
-
-    pub(crate) fn channel_data_mut(&mut self) -> &mut Vec<Grid<i32>> {
-        &mut self.data
-    }
-
-    /// Make this `Image` into a [Vec] of channels.
-    pub fn into_channel_data(self) -> Vec<Grid<i32>> {
-        self.data
+        let channel_info = channels.info;
+        let channel_indices = (0..channel_info.len()).collect();
+        Ok(TransformedModularSubimage {
+            header: self.header.clone(),
+            ma_ctx: self.ma_ctx.clone(),
+            bit_depth: self.bit_depth,
+            nb_meta_channels: channels.nb_meta_channels as usize,
+            channel_info,
+            channel_indices,
+            grid: grids,
+            partial: true,
+        })
     }
 }

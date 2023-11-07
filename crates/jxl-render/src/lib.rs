@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
-use jxl_frame::{Frame, header::FrameType, data::{GlobalModular, LfGroup, LfGlobal}};
+use jxl_frame::{Frame, header::FrameType, data::{LfGroup, LfGlobalVarDct}};
 use jxl_image::ImageHeader;
 
 mod blend;
@@ -17,6 +17,7 @@ mod state;
 mod vardct;
 pub use error::{Error, Result};
 pub use features::render_spot_color;
+use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 pub use region::Region;
 
 use inner::*;
@@ -371,15 +372,19 @@ impl std::ops::DerefMut for IndexedFrame {
 
 fn load_lf_groups(
     frame: &IndexedFrame,
-    lf_global: &LfGlobal,
+    lf_global_vardct: Option<&LfGlobalVarDct>,
     lf_groups: &mut std::collections::HashMap<u32, LfGroup>,
+    global_ma_config: Option<&MaConfig>,
+    mlf_groups: Vec<TransformedModularSubimage>,
     lf_region: Region,
-    gmodular: &mut GlobalModular,
 ) -> Result<()> {
     let frame_header = frame.header();
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
+    let mut mlf_groups_it = mlf_groups.into_iter();
     for idx in 0..frame_header.num_lf_groups() {
+        let mlf_group = mlf_groups_it.next();
+
         let left = (idx % lf_groups_per_row) * group_dim;
         let top = (idx / lf_groups_per_row) * group_dim;
         let lf_group_region = Region {
@@ -393,14 +398,19 @@ fn load_lf_groups(
         }
 
         let lf_group = lf_groups.entry(idx);
-        let lf_group = match lf_group {
-            std::collections::hash_map::Entry::Occupied(x) => x.into_mut(),
-            std::collections::hash_map::Entry::Vacant(x) => {
-                let Some(lf_group) = frame.try_parse_lf_group(Some(lf_global), idx).transpose()? else { continue; };
-                &*x.insert(lf_group)
+        match lf_group {
+            std::collections::hash_map::Entry::Occupied(x) => {
+                let lf_group_ref = x.into_mut();
+                if lf_group_ref.partial {
+                    let Some(lf_group) = frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx).transpose()? else { continue; };
+                    *lf_group_ref = lf_group;
+                }
             },
-        };
-        gmodular.modular.copy_from_modular(lf_group.mlf_group.clone());
+            std::collections::hash_map::Entry::Vacant(x) => {
+                let Some(lf_group) = frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx).transpose()? else { continue; };
+                x.insert(lf_group);
+            },
+        }
     }
 
     Ok(())

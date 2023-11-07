@@ -1,49 +1,36 @@
-use jxl_bitstream::{read_bits, Bitstream, Bundle};
-use jxl_modular::Modular;
+use jxl_bitstream::{Bitstream, Bundle};
+use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 use jxl_vardct::{HfMetadata, HfMetadataParams, Quantizer, LfCoeff, LfCoeffParams};
 
 use crate::{
     FrameHeader,
-    GlobalModular,
-    LfGlobal,
     Result,
     filter::EdgePreservingFilter,
     header::Encoding,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct LfGroupParams<'a> {
-    frame_header: &'a FrameHeader,
-    quantizer: Option<&'a Quantizer>,
-    gmodular: &'a GlobalModular,
-    lf_group_idx: u32,
-    allow_partial: bool,
-}
-
-impl<'a> LfGroupParams<'a> {
-    pub fn new(frame_header: &'a FrameHeader, lf_global: &'a LfGlobal, lf_group_idx: u32, allow_partial: bool) -> Self {
-        Self {
-            frame_header,
-            quantizer: lf_global.vardct.as_ref().map(|vardct| &vardct.quantizer),
-            gmodular: &lf_global.gmodular,
-            lf_group_idx,
-            allow_partial,
-        }
-    }
+#[derive(Debug)]
+pub struct LfGroupParams<'a, 'dest> {
+    pub frame_header: &'a FrameHeader,
+    pub quantizer: Option<&'a Quantizer>,
+    pub global_ma_config: Option<&'a MaConfig>,
+    pub mlf_group: Option<TransformedModularSubimage<'dest>>,
+    pub lf_group_idx: u32,
+    pub allow_partial: bool,
 }
 
 #[derive(Debug)]
 pub struct LfGroup {
     pub lf_coeff: Option<LfCoeff>,
-    pub mlf_group: Modular,
     pub hf_meta: Option<HfMetadata>,
+    pub partial: bool,
 }
 
-impl Bundle<LfGroupParams<'_>> for LfGroup {
+impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_>) -> Result<Self> {
-        let LfGroupParams { frame_header, gmodular, lf_group_idx, allow_partial, .. } = params;
+    fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_, '_>) -> Result<Self> {
+        let LfGroupParams { frame_header, global_ma_config, mlf_group, lf_group_idx, allow_partial, .. } = params;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 
         let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
@@ -54,7 +41,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
                     lf_height,
                     jpeg_upsampling: frame_header.jpeg_upsampling,
                     bits_per_sample: frame_header.bit_depth.bits_per_sample(),
-                    global_ma_config: gmodular.ma_config(),
+                    global_ma_config,
                     allow_partial,
                 };
                 LfCoeff::parse(bitstream, lf_coeff_params)
@@ -62,18 +49,20 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
             .transpose()?;
 
         if let Some(lf_coeff_inner) = &lf_coeff {
-            if lf_coeff_inner.lf_quant.is_partial() {
-                return Ok(Self { lf_coeff, mlf_group: Modular::empty(), hf_meta: None });
+            if lf_coeff_inner.partial {
+                return Ok(Self { lf_coeff, hf_meta: None, partial: true });
             }
         }
 
-        let mlf_group_params = gmodular.modular
-            .make_subimage_params_lf_group(gmodular.ma_config.as_ref(), lf_group_idx);
-        let mut mlf_group = read_bits!(bitstream, Bundle(Modular), mlf_group_params.clone())?;
-        mlf_group.decode_image(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
-        mlf_group.inverse_transform();
+        let mut is_mlf_complete = true;
+        if let Some(image) = mlf_group {
+            let mut subimage = image.recursive(bitstream, global_ma_config)?;
+            let mut subimage = subimage.prepare_subimage()?;
+            subimage.decode(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
+            is_mlf_complete = subimage.finish();
+        }
 
-        let hf_meta = (frame_header.encoding == Encoding::VarDct && !mlf_group.is_partial())
+        let hf_meta = (frame_header.encoding == Encoding::VarDct && is_mlf_complete)
             .then(|| {
                 let hf_meta_params = HfMetadataParams {
                     num_lf_groups: frame_header.num_lf_groups(),
@@ -82,7 +71,7 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
                     lf_height,
                     jpeg_upsampling: frame_header.jpeg_upsampling,
                     bits_per_sample: frame_header.bit_depth.bits_per_sample(),
-                    global_ma_config: gmodular.ma_config(),
+                    global_ma_config,
                     epf: match &frame_header.restoration_filter.epf {
                         EdgePreservingFilter::Disabled => None,
                         EdgePreservingFilter::Enabled { sharp_lut, sigma, .. } => {
@@ -97,10 +86,10 @@ impl Bundle<LfGroupParams<'_>> for LfGroup {
         match hf_meta {
             Err(e) if e.unexpected_eof() && allow_partial => {
                 tracing::debug!("Decoded partial HfMeta");
-                Ok(Self { lf_coeff, mlf_group, hf_meta: None })
+                Ok(Self { lf_coeff, hf_meta: None, partial: true })
             },
             Err(e) => Err(e.into()),
-            Ok(hf_meta) => Ok(Self { lf_coeff, mlf_group, hf_meta }),
+            Ok(hf_meta) => Ok(Self { lf_coeff, hf_meta, partial: !is_mlf_complete }),
         }
     }
 }
