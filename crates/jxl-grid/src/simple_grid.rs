@@ -260,6 +260,43 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 }
 
 impl<'g, V: Copy> CutGrid<'g, V> {
+    pub fn subgrid_mut(&mut self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> CutGrid<V> {
+        use std::ops::Bound;
+
+        let left = match range_x.start_bound() {
+            Bound::Included(&v) => v,
+            Bound::Excluded(&v) => v + 1,
+            Bound::Unbounded => 0,
+        };
+        let right = match range_x.end_bound() {
+            Bound::Included(&v) => v + 1,
+            Bound::Excluded(&v) => v,
+            Bound::Unbounded => self.width,
+        };
+        let top = match range_y.start_bound() {
+            Bound::Included(&v) => v,
+            Bound::Excluded(&v) => v + 1,
+            Bound::Unbounded => 0,
+        };
+        let bottom = match range_y.end_bound() {
+            Bound::Included(&v) => v + 1,
+            Bound::Excluded(&v) => v,
+            Bound::Unbounded => self.height,
+        };
+
+        // Bounds checks.
+        assert!(left <= right);
+        assert!(top <= bottom);
+        assert!(right <= self.width);
+        assert!(bottom <= self.height);
+
+        let base_ptr = NonNull::new(self.get_ptr(left, top)).unwrap();
+        // SAFETY: subgrid is contained in `self`.
+        unsafe {
+            CutGrid::new_with_step(base_ptr, right - left, bottom - top, self.step, self.stride)
+        }
+    }
+
     /// Split the grid horizontally at an index.
     ///
     /// # Panics

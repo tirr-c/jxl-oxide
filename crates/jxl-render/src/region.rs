@@ -1,4 +1,4 @@
-use jxl_grid::SimpleGrid;
+use jxl_grid::{SimpleGrid, CutGrid};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Region {
@@ -295,5 +295,52 @@ impl ImageWithRegion {
             let output_row = &mut output_row[output_begin_x..][..intersection.width as usize];
             output_row.copy_from_slice(input_row);
         }
+    }
+}
+
+impl ImageWithRegion {
+    pub(crate) fn groups_with_group_id(
+        &mut self,
+        frame_header: &jxl_frame::FrameHeader,
+    ) -> Vec<(u32, [CutGrid<'_, f32>; 3])> {
+        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
+            jxl_modular::ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
+        });
+
+        let [fb_x, fb_y, fb_b, ..] = self.buffer.as_mut_slice() else {
+            panic!();
+        };
+
+        let group_dim = frame_header.group_dim();
+        let base_group_x = self.region.left as u32 / group_dim;
+        let base_group_y = self.region.top as u32 / group_dim;
+        let width = self.region.width;
+        let height = self.region.height;
+        let frame_groups_per_row = frame_header.groups_per_row();
+        let groups_per_row = (width + group_dim - 1) / group_dim;
+
+        let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
+            let fb_width = fb.width();
+            let shifted = shifts_cbycr[idx].shift_size((width, height));
+            let fb = CutGrid::from_buf(fb.buf_mut(), shifted.0 as usize, shifted.1 as usize, fb_width);
+
+            let hshift = shifts_cbycr[idx].hshift();
+            let vshift = shifts_cbycr[idx].vshift();
+            let group_dim = group_dim as usize;
+            fb.into_groups(group_dim >> hshift, group_dim >> vshift)
+        });
+
+        fb_x.into_iter()
+            .zip(fb_y)
+            .zip(fb_b)
+            .enumerate()
+            .map(|(idx, ((fb_x, fb_y), fb_b))| {
+                let idx = idx as u32;
+                let group_x = base_group_x + (idx % groups_per_row);
+                let group_y = base_group_y + (idx / groups_per_row);
+                let group_idx = group_y * frame_groups_per_row + group_x;
+                (group_idx, [fb_x, fb_y, fb_b])
+            })
+            .collect()
     }
 }
