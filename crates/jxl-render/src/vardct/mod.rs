@@ -260,15 +260,40 @@ pub fn render_vardct(
 
     tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
         let Some(hf_global) = hf_global else { return Ok(()); };
-        let num_groups = frame_header.num_groups();
-        let groups_per_row = frame_header.groups_per_row();
+        let base_group_x = aligned_region.left as u32 / group_dim;
+        let base_group_y = aligned_region.top as u32 / group_dim;
+        let width = aligned_region.width;
+        let height = aligned_region.height;
+        let frame_groups_per_row = frame_header.groups_per_row();
+        let groups_per_row = (width + group_dim - 1) / group_dim;
+        let group_rows = (height + group_dim - 1) / group_dim;
+        let num_groups = groups_per_row * group_rows;
         for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
+            let pass_image = if pass_image.is_empty() {
+                let mut ret = Vec::with_capacity(num_groups as usize);
+                ret.resize_with(num_groups as usize, || None);
+                ret
+            } else {
+                pass_image
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(group_idx, modular)| {
+                        let group_idx = group_idx as u32;
+                        let group_x = group_idx % frame_groups_per_row;
+                        let group_y = group_idx / frame_groups_per_row;
+                        if !(base_group_x..base_group_x + groups_per_row).contains(&group_x) || !(base_group_y..base_group_y + group_rows).contains(&group_y) {
+                            return None;
+                        }
+                        Some(Some(modular))
+                    })
+                    .collect()
+            };
+
             let [fb_x, fb_y, fb_b] = fb_xyb.buffer_mut() else { panic!() };
             let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
-                let width = fb.width();
-                let height = fb.height();
-                let shifted = shifts_cbycr[idx].shift_size((width as u32, height as u32));
-                let fb = CutGrid::from_buf(fb.buf_mut(), shifted.0 as usize, shifted.1 as usize, width);
+                let fb_width = fb.width();
+                let shifted = shifts_cbycr[idx].shift_size((width, height));
+                let fb = CutGrid::from_buf(fb.buf_mut(), shifted.0 as usize, shifted.1 as usize, fb_width);
 
                 let hshift = shifts_cbycr[idx].hshift();
                 let vshift = shifts_cbycr[idx].vshift();
@@ -277,8 +302,6 @@ pub fn render_vardct(
             });
 
             let pass_idx = pass_idx as u32;
-            let mut pass_image = pass_image.into_iter().map(Some).collect::<Vec<_>>();
-            pass_image.resize_with(num_groups as usize, || None);
 
             fb_x.into_par_iter()
                 .zip(fb_y)
@@ -287,6 +310,10 @@ pub fn render_vardct(
                 .enumerate()
                 .try_for_each(|(group_idx, (((fb_x, fb_y), fb_b), modular))| -> Result<_> {
                 let group_idx = group_idx as u32;
+                let group_x = base_group_x + (group_idx % groups_per_row);
+                let group_y = base_group_y + (group_idx / groups_per_row);
+                let group_idx = group_y * frame_groups_per_row + group_x;
+
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return Ok(()); };
                 if lf_group.hf_meta.is_none() {
@@ -296,8 +323,6 @@ pub fn render_vardct(
                 let allow_partial = bitstream.partial;
                 let mut bitstream = bitstream.bitstream;
 
-                let group_x = group_idx % groups_per_row;
-                let group_y = group_idx / groups_per_row;
                 let left = group_x * group_dim;
                 let top = group_y * group_dim;
                 let group_width = group_dim.min(width_rounded as u32 - left);

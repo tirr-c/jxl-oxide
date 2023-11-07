@@ -168,10 +168,10 @@ fn main() {
         image.set_render_spot_colour(false);
     }
     for idx in 0..image.num_loaded_keyframes() {
-        let frame = image.render_frame(idx).expect("rendering frames failed");
+        let frame = image.render_frame_cropped(idx, crop).expect("rendering frames failed");
         keyframes.push(frame);
     }
-    if let Ok(frame) = image.render_frame(image.num_loaded_keyframes()) {
+    if let Ok(frame) = image.render_frame_cropped(image.num_loaded_keyframes(), crop) {
         tracing::warn!("Rendered partially loaded frame");
         keyframes.push(frame);
     }
