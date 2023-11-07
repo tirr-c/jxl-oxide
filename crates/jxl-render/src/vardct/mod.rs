@@ -459,8 +459,8 @@ pub fn dequant_hf_varblock(
     lf_groups: &HashMap<u32, LfGroup>,
     hf_global: &HfGlobal,
 ) {
-    let region = out.region();
-    let out = out.buffer_mut();
+    use rayon::prelude::*;
+
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });
@@ -476,82 +476,79 @@ pub fn dequant_hf_varblock(
 
     let quant_bias_numerator = oim.quant_bias_numerator;
 
-    for lf_group_idx in 0..frame_header.num_lf_groups() {
-        let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-        let hf_meta = lf_group.hf_meta.as_ref().unwrap();
+    let group_dim = frame_header.group_dim();
+    let groups_per_row = frame_header.groups_per_row();
+    let coeff_groups = out.groups_with_group_id(frame_header);
+    coeff_groups
+        .into_par_iter()
+        .for_each(|(group_idx, mut coeff_out)| {
+            let group_x = group_idx % groups_per_row;
+            let group_y = group_idx / groups_per_row;
 
-        let lf_left = (lf_group_idx % frame_header.lf_groups_per_row()) * frame_header.lf_group_dim();
-        let lf_top = (lf_group_idx / frame_header.lf_groups_per_row()) * frame_header.lf_group_dim();
+            let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+            let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
+            let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
+            let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
 
-        let block_info = &hf_meta.block_info;
-        let w8 = block_info.width();
-        let h8 = block_info.height();
+            let Some(hf_meta) = &lf_group.hf_meta else { return; };
 
-        for (channel, coeff) in out.iter_mut().enumerate() {
-            let shift = shifts_cbycr[channel];
-            let vshift = shift.vshift();
-            let hshift = shift.hshift();
+            let block_info = &hf_meta.block_info;
+            let lf_width = (block_info.width() - left_in_lf).min(group_dim as usize / 8);
+            let lf_height = (block_info.height() - top_in_lf).min(group_dim as usize / 8);
+            let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width), top_in_lf..(top_in_lf + lf_height));
+            let w8 = block_info.width();
+            let h8 = block_info.height();
 
-            let quant_bias = oim.quant_bias[channel];
-            let stride = coeff.width();
-            for by in 0..h8 {
-                for bx in 0..w8 {
-                    let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by).unwrap() else { continue; };
-                    if ((bx >> hshift) << hshift) != bx || ((by >> vshift) << vshift) != by {
-                        continue;
-                    }
+            for (channel, coeff) in coeff_out.iter_mut().enumerate() {
+                let quant_bias = oim.quant_bias[channel];
+                let shift = shifts_cbycr[channel];
+                let vshift = shift.vshift();
+                let hshift = shift.hshift();
 
-                    let left = lf_left as usize + bx * 8;
-                    let top = lf_top as usize + by * 8;
-                    let (bw, bh) = dct_select.dct_select_size();
-                    let width = bw * 8;
-                    let height = bh * 8;
-                    let block_region = Region {
-                        left: left as i32,
-                        top: top as i32,
-                        width,
-                        height,
-                    };
-                    if region.intersection(block_region).is_empty() {
-                        continue;
-                    }
+                for by in 0..h8 {
+                    for bx in 0..w8 {
+                        let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else { continue; };
+                        let shifted_bx = bx >> hshift;
+                        let shifted_by = by >> hshift;
+                        if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
+                            continue;
+                        }
 
-                    let left = left >> hshift;
-                    let top = top >> vshift;
-                    let offset = (top - (region.top as usize >> vshift)) * stride + (left - (region.left as usize >> hshift));
-                    let coeff_buf = coeff.buf_mut();
+                        let (bw, bh) = dct_select.dct_select_size();
+                        let left = shifted_bx * 8;
+                        let top = shifted_by * 8;
 
-                    let need_transpose = dct_select.need_transpose();
-                    let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
+                        let bw = bw as usize;
+                        let bh = bh as usize;
+                        let width = bw * 8;
+                        let height = bh * 8;
 
-                    let matrix = if need_transpose {
-                        dequant_matrices.get_transposed(channel, dct_select)
-                    } else {
-                        dequant_matrices.get(channel, dct_select)
-                    };
+                        let need_transpose = dct_select.need_transpose();
+                        let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
-                    let mut coeff = CutGrid::from_buf(
-                        &mut coeff_buf[offset..],
-                        width as usize,
-                        height as usize,
-                        stride,
-                    );
-                    for (y, matrix_row) in matrix.chunks_exact(width as usize).enumerate() {
-                        let row = coeff.get_row_mut(y);
-                        for (q, &m) in row.iter_mut().zip(matrix_row) {
-                            if q.abs() <= 1.0f32 {
-                                *q *= quant_bias;
-                            } else {
-                                *q -= quant_bias_numerator / *q;
+                        let matrix = if need_transpose {
+                            dequant_matrices.get_transposed(channel, dct_select)
+                        } else {
+                            dequant_matrices.get(channel, dct_select)
+                        };
+
+                        let mut coeff = coeff.subgrid_mut(left..(left + width), top..(top + height));
+                        for (y, matrix_row) in matrix.chunks_exact(width).enumerate() {
+                            let row = coeff.get_row_mut(y);
+                            for (q, &m) in row.iter_mut().zip(matrix_row) {
+                                if q.abs() <= 1.0f32 {
+                                    *q *= quant_bias;
+                                } else {
+                                    *q -= quant_bias_numerator / *q;
+                                }
+                                *q *= m;
+                                *q *= mul;
                             }
-                            *q *= m;
-                            *q *= mul;
                         }
                     }
                 }
             }
-        }
-    }
+        });
 }
 
 pub fn chroma_from_luma_lf(
