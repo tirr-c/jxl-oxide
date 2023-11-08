@@ -46,8 +46,6 @@ pub fn render_vardct(
     cache: &mut RenderCache,
     region: Region,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
-    use rayon::prelude::*;
-
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
 
@@ -273,72 +271,89 @@ pub fn render_vardct(
             }
         }
 
-        fb_xyb
-            .groups_with_group_id(frame_header)
-            .into_par_iter()
-            .zip(group_passes)
-            .try_for_each(|((group_idx, mut grid_xyb), mut pass_modular)| -> Result<_> {
+        let result = std::sync::RwLock::new(Result::Ok(()));
+        rayon::scope(|scope| {
+            for ((group_idx, mut grid_xyb), mut pass_modular) in fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes) {
+                if result.read().unwrap().is_err() {
+                    return;
+                }
+
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return Ok(()); };
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
                 if lf_group.hf_meta.is_none() {
-                    return Ok(());
+                    continue;
                 }
 
-                for pass_idx in 0..num_passes {
-                    let modular = pass_modular.remove(&pass_idx);
+                let result = &result;
+                let lf_groups = &lf_groups;
+                let lf_xyb = &lf_xyb;
+                let hf_cfl_data = hf_cfl_data.as_ref();
+                let global_ma_config = gmodular.ma_config.as_ref();
+                scope.spawn(move |_| {
+                    for pass_idx in 0..num_passes {
+                        let modular = pass_modular.remove(&pass_idx);
 
-                    let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
-                    let allow_partial = bitstream.partial;
-                    let mut bitstream = bitstream.bitstream;
+                        let bitstream = match frame.pass_group_bitstream(pass_idx, group_idx) {
+                            Some(Ok(bitstream)) => bitstream,
+                            Some(Err(e)) => {
+                                *result.write().unwrap() = Err(e.into());
+                                return;
+                            },
+                            None => continue,
+                        };
+                        let allow_partial = bitstream.partial;
+                        let mut bitstream = bitstream.bitstream;
 
-                    let vardct = Some(PassGroupParamsVardct {
-                        lf_vardct: lf_global_vardct,
-                        hf_global,
-                        hf_coeff_output: &mut grid_xyb,
-                    });
+                        let vardct = Some(PassGroupParamsVardct {
+                            lf_vardct: lf_global_vardct,
+                            hf_global,
+                            hf_coeff_output: &mut grid_xyb,
+                        });
 
-                    let result = jxl_frame::data::decode_pass_group(
-                        &mut bitstream,
-                        PassGroupParams {
-                            frame_header,
-                            lf_group,
-                            pass_idx,
-                            group_idx,
-                            global_ma_config: gmodular.ma_config.as_ref(),
-                            modular,
-                            vardct,
-                            allow_partial,
-                        },
-                    );
-                    if !allow_partial {
-                        result?;
+                        let r = jxl_frame::data::decode_pass_group(
+                            &mut bitstream,
+                            PassGroupParams {
+                                frame_header,
+                                lf_group,
+                                pass_idx,
+                                group_idx,
+                                global_ma_config,
+                                modular,
+                                vardct,
+                                allow_partial,
+                            },
+                        );
+                        if !allow_partial && r.is_err() {
+                            *result.write().unwrap() = r.map_err(From::from);
+                        }
                     }
-                }
 
-                dequant_hf_varblock_grouped(
-                    &mut grid_xyb,
-                    group_idx,
-                    image_header,
-                    frame_header,
-                    lf_global,
-                    lf_groups,
-                    hf_global,
-                );
+                    dequant_hf_varblock_grouped(
+                        &mut grid_xyb,
+                        group_idx,
+                        image_header,
+                        frame_header,
+                        lf_global,
+                        lf_groups,
+                        hf_global,
+                    );
 
-                if let Some(cfl) = &hf_cfl_data {
-                    chroma_from_luma_hf_grouped(&mut grid_xyb, group_idx, frame_header, cfl);
-                }
+                    if let Some(cfl) = hf_cfl_data {
+                        chroma_from_luma_hf_grouped(&mut grid_xyb, group_idx, frame_header, cfl);
+                    }
 
-                transform_with_lf_grouped(
-                    &lf_xyb,
-                    &mut grid_xyb,
-                    group_idx,
-                    frame_header,
-                    &*lf_groups,
-                );
+                    transform_with_lf_grouped(
+                        lf_xyb,
+                        &mut grid_xyb,
+                        group_idx,
+                        frame_header,
+                        lf_groups,
+                    );
+                });
+            }
+        });
 
-                Ok(())
-            })
+        result.into_inner().unwrap()
     })?;
 
     if let Some(modular_image) = modular_image {

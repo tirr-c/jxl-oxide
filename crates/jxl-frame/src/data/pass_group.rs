@@ -99,11 +99,36 @@ pub fn decode_pass_group(
     }
 
     if let Some(modular) = modular {
-        let mut modular = modular.recursive(bitstream, global_ma_config)?;
-        let mut subimage = modular.prepare_subimage()?;
-        subimage.decode(bitstream, 1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx, allow_partial)?;
-        subimage.finish();
+        decode_pass_group_modular(
+            bitstream,
+            frame_header,
+            global_ma_config,
+            pass_idx,
+            group_idx,
+            modular,
+            allow_partial,
+        )?;
     }
 
+    Ok(())
+}
+
+pub fn decode_pass_group_modular(
+    bitstream: &mut Bitstream,
+    frame_header: &FrameHeader,
+    global_ma_config: Option<&MaConfig>,
+    pass_idx: u32,
+    group_idx: u32,
+    modular: TransformedModularSubimage,
+    allow_partial: bool,
+) -> Result<()> {
+    let mut modular = modular.recursive(bitstream, global_ma_config)?;
+    let mut subimage = modular.prepare_subimage()?;
+    subimage.decode(
+        bitstream,
+        1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx,
+        allow_partial,
+    )?;
+    subimage.finish();
     Ok(())
 }

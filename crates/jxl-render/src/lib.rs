@@ -378,16 +378,26 @@ fn load_lf_groups(
     mlf_groups: Vec<TransformedModularSubimage>,
     lf_region: Region,
 ) -> Result<()> {
-    use rayon::prelude::*;
-
     let frame_header = frame.header();
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
-    let mut mlf_groups = mlf_groups.into_iter().map(Some).collect::<Vec<_>>();
-    mlf_groups.resize_with(frame_header.num_lf_groups() as usize, || None);
+    let num_lf_groups = frame_header.num_lf_groups();
 
-    let new_groups = mlf_groups.into_par_iter().enumerate()
-        .filter_map(|(idx, mlf_group)| {
+    let result = std::sync::RwLock::new(Result::Ok(()));
+    let mut lf_groups_out = Vec::with_capacity(num_lf_groups as usize);
+    lf_groups_out.resize_with(num_lf_groups as usize, || (None, false));
+    for (&idx, lf_group) in lf_groups.iter() {
+        lf_groups_out[idx as usize].1 = !lf_group.partial;
+    }
+
+    rayon::scope(|scope| {
+        let mut modular_it = mlf_groups.into_iter();
+        for (idx, (lf_group_out, loaded)) in lf_groups_out.iter_mut().enumerate() {
+            let modular = modular_it.next();
+            if *loaded {
+                continue;
+            }
+
             let idx = idx as u32;
             let left = (idx % lf_groups_per_row) * group_dim;
             let top = (idx / lf_groups_per_row) * group_dim;
@@ -398,19 +408,31 @@ fn load_lf_groups(
                 height: group_dim,
             };
             if lf_region.intersection(lf_group_region).is_empty() {
-                return None;
+                continue;
             }
 
-            let lf_group_partial = lf_groups.get(&idx).map(|g| g.partial);
-            if lf_group_partial == Some(false) {
-                return None;
-            }
-            frame.try_parse_lf_group(lf_global_vardct, global_ma_config, mlf_group, idx)
-                .map(|o| o.map(|g| (idx, g)).map_err(From::from))
-        })
-        .collect::<Result<std::collections::HashMap<_, _>>>()?;
-    lf_groups.extend(new_groups);
-    Ok(())
+            let result = &result;
+            scope.spawn(move |_| {
+                match frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular, idx) {
+                    Some(Ok(g)) => {
+                        *lf_group_out = Some(g);
+                    },
+                    Some(Err(e)) => {
+                        *result.write().unwrap() = Err(e.into());
+                    },
+                    None => {
+                    },
+                }
+            });
+        }
+    });
+
+    for (idx, (group, _)) in lf_groups_out.into_iter().enumerate() {
+        if let Some(group) = group {
+            lf_groups.insert(idx as u32, group);
+        }
+    }
+    result.into_inner().unwrap()
 }
 
 fn upsample_lf(image: &ImageWithRegion, frame: &IndexedFrame, frame_region: Region) -> ImageWithRegion {
