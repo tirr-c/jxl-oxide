@@ -1,6 +1,6 @@
 [package]
 name = "jxl-image"
-description = "JPEG XL image header representaion, part of jxl-oxide"
+description = "JPEG XL image header representation, part of jxl-oxide"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
 repository = "https://github.com/tirr-c/jxl-oxide.git"
 readme = "README.md"
