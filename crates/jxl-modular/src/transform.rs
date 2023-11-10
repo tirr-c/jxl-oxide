@@ -6,6 +6,8 @@ use jxl_grid::{SimpleGrid, CutGrid};
 use crate::{Error, Result, image::TransformedGrid};
 use super::{ModularChannelInfo, predictor::{Predictor, PredictorState, WpHeader}};
 
+mod squeeze;
+
 #[derive(Debug, Clone)]
 pub enum TransformInfo {
     Rct(Rct),
@@ -526,88 +528,12 @@ impl SqueezeParams {
             if !i0.merge_interleaved_horizontal(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            self.inverse_h(i0)
+            squeeze::inverse_h(i0)
         } else {
             if !i0.merge_interleaved_vertical(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            self.inverse_v(i0)
+            squeeze::inverse_v(i0)
         }
-    }
-
-    fn inverse_h(&self, merged: &mut CutGrid<'_, i32>) {
-        let height = merged.height();
-        let width = merged.width();
-        let width_iters = width / 2;
-        for y in 0..height {
-            let mut avg = merged.get(0, y);
-            let mut left = avg;
-            for x2 in 0..width_iters {
-                let x = x2 * 2;
-                let residu = merged.get(x + 1, y);
-                let next_avg = if x + 2 < width {
-                    merged.get(x + 2, y)
-                } else {
-                    avg
-                };
-                let diff = residu + tendency(left, avg, next_avg);
-                let first = avg + diff / 2;
-                *merged.get_mut(x, y) = first;
-                *merged.get_mut(x + 1, y) = first - diff;
-                avg = next_avg;
-                left = first - diff;
-            }
-        }
-    }
-
-    fn inverse_v(&self, merged: &mut CutGrid<'_, i32>) {
-        let width = merged.width();
-        let height = merged.height();
-        let height_iters = height / 2;
-        for y2 in 0..height_iters {
-            let y = y2 * 2;
-            for x in 0..width {
-                let avg = merged.get(x, y);
-                let residu = merged.get(x, y + 1);
-                let next_avg = if y + 2 < height {
-                    merged.get(x, y + 2)
-                } else {
-                    avg
-                };
-                let top = if y > 0 {
-                    merged.get(x, y - 1)
-                } else {
-                    avg
-                };
-                let diff = residu + tendency(top, avg, next_avg);
-                let first = avg + diff / 2;
-                *merged.get_mut(x, y) = first;
-                *merged.get_mut(x, y + 1) = first - diff;
-            }
-        }
-    }
-}
-
-fn tendency(a: i32, b: i32, c: i32) -> i32 {
-    if a >= b && b >= c {
-        let mut x = (4 * a - 3 * c - b + 6) / 12;
-        if x - (x & 1) > 2 * (a - b) {
-            x = 2 * (a - b) + 1;
-        }
-        if x + (x & 1) > 2 * (b - c) {
-            x = 2 * (b - c);
-        }
-        x
-    } else if a <= b && b <= c {
-        let mut x = (4 * a - 3 * c - b - 6) / 12;
-        if x + (x & 1) < 2 * (a - b) {
-            x = 2 * (a - b) - 1;
-        }
-        if x - (x & 1) < 2 * (b - c) {
-            x = 2 * (b - c);
-        }
-        x
-    } else {
-        0
     }
 }
