@@ -1,6 +1,7 @@
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_image::ImageMetadata;
 use jxl_modular::MaConfig;
+use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{
     DequantMatrixSet,
     DequantMatrixSetParams,
@@ -18,16 +19,23 @@ pub struct HfGlobalParams<'a> {
     frame_header: &'a FrameHeader,
     ma_config: Option<&'a MaConfig>,
     hf_block_ctx: &'a HfBlockContext,
+    pool: &'a JxlThreadPool,
 }
 
 impl<'a> HfGlobalParams<'a> {
-    pub fn new(metadata: &'a ImageMetadata, frame_header: &'a FrameHeader, lf_global: &'a LfGlobal) -> Self {
+    pub fn new(
+        metadata: &'a ImageMetadata,
+        frame_header: &'a FrameHeader,
+        lf_global: &'a LfGlobal,
+        pool: &'a JxlThreadPool,
+    ) -> Self {
         let Some(lf_vardct) = &lf_global.vardct else { panic!("VarDCT not initialized") };
         Self {
             metadata,
             frame_header,
             ma_config: lf_global.gmodular.ma_config.as_ref(),
             hf_block_ctx: &lf_vardct.hf_block_ctx,
+            pool,
         }
     }
 }
@@ -43,11 +51,12 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: HfGlobalParams<'_>) -> Result<Self> {
-        let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx } = params;
+        let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx, pool } = params;
         let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
             frame_header.num_lf_groups(),
             ma_config,
+            pool,
         );
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
 

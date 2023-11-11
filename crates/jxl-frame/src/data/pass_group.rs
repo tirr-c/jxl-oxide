@@ -1,6 +1,7 @@
 use jxl_bitstream::Bitstream;
 use jxl_grid::CutGrid;
 use jxl_modular::{ChannelShift, image::TransformedModularSubimage, MaConfig};
+use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{HfCoeffParams, write_hf_coeff};
 
 use crate::{FrameHeader, Result};
@@ -20,6 +21,7 @@ pub struct PassGroupParams<'frame, 'buf, 'g> {
     pub modular: Option<TransformedModularSubimage<'g>>,
     pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
     pub allow_partial: bool,
+    pub pool: &'frame JxlThreadPool,
 }
 
 #[derive(Debug)]
@@ -42,6 +44,7 @@ pub fn decode_pass_group(
         modular,
         vardct,
         allow_partial,
+        pool,
     } = params;
 
     if let (Some(PassGroupParamsVardct { lf_vardct, hf_global, hf_coeff_output }), Some(hf_meta)) = (vardct, &lf_group.hf_meta) {
@@ -107,12 +110,14 @@ pub fn decode_pass_group(
             group_idx,
             modular,
             allow_partial,
+            pool,
         )?;
     }
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn decode_pass_group_modular(
     bitstream: &mut Bitstream,
     frame_header: &FrameHeader,
@@ -121,6 +126,7 @@ pub fn decode_pass_group_modular(
     group_idx: u32,
     modular: TransformedModularSubimage,
     allow_partial: bool,
+    pool: &JxlThreadPool,
 ) -> Result<()> {
     let mut modular = modular.recursive(bitstream, global_ma_config)?;
     let mut subimage = modular.prepare_subimage()?;
@@ -129,6 +135,6 @@ pub fn decode_pass_group_modular(
         1 + 3 * frame_header.num_lf_groups() + 17 + pass_idx * frame_header.num_groups() + group_idx,
         allow_partial,
     )?;
-    subimage.finish();
+    subimage.finish(pool);
     Ok(())
 }

@@ -30,6 +30,7 @@ pub mod header;
 pub use error::{Error, Result};
 pub use header::FrameHeader;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
+use jxl_threadpool::JxlThreadPool;
 
 use crate::data::*;
 
@@ -38,6 +39,7 @@ use crate::data::*;
 /// A frame represents a single unit of image that can be displayed or referenced by other frames.
 #[derive(Debug)]
 pub struct Frame {
+    pool: JxlThreadPool,
     image_header: Arc<ImageHeader>,
     header: FrameHeader,
     toc: Toc,
@@ -62,10 +64,18 @@ impl From<TocGroup> for GroupData {
     }
 }
 
-impl Bundle<Arc<ImageHeader>> for Frame {
+#[derive(Debug, Clone)]
+pub struct FrameContext {
+    pub image_header: Arc<ImageHeader>,
+    pub pool: JxlThreadPool,
+}
+
+impl Bundle<FrameContext> for Frame {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, image_header: Arc<ImageHeader>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, ctx: FrameContext) -> Result<Self> {
+        let FrameContext { image_header, pool } = ctx;
+
         bitstream.zero_pad_to_byte()?;
         let base_offset = bitstream.num_read_bits() / 8;
         let header = read_bits!(bitstream, Bundle(FrameHeader), &image_header)?;
@@ -147,6 +157,7 @@ impl Bundle<Arc<ImageHeader>> for Frame {
         pass_shifts.insert(header.passes.num_passes - 1, (0i32, maxshift));
 
         Ok(Self {
+            pool,
             image_header,
             header,
             toc,
@@ -237,9 +248,10 @@ impl Frame {
                 mlf_group,
                 lf_group_idx: 0,
                 allow_partial: false,
+                pool: &self.pool,
             })?;
             let hf_global = (self.header.encoding == header::Encoding::VarDct).then(|| {
-                HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global))
+                HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global, &self.pool))
             }).transpose()?;
             Ok((lf_global, lf_group, hf_global))
         })();
@@ -295,6 +307,7 @@ impl Frame {
                 mlf_group,
                 lf_group_idx,
                 allow_partial,
+                pool: &self.pool,
             });
             if allow_partial && result.is_err() {
                 return None;
@@ -327,7 +340,7 @@ impl Frame {
                 None
             };
             let lf_global = cached_lf_global.or(lf_global.as_ref()).unwrap();
-            let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global);
+            let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global, &self.pool);
             Some(HfGlobal::parse(&mut bitstream, params))
         }
     }

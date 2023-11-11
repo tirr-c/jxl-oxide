@@ -17,6 +17,7 @@ pub struct LfGroupParams<'a, 'dest> {
     pub mlf_group: Option<TransformedModularSubimage<'dest>>,
     pub lf_group_idx: u32,
     pub allow_partial: bool,
+    pub pool: &'a jxl_threadpool::JxlThreadPool,
 }
 
 #[derive(Debug)]
@@ -30,7 +31,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_, '_>) -> Result<Self> {
-        let LfGroupParams { frame_header, global_ma_config, mlf_group, lf_group_idx, allow_partial, .. } = params;
+        let LfGroupParams { frame_header, global_ma_config, mlf_group, lf_group_idx, allow_partial, pool, .. } = params;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 
         let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
@@ -43,6 +44,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
                     bits_per_sample: frame_header.bit_depth.bits_per_sample(),
                     global_ma_config,
                     allow_partial,
+                    pool,
                 };
                 LfCoeff::parse(bitstream, lf_coeff_params)
             })
@@ -59,7 +61,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
             let mut subimage = image.recursive(bitstream, global_ma_config)?;
             let mut subimage = subimage.prepare_subimage()?;
             subimage.decode(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
-            is_mlf_complete = subimage.finish();
+            is_mlf_complete = subimage.finish(pool);
         }
 
         let hf_meta = (frame_header.encoding == Encoding::VarDct && is_mlf_complete)
@@ -79,6 +81,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
                         },
                     },
                     quantizer_global_scale: params.quantizer.unwrap().global_scale,
+                    pool,
                 };
                 HfMetadata::parse(bitstream, hf_meta_params)
             })

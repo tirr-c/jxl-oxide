@@ -5,7 +5,7 @@ use jxl_frame::{
     data::*,
     filter::{Gabor, EdgePreservingFilter},
     header::{Encoding, FrameType},
-    Frame, FrameHeader,
+    Frame, FrameHeader, FrameContext,
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ImageMetadata};
@@ -149,7 +149,10 @@ impl ContextInner {
         let image_header = &self.image_header;
 
         let bitstream_original = bitstream.clone();
-        let frame = match Frame::parse(bitstream, image_header.clone()) {
+        let frame = match Frame::parse(
+            bitstream,
+            FrameContext { image_header: image_header.clone(), pool: self.pool.clone() },
+        ) {
             Ok(frame) => frame,
             Err(e) => {
                 *bitstream = bitstream_original;

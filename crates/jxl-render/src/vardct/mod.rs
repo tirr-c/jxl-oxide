@@ -323,6 +323,7 @@ pub fn render_vardct(
                                 modular,
                                 vardct,
                                 allow_partial,
+                                pool,
                             },
                         );
                         if !allow_partial && r.is_err() {
@@ -360,7 +361,7 @@ pub fn render_vardct(
 
     if let Some(modular_image) = modular_image {
         tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
-            modular_image.prepare_subimage().unwrap().finish();
+            modular_image.prepare_subimage().unwrap().finish(pool);
         });
     }
 

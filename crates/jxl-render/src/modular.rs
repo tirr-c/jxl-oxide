@@ -113,6 +113,7 @@ pub fn render_modular(
                             group_idx,
                             modular,
                             allow_partial,
+                            pool,
                         );
                         if !allow_partial && r.is_err() {
                             *result.write().unwrap() = r.map_err(From::from);
@@ -125,7 +126,7 @@ pub fn render_modular(
     })?;
 
     tracing::trace_span!("Inverse Modular transform").in_scope(|| {
-        modular_image.prepare_subimage().unwrap().finish();
+        modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
     tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| {

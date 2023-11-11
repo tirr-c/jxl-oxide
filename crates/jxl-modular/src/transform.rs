@@ -49,15 +49,7 @@ impl TransformInfo {
         }
     }
 
-    pub(super) fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, bit_depth: u32) {
-        match self {
-            Self::Rct(rct) => rct.inverse(grids),
-            Self::Palette(pal) => pal.inverse(grids, bit_depth),
-            Self::Squeeze(sq) => sq.inverse(grids),
-        }
-    }
-
-    pub(super) fn inverse_with_threads(
+    pub(super) fn inverse(
         &self,
         grids: &mut Vec<TransformedGrid<'_>>,
         bit_depth: u32,
@@ -66,7 +58,7 @@ impl TransformInfo {
         match self {
             Self::Rct(rct) => rct.inverse(grids),
             Self::Palette(pal) => pal.inverse(grids, bit_depth),
-            Self::Squeeze(sq) => sq.inverse_with_threads(grids, pool),
+            Self::Squeeze(sq) => sq.inverse(grids, pool),
         }
     }
 
@@ -515,24 +507,7 @@ impl Squeeze {
         Ok(())
     }
 
-    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>) {
-        for sp in self.sp.iter().rev() {
-            let begin = sp.begin_c as usize;
-            let channel_count = sp.num_c as usize;
-            let end = begin + channel_count;
-            let residual_channels: Vec<_> = if sp.in_place {
-                grids.drain(end..(end + channel_count)).collect()
-            } else {
-                grids.drain((grids.len() - channel_count)..).collect()
-            };
-
-            for (ch, residu) in grids[begin..end].iter_mut().zip(residual_channels) {
-                sp.inverse(ch, residu);
-            }
-        }
-    }
-
-    fn inverse_with_threads(
+    fn inverse(
         &self,
         grids: &mut Vec<TransformedGrid<'_>>,
         pool: &jxl_threadpool::JxlThreadPool,
@@ -548,30 +523,14 @@ impl Squeeze {
             };
 
             for (ch, residu) in grids[begin..end].iter_mut().zip(residual_channels) {
-                sp.inverse_with_threads(ch, residu, pool);
+                sp.inverse(ch, residu, pool);
             }
         }
     }
 }
 
 impl SqueezeParams {
-    fn inverse<'dest>(&self, i0: &mut TransformedGrid<'dest>, i1: TransformedGrid<'dest>) {
-        let i0 = i0.grid_mut();
-        let TransformedGrid::Single(i1) = i1 else { panic!("residual channel should be Single channel") };
-        if self.horizontal {
-            if !i0.merge_interleaved_horizontal(i1) {
-                panic!("two grids are not from same squeeze transform");
-            }
-            squeeze::inverse_h(i0);
-        } else {
-            if !i0.merge_interleaved_vertical(i1) {
-                panic!("two grids are not from same squeeze transform");
-            }
-            squeeze::inverse_v(i0);
-        }
-    }
-
-    fn inverse_with_threads<'dest>(
+    fn inverse<'dest>(
         &self,
         i0: &mut TransformedGrid<'dest>,
         i1: TransformedGrid<'dest>,

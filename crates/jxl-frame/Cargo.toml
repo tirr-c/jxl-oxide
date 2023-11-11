@@ -33,6 +33,10 @@ path = "../jxl-image"
 version = "0.3.0"
 path = "../jxl-modular"
 
+[dependencies.jxl-threadpool]
+version = "0.1.0"
+path = "../jxl-threadpool"
+
 [dependencies.jxl-vardct]
 version = "0.3.0"
 path = "../jxl-vardct"

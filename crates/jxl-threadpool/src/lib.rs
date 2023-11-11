@@ -57,7 +57,7 @@ impl Default for JxlThreadPool {
 }
 
 impl JxlThreadPool {
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self(JxlThreadPoolImpl::None)
     }
 

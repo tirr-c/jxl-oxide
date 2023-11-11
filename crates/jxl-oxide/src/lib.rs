@@ -95,6 +95,7 @@ mod fb;
 use bitstream::ContainerDetectingReader;
 pub use jxl_bitstream as bitstream;
 pub use jxl_color::header as color;
+use jxl_frame::FrameContext;
 pub use jxl_image as image;
 pub use jxl_frame::header as frame;
 
@@ -210,7 +211,10 @@ impl UninitializedJxlImage {
 
         let image_header = Arc::new(image_header);
         let skip_bytes = if image_header.metadata.preview.is_some() {
-            let frame = match Frame::parse(&mut bitstream, image_header.clone()) {
+            let frame = match Frame::parse(
+                &mut bitstream,
+                FrameContext { image_header: image_header.clone(), pool: self.pool.clone() },
+            ) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
                     return Ok(InitializeResult::NeedMoreData(self));
