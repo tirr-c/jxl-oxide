@@ -528,12 +528,34 @@ impl SqueezeParams {
             if !i0.merge_interleaved_horizontal(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            squeeze::inverse_h(i0)
+            let width = i0.width();
+            let height = i0.height();
+            if height > 16 {
+                rayon::scope(|scope| {
+                    let remaining = i0.split_vertical(0).1;
+                    for mut group in remaining.into_groups(width, 8) {
+                        scope.spawn(move |_| squeeze::inverse_h(&mut group));
+                    }
+                });
+            } else {
+                squeeze::inverse_h(i0)
+            }
         } else {
             if !i0.merge_interleaved_vertical(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            squeeze::inverse_v(i0)
+            let width = i0.width();
+            let height = i0.height();
+            if width > 16 {
+                rayon::scope(|scope| {
+                    let remaining = i0.split_horizontal(0).1;
+                    for mut group in remaining.into_groups(8, height) {
+                        scope.spawn(move |_| squeeze::inverse_v(&mut group));
+                    }
+                });
+            } else {
+                squeeze::inverse_v(i0);
+            }
         }
     }
 }
