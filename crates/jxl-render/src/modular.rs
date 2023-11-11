@@ -167,6 +167,10 @@ pub fn copy_modular_groups(
     bit_depth: BitDepth,
     xyb_encoded: bool,
 ) {
+    let Region { left, top, width: rwidth, height: rheight } = region;
+    assert_eq!(rwidth as usize, buffer.width());
+    assert_eq!(rheight as usize, buffer.height());
+
     let width = g.width();
     let height = g.height();
 
@@ -174,28 +178,52 @@ pub fn copy_modular_groups(
     let buffer_stride = buffer.width();
     let g = g.buf();
     let buffer = buffer.buf_mut();
-    for y in region.top..region.top.wrapping_add_unsigned(region.height) {
-        let buffer_y = y.abs_diff(region.top) as usize;
-        for x in region.left..region.left.wrapping_add_unsigned(region.width) {
-            let buffer_x = x.abs_diff(region.left) as usize;
 
-            let s = if y < 0 || x < 0 {
-                0i32
-            } else {
-                let x = x as usize;
-                let y = y as usize;
-                if y >= height || x >= width {
-                    0i32
-                } else {
-                    g[y * g_stride + x]
-                }
-            };
+    let bottom = top.checked_add_unsigned(rheight).unwrap();
+    let right = left.checked_add_unsigned(rwidth).unwrap();
 
-            buffer[buffer_y * buffer_stride + buffer_x] = if xyb_encoded {
-                s as f32
-            } else {
-                bit_depth.parse_integer_sample(s)
-            };
+    if bottom <= 0 || top > height as i32 || right <= 0 || left > width as i32 {
+        buffer.fill(0f32);
+        return;
+    }
+
+    if top < 0 {
+        buffer[..(-top) as usize * buffer_stride].fill(0f32);
+    }
+
+    if bottom as usize > height {
+        let remaining = bottom as usize - height;
+        let from_y = rheight as usize - remaining;
+        buffer[from_y * buffer_stride..].fill(0f32);
+    }
+
+    let mut col_begin = 0usize;
+    let mut col_end = buffer_stride;
+    if left < 0 {
+        col_begin = (-left) as usize;
+    }
+    if right as usize > width {
+        let remaining = right as usize - width;
+        col_end = rwidth as usize - remaining;
+    }
+
+    for y in (top.max(0) as usize)..(bottom as usize).min(height) {
+        let buffer_y = y.checked_add_signed((-top) as isize).unwrap();
+        let buffer_row = &mut buffer[buffer_y * buffer_stride..][..buffer_stride];
+
+        buffer_row[..col_begin].fill(0f32);
+        buffer_row[col_end..].fill(0f32);
+
+        let g_row = &g[y * g_stride..][left.max(0) as usize..(right as usize).min(width)];
+        let buffer_row = &mut buffer_row[col_begin..col_end];
+        if xyb_encoded {
+            for (&s, v) in g_row.iter().zip(buffer_row) {
+                *v = s as f32;
+            }
+        } else {
+            for (&s, v) in g_row.iter().zip(buffer_row) {
+                *v = bit_depth.parse_integer_sample(s);
+            }
         }
     }
 }

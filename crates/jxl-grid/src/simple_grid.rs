@@ -176,6 +176,16 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 
     #[inline]
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
+    #[inline]
+    pub fn step(&self) -> usize {
+        self.step
+    }
+
+    #[inline]
     fn get_ptr(&self, x: usize, y: usize) -> *mut V {
         if x >= self.width || y >= self.height {
             panic!(
@@ -185,10 +195,13 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         }
 
         // SAFETY: (x, y) is checked above and is in bounds.
-        unsafe {
-            let offset = y * self.stride + x * self.step;
-            self.ptr.as_ptr().add(offset)
-        }
+        unsafe { self.get_ptr_unchecked(x, y) }
+    }
+
+    #[inline]
+    unsafe fn get_ptr_unchecked(&self, x: usize, y: usize) -> *mut V {
+        let offset = y * self.stride + x * self.step;
+        self.ptr.as_ptr().add(offset)
     }
 
     #[inline]
@@ -246,7 +259,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         assert!(x <= self.width);
 
         let left_ptr = self.ptr;
-        let right_ptr = NonNull::new(self.get_ptr(x, 0)).unwrap();
+        let right_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(x, 0) }).unwrap();
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
@@ -266,7 +279,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         assert!(y <= self.height);
 
         let top_ptr = self.ptr;
-        let bottom_ptr = NonNull::new(self.get_ptr(0, y)).unwrap();
+        let bottom_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(0, y) }).unwrap();
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());

@@ -470,7 +470,7 @@ impl BitDepth {
         match self {
             Self::IntegerSample { bits_per_sample } => {
                 let div = (1i32 << bits_per_sample) - 1;
-                (sample as f64 / div as f64) as f32
+                sample as f32 / div as f32
             }
             Self::FloatSample {
                 bits_per_sample,
