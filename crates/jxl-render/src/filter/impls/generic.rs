@@ -186,7 +186,7 @@ macro_rules! define_epf {
                     let Some(&sigma_val) = sigma_grid.get(x8 - 1, y8) else { break; };
                     if sigma_val < 0.3 {
                         for (input_ch, output_ch) in input_buf.iter().zip(output_buf_rows.iter_mut()) {
-                            output_ch[base_idx..][..8].copy_from_slice(&input_ch[base_x..][..8]);
+                            output_ch[base_x..][..8].copy_from_slice(&input_ch[base_idx..][..8]);
                         }
                         continue;
                     }
