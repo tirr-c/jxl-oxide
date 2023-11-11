@@ -390,7 +390,7 @@ fn load_lf_groups(
         lf_groups_out[idx as usize].1 = !lf_group.partial;
     }
 
-    rayon::scope(|scope| {
+    rayon_core::scope(|scope| {
         let mut modular_it = mlf_groups.into_iter();
         for (idx, (lf_group_out, loaded)) in lf_groups_out.iter_mut().enumerate() {
             let modular = modular_it.next();

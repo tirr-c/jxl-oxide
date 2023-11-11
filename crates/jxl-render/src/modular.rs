@@ -48,7 +48,7 @@ pub fn render_modular(
 
     tracing::trace_span!("Decode").in_scope(|| {
         let result = std::sync::RwLock::new(Result::Ok(()));
-        rayon::scope(|scope| {
+        rayon_core::scope(|scope| {
             let lf_groups = &mut cache.lf_groups;
             scope.spawn(|_| {
                 let r = crate::load_lf_groups(

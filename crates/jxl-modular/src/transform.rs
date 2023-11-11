@@ -531,7 +531,7 @@ impl SqueezeParams {
             let width = i0.width();
             let height = i0.height();
             if height > 16 {
-                rayon::scope(|scope| {
+                rayon_core::scope(|scope| {
                     let remaining = i0.split_vertical(0).1;
                     for mut group in remaining.into_groups(width, 8) {
                         scope.spawn(move |_| squeeze::inverse_h(&mut group));
@@ -547,7 +547,7 @@ impl SqueezeParams {
             let width = i0.width();
             let height = i0.height();
             if width > 16 {
-                rayon::scope(|scope| {
+                rayon_core::scope(|scope| {
                     let remaining = i0.split_horizontal(0).1;
                     for mut group in remaining.into_groups(8, height) {
                         scope.spawn(move |_| squeeze::inverse_v(&mut group));

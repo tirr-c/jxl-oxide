@@ -272,7 +272,7 @@ pub fn render_vardct(
         }
 
         let result = std::sync::RwLock::new(Result::Ok(()));
-        rayon::scope(|scope| {
+        rayon_core::scope(|scope| {
             for ((group_idx, mut grid_xyb), mut pass_modular) in fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes) {
                 if result.read().unwrap().is_err() {
                     return;
