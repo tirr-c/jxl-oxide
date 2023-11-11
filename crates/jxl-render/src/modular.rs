@@ -31,7 +31,7 @@ pub fn render_modular(
         cache.lf_global.as_ref().unwrap()
     };
     let mut gmodular = lf_global.gmodular.clone();
-    let modular_region = compute_modular_region(frame_header, &gmodular, region);
+    let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let shifts_cbycr = [0, 1, 2].map(|idx| {
@@ -168,9 +168,18 @@ pub fn compute_modular_region(
     frame_header: &FrameHeader,
     gmodular: &GlobalModular,
     region: Region,
+    is_lf: bool,
 ) -> Region {
     if gmodular.modular.has_palette() || gmodular.modular.has_squeeze() {
-        Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
+        let mut width = frame_header.color_sample_width();
+        let mut height = frame_header.color_sample_height();
+        if is_lf {
+            width = (width + 7) / 8;
+            height = (height + 7) / 8;
+        }
+        let width = width.max(region.width.checked_add_signed(region.left).unwrap());
+        let height = height.max(region.height.checked_add_signed(region.top).unwrap());
+        Region::with_size(width, height)
     } else {
         region
     }

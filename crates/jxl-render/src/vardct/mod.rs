@@ -101,13 +101,13 @@ pub fn render_vardct(
         }.container_aligned(frame_header.group_dim())
     };
 
-    let _modular_region = modular::compute_modular_region(frame_header, &gmodular, aligned_region);
-    let modular_lf_region = modular::compute_modular_region(frame_header, &gmodular, aligned_lf_region)
-        .intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
     let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
     let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
+    let modular_region = modular::compute_modular_region(frame_header, &gmodular, aligned_region, false);
+    let modular_lf_region = modular::compute_modular_region(frame_header, &gmodular, aligned_lf_region, true)
+        .intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
 
-    let mut fb_xyb = ImageWithRegion::from_region(3, aligned_region);
+    let mut fb_xyb = ImageWithRegion::from_region(3, modular_region);
 
     let mut modular_image = gmodular.modular.image_mut();
     let groups = modular_image.as_mut().map(|x| x.prepare_groups(frame.pass_shifts())).transpose()?;
@@ -136,15 +136,15 @@ pub fn render_vardct(
     let group_dim = frame_header.group_dim();
     let (hf_cfl_data, mut lf_xyb) = tracing::trace_span!("Copy LFQuant").in_scope(|| {
         let mut hf_cfl_data = (!subsampled).then(|| {
-            ImageWithRegion::from_region(2, aligned_lf_region.downsample(3))
+            ImageWithRegion::from_region(2, modular_lf_region.downsample(3))
         });
 
-        let mut lf_xyb = ImageWithRegion::from_region(3, aligned_lf_region);
+        let mut lf_xyb = ImageWithRegion::from_region(3, modular_lf_region);
 
         if let Some(x) = lf_frame {
-            x.image.clone_region_channel(aligned_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
-            x.image.clone_region_channel(aligned_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
-            x.image.clone_region_channel(aligned_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
+            x.image.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
+            x.image.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
+            x.image.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
         }
 
         let lf_groups_per_row = frame_header.lf_groups_per_row();
@@ -161,12 +161,12 @@ pub fn render_vardct(
                 width: group_dim,
                 height: group_dim,
             };
-            if aligned_lf_region.intersection(lf_group_region).is_empty() {
+            if modular_lf_region.intersection(lf_group_region).is_empty() {
                 continue;
             }
 
-            let left = left - aligned_lf_region.left as u32;
-            let top = top - aligned_lf_region.top as u32;
+            let left = left - modular_lf_region.left as u32;
+            let top = top - modular_lf_region.top as u32;
 
             if lf_frame.is_none() {
                 let quantizer = &lf_global_vardct.quantizer;
@@ -275,7 +275,9 @@ pub fn render_vardct(
 
         let result = std::sync::RwLock::new(Result::Ok(()));
         pool.scope(|scope| {
-            for ((group_idx, mut grid_xyb), mut pass_modular) in fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes) {
+            let groups_per_row = frame_header.groups_per_row();
+            let it = fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes);
+            for ((group_idx, mut grid_xyb), mut pass_modular) in it {
                 if result.read().unwrap().is_err() {
                     return;
                 }
@@ -285,6 +287,21 @@ pub fn render_vardct(
                 if lf_group.hf_meta.is_none() {
                     continue;
                 }
+
+                let transform_hf = {
+                    let group_x = group_idx % groups_per_row;
+                    let group_y = group_idx / groups_per_row;
+                    let left = group_x * group_dim;
+                    let top = group_y * group_dim;
+
+                    let group_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width: group_dim,
+                        height: group_dim,
+                    };
+                    !group_region.intersection(aligned_region).is_empty()
+                };
 
                 let result = &result;
                 let lf_groups = &lf_groups;
@@ -331,27 +348,34 @@ pub fn render_vardct(
                         }
                     }
 
-                    dequant_hf_varblock_grouped(
-                        &mut grid_xyb,
-                        group_idx,
-                        image_header,
-                        frame_header,
-                        lf_global,
-                        lf_groups,
-                        hf_global,
-                    );
+                    if transform_hf {
+                        dequant_hf_varblock_grouped(
+                            &mut grid_xyb,
+                            group_idx,
+                            image_header,
+                            frame_header,
+                            lf_global,
+                            lf_groups,
+                            hf_global,
+                        );
 
-                    if let Some(cfl) = hf_cfl_data {
-                        chroma_from_luma_hf_grouped(&mut grid_xyb, group_idx, frame_header, cfl);
+                        if let Some(cfl) = hf_cfl_data {
+                            chroma_from_luma_hf_grouped(
+                                &mut grid_xyb,
+                                group_idx,
+                                frame_header,
+                                cfl,
+                            );
+                        }
+
+                        transform_with_lf_grouped(
+                            lf_xyb,
+                            &mut grid_xyb,
+                            group_idx,
+                            frame_header,
+                            lf_groups,
+                        );
                     }
-
-                    transform_with_lf_grouped(
-                        lf_xyb,
-                        &mut grid_xyb,
-                        group_idx,
-                        frame_header,
-                        lf_groups,
-                    );
                 });
             }
         });
@@ -359,11 +383,18 @@ pub fn render_vardct(
         result.into_inner().unwrap()
     })?;
 
-    if let Some(modular_image) = modular_image {
-        tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
-            modular_image.prepare_subimage().unwrap().finish(pool);
-        });
-    }
+    pool.scope(|scope| {
+        if fb_xyb.region() != aligned_region {
+            scope.spawn(|_| {
+                fb_xyb = fb_xyb.clone_intersection(aligned_region);
+            });
+        }
+        if let Some(modular_image) = modular_image {
+            tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
+                modular_image.prepare_subimage().unwrap().finish(pool);
+            });
+        }
+    });
 
     Ok((fb_xyb, gmodular))
 }
