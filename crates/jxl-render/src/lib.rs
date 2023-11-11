@@ -18,6 +18,7 @@ mod vardct;
 pub use error::{Error, Result};
 pub use features::render_spot_color;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
+use jxl_threadpool::JxlThreadPool;
 pub use region::Region;
 
 use inner::*;
@@ -36,6 +37,14 @@ impl RenderContext {
     pub fn new(image_header: Arc<ImageHeader>) -> Self {
         Self {
             inner: ContextInner::new(image_header),
+            state: RenderState::new(),
+        }
+    }
+
+    /// Creates a new render context with custom thread pool.
+    pub fn with_threads(image_header: Arc<ImageHeader>, pool: JxlThreadPool) -> Self {
+        Self {
+            inner: ContextInner::with_threads(image_header, pool),
             state: RenderState::new(),
         }
     }
@@ -377,6 +386,7 @@ fn load_lf_groups(
     global_ma_config: Option<&MaConfig>,
     mlf_groups: Vec<TransformedModularSubimage>,
     lf_region: Region,
+    pool: &JxlThreadPool,
 ) -> Result<()> {
     let frame_header = frame.header();
     let lf_groups_per_row = frame_header.lf_groups_per_row();
@@ -390,7 +400,7 @@ fn load_lf_groups(
         lf_groups_out[idx as usize].1 = !lf_group.partial;
     }
 
-    rayon_core::scope(|scope| {
+    pool.scope(|scope| {
         let mut modular_it = mlf_groups.into_iter();
         for (idx, (lf_group_out, loaded)) in lf_groups_out.iter_mut().enumerate() {
             let modular = modular_it.next();

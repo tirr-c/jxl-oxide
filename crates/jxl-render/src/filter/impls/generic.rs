@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use jxl_grid::SimpleGrid;
+use jxl_threadpool::JxlThreadPool;
 
 pub(crate) struct EpfRow<'buf> {
     pub(crate) input_buf: [&'buf [f32]; 3],
@@ -14,6 +15,7 @@ pub(crate) struct EpfRow<'buf> {
     pub(crate) step_multiplier: f32,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn epf_common<'buf>(
     input: &'buf [SimpleGrid<f32>; 3],
     output: &'buf mut [SimpleGrid<f32>; 3],
@@ -21,6 +23,7 @@ pub(crate) unsafe fn epf_common<'buf>(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
     handle_row: for<'a> unsafe fn(EpfRow<'a>),
 ) {
     let width = input[0].width();
@@ -44,7 +47,7 @@ pub(crate) unsafe fn epf_common<'buf>(
     let output1_it = output1[3 * width..][..(height * width)].chunks_mut(8 * width);
     let output2_it = output2[3 * width..][..(height * width)].chunks_mut(8 * width);
 
-    rayon_core::scope(|scope| {
+    pool.scope(|scope| {
         for (y8, ((output0, output1), output2)) in output0_it.zip(output1_it).zip(output2_it).enumerate() {
             scope.spawn(move |_| {
                 for dy in 0..(height - y8 * 8).min(8) {
@@ -79,6 +82,7 @@ pub fn epf_step0(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     // SAFETY: row handler is safe.
     unsafe {
@@ -89,6 +93,7 @@ pub fn epf_step0(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_row_step0,
         );
     }
@@ -101,6 +106,7 @@ pub fn epf_step1(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     // SAFETY: row handler is safe.
     unsafe {
@@ -111,6 +117,7 @@ pub fn epf_step1(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_row_step1,
         );
     }
@@ -123,6 +130,7 @@ pub fn epf_step2(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     // SAFETY: row handler is safe.
     unsafe {
@@ -133,6 +141,7 @@ pub fn epf_step2(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_row_step2,
         );
     }

@@ -45,6 +45,7 @@ pub fn render_vardct(
     lf_frame: Option<Reference>,
     cache: &mut RenderCache,
     region: Region,
+    pool: &jxl_threadpool::JxlThreadPool,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
@@ -128,6 +129,7 @@ pub fn render_vardct(
             gmodular.ma_config.as_ref(),
             lf_group_image,
             modular_lf_region,
+            pool,
         )
     })?;
 
@@ -272,7 +274,7 @@ pub fn render_vardct(
         }
 
         let result = std::sync::RwLock::new(Result::Ok(()));
-        rayon_core::scope(|scope| {
+        pool.scope(|scope| {
             for ((group_idx, mut grid_xyb), mut pass_modular) in fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes) {
                 if result.read().unwrap().is_err() {
                     return;

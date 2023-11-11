@@ -106,6 +106,7 @@ pub use jxl_image::{ExtraChannelType, ImageHeader};
 use jxl_render::{RenderContext, IndexedFrame};
 
 pub use fb::FrameBuffer;
+use jxl_threadpool::JxlThreadPool;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -135,6 +136,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 /// ```
 #[derive(Default)]
 pub struct UninitializedJxlImage {
+    pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
 }
@@ -225,7 +227,7 @@ impl UninitializedJxlImage {
             reader: self.reader,
             image_header: image_header.clone(),
             embedded_icc,
-            ctx: RenderContext::new(image_header),
+            ctx: RenderContext::with_threads(image_header, self.pool),
             render_spot_colour,
             end_of_image: false,
             buffer: Vec::new(),

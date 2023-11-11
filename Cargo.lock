@@ -615,7 +615,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
- "rayon-core",
+ "jxl-threadpool",
  "tracing",
 ]
 
@@ -629,6 +629,7 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-render",
+ "jxl-threadpool",
  "lcms2",
  "rand",
  "reqwest",
@@ -668,7 +669,15 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-modular",
+ "jxl-threadpool",
  "jxl-vardct",
+ "tracing",
+]
+
+[[package]]
+name = "jxl-threadpool"
+version = "0.1.0"
+dependencies = [
  "rayon-core",
  "tracing",
 ]

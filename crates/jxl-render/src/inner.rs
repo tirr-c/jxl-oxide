@@ -9,6 +9,7 @@ use jxl_frame::{
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::{ImageHeader, ImageMetadata};
+use jxl_threadpool::JxlThreadPool;
 
 use crate::{
     blend,
@@ -26,6 +27,7 @@ use crate::{
 #[derive(Debug)]
 pub struct ContextInner {
     image_header: Arc<ImageHeader>,
+    pool: JxlThreadPool,
     pub(crate) frames: Vec<IndexedFrame>,
     pub(crate) keyframes: Vec<usize>,
     pub(crate) keyframe_in_progress: Option<usize>,
@@ -38,8 +40,13 @@ pub struct ContextInner {
 
 impl ContextInner {
     pub fn new(image_header: Arc<ImageHeader>) -> Self {
+        Self::with_threads(image_header, JxlThreadPool::none())
+    }
+
+    pub fn with_threads(image_header: Arc<ImageHeader>, pool: JxlThreadPool) -> Self {
         Self {
             image_header,
+            pool,
             frames: Vec::new(),
             keyframes: Vec::new(),
             keyframe_in_progress: None,
@@ -222,11 +229,11 @@ impl ContextInner {
 
         let (mut fb, gmodular) = match frame_header.encoding {
             Encoding::Modular => {
-                let (grid, gmodular) = modular::render_modular(frame, cache, color_padded_region)?;
+                let (grid, gmodular) = modular::render_modular(frame, cache, color_padded_region, &self.pool)?;
                 (grid, Some(gmodular))
             },
             Encoding::VarDct => {
-                let result = vardct::render_vardct(frame, reference_frames.lf, cache, color_padded_region);
+                let result = vardct::render_vardct(frame, reference_frames.lf, cache, color_padded_region, &self.pool);
                 match (result, reference_frames.lf) {
                     (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                     (Err(e), Some(lf)) if e.unexpected_eof() => {
@@ -248,7 +255,7 @@ impl ContextInner {
         if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header);
+        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &self.pool);
 
         self.upsample_color_channels(&mut fb, frame_header, frame_region);
         if let Some(gmodular) = gmodular {

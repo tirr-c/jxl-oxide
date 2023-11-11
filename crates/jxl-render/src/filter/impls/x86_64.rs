@@ -1,4 +1,5 @@
 use jxl_grid::SimpleGrid;
+use jxl_threadpool::JxlThreadPool;
 
 use super::generic::epf_common;
 
@@ -12,6 +13,7 @@ pub fn epf_step0(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
@@ -23,6 +25,7 @@ pub fn epf_step0(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf_avx2::epf_row_step0_avx2,
             );
         }
@@ -37,6 +40,7 @@ pub fn epf_step0(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_sse2::epf_row_step0_sse2,
         )
     }
@@ -49,6 +53,7 @@ pub fn epf_step1(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
@@ -60,6 +65,7 @@ pub fn epf_step1(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf_avx2::epf_row_step1_avx2,
             );
         }
@@ -74,6 +80,7 @@ pub fn epf_step1(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_sse2::epf_row_step1_sse2,
         )
     }
@@ -86,6 +93,7 @@ pub fn epf_step2(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
@@ -97,6 +105,7 @@ pub fn epf_step2(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf_avx2::epf_row_step2_avx2,
             );
         }
@@ -111,6 +120,7 @@ pub fn epf_step2(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             epf_sse2::epf_row_step2_sse2,
         )
     }

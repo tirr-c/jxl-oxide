@@ -2,6 +2,7 @@ use std::arch::is_aarch64_feature_detected;
 use std::arch::aarch64::*;
 
 use jxl_grid::SimpleGrid;
+use jxl_threadpool::JxlThreadPool;
 
 use super::generic::epf_common;
 
@@ -14,6 +15,7 @@ pub fn epf_step0(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
@@ -25,6 +27,7 @@ pub fn epf_step0(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf::epf_row_step0_neon,
             );
         }
@@ -39,6 +42,7 @@ pub fn epf_step0(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             super::generic::epf_row_step0,
         );
     }
@@ -51,6 +55,7 @@ pub fn epf_step1(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
@@ -62,6 +67,7 @@ pub fn epf_step1(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf::epf_row_step1_neon,
             );
         }
@@ -76,6 +82,7 @@ pub fn epf_step1(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             super::generic::epf_row_step1,
         );
     }
@@ -88,6 +95,7 @@ pub fn epf_step2(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
@@ -99,6 +107,7 @@ pub fn epf_step2(
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
                 epf::epf_row_step2_neon,
             );
         }
@@ -113,6 +122,7 @@ pub fn epf_step2(
             channel_scale,
             border_sad_mul,
             step_multiplier,
+            pool,
             super::generic::epf_row_step2,
         );
     }

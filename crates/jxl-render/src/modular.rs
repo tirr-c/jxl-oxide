@@ -16,6 +16,7 @@ pub fn render_modular(
     frame: &IndexedFrame,
     cache: &mut RenderCache,
     region: Region,
+    pool: &jxl_threadpool::JxlThreadPool,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -48,7 +49,7 @@ pub fn render_modular(
 
     tracing::trace_span!("Decode").in_scope(|| {
         let result = std::sync::RwLock::new(Result::Ok(()));
-        rayon_core::scope(|scope| {
+        pool.scope(|scope| {
             let lf_groups = &mut cache.lf_groups;
             scope.spawn(|_| {
                 let r = crate::load_lf_groups(
@@ -58,6 +59,7 @@ pub fn render_modular(
                     gmodular.ma_config.as_ref(),
                     lf_group_image,
                     modular_region.downsample(3),
+                    pool,
                 );
                 if r.is_err() {
                     *result.write().unwrap() = r;
