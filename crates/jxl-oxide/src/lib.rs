@@ -143,8 +143,21 @@ pub struct UninitializedJxlImage {
 
 impl UninitializedJxlImage {
     /// Creates an image struct in empty, uninitialized state.
+    ///
+    /// The struct will be created with default thread pool.
     pub fn new() -> Self {
-        Self::default()
+        if cfg!(feature = "rayon") {
+            Self::default()
+        } else {
+            Self {
+                pool: JxlThreadPool::none(),
+                ..Default::default()
+            }
+        }
+    }
+
+    pub fn with_threads(pool: JxlThreadPool) -> Self {
+        Self { pool, ..Default::default() }
     }
 
     /// Feeds more data into the decoder.
@@ -264,8 +277,14 @@ pub struct JxlImage {
 
 impl JxlImage {
     /// Creates an image struct in empty, uninitialized state.
+    ///
+    /// The struct will be created with default thread pool.
     pub fn new_uninit() -> UninitializedJxlImage {
         UninitializedJxlImage::new()
+    }
+
+    pub fn new_uninit_with_threads(pool: JxlThreadPool) -> UninitializedJxlImage {
+        UninitializedJxlImage::with_threads(pool)
     }
 
     /// Reads image with the given reader.
