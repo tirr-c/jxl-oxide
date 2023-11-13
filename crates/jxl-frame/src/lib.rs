@@ -16,6 +16,7 @@
 //! [`num_lf_groups`]: FrameHeader::num_lf_groups
 //! [`num_groups`]: FrameHeader::num_groups
 //! [`num_passes`]: header::Passes::num_passes
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -44,8 +45,16 @@ pub struct Frame {
     header: FrameHeader,
     toc: Toc,
     data: Vec<GroupData>,
+    all_group_offsets: AllGroupOffsets,
     reading_data_index: usize,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
+}
+
+#[derive(Debug, Default)]
+struct AllGroupOffsets {
+    lf_group: AtomicUsize,
+    hf_global: AtomicUsize,
+    pass_group: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -162,6 +171,7 @@ impl Bundle<FrameContext> for Frame {
             header,
             toc,
             data,
+            all_group_offsets: AllGroupOffsets::default(),
             reading_data_index: 0,
             pass_shifts,
         })
@@ -221,57 +231,17 @@ impl Frame {
     }
 }
 
-struct AllParseResult<'buf> {
-    #[allow(unused)]
-    lf_global: LfGlobal,
-    lf_group: LfGroup,
-    hf_global: Option<HfGlobal>,
-    pass_group_bitstream: Bitstream<'buf>,
-}
-
 impl Frame {
-    fn try_parse_all(&self) -> Option<Result<AllParseResult>> {
-        if !self.toc.is_single_entry() {
-            panic!();
-        }
-
-        let group = self.data.get(0)?;
-        let mut bitstream = Bitstream::new(&group.bytes);
-        let result = (|| -> Result<_> {
-            let mut lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))?;
-            let groups = lf_global.gmodular.modular.image_mut().map(|x| x.prepare_groups(&self.pass_shifts)).transpose()?;
-            let mlf_group = groups.and_then(|mut x| x.lf_groups.pop());
-            let lf_group = LfGroup::parse(&mut bitstream, LfGroupParams {
-                frame_header: &self.header,
-                quantizer: lf_global.vardct.as_ref().map(|x| &x.quantizer),
-                global_ma_config: lf_global.gmodular.ma_config.as_ref(),
-                mlf_group,
-                lf_group_idx: 0,
-                allow_partial: false,
-                pool: &self.pool,
-            })?;
-            let hf_global = (self.header.encoding == header::Encoding::VarDct).then(|| {
-                HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, &lf_global, &self.pool))
-            }).transpose()?;
-            Ok((lf_global, lf_group, hf_global))
-        })();
-
-        match result {
-            Ok((lf_global, lf_group, hf_global)) => Some(Ok(AllParseResult {
-                lf_global,
-                lf_group,
-                hf_global,
-                pass_group_bitstream: bitstream,
-            })),
-            Err(e) => Some(Err(e)),
-        }
-    }
-
     pub fn try_parse_lf_global(&self) -> Option<Result<LfGlobal>> {
         Some(if self.toc.is_single_entry() {
             let group = self.data.get(0)?;
             let mut bitstream = Bitstream::new(&group.bytes);
-            LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false))
+            let lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false));
+            if lf_global.is_ok() {
+                tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
+                self.all_group_offsets.lf_group.store(bitstream.num_read_bits(), Ordering::Relaxed);
+            }
+            lf_global
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGlobal);
             let group = self.data.get(idx)?;
@@ -293,7 +263,35 @@ impl Frame {
             if lf_group_idx != 0 {
                 return None;
             }
-            Some(self.try_parse_all()?.map(|x| x.lf_group))
+
+            let group = self.data.get(0)?;
+            let mut bitstream = Bitstream::new(&group.bytes);
+            let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
+            if offset == 0 {
+                let lf_global = self.try_parse_lf_global().unwrap();
+                if let Err(e) = lf_global {
+                    return Some(Err(e));
+                }
+            }
+            let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
+            bitstream.skip_bits(offset).unwrap();
+
+            let allow_partial = group.bytes.len() < group.toc_group.size as usize;
+            let result = LfGroup::parse(&mut bitstream, LfGroupParams {
+                frame_header: &self.header,
+                quantizer: lf_global_vardct.map(|x| &x.quantizer),
+                global_ma_config,
+                mlf_group,
+                lf_group_idx,
+                allow_partial,
+                pool: &self.pool,
+            });
+            if allow_partial && result.is_err() {
+                return None;
+            }
+            tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGroup");
+            self.all_group_offsets.hf_global.store(bitstream.num_read_bits(), Ordering::Relaxed);
+            Some(result)
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
             let group = self.data.get(idx)?;
@@ -317,13 +315,58 @@ impl Frame {
     }
 
     pub fn try_parse_hf_global(&self, cached_lf_global: Option<&LfGlobal>) -> Option<Result<HfGlobal>> {
-        if self.header.encoding == header::Encoding::Modular {
-            return None;
-        }
+        let is_modular = self.header.encoding == header::Encoding::Modular;
 
         if self.toc.is_single_entry() {
-            Some(self.try_parse_all()?.map(|x| x.hf_global.unwrap()))
+            let group = self.data.get(0)?;
+            let mut bitstream = Bitstream::new(&group.bytes);
+            let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
+            let lf_global = if cached_lf_global.is_none() && (offset == 0 || !is_modular) {
+                match self.try_parse_lf_global()? {
+                    Ok(lf_global) => Some(lf_global),
+                    Err(e) => return Some(Err(e)),
+                }
+            } else {
+                None
+            };
+            let lf_global = cached_lf_global.or(lf_global.as_ref());
+
+            if offset == 0 {
+                let lf_global = lf_global.unwrap();
+                let mut gmodular = lf_global.gmodular.clone();
+                let groups = gmodular.modular.image_mut().map(|x| x.prepare_groups(&self.pass_shifts)).transpose();
+                let groups = match groups {
+                    Ok(groups) => groups,
+                    Err(e) => return Some(Err(e.into())),
+                };
+                let mlf_group = groups.and_then(|mut x| x.lf_groups.pop());
+                let lf_group = self.try_parse_lf_group(
+                    lf_global.vardct.as_ref(),
+                    lf_global.gmodular.ma_config(),
+                    mlf_group,
+                    0,
+                ).unwrap();
+                if let Err(e) = lf_group {
+                    return Some(Err(e));
+                }
+            }
+            let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
+
+            if self.header.encoding == header::Encoding::Modular {
+                self.all_group_offsets.pass_group.store(offset, Ordering::Relaxed);
+                return None;
+            }
+
+            bitstream.skip_bits(offset).unwrap();
+            let lf_global = lf_global.unwrap();
+            let result = HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global, &self.pool));
+            self.all_group_offsets.pass_group.store(bitstream.num_read_bits(), Ordering::Relaxed);
+            Some(result)
         } else {
+            if self.header.encoding == header::Encoding::Modular {
+                return None;
+            }
+
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::HfGlobal);
             let group = self.data.get(idx)?;
             if group.bytes.len() < group.toc_group.size as usize {
@@ -347,9 +390,25 @@ impl Frame {
 
     pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<PassGroupBitstream>> {
         Some(if self.toc.is_single_entry() {
-            self.try_parse_all()?.map(|group| PassGroupBitstream {
-                bitstream: group.pass_group_bitstream,
-                partial: self.data[0].bytes.len() < self.data[0].toc_group.size as usize,
+            if pass_idx != 0 || group_idx != 0 {
+                return None;
+            }
+
+            let group = self.data.get(0)?;
+            let mut bitstream = Bitstream::new(&group.bytes);
+            let mut offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
+            if offset == 0 {
+                let hf_global = self.try_parse_hf_global(None)?;
+                if let Err(e) = hf_global {
+                    return Some(Err(e));
+                }
+                offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
+            }
+            bitstream.skip_bits(offset).unwrap();
+
+            Ok(PassGroupBitstream {
+                bitstream,
+                partial: group.bytes.len() < group.toc_group.size as usize,
             })
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::GroupPass { pass_idx, group_idx });
