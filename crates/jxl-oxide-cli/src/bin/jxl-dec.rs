@@ -202,6 +202,7 @@ fn main() {
         image.set_render_spot_colour(false);
     }
 
+    #[allow(unused_mut)]
     let mut rendered = false;
     #[cfg(feature = "rayon")]
     if let Some(rayon_pool) = &rayon_pool {
