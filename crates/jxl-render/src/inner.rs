@@ -21,14 +21,15 @@ use crate::{
     Result,
     Error,
     region::{Region, ImageWithRegion},
-    state::RenderCache,
+    state::{RenderCache, FrameRenderHandle, FrameRender, RenderOp},
 };
 
 #[derive(Debug)]
 pub struct ContextInner {
     image_header: Arc<ImageHeader>,
     pool: JxlThreadPool,
-    pub(crate) frames: Vec<IndexedFrame>,
+    pub(crate) frames: Vec<Arc<IndexedFrame>>,
+    pub(crate) renders: Vec<Arc<FrameRenderHandle>>,
     pub(crate) keyframes: Vec<usize>,
     pub(crate) keyframe_in_progress: Option<usize>,
     pub(crate) refcounts: Vec<usize>,
@@ -36,6 +37,7 @@ pub struct ContextInner {
     pub(crate) lf_frame: [usize; 4],
     pub(crate) reference: [usize; 4],
     pub(crate) loading_frame: Option<IndexedFrame>,
+    pub(crate) loading_render_cache: Option<RenderCache>,
 }
 
 impl ContextInner {
@@ -48,6 +50,7 @@ impl ContextInner {
             image_header,
             pool,
             frames: Vec::new(),
+            renders: Vec::new(),
             keyframes: Vec::new(),
             keyframe_in_progress: None,
             refcounts: Vec::new(),
@@ -55,6 +58,7 @@ impl ContextInner {
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
             loading_frame: None,
+            loading_render_cache: None,
         }
     }
 }
@@ -134,13 +138,25 @@ impl ContextInner {
             self.keyframe_in_progress = Some(idx);
         }
 
-        self.frames.push(frame);
+        let frame = Arc::new(frame);
+        let render_op = self.render_op(Arc::clone(&frame), deps);
+        let handle = if let Some(cache) = self.loading_render_cache.take() {
+            FrameRenderHandle::from_cache(Arc::clone(&frame), cache, render_op)
+        } else {
+            FrameRenderHandle::new(Arc::clone(&frame), render_op)
+        };
+
+        self.frames.push(Arc::clone(&frame));
         self.frame_deps.push(deps);
+        self.renders.push(Arc::new(handle));
     }
 
     pub(crate) fn loading_frame(&self) -> Option<&IndexedFrame> {
         let search_from = self.keyframe_in_progress.or_else(|| self.keyframes.last().map(|x| x + 1)).unwrap_or(0);
-        self.frames[search_from..].iter().chain(self.loading_frame.as_ref()).rev().find(|x| x.header().frame_type.is_progressive_frame())
+        self.frames[search_from..]
+            .iter()
+            .map(|r| &**r)
+            .chain(self.loading_frame.as_ref()).rev().find(|x| x.header().frame_type.is_progressive_frame())
     }
 }
 
@@ -172,13 +188,59 @@ impl ContextInner {
 }
 
 impl ContextInner {
-    pub fn render_frame<'a>(
-        &'a self,
-        frame: &'a IndexedFrame,
-        reference_frames: ReferenceFrames<'a>,
+    fn render_op(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp {
+        let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
+        let reference_frames = ReferenceFrames {
+            lf: (deps.lf != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[deps.lf]),
+                image: Arc::clone(&self.renders[deps.lf]),
+            }),
+            refs: deps.ref_slots.map(|r| (r != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[r]),
+                image: Arc::clone(&self.renders[r]),
+            })),
+        };
+
+        let pool = self.pool.clone();
+        Arc::new(move |mut state, image_region| {
+            let mut cache = match state {
+                FrameRender::InProgress(cache) => cache,
+                _ => {
+                    state = FrameRender::InProgress(Box::new(RenderCache::new(&frame)));
+                    let FrameRender::InProgress(cache) = state else { unreachable!() };
+                    cache
+                },
+            };
+
+            tracing::debug!(index = frame.idx, ?image_region, "Rendering frame");
+
+            let result = ContextInner::render_frame(
+                &frame,
+                reference_frames.clone(),
+                &mut cache,
+                image_region,
+                pool.clone(),
+                prev_frame_visibility,
+            );
+            match result {
+                Ok(grid) => FrameRender::Done(grid),
+                Err(Error::IncompleteFrame) => FrameRender::InProgress(cache),
+                Err(e) if e.unexpected_eof() => FrameRender::InProgress(cache),
+                Err(e) => FrameRender::Err(e),
+            }
+        })
+    }
+
+    pub fn render_frame(
+        frame: &IndexedFrame,
+        reference_frames: ReferenceFrames,
         cache: &mut RenderCache,
-        frame_region: Region,
+        image_region: Option<Region>,
+        pool: JxlThreadPool,
+        frame_visibility: (usize, usize),
     ) -> Result<ImageWithRegion> {
+        let frame_region = crate::image_region_to_frame(frame, image_region, false);
+
         let image_header = frame.image_header();
         let frame_header = frame.header();
         let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
@@ -232,15 +294,23 @@ impl ContextInner {
 
         let (mut fb, gmodular) = match frame_header.encoding {
             Encoding::Modular => {
-                let (grid, gmodular) = modular::render_modular(frame, cache, color_padded_region, &self.pool)?;
+                let (grid, gmodular) = modular::render_modular(frame, cache, color_padded_region, &pool)?;
                 (grid, Some(gmodular))
             },
             Encoding::VarDct => {
-                let result = vardct::render_vardct(frame, reference_frames.lf, cache, color_padded_region, &self.pool);
+                let result = vardct::render_vardct(
+                    frame,
+                    reference_frames.lf.as_ref(),
+                    cache,
+                    color_padded_region,
+                    image_region,
+                    &pool,
+                );
                 match (result, reference_frames.lf) {
                     (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                     (Err(e), Some(lf)) if e.unexpected_eof() => {
-                        (super::upsample_lf(lf.image, lf.frame, frame_region), None)
+                        let render = lf.image.run_with_image(image_region)?;
+                        (super::upsample_lf(&render, &lf.frame, frame_region), None)
                     },
                     (Err(e), _) => return Err(e),
                 }
@@ -258,31 +328,44 @@ impl ContextInner {
         if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
             filter::apply_gabor_like([a, b, c], weights);
         }
-        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &self.pool);
+        filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &pool);
 
-        self.upsample_color_channels(&mut fb, frame_header, frame_region);
+        Self::upsample_color_channels(&mut fb, image_header, frame_header, frame_region);
         if let Some(gmodular) = gmodular {
-            self.append_extra_channels(frame, &mut fb, gmodular, frame_region);
+            Self::append_extra_channels(frame, &mut fb, gmodular, frame_region);
         }
 
-        self.render_features(frame, &mut fb, reference_frames.refs, cache)?;
+        Self::render_features(
+            frame,
+            image_region,
+            &mut fb,
+            reference_frames.refs.clone(),
+            cache,
+            frame_visibility.0,
+            frame_visibility.1,
+        )?;
 
         if !frame_header.save_before_ct {
             if frame_header.do_ycbcr {
                 let [cb, y, cr, ..] = fb.buffer_mut() else { panic!() };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            self.convert_color(fb.buffer_mut());
+            Self::convert_color(image_header, fb.buffer_mut());
         }
 
         Ok(if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
             fb
         } else {
-            blend::blend(&self.image_header, reference_frames.refs, frame, &fb)
+            blend::blend(frame.image_header(), image_region, reference_frames.refs, frame, &fb)
         })
     }
 
-    fn upsample_color_channels(&self, fb: &mut ImageWithRegion, frame_header: &FrameHeader, original_region: Region) {
+    fn upsample_color_channels(
+        fb: &mut ImageWithRegion,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+        original_region: Region,
+    ) {
         let upsample_factor = frame_header.upsampling.ilog2();
         let upsampled_region = fb.region().upsample(upsample_factor);
         let upsampled_buffer = if upsample_factor == 0 {
@@ -294,7 +377,7 @@ impl ContextInner {
             let mut buffer = fb.take_buffer();
             tracing::trace_span!("Upsample color channels").in_scope(|| {
                 for (idx, g) in buffer.iter_mut().enumerate() {
-                    features::upsample(g, &self.image_header, frame_header, idx);
+                    features::upsample(g, image_header, frame_header, idx);
                 }
             });
             buffer
@@ -313,14 +396,14 @@ impl ContextInner {
         });
     }
 
-    fn append_extra_channels<'a>(
-        &'a self,
-        frame: &'a IndexedFrame,
+    fn append_extra_channels(
+        frame: &IndexedFrame,
         fb: &mut ImageWithRegion,
         gmodular: GlobalModular,
         original_region: Region,
     ) {
         let fb_region = fb.region();
+        let image_header = frame.image_header();
         let frame_header = frame.header();
 
         let extra_channel_from = gmodular.extra_channel_from();
@@ -332,7 +415,7 @@ impl ContextInner {
             tracing::debug!(ec_idx = idx, "Attaching extra channels");
 
             let upsampling = frame_header.ec_upsampling[idx];
-            let ec_info = &self.image_header.metadata.ec_info[idx];
+            let ec_info = &image_header.metadata.ec_info[idx];
 
             let upsample_factor = upsampling.ilog2() + ec_info.dim_shift;
             let region = if upsample_factor > 0 {
@@ -348,7 +431,7 @@ impl ContextInner {
             modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
 
             let upsampled_region = region.upsample(upsample_factor);
-            features::upsample(&mut out, &self.image_header, frame_header, idx + 3);
+            features::upsample(&mut out, image_header, frame_header, idx + 3);
             let out = ImageWithRegion::from_buffer(
                 vec![out],
                 upsampled_region.left,
@@ -359,13 +442,16 @@ impl ContextInner {
         }
     }
 
-    fn render_features<'a>(
-        &'a self,
-        frame: &'a IndexedFrame,
+    fn render_features(
+        frame: &IndexedFrame,
+        image_region: Option<Region>,
         grid: &mut ImageWithRegion,
         reference_grids: [Option<Reference>; 4],
         cache: &mut RenderCache,
+        visible_frames_num: usize,
+        invisible_frames_num: usize,
     ) -> Result<()> {
+        let image_header = frame.image_header();
         let frame_header = frame.header();
         let lf_global = cache.lf_global.as_ref().unwrap();
         let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
@@ -377,10 +463,11 @@ impl ContextInner {
 
         if let Some(patches) = &lf_global.patches {
             for patch in &patches.patches {
-                let Some(ref_grid) = reference_grids[patch.ref_idx as usize] else {
+                let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                     return Err(Error::InvalidReference(patch.ref_idx));
                 };
-                blend::patch(&self.image_header, grid, ref_grid.image, patch);
+                let ref_grid_image = ref_grid.image.run_with_image(image_region)?;
+                blend::patch(image_header, grid, &ref_grid_image, patch);
             }
         }
 
@@ -388,9 +475,6 @@ impl ContextInner {
             features::render_spline(frame_header, grid, splines, base_correlations_xb)?;
         }
         if let Some(noise) = &lf_global.noise {
-            let (visible_frames_num, invisible_frames_num) =
-                self.get_previous_frames_visibility(frame);
-
             features::render_noise(
                 frame.header(),
                 visible_frames_num,
@@ -404,8 +488,8 @@ impl ContextInner {
         Ok(())
     }
 
-    pub fn convert_color(&self, grid: &mut [SimpleGrid<f32>]) {
-        let metadata = &self.image_header.metadata;
+    pub fn convert_color(image_header: &ImageHeader, grid: &mut [SimpleGrid<f32>]) {
+        let metadata = &image_header.metadata;
         if metadata.xyb_encoded {
             let [x, y, b, ..] = grid else { panic!() };
             tracing::trace_span!("XYB to linear sRGB").in_scope(|| {
@@ -432,7 +516,7 @@ impl ContextInner {
         }
     }
 
-    fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {
+    pub fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {
         let frame_idx = frame.index();
         let (is_keyframe, keyframe_idx) = match self.keyframes.binary_search(&frame_idx) {
             Ok(val) => (true, val),
@@ -468,14 +552,14 @@ impl FrameDependence {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct ReferenceFrames<'state> {
-    pub(crate) lf: Option<Reference<'state>>,
-    pub(crate) refs: [Option<Reference<'state>>; 4],
+#[derive(Debug, Clone, Default)]
+pub struct ReferenceFrames {
+    pub(crate) lf: Option<Reference>,
+    pub(crate) refs: [Option<Reference>; 4],
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Reference<'state> {
-    pub(crate) frame: &'state IndexedFrame,
-    pub(crate) image: &'state ImageWithRegion,
+#[derive(Debug, Clone)]
+pub struct Reference {
+    pub(crate) frame: Arc<IndexedFrame>,
+    pub(crate) image: Arc<FrameRenderHandle>,
 }

@@ -8,13 +8,13 @@ mod util;
 fn run_test(buf: &[u8]) {
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
-    let mut image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
+    let image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
     let width = image.width();
     let height = image.height();
     let width_dist = rand::distributions::Uniform::new_inclusive(128, (width / 2).max(128));
     let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
 
-    let mut tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
+    let tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
 
     let num_frames = image.num_loaded_keyframes();
     for _ in 0..4 {

@@ -42,9 +42,10 @@ use generic as impls;
 
 pub fn render_vardct(
     frame: &IndexedFrame,
-    lf_frame: Option<Reference>,
+    lf_frame: Option<&Reference>,
     cache: &mut RenderCache,
     region: Region,
+    image_region: Option<Region>,
     pool: &jxl_threadpool::JxlThreadPool,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
@@ -134,7 +135,7 @@ pub fn render_vardct(
     })?;
 
     let group_dim = frame_header.group_dim();
-    let (hf_cfl_data, mut lf_xyb) = tracing::trace_span!("Copy LFQuant").in_scope(|| {
+    let (hf_cfl_data, mut lf_xyb) = tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
         let mut hf_cfl_data = (!subsampled).then(|| {
             ImageWithRegion::from_region(2, modular_lf_region.downsample(3))
         });
@@ -142,9 +143,10 @@ pub fn render_vardct(
         let mut lf_xyb = ImageWithRegion::from_region(3, modular_lf_region);
 
         if let Some(x) = lf_frame {
-            x.image.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
-            x.image.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
-            x.image.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
+            let lf_frame = x.image.run_with_image(image_region)?;
+            lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
+            lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
+            lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
         }
 
         let lf_groups_per_row = frame_header.lf_groups_per_row();
@@ -228,8 +230,8 @@ pub fn render_vardct(
             }
         }
 
-        (hf_cfl_data, lf_xyb)
-    });
+        Ok((hf_cfl_data, lf_xyb))
+    })?;
 
     if lf_frame.is_none() {
         if !subsampled {

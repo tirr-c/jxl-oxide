@@ -1,7 +1,7 @@
 use std::{path::PathBuf, io::prelude::*};
 
 use clap::Parser;
-use jxl_oxide::{JxlImage, CropInfo, FrameBuffer, PixelFormat, Render};
+use jxl_oxide::{JxlImage, CropInfo, FrameBuffer, PixelFormat, Render, JxlThreadPool};
 use lcms2::Profile;
 
 enum LcmsTransform {
@@ -45,6 +45,10 @@ struct Args {
     /// Print debug information
     #[arg(short, long)]
     verbose: bool,
+    /// Number of parallelism to use
+    #[cfg(feature = "rayon")]
+    #[arg(short = 'j', long)]
+    num_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -102,6 +106,24 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
     })
 }
 
+#[cfg(feature = "rayon")]
+fn init_thread_pool(num_threads: Option<usize>) -> Option<rayon::ThreadPool> {
+    let num_threads = match num_threads {
+        Some(0) | None => {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .ok()?
+        },
+        Some(n) => n,
+    };
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .expect("Cannot initialize thread pool");
+    Some(pool)
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -121,7 +143,19 @@ fn main() {
     let span = tracing::span!(tracing::Level::TRACE, "jxl-dec");
     let _guard = span.enter();
 
-    let mut image = JxlImage::open(&args.input).expect("Failed to open file");
+    #[cfg(feature = "rayon")]
+    let rayon_pool = init_thread_pool(args.num_threads).map(std::sync::Arc::new);
+    #[cfg(feature = "rayon")]
+    let pool = if let Some(rayon_pool) = &rayon_pool {
+        JxlThreadPool::rayon(rayon_pool.clone())
+    } else {
+        JxlThreadPool::none()
+    };
+    #[cfg(not(feature = "rayon"))]
+    let pool = JxlThreadPool::none();
+
+    let mut image = JxlImage::open_with_threads(&args.input, pool)
+        .expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }
@@ -167,11 +201,29 @@ fn main() {
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
-    for idx in 0..image.num_loaded_keyframes() {
-        let frame = image.render_frame_cropped(idx, crop).expect("rendering frames failed");
-        keyframes.push(frame);
+
+    let mut rendered = false;
+    #[cfg(feature = "rayon")]
+    if let Some(rayon_pool) = &rayon_pool {
+        keyframes = rayon_pool.install(|| {
+            use rayon::prelude::*;
+
+            (0..image.num_loaded_keyframes())
+                .into_par_iter()
+                .map(|idx| image.render_frame_cropped(idx, crop))
+                .collect::<Result<Vec<_>, _>>()
+        }).expect("rendering frames failed");
+        rendered = true;
     }
-    if let Ok(frame) = image.render_frame_cropped(image.num_loaded_keyframes(), crop) {
+
+    if !rendered {
+        for idx in 0..image.num_loaded_keyframes() {
+            let frame = image.render_frame_cropped(idx, crop).expect("rendering frames failed");
+            keyframes.push(frame);
+        }
+    }
+
+    if let Ok(frame) = image.render_loading_frame_cropped(crop) {
         tracing::warn!("Rendered partially loaded frame");
         keyframes.push(frame);
     }

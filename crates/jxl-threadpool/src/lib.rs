@@ -76,6 +76,14 @@ impl JxlThreadPool {
 }
 
 impl JxlThreadPool {
+    pub fn spawn(&self, op: impl FnOnce() + Send + 'static) {
+        match &self.0 {
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::Rayon(pool) => pool.spawn(op),
+            JxlThreadPoolImpl::None => op(),
+        }
+    }
+
     pub fn scope<'scope, R: Send>(
         &'scope self,
         op: impl for<'r> FnOnce(JxlScope<'r, 'scope>) -> R + Send,
@@ -93,6 +101,14 @@ impl JxlThreadPool {
             },
         }
     }
+
+    pub fn yield_now(&self) -> Option<JxlYield> {
+        match &self.0 {
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::Rayon(_) => rayon_core::yield_now().map(From::from),
+            JxlThreadPoolImpl::None => None,
+        }
+    }
 }
 
 impl<'scope> JxlScope<'_, 'scope> {
@@ -108,6 +124,22 @@ impl<'scope> JxlScope<'_, 'scope> {
             JxlScopeInner::None(_) => {
                 op(JxlScope(JxlScopeInner::None(Default::default())))
             },
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum JxlYield {
+    Executed,
+    Idle,
+}
+
+#[cfg(feature = "rayon")]
+impl From<rayon_core::Yield> for JxlYield {
+    fn from(value: rayon_core::Yield) -> Self {
+        match value {
+            rayon_core::Yield::Executed => Self::Executed,
+            rayon_core::Yield::Idle => Self::Idle,
         }
     }
 }

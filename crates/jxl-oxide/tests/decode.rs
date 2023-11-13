@@ -25,7 +25,7 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
     expected.read_exact(&mut header).unwrap();
     let fixture_header = FixtureHeader::from_bytes(header);
 
-    let mut image = jxl_oxide::JxlImage::from_reader(std::io::Cursor::new(data)).unwrap();
+    let image = jxl_oxide::JxlImage::from_reader(std::io::Cursor::new(data)).unwrap();
     let image_header = &image.image_header().metadata;
     let bit_depth = image_header.bit_depth.bits_per_sample();
 
