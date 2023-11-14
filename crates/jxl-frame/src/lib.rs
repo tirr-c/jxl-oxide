@@ -7,9 +7,9 @@
 //! - [Frame header][FrameHeader].
 //! - [Table of contents (TOC)][data::Toc].
 //! - Actual frame data, in the following order, potentially permuted as specified in the TOC:
-//!   - one [`LfGlobal`][data::LfGlobal],
-//!   - [`num_lf_groups`] [`LfGroup`][data::LfGroup]'s, in raster order,
-//!   - one [`HfGlobal`][data::HfGlobal], potentially empty for Modular frames, and
+//!   - one [`LfGlobal`],
+//!   - [`num_lf_groups`] [`LfGroup`]'s, in raster order,
+//!   - one [`HfGlobal`], potentially empty for Modular frames, and
 //!   - [`num_passes`] times [`num_groups`] [pass groups][data::decode_pass_group], in raster
 //!     order.
 //!
