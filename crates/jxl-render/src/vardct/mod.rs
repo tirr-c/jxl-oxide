@@ -17,10 +17,11 @@ use crate::{
     region::ImageWithRegion,
     Region,
     IndexedFrame,
-    inner::Reference,
+    Reference,
     RenderCache,
     Error,
-    Result, modular,
+    Result,
+    modular,
 };
 
 mod transform;
@@ -40,7 +41,7 @@ mod generic;
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 use generic as impls;
 
-pub fn render_vardct(
+pub(crate) fn render_vardct(
     frame: &IndexedFrame,
     lf_frame: Option<&Reference>,
     cache: &mut RenderCache,

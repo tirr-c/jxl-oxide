@@ -6,7 +6,7 @@ use jxl_frame::{
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 
-use crate::{region::{ImageWithRegion, Region}, inner::Reference};
+use crate::{region::{ImageWithRegion, Region}, Reference};
 
 #[derive(Debug)]
 enum BlendMode<'a> {
@@ -140,7 +140,7 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
     (source, alpha)
 }
 
-pub fn blend(
+pub(crate) fn blend(
     image_header: &ImageHeader,
     image_region: Option<Region>,
     reference_grids: [Option<Reference>; 4],

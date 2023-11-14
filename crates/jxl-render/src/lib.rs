@@ -1,9 +1,9 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
 use std::sync::Arc;
 
-use jxl_bitstream::Bitstream;
-use jxl_frame::{Frame, header::FrameType, data::{LfGroup, LfGlobalVarDct}};
-use jxl_image::ImageHeader;
+use jxl_bitstream::{Bitstream, Bundle};
+use jxl_frame::{Frame, header::FrameType, data::{LfGroup, LfGlobalVarDct}, FrameContext};
+use jxl_image::{ImageHeader, ImageMetadata};
 
 mod blend;
 mod dct;
@@ -21,31 +21,47 @@ use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 use jxl_threadpool::JxlThreadPool;
 pub use region::Region;
 
-use inner::*;
 use region::ImageWithRegion;
 use state::*;
 
 /// Render context that tracks loaded and rendered frames.
 #[derive(Debug)]
 pub struct RenderContext {
-    inner: ContextInner,
+    image_header: Arc<ImageHeader>,
     pool: JxlThreadPool,
+    pub(crate) frames: Vec<Arc<IndexedFrame>>,
+    pub(crate) renders: Vec<Arc<FrameRenderHandle>>,
+    pub(crate) keyframes: Vec<usize>,
+    pub(crate) keyframe_in_progress: Option<usize>,
+    pub(crate) refcounts: Vec<usize>,
+    pub(crate) frame_deps: Vec<FrameDependence>,
+    pub(crate) lf_frame: [usize; 4],
+    pub(crate) reference: [usize; 4],
+    pub(crate) loading_frame: Option<IndexedFrame>,
+    pub(crate) loading_render_cache: Option<RenderCache>,
 }
 
 impl RenderContext {
-    /// Creates a new render context.
+    /// Creates a new render context without any multithreading.
     pub fn new(image_header: Arc<ImageHeader>) -> Self {
-        Self {
-            inner: ContextInner::new(image_header),
-            pool: JxlThreadPool::none(),
-        }
+        Self::with_threads(image_header, JxlThreadPool::none())
     }
 
     /// Creates a new render context with custom thread pool.
     pub fn with_threads(image_header: Arc<ImageHeader>, pool: JxlThreadPool) -> Self {
         Self {
-            inner: ContextInner::with_threads(image_header, pool.clone()),
+            image_header,
             pool,
+            frames: Vec::new(),
+            renders: Vec::new(),
+            keyframes: Vec::new(),
+            keyframe_in_progress: None,
+            refcounts: Vec::new(),
+            frame_deps: Vec::new(),
+            lf_frame: [usize::MAX; 4],
+            reference: [usize::MAX; 4],
+            loading_frame: None,
+            loading_render_cache: None,
         }
     }
 }
@@ -54,39 +70,132 @@ impl RenderContext {
     /// Returns the image width.
     #[inline]
     pub fn width(&self) -> u32 {
-        self.inner.width()
+        self.image_header.size.width
     }
 
     /// Returns the image height.
     #[inline]
     pub fn height(&self) -> u32 {
-        self.inner.height()
+        self.image_header.size.height
     }
 
     /// Returns the number of loaded keyframes in the context.
     #[inline]
     pub fn loaded_keyframes(&self) -> usize {
-        self.inner.loaded_keyframes()
+        self.keyframes.len()
+    }
+
+    /// Returns the number of loaded frames in the context, including frames that are not shown
+    /// directly.
+    #[inline]
+    pub fn loaded_frames(&self) -> usize {
+        self.frames.len()
     }
 
     #[inline]
-    pub fn loaded_frames(&self) -> usize {
-        self.inner.frames.len()
+    fn metadata(&self) -> &ImageMetadata {
+        &self.image_header.metadata
+    }
+
+    fn preserve_current_frame(&mut self) {
+        let Some(frame) = self.loading_frame.take() else { return; };
+
+        let header = frame.header();
+        let idx = self.frames.len();
+        let is_last = header.is_last;
+
+        self.refcounts.push(0);
+
+        let lf = if header.flags.use_lf_frame() {
+            let lf = self.lf_frame[header.lf_level as usize];
+            self.refcounts[lf] += 1;
+            lf
+        } else {
+            usize::MAX
+        };
+        for ref_idx in self.reference {
+            if ref_idx != usize::MAX {
+                self.refcounts[ref_idx] += 1;
+            }
+        }
+
+        let deps = FrameDependence {
+            lf,
+            ref_slots: self.reference,
+        };
+
+        if !is_last && (header.duration == 0 || header.save_as_reference != 0) && header.frame_type != FrameType::LfFrame {
+            let ref_idx = header.save_as_reference as usize;
+            self.reference[ref_idx] = idx;
+        }
+        if header.lf_level != 0 {
+            let lf_idx = header.lf_level as usize - 1;
+            self.lf_frame[lf_idx] = idx;
+        }
+
+        if header.is_keyframe() {
+            self.refcounts[idx] += 1;
+            self.keyframes.push(idx);
+            self.keyframe_in_progress = None;
+        } else if header.frame_type.is_normal_frame() {
+            self.keyframe_in_progress = Some(idx);
+        }
+
+        let frame = Arc::new(frame);
+        let render_op = self.render_op(Arc::clone(&frame), deps);
+        let handle = if let Some(cache) = self.loading_render_cache.take() {
+            FrameRenderHandle::from_cache(Arc::clone(&frame), cache, render_op)
+        } else {
+            FrameRenderHandle::new(Arc::clone(&frame), render_op)
+        };
+
+        self.frames.push(Arc::clone(&frame));
+        self.frame_deps.push(deps);
+        self.renders.push(Arc::new(handle));
+    }
+
+    fn loading_frame(&self) -> Option<&IndexedFrame> {
+        let search_from = self.keyframe_in_progress.or_else(|| self.keyframes.last().map(|x| x + 1)).unwrap_or(0);
+        self.frames[search_from..]
+            .iter()
+            .map(|r| &**r)
+            .chain(self.loading_frame.as_ref()).rev().find(|x| x.header().frame_type.is_progressive_frame())
     }
 }
 
 impl RenderContext {
     pub fn load_frame_header(&mut self, bitstream: &mut Bitstream) -> Result<&mut IndexedFrame> {
-        if self.inner.loading_frame.is_some() && !self.try_finalize_current_frame() {
+        if self.loading_frame.is_some() && !self.try_finalize_current_frame() {
             panic!("another frame is still loading");
         }
 
-        self.inner.load_frame_header(bitstream)
+        let image_header = &self.image_header;
+
+        let bitstream_original = bitstream.clone();
+        let frame = match Frame::parse(
+            bitstream,
+            FrameContext { image_header: image_header.clone(), pool: self.pool.clone() },
+        ) {
+            Ok(frame) => frame,
+            Err(e) => {
+                *bitstream = bitstream_original;
+                return Err(e.into());
+            },
+        };
+
+        let header = frame.header();
+        // Check if LF frame exists
+        if header.flags.use_lf_frame() && self.lf_frame[header.lf_level as usize] == usize::MAX {
+            return Err(Error::UninitializedLfFrame(header.lf_level));
+        }
+
+        self.loading_frame = Some(IndexedFrame::new(frame, self.frames.len()));
+        Ok(self.loading_frame.as_mut().unwrap())
     }
 
     pub fn current_loading_frame(&mut self) -> Option<&mut IndexedFrame> {
         self.try_finalize_current_frame();
-        self.inner.loading_frame.as_mut()
+        self.loading_frame.as_mut()
     }
 
     pub fn finalize_current_frame(&mut self) {
@@ -96,9 +205,9 @@ impl RenderContext {
     }
 
     fn try_finalize_current_frame(&mut self) -> bool {
-        if let Some(loading_frame) = &self.inner.loading_frame {
+        if let Some(loading_frame) = &self.loading_frame {
             if loading_frame.is_loading_done() {
-                self.inner.preserve_current_frame();
+                self.preserve_current_frame();
                 return true;
             }
         }
@@ -110,16 +219,89 @@ impl RenderContext {
     /// Returns the frame with the keyframe index, or `None` if the keyframe does not exist.
     #[inline]
     pub fn keyframe(&self, keyframe_idx: usize) -> Option<&IndexedFrame> {
-        self.inner.keyframe(keyframe_idx)
+        if keyframe_idx == self.keyframes.len() {
+            self.loading_frame()
+        } else if let Some(&idx) = self.keyframes.get(keyframe_idx) {
+            Some(&self.frames[idx])
+        } else {
+            None
+        }
     }
 
     #[inline]
     pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
-        if self.inner.frames.len() == frame_idx {
-            self.inner.loading_frame.as_ref()
+        if self.frames.len() == frame_idx {
+            self.loading_frame.as_ref()
         } else {
-            self.inner.frames.get(frame_idx).map(|x| &**x)
+            self.frames.get(frame_idx).map(|x| &**x)
         }
+    }
+}
+
+impl RenderContext {
+    fn render_op(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp {
+        let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
+        let reference_frames = ReferenceFrames {
+            lf: (deps.lf != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[deps.lf]),
+                image: Arc::clone(&self.renders[deps.lf]),
+            }),
+            refs: deps.ref_slots.map(|r| (r != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[r]),
+                image: Arc::clone(&self.renders[r]),
+            })),
+        };
+
+        let pool = self.pool.clone();
+        Arc::new(move |mut state, image_region| {
+            let mut cache = match state {
+                FrameRender::InProgress(cache) => cache,
+                _ => {
+                    state = FrameRender::InProgress(Box::new(RenderCache::new(&frame)));
+                    let FrameRender::InProgress(cache) = state else { unreachable!() };
+                    cache
+                },
+            };
+
+            tracing::debug!(index = frame.idx, ?image_region, "Rendering frame");
+
+            let result = inner::render_frame(
+                &frame,
+                reference_frames.clone(),
+                &mut cache,
+                image_region,
+                pool.clone(),
+                prev_frame_visibility,
+            );
+            match result {
+                Ok(grid) => FrameRender::Done(grid),
+                Err(Error::IncompleteFrame) => FrameRender::InProgress(cache),
+                Err(e) if e.unexpected_eof() => FrameRender::InProgress(cache),
+                Err(e) => FrameRender::Err(e),
+            }
+        })
+    }
+
+    fn get_previous_frames_visibility<'a>(&'a self, frame: &'a IndexedFrame) -> (usize, usize) {
+        let frame_idx = frame.index();
+        let (is_keyframe, keyframe_idx) = match self.keyframes.binary_search(&frame_idx) {
+            Ok(val) => (true, val),
+            Err(val) => (false, val),
+        };
+        let prev_keyframes = &self.keyframes[..keyframe_idx];
+
+        let visible_frames_num = keyframe_idx + is_keyframe as usize;
+
+        let invisible_frames_num = if is_keyframe {
+            0
+        } else if prev_keyframes.is_empty() {
+            1 + frame_idx
+        } else {
+            let last_visible_frame = prev_keyframes[keyframe_idx];
+            frame_idx - last_visible_frame
+        };
+
+        (visible_frames_num, invisible_frames_num)
     }
 }
 
@@ -174,14 +356,14 @@ fn image_region_to_frame(frame: &Frame, image_region: Option<Region>, ignore_lf_
 
 impl RenderContext {
     fn spawn_renderer(&self, index: usize, image_region: Option<Region>) {
-        let render_handle = Arc::clone(&self.inner.renders[index]);
+        let render_handle = Arc::clone(&self.renders[index]);
         self.pool.spawn(move || {
             render_handle.run(image_region);
         });
     }
 
     fn render_by_index(&self, index: usize, image_region: Option<Region>) -> Result<ImageWithRegion> {
-        let deps = self.inner.frame_deps[index];
+        let deps = self.frame_deps[index];
         let indices: Vec<_> = deps.indices().collect();
         if !indices.is_empty() {
             tracing::trace!(
@@ -194,7 +376,7 @@ impl RenderContext {
             }
         }
 
-        self.inner.renders[index].run_with_image(image_region)
+        self.renders[index].run_with_image(image_region)
     }
 
     /// Renders the first keyframe.
@@ -216,9 +398,9 @@ impl RenderContext {
         keyframe_idx: usize,
         image_region: Option<Region>,
     ) -> Result<ImageWithRegion> {
-        let idx = *self.inner.keyframes.get(keyframe_idx).ok_or(Error::IncompleteFrame)?;
+        let idx = *self.keyframes.get(keyframe_idx).ok_or(Error::IncompleteFrame)?;
         let mut grid = self.render_by_index(idx, image_region)?;
-        let frame = &*self.inner.frames[idx];
+        let frame = &*self.frames[idx];
 
         let image_header = frame.image_header();
         let frame_header = frame.header();
@@ -228,10 +410,10 @@ impl RenderContext {
                 let [cb, y, cr, ..] = grid.buffer_mut() else { panic!() };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            ContextInner::convert_color(image_header, grid.buffer_mut());
+            inner::convert_color(image_header, grid.buffer_mut());
         }
 
-        let channels = if self.inner.metadata().grayscale() { 1 } else { 3 };
+        let channels = if self.metadata().grayscale() { 1 } else { 3 };
         grid.remove_channels(channels..3);
         Ok(grid)
     }
@@ -241,7 +423,7 @@ impl RenderContext {
         image_region: Option<Region>,
     ) -> Result<(&IndexedFrame, ImageWithRegion)> {
         let mut current_frame_grid = None;
-        if self.inner.loading_frame().is_some() {
+        if self.loading_frame().is_some() {
             let ret = self.render_loading_frame(image_region);
             match ret {
                 Ok(grid) => current_frame_grid = Some(grid),
@@ -251,11 +433,11 @@ impl RenderContext {
         }
 
         let (frame, mut grid) = if let Some(grid) = current_frame_grid {
-            let frame = self.inner.loading_frame().unwrap();
+            let frame = self.loading_frame().unwrap();
             (frame, grid)
-        } else if let Some(idx) = self.inner.keyframe_in_progress {
+        } else if let Some(idx) = self.keyframe_in_progress {
             let grid = self.render_by_index(idx, image_region)?;
-            let frame = &*self.inner.frames[idx];
+            let frame = &*self.frames[idx];
             (frame, grid)
         } else {
             return Err(Error::IncompleteFrame);
@@ -269,16 +451,16 @@ impl RenderContext {
                 let [cb, y, cr, ..] = grid.buffer_mut() else { panic!() };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            ContextInner::convert_color(image_header, grid.buffer_mut());
+            inner::convert_color(image_header, grid.buffer_mut());
         }
 
-        let channels = if self.inner.metadata().grayscale() { 1 } else { 3 };
+        let channels = if self.metadata().grayscale() { 1 } else { 3 };
         grid.remove_channels(channels..3);
         Ok((frame, grid))
     }
 
     fn render_loading_frame(&mut self, image_region: Option<Region>) -> Result<ImageWithRegion> {
-        let frame = self.inner.loading_frame().unwrap();
+        let frame = self.loading_frame().unwrap();
         if !frame.header().frame_type.is_progressive_frame() {
             return Err(Error::IncompleteFrame);
         }
@@ -289,48 +471,48 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         }
 
-        let lf_frame_idx = self.inner.lf_frame[header.lf_level as usize];
+        let lf_frame_idx = self.lf_frame[header.lf_level as usize];
         if header.flags.use_lf_frame() {
             self.spawn_renderer(lf_frame_idx, image_region);
         }
-        for idx in self.inner.reference {
+        for idx in self.reference {
             if idx != usize::MAX {
                 self.spawn_renderer(idx, image_region);
             }
         }
 
         tracing::debug!(?image_region, ?frame_region, "Rendering loading frame");
-        let mut cache = self.inner.loading_render_cache
+        let mut cache = self.loading_render_cache
             .take()
             .unwrap_or_else(|| {
-                let frame = self.inner.loading_frame().unwrap();
+                let frame = self.loading_frame().unwrap();
                 RenderCache::new(frame)
             });
 
         let reference_frames = ReferenceFrames {
             lf: (lf_frame_idx != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.inner.frames[lf_frame_idx]),
-                image: Arc::clone(&self.inner.renders[lf_frame_idx]),
+                frame: Arc::clone(&self.frames[lf_frame_idx]),
+                image: Arc::clone(&self.renders[lf_frame_idx]),
             }),
-            refs: self.inner.reference.map(|r| (r != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.inner.frames[r]),
-                image: Arc::clone(&self.inner.renders[r]),
+            refs: self.reference.map(|r| (r != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[r]),
+                image: Arc::clone(&self.renders[r]),
             })),
         };
 
-        let frame = self.inner.loading_frame().unwrap();
-        let image_result = ContextInner::render_frame(
+        let frame = self.loading_frame().unwrap();
+        let image_result = inner::render_frame(
             frame,
             reference_frames,
             &mut cache,
             image_region,
             self.pool.clone(),
-            self.inner.get_previous_frames_visibility(frame),
+            self.get_previous_frames_visibility(frame),
         );
         let image = match image_result {
             Ok(image) => image,
             Err(e) => {
-                self.inner.loading_render_cache = Some(cache);
+                self.loading_render_cache = Some(cache);
                 return Err(e);
             },
         };
@@ -341,38 +523,6 @@ impl RenderContext {
         } else {
             Ok(image)
         }
-    }
-}
-
-/// Frame with its index in the image.
-#[derive(Debug)]
-pub struct IndexedFrame {
-    f: Frame,
-    idx: usize,
-}
-
-impl IndexedFrame {
-    fn new(frame: Frame, index: usize) -> Self {
-        IndexedFrame { f: frame, idx: index }
-    }
-
-    /// Returns the frame index.
-    pub fn index(&self) -> usize {
-        self.idx
-    }
-}
-
-impl std::ops::Deref for IndexedFrame {
-    type Target = Frame;
-
-    fn deref(&self) -> &Self::Target {
-        &self.f
-    }
-}
-
-impl std::ops::DerefMut for IndexedFrame {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.f
     }
 }
 
@@ -466,4 +616,60 @@ fn upsample_lf(image: &ImageWithRegion, frame: &IndexedFrame, frame_region: Regi
         }
     }
     new_image.clone_intersection(frame_region)
+}
+
+/// Frame with its index in the image.
+#[derive(Debug)]
+pub struct IndexedFrame {
+    f: Frame,
+    idx: usize,
+}
+
+impl IndexedFrame {
+    fn new(frame: Frame, index: usize) -> Self {
+        IndexedFrame { f: frame, idx: index }
+    }
+
+    /// Returns the frame index.
+    pub fn index(&self) -> usize {
+        self.idx
+    }
+}
+
+impl std::ops::Deref for IndexedFrame {
+    type Target = Frame;
+
+    fn deref(&self) -> &Self::Target {
+        &self.f
+    }
+}
+
+impl std::ops::DerefMut for IndexedFrame {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.f
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FrameDependence {
+    pub(crate) lf: usize,
+    pub(crate) ref_slots: [usize; 4],
+}
+
+impl FrameDependence {
+    pub fn indices(&self) -> impl Iterator<Item = usize> + 'static {
+        std::iter::once(self.lf).chain(self.ref_slots).filter(|&v| v != usize::MAX)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ReferenceFrames {
+    pub(crate) lf: Option<Reference>,
+    pub(crate) refs: [Option<Reference>; 4],
+}
+
+#[derive(Debug, Clone)]
+struct Reference {
+    pub(crate) frame: Arc<IndexedFrame>,
+    pub(crate) image: Arc<FrameRenderHandle>,
 }

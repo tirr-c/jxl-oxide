@@ -12,7 +12,7 @@ use crate::{
     Result,
 };
 
-pub fn render_modular(
+pub(crate) fn render_modular(
     frame: &IndexedFrame,
     cache: &mut RenderCache,
     region: Region,
