@@ -1,3 +1,13 @@
+//! Internal crate used in jxl-oxide, for abstraction of thread pool.
+//!
+//! [`JxlThreadPool`] is re-exported by `jxl-oxide`.
+
+/// Thread pool wrapper.
+///
+/// This struct wraps internal thread pool implementation and provides interfaces to access it. If
+/// `rayon` feature is enabled, users can create an actual thread pool backed by Rayon; if not,
+/// this struct won't have any multithreading capability, and every spawn operation will just run
+/// the given closure in place.
 #[derive(Debug, Clone)]
 pub struct JxlThreadPool(JxlThreadPoolImpl);
 
@@ -8,6 +18,7 @@ enum JxlThreadPoolImpl {
     None,
 }
 
+/// Fork-join scope created by thread pool.
 #[derive(Debug, Copy, Clone)]
 pub struct JxlScope<'r, 'scope>(JxlScopeInner<'r, 'scope>);
 
@@ -57,15 +68,20 @@ impl Default for JxlThreadPool {
 }
 
 impl JxlThreadPool {
+    /// Creates a "fake" thread pool without any multithreading capability.
+    ///
+    /// Every spawn operation on this thread poll will just run the closure in current thread.
     pub const fn none() -> Self {
         Self(JxlThreadPoolImpl::None)
     }
 
+    /// Creates a thread pool backed by Rayon.
     #[cfg(feature = "rayon")]
     pub fn rayon(pool: std::sync::Arc<rayon_core::ThreadPool>) -> Self {
         Self(JxlThreadPoolImpl::Rayon(pool))
     }
 
+    /// Returns if the thread pool is capable of multithreading.
     pub fn is_multithreaded(&self) -> bool {
         match self.0 {
             #[cfg(feature = "rayon")]
@@ -76,6 +92,7 @@ impl JxlThreadPool {
 }
 
 impl JxlThreadPool {
+    /// Runs the given closure on the thread pool.
     pub fn spawn(&self, op: impl FnOnce() + Send + 'static) {
         match &self.0 {
             #[cfg(feature = "rayon")]
@@ -84,6 +101,7 @@ impl JxlThreadPool {
         }
     }
 
+    /// Creates a fork-join scope of tasks.
     pub fn scope<'scope, R: Send>(
         &'scope self,
         op: impl for<'r> FnOnce(JxlScope<'r, 'scope>) -> R + Send,
@@ -101,17 +119,10 @@ impl JxlThreadPool {
             },
         }
     }
-
-    pub fn yield_now(&self) -> Option<JxlYield> {
-        match &self.0 {
-            #[cfg(feature = "rayon")]
-            JxlThreadPoolImpl::Rayon(_) => rayon_core::yield_now().map(From::from),
-            JxlThreadPoolImpl::None => None,
-        }
-    }
 }
 
 impl<'scope> JxlScope<'_, 'scope> {
+    /// Spanws the given closure in current fork-join scope.
     pub fn spawn(&self, op: impl for<'r> FnOnce(JxlScope<'r, 'scope>) + Send + 'scope) {
         match self.0 {
             #[cfg(feature = "rayon")]
@@ -124,22 +135,6 @@ impl<'scope> JxlScope<'_, 'scope> {
             JxlScopeInner::None(_) => {
                 op(JxlScope(JxlScopeInner::None(Default::default())))
             },
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum JxlYield {
-    Executed,
-    Idle,
-}
-
-#[cfg(feature = "rayon")]
-impl From<rayon_core::Yield> for JxlYield {
-    fn from(value: rayon_core::Yield) -> Self {
-        match value {
-            rayon_core::Yield::Executed => Self::Executed,
-            rayon_core::Yield::Idle => Self::Idle,
         }
     }
 }

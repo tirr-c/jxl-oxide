@@ -1,6 +1,6 @@
 [package]
 name = "jxl-threadpool"
-description = "jxl-oxide internal crate to abstract over thread pool implementation"
+description = "Internal crate of jxl-oxide to abstract over thread pool implementation"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
 repository = "https://github.com/tirr-c/jxl-oxide.git"
 readme = "README.md"

@@ -158,6 +158,7 @@ impl UninitializedJxlImage {
         Self::with_threads(default_pool())
     }
 
+    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
     pub fn with_threads(pool: JxlThreadPool) -> Self {
         Self { pool, ..Default::default() }
     }
@@ -290,6 +291,7 @@ impl JxlImage {
         UninitializedJxlImage::new()
     }
 
+    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
     pub fn new_uninit_with_threads(pool: JxlThreadPool) -> UninitializedJxlImage {
         UninitializedJxlImage::with_threads(pool)
     }
@@ -307,6 +309,7 @@ impl JxlImage {
         Self::from_reader_with_threads(reader, default_pool())
     }
 
+    /// Reads image with the given reader, with custom thread pool.
     pub fn from_reader_with_threads(
         mut reader: impl std::io::Read,
         pool: JxlThreadPool,
@@ -358,6 +361,7 @@ impl JxlImage {
         Self::open_with_threads(path, default_pool())
     }
 
+    /// Reads image from the file, with custom thread pool.
     pub fn open_with_threads(
         path: impl AsRef<std::path::Path>,
         pool: JxlThreadPool,
@@ -374,6 +378,7 @@ impl JxlImage {
         &self.image_header
     }
 
+    /// Returns the thread pool used by the renderer.
     #[inline]
     pub fn pool(&self) -> &JxlThreadPool {
         &self.pool
@@ -607,6 +612,7 @@ impl JxlImage {
         Ok(result)
     }
 
+    /// Renders the currently loading keyframe with optional cropping region.
     pub fn render_loading_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<Render> {
         let (frame, mut grids) = self.ctx.render_loading_keyframe(image_region.map(From::from))?;
         let frame_header = frame.header();
@@ -659,6 +665,7 @@ impl JxlImage {
         self.render_frame_cropped(keyframe_index, None)
     }
 
+    /// Renders the currently loading keyframe.
     pub fn render_loading_frame(&mut self) -> Result<Render> {
         self.render_loading_frame_cropped(None)
     }
