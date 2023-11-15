@@ -263,8 +263,6 @@ pub(crate) fn render_vardct(
     };
 
     tracing::trace_span!("Decode and transform").in_scope(|| -> Result<_> {
-        let Some(hf_global) = hf_global else { return Ok(()); };
-
         let num_groups = frame_header.num_groups();
         let num_passes = frame_header.passes.num_passes;
 
@@ -285,11 +283,25 @@ pub(crate) fn render_vardct(
                     return;
                 }
 
+                let lf_xyb = &lf_xyb;
+                let lf_groups = &lf_groups;
+
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-                if lf_group.hf_meta.is_none() {
+
+                if lf_group.hf_meta.is_none() || hf_global.is_none() {
+                    scope.spawn(move |_| {
+                        transform_with_lf_grouped(
+                            lf_xyb,
+                            &mut grid_xyb,
+                            group_idx,
+                            frame_header,
+                            lf_groups,
+                        );
+                    });
                     continue;
                 }
+                let hf_global = hf_global.unwrap();
 
                 let transform_hf = {
                     let group_x = group_idx % groups_per_row;
@@ -307,8 +319,6 @@ pub(crate) fn render_vardct(
                 };
 
                 let result = &result;
-                let lf_groups = &lf_groups;
-                let lf_xyb = &lf_xyb;
                 let hf_cfl_data = hf_cfl_data.as_ref();
                 let global_ma_config = gmodular.ma_config.as_ref();
                 scope.spawn(move |_| {
