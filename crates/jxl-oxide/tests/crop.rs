@@ -1,11 +1,12 @@
 use std::io::Cursor;
 
 use rand::prelude::*;
-use jxl_oxide::{JxlImage, CropInfo};
+use jxl_oxide::{JxlImage, CropInfo, Render};
 
 mod util;
 
-fn run_test(buf: &[u8]) {
+fn run_test(buf: &[u8], name: &str) {
+    let is_ci = std::env::var_os("CI").map(|v| !v.is_empty()).unwrap_or(false);
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
     let mut image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
@@ -17,7 +18,7 @@ fn run_test(buf: &[u8]) {
     let mut tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
 
     let num_frames = image.num_loaded_keyframes();
-    for _ in 0..4 {
+    for _ in 0..8 {
         let crop_width = width_dist.sample(&mut rng);
         let crop_height = height_dist.sample(&mut rng);
         let crop_left = rng.gen_range(0..=(width - crop_width));
@@ -45,10 +46,26 @@ fn run_test(buf: &[u8]) {
                     .chunks_exact(width as usize)
                     .skip(crop_top as usize)
                     .zip(actual.chunks_exact(crop_width as usize));
-                for (expected_row, actual_row) in it {
+                for (y, (expected_row, actual_row)) in it.enumerate() {
                     let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
-                    for (expected, actual) in expected_row.iter().zip(actual_row) {
-                        assert!((expected - actual).abs() <= 1e-6);
+                    for (x, (expected, actual)) in expected_row.iter().zip(actual_row).enumerate() {
+                        if (expected - actual).abs() > 1e-6 {
+                            if is_ci {
+                                eprintln!("Test failed at x={x}, y={y}");
+                                let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                                path.push("tests/.artifact");
+                                std::fs::create_dir_all(&path).unwrap();
+
+                                let mut full = path.clone();
+                                full.push(format!("{name}-full.npy"));
+                                write_npy(&full_render, full);
+
+                                let mut cropped = path.clone();
+                                cropped.push(format!("{name}-cropped.npy"));
+                                write_npy(&cropped_render, cropped);
+                            }
+                            panic!();
+                        }
                     }
                 }
             }
@@ -64,7 +81,7 @@ macro_rules! testcase {
             fn $name() {
                 let path = util::conformance_path(stringify!($name));
                 let buf = std::fs::read(path).expect("Failed to open file");
-                run_test(&buf);
+                run_test(&buf, stringify!($name));
             }
         )*
     };
@@ -91,4 +108,44 @@ testcase! {
     grayscale_jpeg,
     grayscale_public_university,
     spot,
+}
+
+fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
+    use std::io::prelude::*;
+
+    let file = std::fs::File::create(path).unwrap();
+    let mut file = std::io::BufWriter::new(file);
+
+    file.write_all(b"\x93NUMPY\x01\x00").unwrap();
+
+    let color_channels = render.color_channels();
+    let extra_channels = render.extra_channels();
+
+    let num_channels = color_channels.len() + extra_channels.len();
+    let first_channel = &color_channels[0];
+    let width = first_channel.width();
+    let height = first_channel.height();
+    let header_string = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': (1, {height}, {width}, {num_channels}), }}\n");
+    eprintln!("width={width}, height={height}, num_channels={num_channels}");
+    let header_len = header_string.len() as u16;
+    file.write_all(&header_len.to_le_bytes()).unwrap();
+    file.write_all(header_string.as_bytes()).unwrap();
+    file.flush().unwrap();
+
+    for y in 0..height {
+        for x in 0..width {
+            for cc in color_channels {
+                let f = *cc.get(x, y).unwrap();
+                let b = f.to_bits().to_le_bytes();
+                file.write_all(&b).unwrap();
+            }
+            for ec in extra_channels {
+                let f = *ec.grid().get(x, y).unwrap();
+                let b = f.to_bits().to_le_bytes();
+                file.write_all(&b).unwrap();
+            }
+        }
+    }
+
+    file.flush().unwrap();
 }
