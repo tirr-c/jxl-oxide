@@ -39,6 +39,7 @@ pub struct RenderContext {
     pub(crate) reference: [usize; 4],
     pub(crate) loading_frame: Option<IndexedFrame>,
     pub(crate) loading_render_cache: Option<RenderCache>,
+    pub(crate) loading_region: Option<Region>,
 }
 
 impl RenderContext {
@@ -62,6 +63,7 @@ impl RenderContext {
             reference: [usize::MAX; 4],
             loading_frame: None,
             loading_render_cache: None,
+            loading_region: None,
         }
     }
 }
@@ -144,7 +146,8 @@ impl RenderContext {
         let frame = Arc::new(frame);
         let render_op = self.render_op(Arc::clone(&frame), deps);
         let handle = if let Some(cache) = self.loading_render_cache.take() {
-            FrameRenderHandle::from_cache(Arc::clone(&frame), cache, render_op)
+            let region = self.loading_region.take().unwrap();
+            FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
         } else {
             FrameRenderHandle::new(Arc::clone(&frame), render_op)
         };
@@ -402,19 +405,7 @@ impl RenderContext {
         let mut grid = self.render_by_index(idx, image_region)?;
         let frame = &*self.frames[idx];
 
-        let image_header = frame.image_header();
-        let frame_header = frame.header();
-
-        if frame_header.save_before_ct {
-            if frame_header.do_ycbcr {
-                let [cb, y, cr, ..] = grid.buffer_mut() else { panic!() };
-                jxl_color::ycbcr_to_rgb([cb, y, cr]);
-            }
-            inner::convert_color(image_header, grid.buffer_mut());
-        }
-
-        let channels = if self.metadata().grayscale() { 1 } else { 3 };
-        grid.remove_channels(channels..3);
+        self.postprocess_keyframe(frame, &mut grid, image_region);
         Ok(grid)
     }
 
@@ -443,19 +434,7 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         };
 
-        let image_header = frame.image_header();
-        let frame_header = frame.header();
-
-        if frame_header.save_before_ct {
-            if frame_header.do_ycbcr {
-                let [cb, y, cr, ..] = grid.buffer_mut() else { panic!() };
-                jxl_color::ycbcr_to_rgb([cb, y, cr]);
-            }
-            inner::convert_color(image_header, grid.buffer_mut());
-        }
-
-        let channels = if self.metadata().grayscale() { 1 } else { 3 };
-        grid.remove_channels(channels..3);
+        self.postprocess_keyframe(frame, &mut grid, image_region);
         Ok((frame, grid))
     }
 
@@ -465,8 +444,11 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         }
 
-        let header = frame.header();
         let frame_region = image_region_to_frame(frame, image_region, false);
+        self.loading_region = Some(frame_region);
+
+        let frame = self.loading_frame().unwrap();
+        let header = frame.header();
         if frame.try_parse_lf_global().is_none() {
             return Err(Error::IncompleteFrame);
         }
@@ -523,6 +505,31 @@ impl RenderContext {
         } else {
             Ok(image)
         }
+    }
+
+    fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion, image_region: Option<Region>) {
+        let frame_region = image_region_to_frame(frame, image_region, false);
+        if grid.region() != frame_region {
+            let mut new_grid = ImageWithRegion::from_region(grid.channels(), frame_region);
+            for (ch, g) in new_grid.buffer_mut().iter_mut().enumerate() {
+                grid.clone_region_channel(frame_region, ch, g);
+            }
+            *grid = new_grid;
+        }
+
+        let image_header = frame.image_header();
+        let frame_header = frame.header();
+
+        if frame_header.save_before_ct {
+            if frame_header.do_ycbcr {
+                let [cb, y, cr, ..] = grid.buffer_mut() else { panic!() };
+                jxl_color::ycbcr_to_rgb([cb, y, cr]);
+            }
+            inner::convert_color(image_header, grid.buffer_mut());
+        }
+
+        let channels = if self.metadata().grayscale() { 1 } else { 3 };
+        grid.remove_channels(channels..3);
     }
 }
 
