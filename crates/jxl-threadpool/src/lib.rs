@@ -29,16 +29,39 @@ enum JxlScopeInner<'r, 'scope> {
     None(std::marker::PhantomData<&'r &'scope ()>),
 }
 
-#[cfg(feature = "rayon")]
-impl Default for JxlThreadPool {
-    fn default() -> Self {
-        let num_threads = std::thread::available_parallelism();
-        let num_threads = match num_threads {
-            Ok(num_threads) => num_threads.into(),
-            Err(e) => {
-                tracing::warn!(%e, "Failed to query available parallelism; falling back to single-threaded");
-                return Self::none();
-            },
+impl JxlThreadPool {
+    /// Creates a "fake" thread pool without any multithreading capability.
+    ///
+    /// Every spawn operation on this thread poll will just run the closure in current thread.
+    pub const fn none() -> Self {
+        Self(JxlThreadPoolImpl::None)
+    }
+
+    /// Creates a thread pool backed by Rayon [`ThreadPool`][rayon_core::ThreadPool].
+    #[cfg(feature = "rayon")]
+    pub fn with_rayon_thread_pool(pool: std::sync::Arc<rayon_core::ThreadPool>) -> Self {
+        Self(JxlThreadPoolImpl::Rayon(pool))
+    }
+
+    /// Creates a thread pool backed by Rayon.
+    ///
+    /// If `num_threads_requested` is `None` or zero, this method queries available paralleism and
+    /// uses it.
+    #[cfg(feature = "rayon")]
+    pub fn rayon(num_threads_requested: Option<usize>) -> Self {
+        let num_threads_requested = num_threads_requested.unwrap_or(0);
+
+        let num_threads = if num_threads_requested == 0 {
+            let num_threads = std::thread::available_parallelism();
+            match num_threads {
+                Ok(num_threads) => num_threads.into(),
+                Err(e) => {
+                    tracing::warn!(%e, "Failed to query available parallelism; falling back to single-threaded");
+                    return Self::none();
+                },
+            }
+        } else {
+            num_threads_requested
         };
 
         let inner = rayon_core::ThreadPoolBuilder::new()
@@ -57,28 +80,14 @@ impl Default for JxlThreadPool {
             },
         }
     }
-}
 
-#[cfg(not(feature = "rayon"))]
-impl Default for JxlThreadPool {
-    fn default() -> Self {
-        tracing::debug!("Not built with multithread support");
-        Self::none()
-    }
-}
-
-impl JxlThreadPool {
-    /// Creates a "fake" thread pool without any multithreading capability.
-    ///
-    /// Every spawn operation on this thread poll will just run the closure in current thread.
-    pub const fn none() -> Self {
-        Self(JxlThreadPoolImpl::None)
-    }
-
-    /// Creates a thread pool backed by Rayon.
+    /// Returns the reference to Rayon thread pool, if exists.
     #[cfg(feature = "rayon")]
-    pub fn rayon(pool: std::sync::Arc<rayon_core::ThreadPool>) -> Self {
-        Self(JxlThreadPoolImpl::Rayon(pool))
+    pub fn as_rayon_pool(&self) -> Option<&rayon_core::ThreadPool> {
+        match &self.0 {
+            JxlThreadPoolImpl::Rayon(pool) => Some(&**pool),
+            JxlThreadPoolImpl::None => None,
+        }
     }
 
     /// Returns if the thread pool is capable of multithreading.

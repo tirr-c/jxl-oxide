@@ -106,24 +106,6 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
     })
 }
 
-#[cfg(feature = "rayon")]
-fn init_thread_pool(num_threads: Option<usize>) -> Option<rayon::ThreadPool> {
-    let num_threads = match num_threads {
-        Some(0) | None => {
-            std::thread::available_parallelism()
-                .map(usize::from)
-                .ok()?
-        },
-        Some(n) => n,
-    };
-
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        .expect("Cannot initialize thread pool");
-    Some(pool)
-}
-
 fn main() {
     let args = Args::parse();
 
@@ -144,17 +126,11 @@ fn main() {
     let _guard = span.enter();
 
     #[cfg(feature = "rayon")]
-    let rayon_pool = init_thread_pool(args.num_threads).map(std::sync::Arc::new);
-    #[cfg(feature = "rayon")]
-    let pool = if let Some(rayon_pool) = &rayon_pool {
-        JxlThreadPool::rayon(rayon_pool.clone())
-    } else {
-        JxlThreadPool::none()
-    };
+    let pool = JxlThreadPool::rayon(args.num_threads);
     #[cfg(not(feature = "rayon"))]
     let pool = JxlThreadPool::none();
 
-    let mut image = JxlImage::open_with_threads(&args.input, pool)
+    let mut image = JxlImage::open_with_threads(&args.input, pool.clone())
         .expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
@@ -205,7 +181,7 @@ fn main() {
     #[allow(unused_mut)]
     let mut rendered = false;
     #[cfg(feature = "rayon")]
-    if let Some(rayon_pool) = &rayon_pool {
+    if let Some(rayon_pool) = &pool.as_rayon_pool() {
         keyframes = rayon_pool.install(|| {
             use rayon::prelude::*;
 

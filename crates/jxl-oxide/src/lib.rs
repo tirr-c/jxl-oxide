@@ -111,12 +111,14 @@ pub use jxl_threadpool::JxlThreadPool;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
+#[cfg(feature = "rayon")]
 fn default_pool() -> JxlThreadPool {
-    if cfg!(feature = "rayon") {
-        JxlThreadPool::default()
-    } else {
-        JxlThreadPool::none()
-    }
+    JxlThreadPool::rayon(None)
+}
+
+#[cfg(not(feature = "rayon"))]
+fn default_pool() -> JxlThreadPool {
+    JxlThreadPool::none()
 }
 
 /// Empty, uninitialized JPEG XL image.
@@ -143,11 +145,16 @@ fn default_pool() -> JxlThreadPool {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Default)]
 pub struct UninitializedJxlImage {
     pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
+}
+
+impl Default for UninitializedJxlImage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UninitializedJxlImage {
@@ -160,7 +167,11 @@ impl UninitializedJxlImage {
 
     /// Creates an image struct in empty, uninitialized state, with custom thread pool.
     pub fn with_threads(pool: JxlThreadPool) -> Self {
-        Self { pool, ..Default::default() }
+        Self {
+            pool,
+            reader: ContainerDetectingReader::new(),
+            buffer: Vec::new(),
+        }
     }
 
     /// Feeds more data into the decoder.
