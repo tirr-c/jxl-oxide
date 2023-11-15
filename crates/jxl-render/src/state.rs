@@ -119,7 +119,6 @@ impl FrameRenderHandle {
         };
         let render = find_compatible_render(&mut guard, frame_region).unwrap();
         let grid = render.as_grid().unwrap().clone();
-        dbg!(grid.region());
         Ok(grid)
     }
 
