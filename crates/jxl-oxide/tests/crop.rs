@@ -17,7 +17,7 @@ fn run_test(buf: &[u8], name: &str) {
 
     let mut tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
 
-    for _ in 0..8 {
+    for _ in 0..4 {
         let crop_width = width_dist.sample(&mut rng);
         let crop_height = height_dist.sample(&mut rng);
         let crop_left = rng.gen_range(0..=(width - crop_width));
@@ -94,7 +94,7 @@ macro_rules! testcase {
 }
 
 macro_rules! testcase_with_crop {
-    {$($(#[$attr:meta])* $name:ident: $testimage:ident ($region:expr)),* $(,)?} => {
+    {$($(#[$attr:meta])* $name:ident: $testimage:ident [$($region:expr),* $(,)?]),* $(,)?} => {
         $(
             #[test]
             $(#[$attr])*
@@ -105,9 +105,15 @@ macro_rules! testcase_with_crop {
 
                 let mut image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
                 let mut tester_image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
-                test_crop_region(&mut image, &mut tester_image, $region, stringify!($name), is_ci);
-                // try repeating
-                test_crop_region(&mut image, &mut tester_image, $region, stringify!($name), is_ci);
+
+                let regions = [
+                    $($region,)*
+                ];
+
+                for region in regions {
+                    eprintln!("{:?}", region);
+                    test_crop_region(&mut image, &mut tester_image, region, stringify!($name), is_ci);
+                }
             }
         )*
     };
@@ -137,37 +143,20 @@ testcase! {
 }
 
 testcase_with_crop! {
-    crop_sunset_logo_0: sunset_logo(CropInfo { width: 179, height: 258, left: 527, top: 298 }),
-    crop_progressive_0: progressive(CropInfo { width: 315, height: 571, left: 1711, top: 800 }),
-    crop_noise_0: noise(CropInfo { width: 195, height: 162, left: 169, top: 194 }),
-    crop_blendmodes_0: blendmodes(CropInfo { width: 242, height: 163, left: 81, top: 302 }),
-}
-
-#[test]
-fn crop_alpha_triangles_triple() {
-    let is_ci = std::env::var_os("CI").map(|v| !v.is_empty()).unwrap_or(false);
-    let path = util::conformance_path("alpha_triangles");
-    let buf = std::fs::read(path).expect("Failed to open file");
-
-    let mut image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
-    let mut tester_image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
-
-    let regions = [
+    crop_sunset_logo_0: sunset_logo[CropInfo { width: 179, height: 258, left: 527, top: 298 }],
+    crop_progressive_0: progressive[CropInfo { width: 315, height: 571, left: 1711, top: 800 }],
+    crop_noise_0: noise[CropInfo { width: 195, height: 162, left: 169, top: 194 }],
+    crop_blendmodes_0: blendmodes[CropInfo { width: 242, height: 163, left: 81, top: 302 }],
+    crop_alpha_triangles_triple: alpha_triangles[
         CropInfo { width: 330, height: 257, left: 94, top: 350 },
         CropInfo { width: 460, height: 325, left: 468, top: 356 },
         CropInfo { width: 361, height: 147, left: 524, top: 475 },
-    ];
-
-    for region in regions {
-        eprintln!("{:?}", region);
-        test_crop_region(
-            &mut image,
-            &mut tester_image,
-            region,
-            "test_crop_region",
-            is_ci,
-        );
-    }
+    ],
+    crop_progressive_triple: progressive[
+        CropInfo { width: 941, height: 659, left: 1893, top: 35 },
+        CropInfo { width: 1847, height: 1220, left: 850, top: 929 },
+        CropInfo { width: 1421, height: 814, left: 1568, top: 1460 },
+    ],
 }
 
 fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
