@@ -2,6 +2,9 @@ use std::arch::is_aarch64_feature_detected;
 use std::arch::aarch64::*;
 
 use jxl_grid::SimpleGrid;
+use jxl_threadpool::JxlThreadPool;
+
+use super::generic::epf_common;
 
 mod epf;
 
@@ -12,29 +15,37 @@ pub fn epf_step0(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
-            return epf::epf_step0_neon(
+            return epf_common(
                 input,
                 output,
                 sigma_grid,
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
+                epf::epf_row_step0_neon,
             );
         }
     }
 
-    super::generic::epf_step0(
-        input,
-        output,
-        sigma_grid,
-        channel_scale,
-        border_sad_mul,
-        step_multiplier,
-    )
+    // SAFETY: row handler is safe.
+    unsafe {
+        epf_common(
+            input,
+            output,
+            sigma_grid,
+            channel_scale,
+            border_sad_mul,
+            step_multiplier,
+            pool,
+            super::generic::epf_row_step0,
+        );
+    }
 }
 
 pub fn epf_step1(
@@ -44,29 +55,37 @@ pub fn epf_step1(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
-            return epf::epf_step1_neon(
+            return epf_common(
                 input,
                 output,
                 sigma_grid,
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
+                epf::epf_row_step1_neon,
             );
         }
     }
 
-    super::generic::epf_step1(
-        input,
-        output,
-        sigma_grid,
-        channel_scale,
-        border_sad_mul,
-        step_multiplier,
-    )
+    // SAFETY: row handler is safe.
+    unsafe {
+        epf_common(
+            input,
+            output,
+            sigma_grid,
+            channel_scale,
+            border_sad_mul,
+            step_multiplier,
+            pool,
+            super::generic::epf_row_step1,
+        );
+    }
 }
 
 pub fn epf_step2(
@@ -76,29 +95,37 @@ pub fn epf_step2(
     channel_scale: [f32; 3],
     border_sad_mul: f32,
     step_multiplier: f32,
+    pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
-            return epf::epf_step2_neon(
+            return epf_common(
                 input,
                 output,
                 sigma_grid,
                 channel_scale,
                 border_sad_mul,
                 step_multiplier,
+                pool,
+                epf::epf_row_step2_neon,
             );
         }
     }
 
-    super::generic::epf_step2(
-        input,
-        output,
-        sigma_grid,
-        channel_scale,
-        border_sad_mul,
-        step_multiplier,
-    )
+    // SAFETY: row handler is safe.
+    unsafe {
+        epf_common(
+            input,
+            output,
+            sigma_grid,
+            channel_scale,
+            border_sad_mul,
+            step_multiplier,
+            pool,
+            super::generic::epf_row_step2,
+        );
+    }
 }
 
 pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {

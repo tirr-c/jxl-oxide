@@ -32,13 +32,14 @@ impl<S: Default + Clone> SimpleGrid<S> {
     const ALIGN: usize = compute_align::<S>();
 
     /// Create a new buffer.
+    #[inline]
     pub fn new(width: usize, height: usize) -> Self {
         let len = width * height;
-        let mut buf = Vec::with_capacity(len + Self::ALIGN / std::mem::size_of::<S>());
+        let mut buf = vec![S::default(); len + Self::ALIGN / std::mem::size_of::<S>()];
 
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
         let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize(len + offset, S::default());
+        buf.resize_with(len + offset, S::default);
         Self {
             width,
             height,
@@ -107,6 +108,9 @@ pub struct CutGrid<'g, V: Copy = f32> {
     _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
+unsafe impl<'g, V: Copy> Send for CutGrid<'g, V> where &'g mut [V]: Send {}
+unsafe impl<'g, V: Copy> Sync for CutGrid<'g, V> where &'g mut [V]: Sync {}
+
 impl<'g, V: Copy> CutGrid<'g, V> {
     /// Create a `CutGrid` from raw pointer to the buffer, width, height and stride.
     ///
@@ -163,6 +167,12 @@ impl<'g, V: Copy> CutGrid<'g, V> {
                 stride,
             )
         }
+    }
+
+    pub fn from_simple_grid(grid: &'g mut SimpleGrid<V>) -> Self {
+        let width = grid.width();
+        let height = grid.height();
+        Self::from_buf(grid.buf_mut(), width, height, width)
     }
 
     #[inline]
@@ -251,6 +261,43 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 }
 
 impl<'g, V: Copy> CutGrid<'g, V> {
+    pub fn subgrid_mut(&mut self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> CutGrid<V> {
+        use std::ops::Bound;
+
+        let left = match range_x.start_bound() {
+            Bound::Included(&v) => v,
+            Bound::Excluded(&v) => v + 1,
+            Bound::Unbounded => 0,
+        };
+        let right = match range_x.end_bound() {
+            Bound::Included(&v) => v + 1,
+            Bound::Excluded(&v) => v,
+            Bound::Unbounded => self.width,
+        };
+        let top = match range_y.start_bound() {
+            Bound::Included(&v) => v,
+            Bound::Excluded(&v) => v + 1,
+            Bound::Unbounded => 0,
+        };
+        let bottom = match range_y.end_bound() {
+            Bound::Included(&v) => v + 1,
+            Bound::Excluded(&v) => v,
+            Bound::Unbounded => self.height,
+        };
+
+        // Bounds checks.
+        assert!(left <= right);
+        assert!(top <= bottom);
+        assert!(right <= self.width);
+        assert!(bottom <= self.height);
+
+        let base_ptr = NonNull::new(self.get_ptr(left, top)).unwrap();
+        // SAFETY: subgrid is contained in `self`.
+        unsafe {
+            CutGrid::new_with_step(base_ptr, right - left, bottom - top, self.step, self.stride)
+        }
+    }
+
     /// Split the grid horizontally at an index.
     ///
     /// # Panics

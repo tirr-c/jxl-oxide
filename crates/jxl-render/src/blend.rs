@@ -6,7 +6,7 @@ use jxl_frame::{
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 
-use crate::{region::{ImageWithRegion, Region}, inner::Reference};
+use crate::{region::{ImageWithRegion, Region}, Reference};
 
 #[derive(Debug)]
 enum BlendMode<'a> {
@@ -140,8 +140,9 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
     (source, alpha)
 }
 
-pub fn blend(
+pub(crate) fn blend(
     image_header: &ImageHeader,
+    image_region: Option<Region>,
     reference_grids: [Option<Reference>; 4],
     new_frame: &Frame,
     new_grid: &ImageWithRegion,
@@ -160,19 +161,26 @@ pub fn blend(
 
     for (idx, blending_info) in [&header.blending_info; 3].into_iter().chain(&header.ec_blending_info).enumerate() {
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
-        let ref_grid = reference_grids[ref_idx];
+        let ref_grid = &reference_grids[ref_idx];
 
         if used_as_alpha[idx] {
-            let empty_image;
-            let (base_grid, base_frame_region) = if let Some(grid) = ref_grid {
+            let mut clone_empty = false;
+            if let Some(grid) = ref_grid {
                 let base_frame_header = grid.frame.header();
                 let base_frame_region = output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-                (grid.image, base_frame_region)
+                if let Ok(base_grid) = grid.image.run_with_image(image_region) {
+                    base_grid.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
+                } else {
+                    tracing::warn!("Reference frame is not decoded");
+                    clone_empty = true;
+                }
             } else {
-                empty_image = ImageWithRegion::from_region(channels, Region::empty());
-                (&empty_image, Region::empty())
-            };
-            base_grid.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
+                clone_empty = true;
+            }
+            if clone_empty {
+                let empty_image = ImageWithRegion::from_region(channels, Region::empty());
+                empty_image.clone_region_channel(Region::empty(), idx, &mut output_grid.buffer_mut()[idx]);
+            }
 
             if blending_info.mode == FrameBlendMode::MulAdd {
                 continue;
@@ -192,25 +200,35 @@ pub fn blend(
         }
 
         let mut base_alpha_grid;
-        let mut blend_params = if let Some(grid) = ref_grid {
+        let mut base_alpha = None;
+        let mut clone_empty = false;
+        if let Some(grid) = ref_grid {
             let base_frame_header = grid.frame.header();
             let base_frame_region = output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-            grid.image.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
+            if let Ok(base_grid) = grid.image.run_with_image(image_region) {
+                base_grid.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
 
-            let base_alpha = if let Some(idx) = alpha_idx {
-                base_alpha_grid = SimpleGrid::new(output_image_region.width as usize, output_image_region.height as usize);
-                grid.image.clone_region_channel(base_frame_region, idx + 3, &mut base_alpha_grid);
-                Some(&base_alpha_grid)
+                if let Some(idx) = alpha_idx {
+                    base_alpha_grid = SimpleGrid::new(output_image_region.width as usize, output_image_region.height as usize);
+                    base_grid.clone_region_channel(base_frame_region, idx + 3, &mut base_alpha_grid);
+                    base_alpha = Some(&base_alpha_grid)
+                }
             } else {
-                None
-            };
-            let new_alpha = alpha_idx.map(|idx| &new_grid.buffer()[idx + 3]);
-            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
-            BlendParams::from_blending_info(blending_info, base_alpha, new_alpha, premultiplied)
+                tracing::warn!("Reference frame is not decoded");
+                clone_empty = true;
+            }
         } else {
+            clone_empty = true;
+        }
+
+        let mut blend_params = if clone_empty {
             let new_alpha = alpha_idx.map(|idx| &new_grid.buffer()[idx + 3]);
             let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             BlendParams::from_blending_info(blending_info, None, new_alpha, premultiplied)
+        } else {
+            let new_alpha = alpha_idx.map(|idx| &new_grid.buffer()[idx + 3]);
+            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
+            BlendParams::from_blending_info(blending_info, base_alpha, new_alpha, premultiplied)
         };
         blend_params.width = output_image_region.width as usize;
         blend_params.height = output_image_region.height as usize;

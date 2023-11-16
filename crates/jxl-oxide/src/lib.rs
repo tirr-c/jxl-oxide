@@ -78,7 +78,7 @@
 //!
 //! # fn present_image(_: Render) {}
 //! # fn main() -> jxl_oxide::Result<()> {
-//! # let mut image = JxlImage::open("input.jxl").unwrap();
+//! # let image = JxlImage::open("input.jxl").unwrap();
 //! for keyframe_idx in 0..image.num_loaded_keyframes() {
 //!     let render = image.render_frame(keyframe_idx)?;
 //!     present_image(render);
@@ -95,6 +95,7 @@ mod fb;
 use bitstream::ContainerDetectingReader;
 pub use jxl_bitstream as bitstream;
 pub use jxl_color::header as color;
+use jxl_frame::FrameContext;
 pub use jxl_image as image;
 pub use jxl_frame::header as frame;
 
@@ -106,8 +107,19 @@ pub use jxl_image::{ExtraChannelType, ImageHeader};
 use jxl_render::{RenderContext, IndexedFrame};
 
 pub use fb::FrameBuffer;
+pub use jxl_threadpool::JxlThreadPool;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+
+#[cfg(feature = "rayon")]
+fn default_pool() -> JxlThreadPool {
+    JxlThreadPool::rayon(None)
+}
+
+#[cfg(not(feature = "rayon"))]
+fn default_pool() -> JxlThreadPool {
+    JxlThreadPool::none()
+}
 
 /// Empty, uninitialized JPEG XL image.
 ///
@@ -133,16 +145,33 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Default)]
 pub struct UninitializedJxlImage {
+    pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
 }
 
+impl Default for UninitializedJxlImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UninitializedJxlImage {
     /// Creates an image struct in empty, uninitialized state.
+    ///
+    /// The struct will be created with default thread pool.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_threads(default_pool())
+    }
+
+    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
+    pub fn with_threads(pool: JxlThreadPool) -> Self {
+        Self {
+            pool,
+            reader: ContainerDetectingReader::new(),
+            buffer: Vec::new(),
+        }
     }
 
     /// Feeds more data into the decoder.
@@ -195,7 +224,10 @@ impl UninitializedJxlImage {
 
         let image_header = Arc::new(image_header);
         let skip_bytes = if image_header.metadata.preview.is_some() {
-            let frame = match Frame::parse(&mut bitstream, image_header.clone()) {
+            let frame = match Frame::parse(
+                &mut bitstream,
+                FrameContext { image_header: image_header.clone(), pool: self.pool.clone() },
+            ) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
                     return Ok(InitializeResult::NeedMoreData(self));
@@ -222,10 +254,11 @@ impl UninitializedJxlImage {
         let render_spot_colour = !image_header.metadata.grayscale();
 
         let mut image = JxlImage {
+            pool: self.pool.clone(),
             reader: self.reader,
             image_header: image_header.clone(),
             embedded_icc,
-            ctx: RenderContext::new(image_header),
+            ctx: RenderContext::with_threads(image_header, self.pool),
             render_spot_colour,
             end_of_image: false,
             buffer: Vec::new(),
@@ -249,6 +282,7 @@ pub enum InitializeResult {
 /// JPEG XL image.
 #[derive(Debug)]
 pub struct JxlImage {
+    pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     image_header: Arc<ImageHeader>,
     embedded_icc: Option<Vec<u8>>,
@@ -262,8 +296,15 @@ pub struct JxlImage {
 
 impl JxlImage {
     /// Creates an image struct in empty, uninitialized state.
+    ///
+    /// The struct will be created with default thread pool.
     pub fn new_uninit() -> UninitializedJxlImage {
         UninitializedJxlImage::new()
+    }
+
+    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
+    pub fn new_uninit_with_threads(pool: JxlThreadPool) -> UninitializedJxlImage {
+        UninitializedJxlImage::with_threads(pool)
     }
 
     /// Reads image with the given reader.
@@ -275,8 +316,16 @@ impl JxlImage {
     /// let image = JxlImage::from_reader(reader).expect("Failed to read image header");
     /// println!("{:?}", image.image_header()); // Prints the image header
     /// ```
-    pub fn from_reader(mut reader: impl std::io::Read) -> Result<Self> {
-        let mut uninit = Self::new_uninit();
+    pub fn from_reader(reader: impl std::io::Read) -> Result<Self> {
+        Self::from_reader_with_threads(reader, default_pool())
+    }
+
+    /// Reads image with the given reader, with custom thread pool.
+    pub fn from_reader_with_threads(
+        mut reader: impl std::io::Read,
+        pool: JxlThreadPool,
+    ) -> Result<Self> {
+        let mut uninit = Self::new_uninit_with_threads(pool);
         let mut buf = vec![0u8; 4096];
         let mut image = loop {
             let count = reader.read(&mut buf)?;
@@ -320,8 +369,16 @@ impl JxlImage {
     /// println!("{:?}", image.image_header()); // Prints the image header
     /// ```
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::open_with_threads(path, default_pool())
+    }
+
+    /// Reads image from the file, with custom thread pool.
+    pub fn open_with_threads(
+        path: impl AsRef<std::path::Path>,
+        pool: JxlThreadPool,
+    ) -> Result<Self> {
         let file = std::fs::File::open(path)?;
-        Self::from_reader(file)
+        Self::from_reader_with_threads(file, pool)
     }
 }
 
@@ -330,6 +387,12 @@ impl JxlImage {
     #[inline]
     pub fn image_header(&self) -> &ImageHeader {
         &self.image_header
+    }
+
+    /// Returns the thread pool used by the renderer.
+    #[inline]
+    pub fn pool(&self) -> &JxlThreadPool {
+        &self.pool
     }
 
     /// Returns the image width with orientation applied.
@@ -542,29 +605,10 @@ impl JxlImage {
     }
 
     /// Renders the given keyframe with optional cropping region.
-    pub fn render_frame_cropped(&mut self, keyframe_index: usize, image_region: Option<CropInfo>) -> Result<Render> {
+    pub fn render_frame_cropped(&self, keyframe_index: usize, image_region: Option<CropInfo>) -> Result<Render> {
         let mut grids = self.ctx.render_keyframe(keyframe_index, image_region.map(From::from))?;
-        let mut grids = grids.take_buffer();
-
-        let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
-        let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
-        let extra_channels: Vec<_> = grids
-            .into_iter()
-            .zip(&self.image_header.metadata.ec_info)
-            .map(|(grid, ec_info)| ExtraChannel {
-                ty: ec_info.ty,
-                name: ec_info.name.clone(),
-                grid,
-            })
-        .collect();
-
-        if self.render_spot_colour {
-            for ec in &extra_channels {
-                if ec.is_spot_colour() {
-                    jxl_render::render_spot_color(&mut color_channels, &ec.grid, &ec.ty)?;
-                }
-            }
-        }
+        let grids = grids.take_buffer();
+        let (color_channels, extra_channels) = self.process_render(grids)?;
 
         let frame = self.ctx.keyframe(keyframe_index).unwrap();
         let frame_header = frame.header();
@@ -576,14 +620,65 @@ impl JxlImage {
             color_channels,
             extra_channels,
         };
-
-        self.end_of_image = frame_header.is_last;
         Ok(result)
     }
 
+    /// Renders the currently loading keyframe with optional cropping region.
+    pub fn render_loading_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<Render> {
+        let (frame, mut grids) = self.ctx.render_loading_keyframe(image_region.map(From::from))?;
+        let frame_header = frame.header();
+        let name = frame_header.name.clone();
+        let duration = frame_header.duration;
+
+        let grids = grids.take_buffer();
+        let (color_channels, extra_channels) = self.process_render(grids)?;
+
+        let result = Render {
+            keyframe_index: self.ctx.loaded_keyframes(),
+            name,
+            duration,
+            orientation: self.image_header.metadata.orientation,
+            color_channels,
+            extra_channels,
+        };
+        Ok(result)
+    }
+
+    fn process_render(
+        &self,
+        mut grids: Vec<SimpleGrid<f32>>,
+    ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
+        let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
+        let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
+        let extra_channels: Vec<_> = grids
+            .into_iter()
+            .zip(&self.image_header.metadata.ec_info)
+            .map(|(grid, ec_info)| ExtraChannel {
+                ty: ec_info.ty,
+                name: ec_info.name.clone(),
+                grid,
+            })
+            .collect();
+
+        if self.render_spot_colour {
+            for ec in &extra_channels {
+                if ec.is_spot_colour() {
+                    jxl_render::render_spot_color(&mut color_channels, &ec.grid, &ec.ty)?;
+                }
+            }
+        }
+
+        Ok((color_channels, extra_channels))
+    }
+
     /// Renders the given keyframe.
-    pub fn render_frame(&mut self, keyframe_index: usize) -> Result<Render> {
+    pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
         self.render_frame_cropped(keyframe_index, None)
+    }
+
+    /// Renders the currently loading keyframe.
+    pub fn render_loading_frame(&mut self) -> Result<Render> {
+        self.render_loading_frame_cropped(None)
     }
 }
 

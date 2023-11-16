@@ -347,14 +347,15 @@ impl DequantMatrixParams {
 
 /// Parameters for decoding `DequantMatrixSet`.
 #[derive(Debug, Copy, Clone)]
-pub struct DequantMatrixSetParams<'a> {
+pub struct DequantMatrixSetParams<'a, 'pool> {
     dct_select: TransformType,
     bit_depth: u32,
     stream_index: u32,
     global_ma_config: Option<&'a jxl_modular::MaConfig>,
+    pool: &'pool jxl_threadpool::JxlThreadPool,
 }
 
-impl<'a> DequantMatrixSetParams<'a> {
+impl<'a, 'pool> DequantMatrixSetParams<'a, 'pool> {
     /// Create a new `DequantMatrixSetParams` with the given information.
     ///
     /// `num_lf_groups` is used to compute the stream index for Modular images.
@@ -362,17 +363,19 @@ impl<'a> DequantMatrixSetParams<'a> {
         bit_depth: u32,
         num_lf_groups: u32,
         global_ma_config: Option<&'a jxl_modular::MaConfig>,
+        pool: &'pool jxl_threadpool::JxlThreadPool,
     ) -> Self {
         Self {
             dct_select: TransformType::Dct8,
             bit_depth,
             stream_index: 1 + num_lf_groups * 3,
             global_ma_config,
+            pool,
         }
     }
 }
 
-impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
+impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixParams {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams) -> Result<Self> {
@@ -414,6 +417,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
             bit_depth,
             stream_index,
             global_ma_config,
+            pool,
         } = params;
 
         let encoding_mode = bitstream.read_bits(3)?;
@@ -477,7 +481,7 @@ impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixParams {
                 let image = params.image_mut().unwrap();
                 let mut subimage = image.prepare_subimage()?;
                 subimage.decode(bitstream, stream_index, false)?;
-                subimage.finish();
+                subimage.finish(pool);
 
                 Raw { denominator, params }
             },
@@ -501,10 +505,10 @@ pub struct DequantMatrixSet {
     matrices_tr: Vec<[Vec<f32>; 3]>,
 }
 
-impl Bundle<DequantMatrixSetParams<'_>> for DequantMatrixSet {
+impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixSet {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams<'_, '_>) -> Result<Self> {
         use TransformType::*;
         const DCT_SELECT_LIST: [TransformType; 17] = [
             Dct8,

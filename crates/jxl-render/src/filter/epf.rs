@@ -9,6 +9,7 @@ pub fn apply_epf(
     fb: &mut ImageWithRegion,
     lf_groups: &HashMap<u32, LfGroup>,
     frame_header: &FrameHeader,
+    pool: &jxl_threadpool::JxlThreadPool,
 ) {
     let EdgePreservingFilter::Enabled {
         iters,
@@ -128,6 +129,7 @@ pub fn apply_epf(
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass0_sigma_scale,
+            pool,
         );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
@@ -166,6 +168,7 @@ pub fn apply_epf(
             channel_scale,
             sigma.border_sad_mul,
             1.0,
+            pool,
         );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }
@@ -204,6 +207,7 @@ pub fn apply_epf(
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass2_sigma_scale,
+            pool,
         );
         std::mem::swap(&mut fb_in, &mut fb_out);
     }

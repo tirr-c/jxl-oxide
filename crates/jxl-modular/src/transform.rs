@@ -49,11 +49,16 @@ impl TransformInfo {
         }
     }
 
-    pub(super) fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, bit_depth: u32) {
+    pub(super) fn inverse(
+        &self,
+        grids: &mut Vec<TransformedGrid<'_>>,
+        bit_depth: u32,
+        pool: &jxl_threadpool::JxlThreadPool,
+    ) {
         match self {
             Self::Rct(rct) => rct.inverse(grids),
             Self::Palette(pal) => pal.inverse(grids, bit_depth),
-            Self::Squeeze(sq) => sq.inverse(grids),
+            Self::Squeeze(sq) => sq.inverse(grids, pool),
         }
     }
 
@@ -502,7 +507,11 @@ impl Squeeze {
         Ok(())
     }
 
-    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>) {
+    fn inverse(
+        &self,
+        grids: &mut Vec<TransformedGrid<'_>>,
+        pool: &jxl_threadpool::JxlThreadPool,
+    ) {
         for sp in self.sp.iter().rev() {
             let begin = sp.begin_c as usize;
             let channel_count = sp.num_c as usize;
@@ -514,26 +523,53 @@ impl Squeeze {
             };
 
             for (ch, residu) in grids[begin..end].iter_mut().zip(residual_channels) {
-                sp.inverse(ch, residu);
+                sp.inverse(ch, residu, pool);
             }
         }
     }
 }
 
 impl SqueezeParams {
-    fn inverse<'dest>(&self, i0: &mut TransformedGrid<'dest>, i1: TransformedGrid<'dest>) {
+    fn inverse<'dest>(
+        &self,
+        i0: &mut TransformedGrid<'dest>,
+        i1: TransformedGrid<'dest>,
+        pool: &jxl_threadpool::JxlThreadPool,
+    ) {
         let i0 = i0.grid_mut();
         let TransformedGrid::Single(i1) = i1 else { panic!("residual channel should be Single channel") };
         if self.horizontal {
             if !i0.merge_interleaved_horizontal(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            squeeze::inverse_h(i0)
+            let width = i0.width();
+            let height = i0.height();
+            if height > 16 {
+                pool.scope(|scope| {
+                    let remaining = i0.split_vertical(0).1;
+                    for mut group in remaining.into_groups(width, 8) {
+                        scope.spawn(move |_| squeeze::inverse_h(&mut group));
+                    }
+                });
+            } else {
+                squeeze::inverse_h(i0);
+            }
         } else {
             if !i0.merge_interleaved_vertical(i1) {
                 panic!("two grids are not from same squeeze transform");
             }
-            squeeze::inverse_v(i0)
+            let width = i0.width();
+            let height = i0.height();
+            if width > 16 {
+                pool.scope(|scope| {
+                    let remaining = i0.split_horizontal(0).1;
+                    for mut group in remaining.into_groups(8, height) {
+                        scope.spawn(move |_| squeeze::inverse_v(&mut group));
+                    }
+                });
+            } else {
+                squeeze::inverse_v(i0);
+            }
         }
     }
 }

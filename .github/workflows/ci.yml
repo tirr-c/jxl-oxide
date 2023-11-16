@@ -41,6 +41,11 @@ jobs:
         run: cargo install cross --version 0.2.5
       - name: Run tests
         run: cross test --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: images
+          path: crates/jxl-oxide/tests/.artifact/
 
   coverage:
     name: Coverage
@@ -99,6 +104,11 @@ jobs:
           flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: images
+          path: crates/jxl-oxide/tests/.artifact/
 
   clippy:
     name: Clippy

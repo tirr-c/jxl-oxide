@@ -1,7 +1,7 @@
 use jxl_oxide::JxlImage;
 
 fn fuzz_decode(data: &[u8]) {
-    if let Ok(mut image) = JxlImage::from_reader(std::io::Cursor::new(data)) {
+    if let Ok(image) = JxlImage::from_reader(std::io::Cursor::new(data)) {
         let _ = image.image_header();
         for keyframe_idx in 0..image.num_loaded_keyframes() {
             let _ = image.render_frame(keyframe_idx);

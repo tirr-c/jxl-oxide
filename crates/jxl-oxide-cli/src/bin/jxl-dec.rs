@@ -1,7 +1,7 @@
 use std::{path::PathBuf, io::prelude::*};
 
 use clap::Parser;
-use jxl_oxide::{JxlImage, CropInfo, FrameBuffer, PixelFormat, Render};
+use jxl_oxide::{JxlImage, CropInfo, FrameBuffer, PixelFormat, Render, JxlThreadPool};
 use lcms2::Profile;
 
 enum LcmsTransform {
@@ -45,6 +45,10 @@ struct Args {
     /// Print debug information
     #[arg(short, long)]
     verbose: bool,
+    /// Number of parallelism to use
+    #[cfg(feature = "rayon")]
+    #[arg(short = 'j', long)]
+    num_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -121,7 +125,13 @@ fn main() {
     let span = tracing::span!(tracing::Level::TRACE, "jxl-dec");
     let _guard = span.enter();
 
-    let mut image = JxlImage::open(&args.input).expect("Failed to open file");
+    #[cfg(feature = "rayon")]
+    let pool = JxlThreadPool::rayon(args.num_threads);
+    #[cfg(not(feature = "rayon"))]
+    let pool = JxlThreadPool::none();
+
+    let mut image = JxlImage::open_with_threads(&args.input, pool.clone())
+        .expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }
@@ -167,11 +177,30 @@ fn main() {
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
-    for idx in 0..image.num_loaded_keyframes() {
-        let frame = image.render_frame(idx).expect("rendering frames failed");
-        keyframes.push(frame);
+
+    #[allow(unused_mut)]
+    let mut rendered = false;
+    #[cfg(feature = "rayon")]
+    if let Some(rayon_pool) = &pool.as_rayon_pool() {
+        keyframes = rayon_pool.install(|| {
+            use rayon::prelude::*;
+
+            (0..image.num_loaded_keyframes())
+                .into_par_iter()
+                .map(|idx| image.render_frame_cropped(idx, crop))
+                .collect::<Result<Vec<_>, _>>()
+        }).expect("rendering frames failed");
+        rendered = true;
     }
-    if let Ok(frame) = image.render_frame(image.num_loaded_keyframes()) {
+
+    if !rendered {
+        for idx in 0..image.num_loaded_keyframes() {
+            let frame = image.render_frame_cropped(idx, crop).expect("rendering frames failed");
+            keyframes.push(frame);
+        }
+    }
+
+    if let Ok(frame) = image.render_loading_frame_cropped(crop) {
         tracing::warn!("Rendered partially loaded frame");
         keyframes.push(frame);
     }

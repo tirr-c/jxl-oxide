@@ -1,4 +1,4 @@
-use jxl_frame::{data::{GlobalModular, PassGroupParams}, FrameHeader};
+use jxl_frame::{data::GlobalModular, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
 use jxl_modular::ChannelShift;
@@ -12,10 +12,11 @@ use crate::{
     Result,
 };
 
-pub fn render_modular(
+pub(crate) fn render_modular(
     frame: &IndexedFrame,
     cache: &mut RenderCache,
     region: Region,
+    pool: &jxl_threadpool::JxlThreadPool,
 ) -> Result<(ImageWithRegion, GlobalModular)> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -30,7 +31,7 @@ pub fn render_modular(
         cache.lf_global.as_ref().unwrap()
     };
     let mut gmodular = lf_global.gmodular.clone();
-    let modular_region = compute_modular_region(frame_header, &gmodular, region);
+    let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let shifts_cbycr = [0, 1, 2].map(|idx| {
@@ -46,71 +47,86 @@ pub fn render_modular(
     let lf_group_image = groups.lf_groups;
     let pass_group_image = groups.pass_groups;
 
-    let lf_groups = &mut cache.lf_groups;
-    tracing::trace_span!("Load LF groups").in_scope(|| {
-        crate::load_lf_groups(
-            frame,
-            lf_global.vardct.as_ref(),
-            lf_groups,
-            gmodular.ma_config.as_ref(),
-            lf_group_image,
-            modular_region.downsample(3),
-        )
-    })?;
-
-    let group_dim = frame_header.group_dim();
-    let groups_per_row = frame_header.groups_per_row();
-    tracing::trace_span!("Decode pass groups").in_scope(|| -> Result<_> {
-        for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
-            let pass_idx = pass_idx as u32;
-            let mut group_it = pass_image.into_iter();
-            for group_idx in 0..frame_header.num_groups() {
-                let modular = group_it.next();
-
-                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
-                let Some(bitstream) = frame.pass_group_bitstream(pass_idx, group_idx).transpose()? else { continue; };
-                let allow_partial = bitstream.partial;
-                let mut bitstream = bitstream.bitstream;
-
-                let group_x = group_idx % groups_per_row;
-                let group_y = group_idx / groups_per_row;
-                let left = group_x * group_dim;
-                let top = group_y * group_dim;
-
-                let group_region = Region {
-                    left: left as i32,
-                    top: top as i32,
-                    width: group_dim,
-                    height: group_dim,
-                };
-                if group_region.intersection(modular_region).is_empty() {
-                    continue;
-                }
-
-                let result = jxl_frame::data::decode_pass_group(
-                    &mut bitstream,
-                    PassGroupParams {
-                        frame_header,
-                        lf_group,
-                        pass_idx,
-                        group_idx,
-                        global_ma_config: gmodular.ma_config.as_ref(),
-                        modular,
-                        vardct: None,
-                        allow_partial,
-                    },
+    tracing::trace_span!("Decode").in_scope(|| {
+        let result = std::sync::RwLock::new(Result::Ok(()));
+        pool.scope(|scope| {
+            let lf_groups = &mut cache.lf_groups;
+            scope.spawn(|_| {
+                let r = crate::load_lf_groups(
+                    frame,
+                    lf_global.vardct.as_ref(),
+                    lf_groups,
+                    gmodular.ma_config.as_ref(),
+                    lf_group_image,
+                    modular_region.downsample(3),
+                    pool,
                 );
-                if !allow_partial {
-                    result?;
+                if r.is_err() {
+                    *result.write().unwrap() = r;
+                }
+            });
+
+            let group_dim = frame_header.group_dim();
+            let groups_per_row = frame_header.groups_per_row();
+            for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
+                let pass_idx = pass_idx as u32;
+                for (group_idx, modular) in pass_image.into_iter().enumerate() {
+                    if result.read().unwrap().is_err() {
+                        return;
+                    }
+
+                    let group_idx = group_idx as u32;
+                    let group_x = group_idx % groups_per_row;
+                    let group_y = group_idx / groups_per_row;
+                    let left = group_x * group_dim;
+                    let top = group_y * group_dim;
+
+                    let group_region = Region {
+                        left: left as i32,
+                        top: top as i32,
+                        width: group_dim,
+                        height: group_dim,
+                    };
+                    if group_region.intersection(modular_region).is_empty() {
+                        continue;
+                    }
+
+                    let bitstream = match frame.pass_group_bitstream(pass_idx, group_idx) {
+                        Some(Ok(bitstream)) => bitstream,
+                        Some(Err(e)) => {
+                            *result.write().unwrap() = Err(e.into());
+                            return;
+                        },
+                        None => continue,
+                    };
+
+                    let allow_partial = bitstream.partial;
+                    let mut bitstream = bitstream.bitstream;
+                    let global_ma_config = gmodular.ma_config.as_ref();
+                    let result = &result;
+                    scope.spawn(move |_| {
+                        let r = jxl_frame::data::decode_pass_group_modular(
+                            &mut bitstream,
+                            frame_header,
+                            global_ma_config,
+                            pass_idx,
+                            group_idx,
+                            modular,
+                            allow_partial,
+                            pool,
+                        );
+                        if !allow_partial && r.is_err() {
+                            *result.write().unwrap() = r.map_err(From::from);
+                        }
+                    });
                 }
             }
-        }
-        Ok(())
+        });
+        result.into_inner().unwrap()
     })?;
 
     tracing::trace_span!("Inverse Modular transform").in_scope(|| {
-        modular_image.prepare_subimage().unwrap().finish();
+        modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
     tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| {
@@ -152,9 +168,18 @@ pub fn compute_modular_region(
     frame_header: &FrameHeader,
     gmodular: &GlobalModular,
     region: Region,
+    is_lf: bool,
 ) -> Region {
     if gmodular.modular.has_palette() || gmodular.modular.has_squeeze() {
-        Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height())
+        let mut width = frame_header.color_sample_width();
+        let mut height = frame_header.color_sample_height();
+        if is_lf {
+            width = (width + 7) / 8;
+            height = (height + 7) / 8;
+        }
+        let width = width.max(region.width.checked_add_signed(region.left).unwrap());
+        let height = height.max(region.height.checked_add_signed(region.top).unwrap());
+        Region::with_size(width, height)
     } else {
         region
     }

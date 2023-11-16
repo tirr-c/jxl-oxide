@@ -326,9 +326,9 @@ impl<'dest> TransformedModularSubimage<'dest> {
         Ok(image)
     }
 
-    pub fn finish(mut self) -> bool {
+    pub fn finish(mut self, pool: &jxl_threadpool::JxlThreadPool) -> bool {
         for tr in self.header.transform.iter().rev() {
-            tr.inverse(&mut self.grid, self.bit_depth);
+            tr.inverse(&mut self.grid, self.bit_depth, pool);
         }
         !self.partial
     }

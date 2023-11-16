@@ -115,12 +115,14 @@ impl Bitstream<'_> {
         }
 
         n -= self.remaining_buf_bits;
+        self.buf = 0;
         self.remaining_buf_bits = 0;
         if n > self.bytes.len() * 8 {
             return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
         }
 
         self.bytes = &self.bytes[n / 8..];
+        n %= 8;
         self.refill();
         self.remaining_buf_bits = self.remaining_buf_bits
             .checked_sub(n)
