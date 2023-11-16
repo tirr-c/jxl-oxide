@@ -245,7 +245,10 @@ fn render_features(
 ) -> Result<()> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
-    let lf_global = cache.lf_global.as_ref().unwrap();
+    let Some(lf_global) = cache.lf_global.as_ref() else {
+        tracing::trace!("LfGlobal not available, skipping feature rendering");
+        return Ok(());
+    };
     let base_correlations_xb = lf_global.vardct.as_ref().map(|x| {
         (
             x.lf_chan_corr.base_correlation_x,
