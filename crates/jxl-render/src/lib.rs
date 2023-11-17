@@ -508,7 +508,7 @@ impl RenderContext {
     }
 
     fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion, image_region: Option<Region>) {
-        let frame_region = image_region_to_frame(frame, image_region, false);
+        let frame_region = image_region_to_frame(frame, image_region, frame.header().lf_level > 0);
         if grid.region() != frame_region {
             let mut new_grid = ImageWithRegion::from_region(grid.channels(), frame_region);
             for (ch, g) in new_grid.buffer_mut().iter_mut().enumerate() {
