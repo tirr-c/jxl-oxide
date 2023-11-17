@@ -111,7 +111,7 @@ jobs:
           path: crates/jxl-oxide/tests/.artifact/
 
   clippy:
-    name: Clippy
+    name: Rustfmt and Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -129,4 +129,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
+      - run: cargo fmt --all --check
       - run: cargo clippy -- -D warnings
