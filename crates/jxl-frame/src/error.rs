@@ -6,9 +6,7 @@ pub enum Error {
     Modular(jxl_modular::Error),
     VarDct(jxl_vardct::Error),
     InvalidTocPermutation,
-    IncompleteFrameData {
-        field: &'static str,
-    },
+    IncompleteFrameData { field: &'static str },
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -43,7 +41,9 @@ impl std::fmt::Display for Error {
             Self::Modular(err) => write!(f, "modular stream error: {}", err),
             Self::VarDct(err) => write!(f, "vardct error: {}", err),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
-            Self::IncompleteFrameData { field } => write!(f, "incomplete frame data: {} is missing", field),
+            Self::IncompleteFrameData { field } => {
+                write!(f, "incomplete frame data: {} is missing", field)
+            }
         }
     }
 }
@@ -63,15 +63,17 @@ impl Error {
     /// Returns whether the error is caused by the unexpected EOF of the bitstream.
     pub fn unexpected_eof(&self) -> bool {
         let bitstream_err = match self {
-            | Self::Bitstream(b)
+            Self::Bitstream(b)
             | Self::Decoder(jxl_coding::Error::Bitstream(b))
             | Self::Modular(jxl_modular::Error::Decoder(jxl_coding::Error::Bitstream(b)))
             | Self::Modular(jxl_modular::Error::Bitstream(b))
             | Self::VarDct(jxl_vardct::Error::Bitstream(b))
             | Self::VarDct(jxl_vardct::Error::Decoder(jxl_coding::Error::Bitstream(b)))
             | Self::VarDct(jxl_vardct::Error::Modular(jxl_modular::Error::Bitstream(b)))
-            | Self::VarDct(jxl_vardct::Error::Modular(jxl_modular::Error::Decoder(jxl_coding::Error::Bitstream(b)))) => b,
-            | _ => return false,
+            | Self::VarDct(jxl_vardct::Error::Modular(jxl_modular::Error::Decoder(
+                jxl_coding::Error::Bitstream(b),
+            ))) => b,
+            _ => return false,
         };
         if let jxl_bitstream::Error::Io(e) = bitstream_err {
             e.kind() == std::io::ErrorKind::UnexpectedEof

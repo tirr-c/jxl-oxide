@@ -22,7 +22,11 @@ pub fn adaptive_lf_smoothing_impl(
     let mut udsum_y = vec![0.0f32; width * (height - 2)];
     let mut udsum_b = vec![0.0f32; width * (height - 2)];
 
-    for (g, out) in [(&mut *in_x, &mut udsum_x), (&mut *in_y, &mut udsum_y), (&mut *in_b, &mut udsum_b)] {
+    for (g, out) in [
+        (&mut *in_x, &mut udsum_x),
+        (&mut *in_y, &mut udsum_y),
+        (&mut *in_b, &mut udsum_b),
+    ] {
         let up = g.chunks_exact(width);
         let down = g[width * 2..].chunks_exact(width);
         let out = out.chunks_exact_mut(width);
@@ -42,7 +46,9 @@ pub fn adaptive_lf_smoothing_impl(
     let mut udsum_b_row = udsum_b.chunks_exact(width);
 
     loop {
-        let Some(udsum_x) = udsum_x_row.next() else { break; };
+        let Some(udsum_x) = udsum_x_row.next() else {
+            break;
+        };
         let udsum_y = udsum_y_row.next().unwrap();
         let udsum_b = udsum_b_row.next().unwrap();
         let in_x = in_x_row.next().unwrap();

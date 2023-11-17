@@ -58,7 +58,7 @@ impl JxlThreadPool {
                 Err(e) => {
                     tracing::warn!(%e, "Failed to query available parallelism; falling back to single-threaded");
                     return Self::none();
-                },
+                }
             }
         } else {
             num_threads_requested
@@ -73,11 +73,11 @@ impl JxlThreadPool {
             Ok(inner) => {
                 tracing::debug!(num_threads, "Initialized Rayon thread pool");
                 Self(inner)
-            },
+            }
             Err(e) => {
                 tracing::warn!(%e, "Failed to initialize thread pool; falling back to single-threaded");
                 Self::none()
-            },
+            }
         }
     }
 
@@ -117,15 +117,11 @@ impl JxlThreadPool {
     ) -> R {
         match &self.0 {
             #[cfg(feature = "rayon")]
-            JxlThreadPoolImpl::Rayon(pool) => {
-                pool.scope(|scope| {
-                    let scope = JxlScope(JxlScopeInner::Rayon(scope));
-                    op(scope)
-                })
-            },
-            JxlThreadPoolImpl::None => {
-                op(JxlScope(JxlScopeInner::None(Default::default())))
-            },
+            JxlThreadPoolImpl::Rayon(pool) => pool.scope(|scope| {
+                let scope = JxlScope(JxlScopeInner::Rayon(scope));
+                op(scope)
+            }),
+            JxlThreadPoolImpl::None => op(JxlScope(JxlScopeInner::None(Default::default()))),
         }
     }
 }
@@ -135,15 +131,11 @@ impl<'scope> JxlScope<'_, 'scope> {
     pub fn spawn(&self, op: impl for<'r> FnOnce(JxlScope<'r, 'scope>) + Send + 'scope) {
         match self.0 {
             #[cfg(feature = "rayon")]
-            JxlScopeInner::Rayon(scope) => {
-                scope.spawn(|scope| {
-                    let scope = JxlScope(JxlScopeInner::Rayon(scope));
-                    op(scope)
-                })
-            },
-            JxlScopeInner::None(_) => {
-                op(JxlScope(JxlScopeInner::None(Default::default())))
-            },
+            JxlScopeInner::Rayon(scope) => scope.spawn(|scope| {
+                let scope = JxlScope(JxlScopeInner::Rayon(scope));
+                op(scope)
+            }),
+            JxlScopeInner::None(_) => op(JxlScope(JxlScopeInner::None(Default::default()))),
         }
     }
 }

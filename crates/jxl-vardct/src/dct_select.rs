@@ -142,7 +142,10 @@ impl TransformType {
     pub fn need_transpose(&self) -> bool {
         use TransformType::*;
 
-        if matches!(self, Hornuss | Dct2 | Dct4 | Dct4x8 | Dct8x4 | Afv0 | Afv1 | Afv2 | Afv3) {
+        if matches!(
+            self,
+            Hornuss | Dct2 | Dct4 | Dct4x8 | Dct8x4 | Afv0 | Afv1 | Afv2 | Afv3
+        ) {
             false
         } else {
             let (w, h) = self.dct_select_size();

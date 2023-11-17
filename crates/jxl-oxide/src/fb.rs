@@ -93,9 +93,7 @@ impl FrameBuffer {
         assert_eq!(self.buf.len(), grouped_len * N);
         // SAFETY: Arrays have size of size_of::<T> * N, alignment of T.
         // Buffer length is checked above.
-        unsafe {
-            std::slice::from_raw_parts(self.buf.as_ptr() as *const [f32; N], grouped_len)
-        }
+        unsafe { std::slice::from_raw_parts(self.buf.as_ptr() as *const [f32; N], grouped_len) }
     }
 
     #[inline]

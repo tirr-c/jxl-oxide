@@ -25,13 +25,19 @@ pub trait BundleDefault<Ctx = ()>: Sized {
     fn default_with_context(ctx: Ctx) -> Self;
 }
 
-impl<T, Ctx> BundleDefault<Ctx> for T where T: Default + Sized {
+impl<T, Ctx> BundleDefault<Ctx> for T
+where
+    T: Default + Sized,
+{
     fn default_with_context(_: Ctx) -> Self {
         Default::default()
     }
 }
 
-impl<T, Ctx> Bundle<Ctx> for Option<T> where T: Bundle<Ctx> {
+impl<T, Ctx> Bundle<Ctx> for Option<T>
+where
+    T: Bundle<Ctx>,
+{
     type Error = T::Error;
 
     fn parse(bitstream: &mut Bitstream, ctx: Ctx) -> std::result::Result<Self, Self::Error> {

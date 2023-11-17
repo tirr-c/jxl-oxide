@@ -7,8 +7,12 @@ const LANE_SIZE: usize = 4;
 type Lane = __m128;
 
 fn transpose_lane(lanes: &mut [Lane]) {
-    let [row0, row1, row2, row3] = lanes else { panic!() };
-    unsafe { _MM_TRANSPOSE4_PS(row0, row1, row2, row3); }
+    let [row0, row1, row2, row3] = lanes else {
+        panic!()
+    };
+    unsafe {
+        _MM_TRANSPOSE4_PS(row0, row1, row2, row3);
+    }
 }
 
 pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
@@ -69,18 +73,8 @@ unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC1: f32 = 1.306563;
 
     let v_flip = unsafe { _mm_shuffle_ps::<0b01001110>(v, v) };
-    let mul_a = Lane::set([
-        1.0,
-        (std::f32::consts::SQRT_2 + 1.0) * SEC0,
-        -1.0,
-        -SEC1,
-    ]);
-    let mul_b = Lane::set([
-        1.0,
-        SEC0,
-        1.0,
-        (std::f32::consts::SQRT_2 - 1.0) * SEC1,
-    ]);
+    let mul_a = Lane::set([1.0, (std::f32::consts::SQRT_2 + 1.0) * SEC0, -1.0, -SEC1]);
+    let mul_b = Lane::set([1.0, SEC0, 1.0, (std::f32::consts::SQRT_2 - 1.0) * SEC1]);
     let tmp = v.muladd(mul_a, v_flip.mul(mul_b));
 
     let tmp_a = unsafe { _mm_shuffle_ps::<0b00101000>(tmp, tmp) };
@@ -102,13 +96,13 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     let input1 = vl.sub(vr_rev).mul(sec_vec);
     let output0 = dct4_vec_forward(input0);
     let output1 = dct4_vec_forward(input1);
-    let output1_shifted = unsafe { _mm_castsi128_ps(_mm_srli_si128::<4>(_mm_castps_si128(output1))) };
+    let output1_shifted =
+        unsafe { _mm_castsi128_ps(_mm_srli_si128::<4>(_mm_castps_si128(output1))) };
     let output1_mul = Lane::set([std::f32::consts::SQRT_2, 1.0, 1.0, 1.0]);
     let output1 = output1.muladd(output1_mul, output1_shifted);
-    (
-        unsafe { _mm_unpacklo_ps(output0, output1) },
-        unsafe { _mm_unpackhi_ps(output0, output1) },
-    )
+    (unsafe { _mm_unpacklo_ps(output0, output1) }, unsafe {
+        _mm_unpackhi_ps(output0, output1)
+    })
 }
 
 unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
@@ -128,10 +122,9 @@ unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     let output1 = dct4_vec_inverse(input1);
     let output1 = output1.mul(sec_vec);
     let sub = output0.sub(output1);
-    (
-        output0.add(output1),
-        unsafe { _mm_shuffle_ps::<0b00011011>(sub, sub) },
-    )
+    (output0.add(output1), unsafe {
+        _mm_shuffle_ps::<0b00011011>(sub, sub)
+    })
 }
 
 unsafe fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
@@ -180,11 +173,7 @@ unsafe fn column_dct_lane(
     }
 }
 
-unsafe fn row_dct_lane(
-    io: &mut CutGrid<'_, Lane>,
-    scratch: &mut [Lane],
-    direction: DctDirection,
-) {
+unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], direction: DctDirection) {
     let width = io.width() * LANE_SIZE;
     let height = io.height();
     let (io_lanes, scratch_lanes) = scratch[..width * 2].split_at_mut(width);
@@ -258,10 +247,18 @@ unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
         io.get(0, 3).add(io.get(0, 4)).mul(half),
     ];
     let input1 = [
-        io.get(0, 0).sub(io.get(0, 7)).mul(Lane::splat_f32(sec[0] / 2.0)),
-        io.get(0, 1).sub(io.get(0, 6)).mul(Lane::splat_f32(sec[1] / 2.0)),
-        io.get(0, 2).sub(io.get(0, 5)).mul(Lane::splat_f32(sec[2] / 2.0)),
-        io.get(0, 3).sub(io.get(0, 4)).mul(Lane::splat_f32(sec[3] / 2.0)),
+        io.get(0, 0)
+            .sub(io.get(0, 7))
+            .mul(Lane::splat_f32(sec[0] / 2.0)),
+        io.get(0, 1)
+            .sub(io.get(0, 6))
+            .mul(Lane::splat_f32(sec[1] / 2.0)),
+        io.get(0, 2)
+            .sub(io.get(0, 5))
+            .mul(Lane::splat_f32(sec[2] / 2.0)),
+        io.get(0, 3)
+            .sub(io.get(0, 4))
+            .mul(Lane::splat_f32(sec[3] / 2.0)),
     ];
     let output0 = dct4_forward(input0);
     for (idx, v) in output0.into_iter().enumerate() {

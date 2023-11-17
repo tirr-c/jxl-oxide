@@ -1,4 +1,4 @@
-use std::{ptr::NonNull, ops::RangeBounds};
+use std::{ops::RangeBounds, ptr::NonNull};
 
 use crate::SimdVector;
 
@@ -111,7 +111,8 @@ impl<'g, V> SharedSubgrid<'g, V> {
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let left_grid = SharedSubgrid::new(left_ptr, x, self.height, self.stride);
-            let right_grid = SharedSubgrid::new(right_ptr, self.width - x, self.height, self.stride);
+            let right_grid =
+                SharedSubgrid::new(right_ptr, self.width - x, self.height, self.stride);
             (left_grid, right_grid)
         }
     }
@@ -128,12 +129,17 @@ impl<'g, V> SharedSubgrid<'g, V> {
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let top_grid = SharedSubgrid::new(top_ptr, self.width, y, self.stride);
-            let bottom_grid = SharedSubgrid::new(bottom_ptr, self.width, self.height - y, self.stride);
+            let bottom_grid =
+                SharedSubgrid::new(bottom_ptr, self.width, self.height - y, self.stride);
             (top_grid, bottom_grid)
         }
     }
 
-    pub fn subgrid(&self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> SharedSubgrid<'g, V> {
+    pub fn subgrid(
+        &self,
+        range_x: impl RangeBounds<usize>,
+        range_y: impl RangeBounds<usize>,
+    ) -> SharedSubgrid<'g, V> {
         use std::ops::Bound;
 
         let left = match range_x.start_bound() {
@@ -165,15 +171,17 @@ impl<'g, V> SharedSubgrid<'g, V> {
 
         let base_ptr = NonNull::new(self.get_ptr(left, top)).unwrap();
         // SAFETY: subgrid is contained in `self`.
-        unsafe {
-            SharedSubgrid::new(base_ptr, right - left, bottom - top, self.stride)
-        }
+        unsafe { SharedSubgrid::new(base_ptr, right - left, bottom - top, self.stride) }
     }
 }
 
 impl<'g> SharedSubgrid<'g, f32> {
     pub fn as_vectored<V: SimdVector>(&self) -> Option<SharedSubgrid<'g, V>> {
-        assert!(V::available(), "Vector type `{}` is not supported by current CPU", std::any::type_name::<V>());
+        assert!(
+            V::available(),
+            "Vector type `{}` is not supported by current CPU",
+            std::any::type_name::<V>()
+        );
 
         let mask = V::SIZE - 1;
         let align_mask = std::mem::align_of::<V>() - 1;

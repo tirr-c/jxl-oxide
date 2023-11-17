@@ -1,10 +1,13 @@
 use std::num::Wrapping;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_grid::{SimpleGrid, CutGrid};
+use jxl_grid::{CutGrid, SimpleGrid};
 
-use crate::{Error, Result, image::TransformedGrid};
-use super::{ModularChannelInfo, predictor::{Predictor, PredictorState, WpHeader}};
+use super::{
+    predictor::{Predictor, PredictorState, WpHeader},
+    ModularChannelInfo,
+};
+use crate::{image::TransformedGrid, Error, Result};
 
 mod squeeze;
 
@@ -16,23 +19,26 @@ pub enum TransformInfo {
 }
 
 impl TransformInfo {
-    pub(super) fn prepare_transform_info(&mut self, channels: &mut super::ModularChannels) -> Result<()> {
+    pub(super) fn prepare_transform_info(
+        &mut self,
+        channels: &mut super::ModularChannels,
+    ) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
             Self::Palette(pal) => pal.transform_channel_info(channels, &mut Vec::new(), None),
             Self::Squeeze(sq) => {
                 sq.set_default_params(channels);
                 sq.transform_channel_info(channels, None)
-            },
+            }
         }
     }
 
-    pub(super) fn prepare_meta_channels(
-        &self,
-        meta_channels: &mut Vec<SimpleGrid<i32>>,
-    ) {
+    pub(super) fn prepare_meta_channels(&self, meta_channels: &mut Vec<SimpleGrid<i32>>) {
         if let Self::Palette(pal) = self {
-            meta_channels.insert(0, SimpleGrid::new(pal.nb_colours as usize, pal.num_c as usize));
+            meta_channels.insert(
+                0,
+                SimpleGrid::new(pal.nb_colours as usize, pal.num_c as usize),
+            );
         }
     }
 
@@ -44,7 +50,9 @@ impl TransformInfo {
     ) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
-            Self::Palette(pal) => pal.transform_channel_info(channels, meta_channel_grids, Some(grids)),
+            Self::Palette(pal) => {
+                pal.transform_channel_info(channels, meta_channel_grids, Some(grids))
+            }
             Self::Squeeze(sq) => sq.transform_channel_info(channels, Some(grids)),
         }
     }
@@ -83,7 +91,7 @@ impl Bundle<&WpHeader> for TransformInfo {
             value => Err(crate::Error::Bitstream(jxl_bitstream::Error::InvalidEnum {
                 name: "TransformId",
                 value,
-            }))
+            })),
         }
     }
 }
@@ -126,7 +134,10 @@ impl Bundle<&WpHeader> for Palette {
     fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> Result<Self> {
         let begin_c = read_bits!(bitstream, U32(u(3), 8 + u(6), 72 + u(10), 1096 + u(13)))?;
         let num_c = read_bits!(bitstream, U32(1, 3, 4, 1 + u(13)))?;
-        let nb_colours = read_bits!(bitstream, U32(u(8), 256 + u(10), 1280 + u(12), 5376 + u(16)))?;
+        let nb_colours = read_bits!(
+            bitstream,
+            U32(u(8), 256 + u(10), 1280 + u(12), 5376 + u(16))
+        )?;
         let nb_deltas = read_bits!(bitstream, U32(0, 1 + u(8), 257 + u(10), 1281 + u(16)))?;
         let d_pred = Predictor::try_from(bitstream.read_bits(4)?)?;
         Ok(Self {
@@ -145,10 +156,7 @@ impl Bundle<&WpHeader> for Palette {
 }
 
 impl Rct {
-    fn transform_channel_info(
-        &self,
-        channels: &mut super::ModularChannels,
-    ) -> Result<()> {
+    fn transform_channel_info(&self, channels: &mut super::ModularChannels) -> Result<()> {
         let begin_c = self.begin_c;
         let end_c = self.begin_c + 3;
         if end_c as usize > channels.info.len() {
@@ -170,9 +178,7 @@ impl Rct {
         let ty = self.rct_type % 7;
 
         let begin_c = self.begin_c as usize;
-        let mut channels = grids
-            .iter_mut()
-            .skip(begin_c);
+        let mut channels = grids.iter_mut().skip(begin_c);
         let a = channels.next().unwrap().grid_mut();
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
@@ -186,11 +192,7 @@ impl Rct {
 
         for y in 0..height {
             for x in 0..width {
-                let samples = [
-                    a.get_mut(x, y),
-                    b.get_mut(x, y),
-                    c.get_mut(x, y),
-                ];
+                let samples = [a.get_mut(x, y), b.get_mut(x, y), c.get_mut(x, y)];
 
                 let a = Wrapping(*samples[0]);
                 let b = Wrapping(*samples[1]);
@@ -205,11 +207,7 @@ impl Rct {
                     d = f + b;
                 } else {
                     d = a;
-                    f = if ty & 1 != 0 {
-                        c + a
-                    } else {
-                        c
-                    };
+                    f = if ty & 1 != 0 { c + a } else { c };
                     e = if (ty >> 1) == 1 {
                         b + a
                     } else if (ty >> 1) == 2 {
@@ -227,6 +225,7 @@ impl Rct {
 }
 
 impl Palette {
+    #[rustfmt::skip]
     const DELTA_PALETTE: [[i16; 3]; 72] = [
         [0, 0, 0], [4, 4, 4], [11, 0, 0], [0, 0, -13], [0, -12, 0], [-10, -10, -10],
         [-18, -18, -18], [-27, -27, -27], [-18, -18, 0], [0, 0, -32], [-32, 0, 0], [-37, -37, -37],
@@ -262,11 +261,18 @@ impl Palette {
             channels.nb_meta_channels += 1;
         }
 
-        channels.info.drain((begin_c as usize + 1)..(end_c as usize));
-        channels.info.insert(0, ModularChannelInfo::new_shifted(self.nb_colours, self.num_c, -1, -1));
+        channels
+            .info
+            .drain((begin_c as usize + 1)..(end_c as usize));
+        channels.info.insert(
+            0,
+            ModularChannelInfo::new_shifted(self.nb_colours, self.num_c, -1, -1),
+        );
 
         if let Some(grids) = grids {
-            let members = grids.drain((begin_c as usize + 1)..(end_c as usize)).collect::<Vec<_>>();
+            let members = grids
+                .drain((begin_c as usize + 1)..(end_c as usize))
+                .collect::<Vec<_>>();
             grids[begin_c as usize].merge(members);
 
             let palette_grid = meta_channel_grids.pop().unwrap();
@@ -306,8 +312,8 @@ impl Palette {
                     let value = index;
                     let index = index - nb_colors;
                     if index < 64 {
-                        *sample = ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4 +
-                            (1i32 << bit_depth.saturating_sub(3));
+                        *sample = ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
+                            + (1i32 << bit_depth.saturating_sub(3));
                     } else {
                         let mut index = index - 64;
                         for _ in 0..c {
@@ -374,7 +380,13 @@ impl Palette {
         let palette_grid = palette_grid.grid();
 
         for (c, grid) in members.iter_mut().enumerate() {
-            self.inverse_once(c + 1, palette_grid, Some(index_grid), grid.grid_mut(), bit_depth);
+            self.inverse_once(
+                c + 1,
+                palette_grid,
+                Some(index_grid),
+                grid.grid_mut(),
+                bit_depth,
+            );
         }
         self.inverse_once(0, palette_grid, None, leader.grid_mut(), bit_depth);
 
@@ -403,7 +415,10 @@ impl Squeeze {
                     in_place: false,
                     horizontal: false,
                 };
-                self.sp.push(SqueezeParams { horizontal: true, ..param_base });
+                self.sp.push(SqueezeParams {
+                    horizontal: true,
+                    ..param_base
+                });
                 self.sp.push(param_base);
             }
         }
@@ -416,16 +431,25 @@ impl Squeeze {
         };
 
         if h >= w && h > 8 {
-            self.sp.push(SqueezeParams { horizontal: false, ..param_base });
+            self.sp.push(SqueezeParams {
+                horizontal: false,
+                ..param_base
+            });
             h = (h + 1) / 2;
         }
         while w > 8 || h > 8 {
             if w > 8 {
-                self.sp.push(SqueezeParams { horizontal: true, ..param_base });
+                self.sp.push(SqueezeParams {
+                    horizontal: true,
+                    ..param_base
+                });
                 w = (w + 1) / 2;
             }
             if h > 8 {
-                self.sp.push(SqueezeParams { horizontal: false, ..param_base });
+                self.sp.push(SqueezeParams {
+                    horizontal: false,
+                    ..param_base
+                });
                 h = (h + 1) / 2;
             }
         }
@@ -437,7 +461,12 @@ impl Squeeze {
         mut grids: Option<&mut Vec<TransformedGrid<'_>>>,
     ) -> Result<()> {
         for sp in &self.sp {
-            let SqueezeParams { horizontal, in_place, begin_c: begin, num_c } = *sp;
+            let SqueezeParams {
+                horizontal,
+                in_place,
+                begin_c: begin,
+                num_c,
+            } = *sp;
             let end = begin + num_c;
 
             if end as usize > channels.info.len() {
@@ -457,9 +486,17 @@ impl Squeeze {
             let mut residu_channels = Vec::with_capacity(residu_cap);
             let mut residu_grids = grids.is_some().then(|| Vec::with_capacity(residu_cap));
 
-            for (idx, ch) in channels.info[(begin as usize)..(end as usize)].iter_mut().enumerate() {
+            for (idx, ch) in channels.info[(begin as usize)..(end as usize)]
+                .iter_mut()
+                .enumerate()
+            {
                 let mut residu = ch.clone();
-                let super::ModularChannelInfo { width: w, height: h, hshift, vshift } = ch;
+                let super::ModularChannelInfo {
+                    width: w,
+                    height: h,
+                    hshift,
+                    vshift,
+                } = ch;
                 if *w == 0 || *h == 0 {
                     return Err(Error::InvalidSqueezeParams);
                 }
@@ -507,11 +544,7 @@ impl Squeeze {
         Ok(())
     }
 
-    fn inverse(
-        &self,
-        grids: &mut Vec<TransformedGrid<'_>>,
-        pool: &jxl_threadpool::JxlThreadPool,
-    ) {
+    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, pool: &jxl_threadpool::JxlThreadPool) {
         for sp in self.sp.iter().rev() {
             let begin = sp.begin_c as usize;
             let channel_count = sp.num_c as usize;
@@ -537,7 +570,9 @@ impl SqueezeParams {
         pool: &jxl_threadpool::JxlThreadPool,
     ) {
         let i0 = i0.grid_mut();
-        let TransformedGrid::Single(i1) = i1 else { panic!("residual channel should be Single channel") };
+        let TransformedGrid::Single(i1) = i1 else {
+            panic!("residual channel should be Single channel")
+        };
         if self.horizontal {
             if !i0.merge_interleaved_horizontal(i1) {
                 panic!("two grids are not from same squeeze transform");

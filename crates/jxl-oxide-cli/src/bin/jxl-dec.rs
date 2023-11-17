@@ -1,7 +1,7 @@
-use std::{path::PathBuf, io::prelude::*};
+use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
-use jxl_oxide::{JxlImage, CropInfo, FrameBuffer, PixelFormat, Render, JxlThreadPool};
+use jxl_oxide::{CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render};
 use lcms2::Profile;
 
 enum LcmsTransform {
@@ -130,8 +130,8 @@ fn main() {
     #[cfg(not(feature = "rayon"))]
     let pool = JxlThreadPool::none();
 
-    let mut image = JxlImage::open_with_threads(&args.input, pool.clone())
-        .expect("Failed to open file");
+    let mut image =
+        JxlImage::open_with_threads(&args.input, pool.clone()).expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }
@@ -182,20 +182,24 @@ fn main() {
     let mut rendered = false;
     #[cfg(feature = "rayon")]
     if let Some(rayon_pool) = &pool.as_rayon_pool() {
-        keyframes = rayon_pool.install(|| {
-            use rayon::prelude::*;
+        keyframes = rayon_pool
+            .install(|| {
+                use rayon::prelude::*;
 
-            (0..image.num_loaded_keyframes())
-                .into_par_iter()
-                .map(|idx| image.render_frame_cropped(idx, crop))
-                .collect::<Result<Vec<_>, _>>()
-        }).expect("rendering frames failed");
+                (0..image.num_loaded_keyframes())
+                    .into_par_iter()
+                    .map(|idx| image.render_frame_cropped(idx, crop))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .expect("rendering frames failed");
         rendered = true;
     }
 
     if !rendered {
         for idx in 0..image.num_loaded_keyframes() {
-            let frame = image.render_frame_cropped(idx, crop).expect("rendering frames failed");
+            let frame = image
+                .render_frame_cropped(idx, crop)
+                .expect("rendering frames failed");
             keyframes.push(frame);
         }
     }
@@ -229,7 +233,7 @@ fn main() {
                     width,
                     height,
                 );
-            },
+            }
             OutputFormat::Png8 => {
                 write_png(
                     output,
@@ -240,7 +244,7 @@ fn main() {
                     width,
                     height,
                 );
-            },
+            }
             OutputFormat::Png16 => {
                 write_png(
                     output,
@@ -251,20 +255,14 @@ fn main() {
                     width,
                     height,
                 );
-            },
+            }
             OutputFormat::Npy => {
                 if args.icc_output.is_none() {
                     tracing::warn!("--icc-output is not set. Numpy buffer alone cannot be used to display image as its colorspace is unknown.");
                 }
 
-                write_npy(
-                    output,
-                    &image,
-                    &keyframes,
-                    width,
-                    height,
-                );
-            },
+                write_npy(output, &image, &keyframes, width, height);
+            }
         }
     } else {
         tracing::info!("No output path specified, skipping output encoding");
@@ -298,7 +296,7 @@ fn write_png<W: Write>(
         _ => {
             tracing::error!("Cannot output CMYK PNG");
             panic!();
-        },
+        }
     };
     encoder.set_color(color_type);
 
@@ -316,55 +314,70 @@ fn write_png<W: Write>(
 
     if let Some(animation) = &metadata.animation {
         let num_plays = animation.num_loops;
-        encoder.set_animated(keyframes.len() as u32, num_plays).unwrap();
+        encoder
+            .set_animated(keyframes.len() as u32, num_plays)
+            .unwrap();
     }
 
     let mut transform = None;
     let icc_cicp = if let Some(icc) = embedded_icc {
         if metadata.xyb_encoded {
-            let source_profile = Profile::new_icc(&source_icc).expect("Failed to create profile from jxl-oxide ICC profile");
+            let source_profile = Profile::new_icc(&source_icc)
+                .expect("Failed to create profile from jxl-oxide ICC profile");
 
             let target_profile = Profile::new_icc(icc);
             match target_profile {
                 Err(err) => {
                     tracing::warn!("Embedded ICC has error: {}", err);
                     None
-                },
+                }
                 Ok(target_profile) => {
                     transform = Some(match color_type {
-                        png::ColorType::Grayscale => LcmsTransform::Grayscale(lcms2::Transform::new(
+                        png::ColorType::Grayscale => LcmsTransform::Grayscale(
+                            lcms2::Transform::new(
                                 &source_profile,
                                 lcms2::PixelFormat::GRAY_FLT,
                                 &target_profile,
                                 lcms2::PixelFormat::GRAY_FLT,
                                 lcms2::Intent::RelativeColorimetric,
-                        ).expect("Failed to create transform")),
-                        png::ColorType::GrayscaleAlpha => LcmsTransform::GrayscaleAlpha(lcms2::Transform::new(
+                            )
+                            .expect("Failed to create transform"),
+                        ),
+                        png::ColorType::GrayscaleAlpha => LcmsTransform::GrayscaleAlpha(
+                            lcms2::Transform::new(
                                 &source_profile,
                                 lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
                                 &target_profile,
                                 lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
                                 lcms2::Intent::RelativeColorimetric,
-                        ).expect("Failed to create transform")),
-                        png::ColorType::Rgb => LcmsTransform::Rgb(lcms2::Transform::new(
+                            )
+                            .expect("Failed to create transform"),
+                        ),
+                        png::ColorType::Rgb => LcmsTransform::Rgb(
+                            lcms2::Transform::new(
                                 &source_profile,
                                 lcms2::PixelFormat::RGB_FLT,
                                 &target_profile,
                                 lcms2::PixelFormat::RGB_FLT,
                                 lcms2::Intent::RelativeColorimetric,
-                        ).expect("Failed to create transform")),
-                        png::ColorType::Rgba => LcmsTransform::Rgba(lcms2::Transform::new(
+                            )
+                            .expect("Failed to create transform"),
+                        ),
+                        png::ColorType::Rgba => LcmsTransform::Rgba(
+                            lcms2::Transform::new(
                                 &source_profile,
                                 lcms2::PixelFormat::RGBA_FLT,
                                 &target_profile,
                                 lcms2::PixelFormat::RGBA_FLT,
                                 lcms2::Intent::RelativeColorimetric,
-                        ).expect("Failed to create transform")),
+                            )
+                            .expect("Failed to create transform"),
+                        ),
                         _ => unreachable!(),
                     });
 
                     Some((icc, None))
-                },
+                }
             }
         } else {
             Some((icc, None))
@@ -375,20 +388,22 @@ fn write_png<W: Write>(
     };
     encoder.validate_sequence(true);
 
-    let mut writer = encoder
-        .write_header()
-        .expect("failed to write header");
+    let mut writer = encoder.write_header().expect("failed to write header");
 
     if let Some((icc, cicp)) = &icc_cicp {
         tracing::debug!("Embedding ICC profile");
         let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(icc, 7);
         let mut iccp_chunk_data = vec![b'0', 0, 0];
         iccp_chunk_data.extend(compressed_icc);
-        writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data).expect("failed to write iCCP");
+        writer
+            .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
+            .expect("failed to write iCCP");
 
         if let Some(cicp) = *cicp {
             tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-            writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp).expect("failed to write cICP");
+            writer
+                .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
+                .expect("failed to write cICP");
         }
     }
 
@@ -425,26 +440,24 @@ fn write_png<W: Write>(
                 b[0] = b0;
                 b[1] = b1;
             }
-            writer.write_image_data(&buf).expect("failed to write frame");
+            writer
+                .write_image_data(&buf)
+                .expect("failed to write frame");
         } else {
             let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels()];
             for (b, s) in buf.iter_mut().zip(fb.buf()) {
                 *b = (*s * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
-            writer.write_image_data(&buf).expect("failed to write frame");
+            writer
+                .write_image_data(&buf)
+                .expect("failed to write frame");
         }
     }
 
     writer.finish().expect("failed to finish writing png");
 }
 
-fn write_npy<W: Write>(
-    output: W,
-    image: &JxlImage,
-    keyframes: &[Render],
-    width: u32,
-    height: u32,
-) {
+fn write_npy<W: Write>(output: W, image: &JxlImage, keyframes: &[Render], width: u32, height: u32) {
     let metadata = &image.image_header().metadata;
     let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let channels = {
@@ -461,7 +474,9 @@ fn write_npy<W: Write>(
         width,
         channels,
     );
-    output.write_all(&(header.len() as u16).to_le_bytes()).unwrap();
+    output
+        .write_all(&(header.len() as u16).to_le_bytes())
+        .unwrap();
     output.write_all(header.as_bytes()).unwrap();
 
     tracing::debug!("Writing image data");

@@ -1,4 +1,4 @@
-use crate::{Error, Result, Bundle};
+use crate::{Bundle, Error, Result};
 
 /// Bitstream reader with borrowed in-memory buffer.
 ///
@@ -68,7 +68,9 @@ impl Bitstream<'_> {
     #[inline(never)]
     fn refill_slow(&mut self) {
         while self.remaining_buf_bits < 56 {
-            let Some((&b, next)) = self.bytes.split_first() else { return; };
+            let Some((&b, next)) = self.bytes.split_first() else {
+                return;
+            };
 
             self.buf |= (b as u64) << self.remaining_buf_bits;
             self.remaining_buf_bits += 8;
@@ -89,7 +91,8 @@ impl Bitstream<'_> {
     /// Consumes bits in bit buffer.
     #[inline]
     pub fn consume_bits(&mut self, n: usize) -> Result<()> {
-        self.remaining_buf_bits = self.remaining_buf_bits
+        self.remaining_buf_bits = self
+            .remaining_buf_bits
             .checked_sub(n)
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
         self.num_read_bits += n;
@@ -124,7 +127,8 @@ impl Bitstream<'_> {
         self.bytes = &self.bytes[n / 8..];
         n %= 8;
         self.refill();
-        self.remaining_buf_bits = self.remaining_buf_bits
+        self.remaining_buf_bits = self
+            .remaining_buf_bits
             .checked_sub(n)
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
         self.buf >>= n;
@@ -163,7 +167,7 @@ impl Bitstream<'_> {
                     shift += 8;
                 }
                 value
-            },
+            }
             _ => unreachable!(),
         })
     }
@@ -210,7 +214,10 @@ impl Bitstream<'_> {
     }
 
     #[inline]
-    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(&mut self, ctx: Ctx) -> std::result::Result<B, B::Error> {
+    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(
+        &mut self,
+        ctx: Ctx,
+    ) -> std::result::Result<B, B::Error> {
         B::parse(self, ctx)
     }
 }

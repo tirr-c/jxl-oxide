@@ -1,5 +1,5 @@
-use std::arch::is_aarch64_feature_detected;
 use std::arch::aarch64::*;
+use std::arch::is_aarch64_feature_detected;
 
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
@@ -177,15 +177,7 @@ unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: 
 
             let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), b);
             let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), bl), br);
-            let unweighted_sum = vfma_n_f32(
-                vfma_n_f32(
-                    c,
-                    sum_side,
-                    weight1,
-                ),
-                sum_diag,
-                weight2,
-            );
+            let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
             let sum = vmul_n_f32(unweighted_sum, global_weight);
 
             vst1_f32(input_t.add(1 + vx * 2), cr);
@@ -213,15 +205,7 @@ unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: 
 
         let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), b);
         let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), bl), br);
-        let unweighted_sum = vfma_n_f32(
-            vfma_n_f32(
-                c,
-                sum_side,
-                weight1,
-            ),
-            sum_diag,
-            weight2,
-        );
+        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
         let sum = vmul_n_f32(unweighted_sum, global_weight);
 
         if width % 2 == 0 {
@@ -246,15 +230,7 @@ unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: 
 
         let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), c);
         let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), cl), cr);
-        let unweighted_sum = vfma_n_f32(
-            vfma_n_f32(
-                c,
-                sum_side,
-                weight1,
-            ),
-            sum_diag,
-            weight2,
-        );
+        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
         let sum = vmul_n_f32(unweighted_sum, global_weight);
 
         vst1_f32(input_c.add(vx * 2), sum);
@@ -276,15 +252,7 @@ unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: 
 
     let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), c);
     let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), cl), cr);
-    let unweighted_sum = vfma_n_f32(
-        vfma_n_f32(
-            c,
-            sum_side,
-            weight1,
-        ),
-        sum_diag,
-        weight2,
-    );
+    let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
     let sum = vmul_n_f32(unweighted_sum, global_weight);
 
     if width % 2 == 0 {

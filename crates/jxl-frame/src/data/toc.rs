@@ -1,9 +1,5 @@
-use jxl_bitstream::{
-    read_bits,
-    Bitstream,
-    Bundle,
-};
 use crate::Result;
+use jxl_bitstream::{read_bits, Bitstream, Bundle};
 
 /// Table of contents of a frame.
 ///
@@ -20,8 +16,7 @@ pub struct Toc {
 
 impl std::fmt::Debug for Toc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("Toc")
+        f.debug_struct("Toc")
             .field("num_lf_groups", &self.num_lf_groups)
             .field("num_groups", &self.num_groups)
             .field("total_size", &self.total_size)
@@ -30,14 +25,22 @@ impl std::fmt::Debug for Toc {
                 &format_args!(
                     "({} {})",
                     self.groups.len(),
-                    if self.groups.len() == 1 { "entry" } else { "entries" },
+                    if self.groups.len() == 1 {
+                        "entry"
+                    } else {
+                        "entries"
+                    },
                 ),
             )
             .field(
                 "bitstream_order",
                 &format_args!(
                     "({})",
-                    if self.bitstream_to_original.is_empty() { "empty" } else { "non-empty" },
+                    if self.bitstream_to_original.is_empty() {
+                        "empty"
+                    } else {
+                        "non-empty"
+                    },
                 ),
             )
             .finish_non_exhaustive()
@@ -61,10 +64,7 @@ pub enum TocGroupKind {
     LfGlobal,
     LfGroup(u32),
     HfGlobal,
-    GroupPass {
-        pass_idx: u32,
-        group_idx: u32,
-    },
+    GroupPass { pass_idx: u32, group_idx: u32 },
 }
 
 impl Ord for TocGroupKind {
@@ -80,9 +80,16 @@ impl Ord for TocGroupKind {
             (_, Self::LfGroup(_)) => std::cmp::Ordering::Greater,
             (Self::HfGlobal, _) => std::cmp::Ordering::Less,
             (_, Self::HfGlobal) => std::cmp::Ordering::Greater,
-            (Self::GroupPass { pass_idx: p_self, group_idx: g_self },
-             Self::GroupPass { pass_idx: p_other, group_idx: g_other }) =>
-                p_self.cmp(p_other).then(g_self.cmp(g_other))
+            (
+                Self::GroupPass {
+                    pass_idx: p_self,
+                    group_idx: g_self,
+                },
+                Self::GroupPass {
+                    pass_idx: p_other,
+                    group_idx: g_other,
+                },
+            ) => p_self.cmp(p_other).then(g_self.cmp(g_other)),
         }
     }
 }
@@ -108,13 +115,23 @@ impl Toc {
     pub fn group_index_bitstream_order(&self, kind: TocGroupKind) -> usize {
         let original_order = match kind {
             TocGroupKind::All if self.is_single_entry() => 0,
-            _ if self.is_single_entry() => panic!("Cannot request group type of {:?} for single-group frame", kind),
+            _ if self.is_single_entry() => panic!(
+                "Cannot request group type of {:?} for single-group frame",
+                kind
+            ),
             TocGroupKind::All => panic!("Cannot request group type of All for multi-group frame"),
             TocGroupKind::LfGlobal => 0,
             TocGroupKind::LfGroup(lf_group_idx) => 1 + lf_group_idx as usize,
             TocGroupKind::HfGlobal => 1 + self.num_lf_groups,
-            TocGroupKind::GroupPass { pass_idx, group_idx } =>
-                1 + self.num_lf_groups + 1 + pass_idx as usize * self.num_groups + group_idx as usize,
+            TocGroupKind::GroupPass {
+                pass_idx,
+                group_idx,
+            } => {
+                1 + self.num_lf_groups
+                    + 1
+                    + pass_idx as usize * self.num_groups
+                    + group_idx as usize
+            }
         };
 
         if self.original_to_bitstream.is_empty() {
@@ -133,7 +150,10 @@ impl Toc {
         let groups = if self.bitstream_to_original.is_empty() {
             self.groups.clone()
         } else {
-            self.bitstream_to_original.iter().map(|&idx| self.groups[idx]).collect()
+            self.bitstream_to_original
+                .iter()
+                .map(|&idx| self.groups[idx])
+                .collect()
         };
         groups.into_iter()
     }
@@ -146,7 +166,8 @@ impl Toc {
         }
 
         for group in &mut self.groups {
-            group.offset = group.offset
+            group.offset = group
+                .offset
                 .checked_sub(global_frame_offset)
                 .expect("group offset is smaller than global frame offset");
         }
@@ -167,16 +188,15 @@ impl Bundle<&crate::FrameHeader> for Toc {
         };
 
         if entry_count > 65536 {
-            return Err(jxl_bitstream::Error::ValidationFailed(
-                "Too many TOC entries"
-            ).into());
+            return Err(jxl_bitstream::Error::ValidationFailed("Too many TOC entries").into());
         }
 
         let permutated_toc = bitstream.read_bool()?;
         let permutation = if permutated_toc {
             let mut decoder = jxl_coding::Decoder::parse(bitstream, 8)?;
             decoder.begin(bitstream)?;
-            let permutation = jxl_coding::read_permutation(bitstream, &mut decoder, entry_count, 0)?;
+            let permutation =
+                jxl_coding::read_permutation(bitstream, &mut decoder, entry_count, 0)?;
             decoder.finalize()?;
             permutation
         } else {
@@ -185,7 +205,12 @@ impl Bundle<&crate::FrameHeader> for Toc {
 
         bitstream.zero_pad_to_byte()?;
         let sizes = (0..entry_count)
-            .map(|_| read_bits!(bitstream, U32(u(10), 1024 + u(14), 17408 + u(22), 4211712 + u(30))))
+            .map(|_| {
+                read_bits!(
+                    bitstream,
+                    U32(u(10), 1024 + u(14), 17408 + u(22), 4211712 + u(30))
+                )
+            })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         bitstream.zero_pad_to_byte()?;
 
@@ -209,7 +234,10 @@ impl Bundle<&crate::FrameHeader> for Toc {
             out.push(TocGroupKind::HfGlobal);
             for pass_idx in 0..num_passes {
                 for group_idx in 0..num_groups {
-                    out.push(TocGroupKind::GroupPass { pass_idx, group_idx });
+                    out.push(TocGroupKind::GroupPass {
+                        pass_idx,
+                        group_idx,
+                    });
                 }
             }
             out
@@ -233,11 +261,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
             .into_iter()
             .zip(offsets)
             .zip(section_kinds)
-            .map(|((size, offset), kind)| TocGroup {
-                kind,
-                offset,
-                size,
-            })
+            .map(|((size, offset), kind)| TocGroup { kind, offset, size })
             .collect::<Vec<_>>();
 
         Ok(Self {

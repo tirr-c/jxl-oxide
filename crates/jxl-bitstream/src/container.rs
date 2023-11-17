@@ -25,11 +25,12 @@ impl ContainerBoxHeader {
             [0, 0, 0, 1, t0, t1, t2, t3, s0, s1, s2, s3, s4, s5, s6, s7, ..] => {
                 let xlbox = u64::from_be_bytes([s0, s1, s2, s3, s4, s5, s6, s7]);
                 let tbox = ContainerBoxType([t0, t1, t2, t3]);
-                let xlbox = xlbox.checked_sub(16).ok_or(
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, Error::InvalidBoxSize)
-                )?;
+                let xlbox = xlbox.checked_sub(16).ok_or(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    Error::InvalidBoxSize,
+                ))?;
                 (tbox, Some(xlbox), 16)
-            },
+            }
             [s0, s1, s2, s3, t0, t1, t2, t3, ..] => {
                 let sbox = u32::from_be_bytes([s0, s1, s2, s3]);
                 let tbox = ContainerBoxType([t0, t1, t2, t3]);
@@ -38,12 +39,13 @@ impl ContainerBoxHeader {
                 } else if let Some(sbox) = sbox.checked_sub(8) {
                     Some(sbox as u64)
                 } else {
-                    return Err(
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, Error::InvalidBoxSize)
-                    );
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        Error::InvalidBoxSize,
+                    ));
                 };
                 (tbox, sbox, 8)
-            },
+            }
             _ => return Ok(HeaderParseResult::NeedMoreData),
         };
         let is_last = size.is_none();
@@ -53,7 +55,10 @@ impl ContainerBoxHeader {
             size,
             is_last,
         };
-        Ok(HeaderParseResult::Done { header, size: header_size })
+        Ok(HeaderParseResult::Done {
+            header,
+            size: header_size,
+        })
     }
 }
 

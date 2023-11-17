@@ -16,7 +16,11 @@ impl FixtureHeader {
         let height = u32::from_le_bytes(tmp);
         tmp.copy_from_slice(&buf[8..12]);
         let channels = u32::from_le_bytes(tmp);
-        Self { width, height, channels }
+        Self {
+            width,
+            height,
+            channels,
+        }
     }
 }
 
@@ -32,14 +36,19 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
     for idx in 0..image.num_loaded_keyframes() {
         let frame = image.render_frame(idx).unwrap();
         let mut marker = 0u8;
-        expected.read_exact(std::slice::from_mut(&mut marker)).unwrap();
+        expected
+            .read_exact(std::slice::from_mut(&mut marker))
+            .unwrap();
         if marker != 0 {
             panic!();
         }
 
         let color_channels = frame.color_channels();
         let extra_channels = frame.extra_channels();
-        assert_eq!(fixture_header.channels as usize, color_channels.len() + extra_channels.len());
+        assert_eq!(
+            fixture_header.channels as usize,
+            color_channels.len() + extra_channels.len()
+        );
 
         // Peak error threshold of Level 10 tests, from 18181-3
         let frame_header = image.frame_header(idx).unwrap();
@@ -51,7 +60,11 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
         let channels_it = color_channels
             .iter()
             .map(|cc| (cc, color_peak_error_threshold))
-            .chain(extra_channels.iter().map(|ec| (ec.grid(), 1u16 << 14u32.saturating_sub(bit_depth))));
+            .chain(
+                extra_channels
+                    .iter()
+                    .map(|ec| (ec.grid(), 1u16 << 14u32.saturating_sub(bit_depth))),
+            );
 
         for (grid, peak_error_threshold) in channels_it {
             assert_eq!(fixture_header.width as usize, grid.width());

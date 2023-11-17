@@ -79,25 +79,12 @@ unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC1: f32 = 1.306563;
 
     let v_flip = vextq_f32(v, v, 2);
-    let mul_a = Lane::set([
-        1.0,
-        (std::f32::consts::SQRT_2 + 1.0) * SEC0,
-        -1.0,
-        -SEC1,
-    ]);
-    let mul_b = Lane::set([
-        1.0,
-        SEC0,
-        1.0,
-        (std::f32::consts::SQRT_2 - 1.0) * SEC1,
-    ]);
+    let mul_a = Lane::set([1.0, (std::f32::consts::SQRT_2 + 1.0) * SEC0, -1.0, -SEC1]);
+    let mul_b = Lane::set([1.0, SEC0, 1.0, (std::f32::consts::SQRT_2 - 1.0) * SEC1]);
     let tmp = v.muladd(mul_a, v_flip.mul(mul_b));
 
     let float32x4x2_t(tmp_a, tmp_b) = vuzpq_f32(tmp, vextq_f32(tmp, tmp, 2));
-    let mul = vcombine_f32(
-        vdup_n_f32(1.0),
-        vdup_n_f32(-1.0),
-    );
+    let mul = vcombine_f32(vdup_n_f32(1.0), vdup_n_f32(-1.0));
     tmp_b.muladd(mul, tmp_a)
 }
 
@@ -115,11 +102,7 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     let output0 = dct4_vec_forward(input0);
     let output1 = dct4_vec_forward(input1);
     let output1_shifted = vextq_f32(output1, Lane::zero(), 1);
-    let output1_mul = vsetq_lane_f32(
-        std::f32::consts::SQRT_2,
-        Lane::splat_f32(1.0),
-        0,
-    );
+    let output1_mul = vsetq_lane_f32(std::f32::consts::SQRT_2, Lane::splat_f32(1.0), 0);
     let output1 = output1.muladd(output1_mul, output1_shifted);
     (
         vcombine_f32(vget_low_f32(output0), vget_low_f32(output1)),
@@ -137,20 +120,13 @@ unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     ]);
     let float32x4x2_t(input0, input1) = vuzpq_f32(vl, vr);
     let input1_shifted = vextq_f32(Lane::zero(), input1, 3);
-    let input1_mul = vsetq_lane_f32(
-        std::f32::consts::SQRT_2,
-        Lane::splat_f32(1.0),
-        0,
-    );
+    let input1_mul = vsetq_lane_f32(std::f32::consts::SQRT_2, Lane::splat_f32(1.0), 0);
     let input1 = input1.muladd(input1_mul, input1_shifted);
     let output0 = dct4_vec_inverse(input0);
     let output1 = dct4_vec_inverse(input1);
     let output1 = output1.mul(sec_vec);
     let sub = output0.sub(output1);
-    (
-        output0.add(output1),
-        vrev64q_f32(vextq_f32(sub, sub, 2)),
-    )
+    (output0.add(output1), vrev64q_f32(vextq_f32(sub, sub, 2)))
 }
 
 unsafe fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
@@ -200,11 +176,7 @@ unsafe fn column_dct_lane(
     }
 }
 
-unsafe fn row_dct_lane(
-    io: &mut CutGrid<'_, Lane>,
-    scratch: &mut [Lane],
-    direction: DctDirection,
-) {
+unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], direction: DctDirection) {
     let width = io.width() * LANE_SIZE;
     let height = io.height();
     let (io_lanes, scratch_lanes) = scratch[..width * 2].split_at_mut(width);
@@ -391,4 +363,3 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
         }
     }
 }
-

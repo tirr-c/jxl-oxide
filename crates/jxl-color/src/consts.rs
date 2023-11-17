@@ -27,15 +27,7 @@ pub const PRIMARIES_SRGB: [[f32; 2]; 3] = [
 ];
 
 /// Primaries specified in ITU-R BT.2100-2.
-pub const PRIMARIES_BT2100: [[f32; 2]; 3] = [
-    [0.708, 0.292],
-    [0.170, 0.797],
-    [0.131, 0.046],
-];
+pub const PRIMARIES_BT2100: [[f32; 2]; 3] = [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]];
 
 /// Primaries specified in SMPTE ST 428-1.
-pub const PRIMARIES_P3: [[f32; 2]; 3] = [
-    [0.680, 0.320],
-    [0.265, 0.690],
-    [0.150, 0.060],
-];
+pub const PRIMARIES_P3: [[f32; 2]; 3] = [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]];

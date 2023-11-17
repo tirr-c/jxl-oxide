@@ -56,7 +56,9 @@ impl std::fmt::Display for Error {
             Color(err) => write!(f, "color management error: {err}"),
             IncompleteFrame => write!(f, "frame data is incomplete"),
             FailedReference => write!(f, "reference frame failed to render"),
-            UninitializedLfFrame(lf_level) => write!(f, "uninitialized LF frame for level {lf_level}"),
+            UninitializedLfFrame(lf_level) => {
+                write!(f, "uninitialized LF frame for level {lf_level}")
+            }
             InvalidReference(idx) => write!(f, "invalid reference {idx}"),
             NotReady => write!(f, "image is not ready to be rendered"),
             NotSupported(msg) => write!(f, "not supported: {}", msg),

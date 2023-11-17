@@ -1,13 +1,8 @@
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
-use jxl_vardct::{HfMetadata, HfMetadataParams, Quantizer, LfCoeff, LfCoeffParams};
+use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
-use crate::{
-    FrameHeader,
-    Result,
-    filter::EdgePreservingFilter,
-    header::Encoding,
-};
+use crate::{filter::EdgePreservingFilter, header::Encoding, FrameHeader, Result};
 
 #[derive(Debug)]
 pub struct LfGroupParams<'a, 'dest> {
@@ -31,28 +26,41 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_, '_>) -> Result<Self> {
-        let LfGroupParams { frame_header, global_ma_config, mlf_group, lf_group_idx, allow_partial, pool, .. } = params;
+        let LfGroupParams {
+            frame_header,
+            global_ma_config,
+            mlf_group,
+            lf_group_idx,
+            allow_partial,
+            pool,
+            ..
+        } = params;
         let (lf_width, lf_height) = frame_header.lf_group_size_for(lf_group_idx);
 
-        let lf_coeff = (frame_header.encoding == Encoding::VarDct && !frame_header.flags.use_lf_frame())
-            .then(|| {
-                let lf_coeff_params = LfCoeffParams {
-                    lf_group_idx,
-                    lf_width,
-                    lf_height,
-                    jpeg_upsampling: frame_header.jpeg_upsampling,
-                    bits_per_sample: frame_header.bit_depth.bits_per_sample(),
-                    global_ma_config,
-                    allow_partial,
-                    pool,
-                };
-                LfCoeff::parse(bitstream, lf_coeff_params)
-            })
-            .transpose()?;
+        let lf_coeff = (frame_header.encoding == Encoding::VarDct
+            && !frame_header.flags.use_lf_frame())
+        .then(|| {
+            let lf_coeff_params = LfCoeffParams {
+                lf_group_idx,
+                lf_width,
+                lf_height,
+                jpeg_upsampling: frame_header.jpeg_upsampling,
+                bits_per_sample: frame_header.bit_depth.bits_per_sample(),
+                global_ma_config,
+                allow_partial,
+                pool,
+            };
+            LfCoeff::parse(bitstream, lf_coeff_params)
+        })
+        .transpose()?;
 
         if let Some(lf_coeff_inner) = &lf_coeff {
             if lf_coeff_inner.partial {
-                return Ok(Self { lf_coeff, hf_meta: None, partial: true });
+                return Ok(Self {
+                    lf_coeff,
+                    hf_meta: None,
+                    partial: true,
+                });
             }
         }
 
@@ -60,7 +68,11 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
         if let Some(image) = mlf_group {
             let mut subimage = image.recursive(bitstream, global_ma_config)?;
             let mut subimage = subimage.prepare_subimage()?;
-            subimage.decode(bitstream, 1 + frame_header.num_lf_groups() + lf_group_idx, allow_partial)?;
+            subimage.decode(
+                bitstream,
+                1 + frame_header.num_lf_groups() + lf_group_idx,
+                allow_partial,
+            )?;
             is_mlf_complete = subimage.finish(pool);
         }
 
@@ -76,9 +88,9 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
                     global_ma_config,
                     epf: match &frame_header.restoration_filter.epf {
                         EdgePreservingFilter::Disabled => None,
-                        EdgePreservingFilter::Enabled { sharp_lut, sigma, .. } => {
-                            Some((sigma.quant_mul, *sharp_lut))
-                        },
+                        EdgePreservingFilter::Enabled {
+                            sharp_lut, sigma, ..
+                        } => Some((sigma.quant_mul, *sharp_lut)),
                     },
                     quantizer_global_scale: params.quantizer.unwrap().global_scale,
                     pool,
@@ -89,10 +101,18 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
         match hf_meta {
             Err(e) if e.unexpected_eof() && allow_partial => {
                 tracing::debug!("Decoded partial HfMeta");
-                Ok(Self { lf_coeff, hf_meta: None, partial: true })
-            },
+                Ok(Self {
+                    lf_coeff,
+                    hf_meta: None,
+                    partial: true,
+                })
+            }
             Err(e) => Err(e.into()),
-            Ok(hf_meta) => Ok(Self { lf_coeff, hf_meta, partial: !is_mlf_complete }),
+            Ok(hf_meta) => Ok(Self {
+                lf_coeff,
+                hf_meta,
+                partial: !is_mlf_complete,
+            }),
         }
     }
 }

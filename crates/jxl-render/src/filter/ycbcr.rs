@@ -5,9 +5,8 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
         (0.25 * left + 0.75 * center, 0.75 * center + 0.25 * right)
     }
 
-    let shifts_cbycr = [0, 1, 2].map(|idx| {
-        jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
-    });
+    let shifts_cbycr =
+        [0, 1, 2].map(|idx| jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
 
     for (buf, shift) in grids_cbycr.into_iter().zip(shifts_cbycr) {
         let width = buf.width();
@@ -20,7 +19,11 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
         if !h_upsampled {
             let orig_width = width;
             let width = (width + 1) / 2;
-            let height = if v_upsampled { height } else { (height + 1) / 2 };
+            let height = if v_upsampled {
+                height
+            } else {
+                (height + 1) / 2
+            };
 
             for y in 0..height {
                 let idx_base = y * orig_width;
@@ -30,11 +33,8 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
                     let left_x = x.saturating_sub(1);
 
                     // We're interpolating right-to-left.
-                    let (right, left) = interpolate(
-                        prev_sample,
-                        curr_sample,
-                        buf[idx_base + left_x],
-                    );
+                    let (right, left) =
+                        interpolate(prev_sample, curr_sample, buf[idx_base + left_x]);
 
                     buf[idx_base + x * 2] = left;
                     if x * 2 + 1 < orig_width {
@@ -59,11 +59,7 @@ pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsamp
                     let curr_sample = buf[idx_base + x];
 
                     // We're interpolating bottom-to-top.
-                    let (bottom, top) = interpolate(
-                        prev_row[x],
-                        curr_sample,
-                        buf[top_base + x],
-                    );
+                    let (bottom, top) = interpolate(prev_row[x], curr_sample, buf[top_base + x]);
                     buf[idx_base * 2 + x] = top;
                     if y * 2 + 1 < orig_height {
                         buf[idx_base * 2 + width + x] = bottom;

@@ -7,9 +7,14 @@ pub fn linear_to_gamma(mut samples: &mut [f32], gamma: f32) {
             for chunk in &mut it {
                 unsafe {
                     let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
-                    let mask = std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(1e-5));
+                    let mask =
+                        std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(1e-5));
                     let exp = crate::fastmath::fast_powf_aarch64_neon(v, gamma);
-                    let v = std::arch::aarch64::vbslq_f32(mask, std::arch::aarch64::vdupq_n_f32(0.0), exp);
+                    let v = std::arch::aarch64::vbslq_f32(
+                        mask,
+                        std::arch::aarch64::vdupq_n_f32(0.0),
+                        exp,
+                    );
                     std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
                 }
             }
@@ -20,18 +25,20 @@ pub fn linear_to_gamma(mut samples: &mut [f32], gamma: f32) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+        {
             samples = unsafe { linear_to_gamma_x86_64_avx2(samples, gamma) };
         } else {
             let mut it = samples.chunks_exact_mut(4);
             for chunk in &mut it {
                 unsafe {
                     let v = std::arch::x86_64::_mm_loadu_ps(chunk.as_ptr());
-                    let mask = std::arch::x86_64::_mm_cmple_ps(
+                    let mask =
+                        std::arch::x86_64::_mm_cmple_ps(v, std::arch::x86_64::_mm_set1_ps(1e-5));
+                    let exp = crate::fastmath::fast_powf_x86_64_sse2(
                         v,
-                        std::arch::x86_64::_mm_set1_ps(1e-5),
+                        std::arch::x86_64::_mm_set1_ps(gamma),
                     );
-                    let exp = crate::fastmath::fast_powf_x86_64_sse2(v, std::arch::x86_64::_mm_set1_ps(gamma));
                     let v = std::arch::x86_64::_mm_andnot_ps(mask, exp);
                     std::arch::x86_64::_mm_storeu_ps(chunk.as_mut_ptr(), v);
                 }
@@ -60,11 +67,7 @@ unsafe fn linear_to_gamma_x86_64_avx2(samples: &mut [f32], gamma: f32) -> &mut [
     let mut it = samples.chunks_exact_mut(8);
     for chunk in &mut it {
         let v = _mm256_loadu_ps(chunk.as_ptr());
-        let mask = _mm256_cmp_ps(
-            v,
-            _mm256_set1_ps(1e-5),
-            _CMP_LE_OS,
-        );
+        let mask = _mm256_cmp_ps(v, _mm256_set1_ps(1e-5), _CMP_LE_OS);
         let exp = crate::fastmath::fast_powf_x86_64_avx2(v, _mm256_set1_ps(gamma));
         let v = _mm256_andnot_ps(mask, exp);
         _mm256_storeu_ps(chunk.as_mut_ptr(), v);
@@ -88,12 +91,10 @@ unsafe fn linear_to_gamma_x86_64_avx2(samples: &mut [f32], gamma: f32) -> &mut [
 struct Aligned([u8; 16]);
 
 const SRGB_POWTABLE_UPPER: Aligned = Aligned([
-    0x00, 0x0a, 0x19, 0x26, 0x32, 0x41, 0x4d, 0x5c,
-    0x68, 0x75, 0x83, 0x8f, 0xa0, 0xaa, 0xb9, 0xc6,
+    0x00, 0x0a, 0x19, 0x26, 0x32, 0x41, 0x4d, 0x5c, 0x68, 0x75, 0x83, 0x8f, 0xa0, 0xaa, 0xb9, 0xc6,
 ]);
 const SRGB_POWTABLE_LOWER: Aligned = Aligned([
-    0x00, 0xb7, 0x04, 0x0d, 0xcb, 0xe7, 0x41, 0x68,
-    0x51, 0xd1, 0xeb, 0xf2, 0x00, 0xb7, 0x04, 0x0d,
+    0x00, 0xb7, 0x04, 0x0d, 0xcb, 0xe7, 0x41, 0x68, 0x51, 0xd1, 0xeb, 0xf2, 0x00, 0xb7, 0x04, 0x0d,
 ]);
 
 /// Converts the linear samples with the sRGB transfer curve.
@@ -123,7 +124,9 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
 
         // `mul` won't be used when `v` is small.
         let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
-        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
+        let mul = 0x4000_0000
+            | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18)
+            | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
         let small = v * 12.92;
@@ -139,12 +142,12 @@ pub fn linear_to_srgb(samples: &mut [f32]) {
 unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
     use std::arch::x86_64::*;
 
-    let powtable_upper = _mm256_castps_si256(
-        _mm256_broadcast_ps(&*(SRGB_POWTABLE_UPPER.0.as_ptr() as *const _))
-    );
-    let powtable_lower = _mm256_castps_si256(
-        _mm256_broadcast_ps(&*(SRGB_POWTABLE_LOWER.0.as_ptr() as *const _))
-    );
+    let powtable_upper = _mm256_castps_si256(_mm256_broadcast_ps(
+        &*(SRGB_POWTABLE_UPPER.0.as_ptr() as *const _),
+    ));
+    let powtable_lower = _mm256_castps_si256(_mm256_broadcast_ps(
+        &*(SRGB_POWTABLE_LOWER.0.as_ptr() as *const _),
+    ));
 
     let mut chunks = samples.chunks_exact_mut(8);
     let sign_mask = _mm256_set1_ps(f32::from_bits(0x8000_0000));
@@ -166,14 +169,8 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
             _mm256_srai_epi32::<23>(_mm256_castps_si256(v)),
             _mm256_set1_epi32(118),
         );
-        let pow_upper = _mm256_shuffle_epi8(
-            powtable_upper,
-            exp_idx,
-        );
-        let pow_lower = _mm256_shuffle_epi8(
-            powtable_lower,
-            exp_idx,
-        );
+        let pow_upper = _mm256_shuffle_epi8(powtable_upper, exp_idx);
+        let pow_lower = _mm256_shuffle_epi8(powtable_lower, exp_idx);
         let mul = _mm256_or_si256(
             _mm256_or_si256(
                 _mm256_slli_epi32::<18>(pow_upper),
@@ -201,7 +198,9 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
         let pow = pow.mul_add(v_adj, 0.018092343);
 
         let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
-        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
+        let mul = 0x4000_0000
+            | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18)
+            | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
         let small = v * 12.92;
@@ -231,10 +230,7 @@ unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
         let pow = vfmaq_f32(vdupq_n_f32(0.107963754), v_adj, pow);
         let pow = vfmaq_f32(vdupq_n_f32(0.018092343), v_adj, pow);
 
-        let exp_idx = vsubq_u32(
-            vshrq_n_u32::<23>(v),
-            vdupq_n_u32(118),
-        );
+        let exp_idx = vsubq_u32(vshrq_n_u32::<23>(v), vdupq_n_u32(118));
         let pow_upper = vqtbl1q_u8(
             vld1q_u8(SRGB_POWTABLE_UPPER.0.as_ptr()),
             vreinterpretq_u8_u32(exp_idx),
@@ -271,7 +267,9 @@ unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
         let pow = pow * v_adj + 0.018092343;
 
         let idx = (v >> 23).wrapping_sub(118) as usize & 0xf;
-        let mul = 0x4000_0000 | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18) | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
+        let mul = 0x4000_0000
+            | (u32::from(SRGB_POWTABLE_UPPER.0[idx]) << 18)
+            | (u32::from(SRGB_POWTABLE_LOWER.0[idx]) << 10);
 
         let v = f32::from_bits(v);
         let small = v * 12.92;
@@ -290,10 +288,15 @@ pub fn linear_to_bt709(mut samples: &mut [f32]) {
             for chunk in &mut it {
                 unsafe {
                     let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
-                    let mask = std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(0.018));
+                    let mask =
+                        std::arch::aarch64::vcleq_f32(v, std::arch::aarch64::vdupq_n_f32(0.018));
                     let lin = std::arch::aarch64::vmulq_n_f32(v, 4.5);
                     let exp = crate::fastmath::fast_powf_aarch64_neon(v, 0.45);
-                    let exp = std::arch::aarch64::vfmaq_n_f32(std::arch::aarch64::vdupq_n_f32(-0.099), exp, 1.099);
+                    let exp = std::arch::aarch64::vfmaq_n_f32(
+                        std::arch::aarch64::vdupq_n_f32(-0.099),
+                        exp,
+                        1.099,
+                    );
                     let v = std::arch::aarch64::vbslq_f32(mask, lin, exp);
                     std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
                 }
@@ -305,19 +308,21 @@ pub fn linear_to_bt709(mut samples: &mut [f32]) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+        {
             samples = unsafe { linear_to_bt709_x86_64_avx2(samples) };
         } else {
             let mut it = samples.chunks_exact_mut(4);
             for chunk in &mut it {
                 unsafe {
                     let v = std::arch::x86_64::_mm_loadu_ps(chunk.as_ptr());
-                    let mask = std::arch::x86_64::_mm_cmple_ps(
-                        v,
-                        std::arch::x86_64::_mm_set1_ps(0.018),
-                    );
+                    let mask =
+                        std::arch::x86_64::_mm_cmple_ps(v, std::arch::x86_64::_mm_set1_ps(0.018));
                     let lin = std::arch::x86_64::_mm_mul_ps(v, std::arch::x86_64::_mm_set1_ps(4.5));
-                    let exp = crate::fastmath::fast_powf_x86_64_sse2(v, std::arch::x86_64::_mm_set1_ps(0.45));
+                    let exp = crate::fastmath::fast_powf_x86_64_sse2(
+                        v,
+                        std::arch::x86_64::_mm_set1_ps(0.45),
+                    );
                     let exp = std::arch::x86_64::_mm_add_ps(
                         std::arch::x86_64::_mm_mul_ps(exp, std::arch::x86_64::_mm_set1_ps(1.099)),
                         std::arch::x86_64::_mm_set1_ps(-0.099),
@@ -353,18 +358,10 @@ unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
     let mut it = samples.chunks_exact_mut(8);
     for chunk in &mut it {
         let v = _mm256_loadu_ps(chunk.as_ptr());
-        let mask = _mm256_cmp_ps(
-            v,
-            _mm256_set1_ps(0.018),
-            _CMP_LE_OS,
-        );
+        let mask = _mm256_cmp_ps(v, _mm256_set1_ps(0.018), _CMP_LE_OS);
         let lin = _mm256_mul_ps(v, _mm256_set1_ps(4.5));
         let exp = crate::fastmath::fast_powf_x86_64_avx2(v, _mm256_set1_ps(0.45));
-        let exp = _mm256_fmadd_ps(
-            exp,
-            _mm256_set1_ps(1.099),
-            _mm256_set1_ps(-0.099),
-        );
+        let exp = _mm256_fmadd_ps(exp, _mm256_set1_ps(1.099), _mm256_set1_ps(-0.099));
         let v = _mm256_blendv_ps(exp, lin, mask);
         _mm256_storeu_ps(chunk.as_mut_ptr(), v);
     }
@@ -378,11 +375,7 @@ unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
     let mask = _mm_cmple_ps(v, _mm_set1_ps(0.018));
     let lin = _mm_mul_ps(v, _mm_set1_ps(4.5));
     let exp = crate::fastmath::fast_powf_x86_64_fma(v, _mm_set1_ps(0.45));
-    let exp = _mm_fmadd_ps(
-        exp,
-        _mm_set1_ps(1.099),
-        _mm_set1_ps(-0.099),
-    );
+    let exp = _mm_fmadd_ps(exp, _mm_set1_ps(1.099), _mm_set1_ps(-0.099));
     let v = _mm_blendv_ps(exp, lin, mask);
     _mm_storeu_ps(chunk.as_mut_ptr(), v);
 
@@ -403,7 +396,9 @@ pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     for s in samples {
         let a = s.abs();
         let y_m1 = (a * y_mult).powf(M1);
-        *s = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0))).powf(M2).copysign(*s);
+        *s = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0)))
+            .powf(M2)
+            .copysign(*s);
     }
 }
 
@@ -458,7 +453,8 @@ pub fn linear_to_hlg(samples: &mut [f32]) {
             (3.0 * a).sqrt()
         } else {
             A * a.mul_add(12.0, -B).ln() + C
-        }.copysign(*s);
+        }
+        .copysign(*s);
     }
 }
 

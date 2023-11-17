@@ -10,9 +10,7 @@ pub fn adaptive_lf_smoothing_impl(
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Feature set is checked above.
-        return unsafe {
-            adaptive_lf_smoothing_core_neon(width, height, lf_image, lf_scale)
-        };
+        return unsafe { adaptive_lf_smoothing_core_neon(width, height, lf_image, lf_scale) };
     }
 
     generic::adaptive_lf_smoothing_impl(width, height, lf_image, lf_scale)

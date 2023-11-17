@@ -17,7 +17,10 @@ pub fn apply_epf(
         ref sigma,
         sigma_for_modular,
         ..
-    } = frame_header.restoration_filter.epf else { return; };
+    } = frame_header.restoration_filter.epf
+    else {
+        return;
+    };
 
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
@@ -46,7 +49,8 @@ pub fn apply_epf(
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {
-            output[(y + 3) * padded_width + 8..][..width].copy_from_slice(&input[y * width..][..width]);
+            output[(y + 3) * padded_width + 8..][..width]
+                .copy_from_slice(&input[y * width..][..width]);
         }
     }
 
@@ -84,7 +88,8 @@ pub fn apply_epf(
                 for x8 in 0..lf_region.width as usize {
                     let lf_x = lf_region.left as usize + x8;
                     let sigma_x = sigma_region.left as usize + x8;
-                    *sigma_grid.get_mut(sigma_x, sigma_y).unwrap() = *epf_sigma.get(lf_x, lf_y).unwrap();
+                    *sigma_grid.get_mut(sigma_x, sigma_y).unwrap() =
+                        *epf_sigma.get(lf_x, lf_y).unwrap();
                 }
             }
         }
@@ -112,12 +117,18 @@ pub fn apply_epf(
 
             let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
             let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
 
             let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -151,12 +162,18 @@ pub fn apply_epf(
 
             let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
             let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
 
             let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -190,12 +207,18 @@ pub fn apply_epf(
 
             let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
             let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
 
             let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk.chunks_exact_mut(padded_width).zip(in_chunk.chunks_exact(padded_width).rev()) {
+            for (out_row, in_row) in out_chunk
+                .chunks_exact_mut(padded_width)
+                .zip(in_chunk.chunks_exact(padded_width).rev())
+            {
                 out_row.copy_from_slice(in_row);
             }
         }
@@ -216,7 +239,8 @@ pub fn apply_epf(
         let output = output.buf_mut();
         let input = input.buf();
         for y in 0..height {
-            output[y * width..][..width].copy_from_slice(&input[(y + 3) * padded_width + 8..][..width]);
+            output[y * width..][..width]
+                .copy_from_slice(&input[(y + 3) * padded_width + 8..][..width]);
         }
     }
 }

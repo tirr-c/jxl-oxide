@@ -58,7 +58,12 @@ impl TryFrom<u32> for Predictor {
             11 => AvgNorthAndNorthWest,
             12 => AvgNorthAndNorthEast,
             13 => AvgAll,
-            _ => return Err(jxl_bitstream::Error::InvalidEnum { name: "MaProperty", value }),
+            _ => {
+                return Err(jxl_bitstream::Error::InvalidEnum {
+                    name: "MaProperty",
+                    value,
+                })
+            }
         })
     }
 }
@@ -82,19 +87,19 @@ impl Predictor {
                 } else {
                     n as i64
                 }
-            },
+            }
             Gradient => {
                 let n = predictor.n as i64;
                 let w = predictor.w as i64;
                 let nw = predictor.nw as i64;
                 (n + w - nw).clamp(w.min(n), w.max(n))
-            },
+            }
             SelfCorrecting => {
                 let prediction = properties
                     .prediction()
                     .expect("predict_non_sc called with SelfCorrecting predictor");
                 (prediction + 3) >> 3
-            },
+            }
             NorthEast => predictor.ne() as i64,
             NorthWest => predictor.nw as i64,
             WestWest => predictor.ww() as i64,
@@ -109,7 +114,7 @@ impl Predictor {
                 let nee = predictor.nee() as i64;
                 let ne = predictor.ne() as i64;
                 (6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16
-            },
+            }
         }
     }
 }
@@ -202,8 +207,15 @@ impl PredictorState {
         out
     }
 
-    pub fn new(width: u32, channel_index: u32, stream_index: u32, prev_channels: usize, wp_header: Option<&WpHeader>) -> Self {
-        let self_correcting = wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header.clone()));
+    pub fn new(
+        width: u32,
+        channel_index: u32,
+        stream_index: u32,
+        prev_channels: usize,
+        wp_header: Option<&WpHeader>,
+    ) -> Self {
+        let self_correcting =
+            wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header.clone()));
         Self {
             width,
             channel_index,
@@ -211,7 +223,9 @@ impl PredictorState {
             second_prev_row: Vec::with_capacity(width as usize),
             prev_row: Vec::with_capacity(width as usize),
             curr_row: Vec::with_capacity(width as usize),
-            prev_channels_rev: (0..prev_channels).map(|_| PrevChannelState::new(width)).collect(),
+            prev_channels_rev: (0..prev_channels)
+                .map(|_| PrevChannelState::new(width))
+                .collect(),
             self_correcting,
             y: 0,
             w: 0,
@@ -221,7 +235,10 @@ impl PredictorState {
         }
     }
 
-    pub fn properties<'p, 's>(&'p mut self, prev_channel_samples_rev: &'s [i32]) -> Properties<'p, 's> {
+    pub fn properties<'p, 's>(
+        &'p mut self,
+        prev_channel_samples_rev: &'s [i32],
+    ) -> Properties<'p, 's> {
         let prediction = self.sc_predict();
         Properties::new(self, prev_channel_samples_rev, prediction)
     }
@@ -253,24 +270,22 @@ impl PredictorState {
             w3 + ne3 - n3,
             n3 - (((true_err_w + true_err_n + true_err_ne) * wp.wp_p1 as i64) >> 5),
             w3 - (((true_err_w + true_err_n + true_err_nw) * wp.wp_p2 as i64) >> 5),
-            n3 - ((true_err_nw * wp.wp_p3a as i64 +
-                    true_err_n * wp.wp_p3b as i64 +
-                    true_err_ne * wp.wp_p3c as i64 +
-                    (nn3 - n3) * wp.wp_p3d as i64 +
-                    (nw3 - w3) * wp.wp_p3e as i64) >> 5),
+            n3 - ((true_err_nw * wp.wp_p3a as i64
+                + true_err_n * wp.wp_p3b as i64
+                + true_err_ne * wp.wp_p3c as i64
+                + (nn3 - n3) * wp.wp_p3d as i64
+                + (nw3 - w3) * wp.wp_p3e as i64)
+                >> 5),
         ];
 
         let mut subpred_err_sum = [0u32; 4];
         for (i, sum) in subpred_err_sum.iter_mut().enumerate() {
-            *sum = subpred_err_nw_ww[i].wrapping_add(subpred_err_n_w[i]).wrapping_add(subpred_err_ne[i]);
+            *sum = subpred_err_nw_ww[i]
+                .wrapping_add(subpred_err_n_w[i])
+                .wrapping_add(subpred_err_ne[i]);
         }
 
-        let wp_wn = [
-            wp.wp_w0,
-            wp.wp_w1,
-            wp.wp_w2,
-            wp.wp_w3,
-        ];
+        let wp_wn = [wp.wp_w0, wp.wp_w1, wp.wp_w2, wp.wp_w3];
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
             let shift = ((err_sum as u64 + 1) >> 5).checked_ilog2().unwrap_or(0);
@@ -302,7 +317,11 @@ impl PredictorState {
             }
         }
 
-        Some(PredictionResult { prediction, max_error: max_error as i32, subpred })
+        Some(PredictionResult {
+            prediction,
+            max_error: max_error as i32,
+            subpred,
+        })
     }
 }
 
@@ -393,7 +412,10 @@ impl SelfCorrectingPredictor {
         let x = self.true_err_curr_row.len();
         if x >= self.width as usize {
             std::mem::swap(&mut self.true_err_prev_row, &mut self.true_err_curr_row);
-            std::mem::swap(&mut self.subpred_err_prev_row, &mut self.subpred_err_curr_row);
+            std::mem::swap(
+                &mut self.subpred_err_prev_row,
+                &mut self.subpred_err_curr_row,
+            );
             self.true_err_curr_row.clear();
             self.subpred_err_curr_row.clear();
 
@@ -439,7 +461,11 @@ pub struct Properties<'p, 's> {
 }
 
 impl<'p, 's> Properties<'p, 's> {
-    fn new(pred: &'p mut PredictorState, prev_channel_samples_rev: &'s [i32], sc_prediction: Option<PredictionResult>) -> Self {
+    fn new(
+        pred: &'p mut PredictorState,
+        prev_channel_samples_rev: &'s [i32],
+        sc_prediction: Option<PredictionResult>,
+    ) -> Self {
         let prop_cache = [
             pred.channel_index as i32,
             pred.stream_index as i32,
@@ -481,7 +507,9 @@ impl Properties<'_, '_> {
         let prev_channel_idx = prop_extra / 4;
         let prop_idx = prop_extra % 4;
 
-        let Some(c) = self.prev_channel_samples_rev.get(prev_channel_idx).copied() else { return 0; };
+        let Some(c) = self.prev_channel_samples_rev.get(prev_channel_idx).copied() else {
+            return 0;
+        };
         let prev_channel = &self.predictor.prev_channels_rev[prev_channel_idx];
         if prop_idx == 0 {
             c.abs()
@@ -542,7 +570,11 @@ impl Properties<'_, '_> {
             }
         }
 
-        for (ch, sample) in pred.prev_channels_rev.iter_mut().zip(self.prev_channel_samples_rev) {
+        for (ch, sample) in pred
+            .prev_channels_rev
+            .iter_mut()
+            .zip(self.prev_channel_samples_rev)
+        {
             ch.record(*sample);
         }
     }

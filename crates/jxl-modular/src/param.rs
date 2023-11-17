@@ -20,7 +20,11 @@ impl<'a> ModularParams<'a> {
     ) -> Self {
         let channels = channel_shifts
             .into_iter()
-            .map(|shift| ModularChannelParams { width, height, shift })
+            .map(|shift| ModularChannelParams {
+                width,
+                height,
+                shift,
+            })
             .collect();
         Self::with_channels(group_dim, bit_depth, channels, ma_config)
     }
@@ -99,7 +103,11 @@ pub struct SubimageChannelInfo {
 
 impl SubimageChannelInfo {
     pub fn new(channel_id: usize, base_x: u32, base_y: u32) -> Self {
-        SubimageChannelInfo { channel_id, base_x, base_y }
+        SubimageChannelInfo {
+            channel_id,
+            base_x,
+            base_y,
+        }
     }
 }
 
@@ -160,27 +168,36 @@ impl ChannelShift {
 
     pub fn shift_size(&self, (width, height): (u32, u32)) -> (u32, u32) {
         match *self {
-            Self::JpegUpsampling { has_h_subsample, has_v_subsample, h_subsample, v_subsample } => {
+            Self::JpegUpsampling {
+                has_h_subsample,
+                has_v_subsample,
+                h_subsample,
+                v_subsample,
+            } => {
                 let width = if has_h_subsample {
                     let size = (width + 1) / 2;
-                    if h_subsample { size } else { size * 2 }
+                    if h_subsample {
+                        size
+                    } else {
+                        size * 2
+                    }
                 } else {
                     width
                 };
                 let height = if has_v_subsample {
                     let size = (height + 1) / 2;
-                    if v_subsample { size } else { size * 2 }
+                    if v_subsample {
+                        size
+                    } else {
+                        size * 2
+                    }
                 } else {
                     height
                 };
                 (width, height)
-            },
-            Self::Shifts(s) => {
-                (width >> s, height >> s)
-            },
-            Self::Raw(h, v) => {
-                (width >> h, height >> v)
-            },
+            }
+            Self::Shifts(s) => (width >> s, height >> s),
+            Self::Raw(h, v) => (width >> h, height >> v),
         }
     }
 }

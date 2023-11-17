@@ -36,10 +36,7 @@ struct ModularData {
 impl Bundle<ModularParams<'_>> for Modular {
     type Error = crate::Error;
 
-    fn parse(
-        bitstream: &mut Bitstream,
-        params: ModularParams<'_>,
-    ) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
         let inner = if params.channels.is_empty() {
             None
         } else {
@@ -58,12 +55,16 @@ impl Modular {
 
 impl Modular {
     pub fn has_palette(&self) -> bool {
-        let Some(image) = &self.inner else { return false; };
+        let Some(image) = &self.inner else {
+            return false;
+        };
         image.image.has_palette()
     }
 
     pub fn has_squeeze(&self) -> bool {
-        let Some(image) = &self.inner else { return false; };
+        let Some(image) = &self.inner else {
+            return false;
+        };
         image.image.has_squeeze()
     }
 }
@@ -85,28 +86,32 @@ impl Modular {
 impl Bundle<ModularParams<'_>> for ModularData {
     type Error = crate::Error;
 
-    fn parse(
-        bitstream: &mut Bitstream,
-        params: ModularParams<'_>,
-    ) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         if header.nb_transforms > 512 {
-            tracing::error!(nb_transforms = header.nb_transforms, "nb_transforms too large");
-            return Err(jxl_bitstream::Error::ProfileConformance(
+            tracing::error!(
+                nb_transforms = header.nb_transforms,
                 "nb_transforms too large"
-            ).into());
+            );
+            return Err(jxl_bitstream::Error::ProfileConformance("nb_transforms too large").into());
         }
 
         let ma_ctx = if header.use_global_tree {
-            params.ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.clone()
+            params
+                .ma_config
+                .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
+                .clone()
         } else {
             read_bits!(bitstream, Bundle(ma::MaConfig))?
         };
         if ma_ctx.tree_depth() > 2048 {
-            tracing::error!(tree_depth = ma_ctx.tree_depth(), "Decoded MA tree is too deep");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "decoded MA tree is too deep"
-            ).into())
+            tracing::error!(
+                tree_depth = ma_ctx.tree_depth(),
+                "Decoded MA tree is too deep"
+            );
+            return Err(
+                jxl_bitstream::Error::ProfileConformance("decoded MA tree is too deep").into(),
+            );
         }
 
         let channels = ModularChannels::from_params(&params);
@@ -118,22 +123,29 @@ impl Bundle<ModularParams<'_>> for ModularData {
         let nb_channels_tr = tr_channels.info.len();
         if nb_channels_tr > (1 << 16) {
             tracing::error!(nb_channels_tr, "nb_channels_tr too large");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "nb_channels_tr too large"
-            ).into());
+            return Err(
+                jxl_bitstream::Error::ProfileConformance("nb_channels_tr too large").into(),
+            );
         }
 
         if !header.use_global_tree {
-            let num_local_samples: u64 = channels.info.iter()
+            let num_local_samples: u64 = channels
+                .info
+                .iter()
                 .map(|ch| (ch.width as u64 * ch.height as u64))
                 .sum();
             let local_ma_nodes = ma_ctx.num_tree_nodes();
             let max_local_ma_nodes = (1 << 20).min(1024 + num_local_samples) as usize;
             if ma_ctx.num_tree_nodes() > max_local_ma_nodes {
-                tracing::error!(local_ma_nodes, max_local_ma_nodes, "Too many local MA tree nodes");
+                tracing::error!(
+                    local_ma_nodes,
+                    max_local_ma_nodes,
+                    "Too many local MA tree nodes"
+                );
                 return Err(jxl_bitstream::Error::ProfileConformance(
-                    "too many local MA tree nodes"
-                ).into());
+                    "too many local MA tree nodes",
+                )
+                .into());
             }
         }
 
@@ -167,7 +179,9 @@ struct ModularChannels {
 
 impl ModularChannels {
     fn from_params(params: &ModularParams<'_>) -> Self {
-        let info = params.channels.iter()
+        let info = params
+            .channels
+            .iter()
             .map(|ch| ModularChannelInfo::new(ch.width, ch.height, ch.shift))
             .collect();
         Self {

@@ -10,17 +10,8 @@ use std::io::Cursor;
 use jxl_bitstream::Bitstream;
 
 use crate::{
-    ciexyz::*,
-    consts::*,
-    tf,
-    ColourEncoding,
-    ColourSpace,
-    Error,
-    Primaries,
-    RenderingIntent,
-    Result,
-    TransferFunction,
-    WhitePoint,
+    ciexyz::*, consts::*, tf, ColourEncoding, ColourSpace, Error, Primaries, RenderingIntent,
+    Result, TransferFunction, WhitePoint,
 };
 
 /// Reads the encoded ICC profile stream from the given bitstream.
@@ -30,9 +21,9 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
     if enc_size > (1 << 28) {
         // Avoids allocating too much memory (>256MiB)
         // Maximum ICC output_size for Level 10
-        return Err(jxl_bitstream::Error::ProfileConformance(
-            "Too large encoded ICC profile"
-        ).into())
+        return Err(
+            jxl_bitstream::Error::ProfileConformance("Too large encoded ICC profile").into(),
+        );
     }
 
     let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)?;
@@ -166,16 +157,12 @@ fn shuffle4(bytes: &[u8]) -> Vec<u8> {
 /// Decodes the given ICC profile stream.
 pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     const COMMON_TAGS: [&[u8]; 19] = [
-        b"rTRC", b"rXYZ",
-        b"cprt", b"wtpt", b"bkpt",
-        b"rXYZ", b"gXYZ", b"bXYZ", b"kXYZ",
-        b"rTRC", b"gTRC", b"bTRC", b"kTRC",
-        b"chad", b"desc", b"chrm", b"dmnd", b"dmdd", b"lumi",
+        b"rTRC", b"rXYZ", b"cprt", b"wtpt", b"bkpt", b"rXYZ", b"gXYZ", b"bXYZ", b"kXYZ", b"rTRC",
+        b"gTRC", b"bTRC", b"kTRC", b"chad", b"desc", b"chrm", b"dmnd", b"dmdd", b"lumi",
     ];
 
     const COMMON_DATA: [&[u8]; 8] = [
-        b"XYZ ", b"desc", b"text", b"mluc",
-        b"para", b"curv", b"sf32", b"gbd ",
+        b"XYZ ", b"desc", b"text", b"mluc", b"para", b"curv", b"sf32", b"gbd ",
     ];
 
     let mut tmp_cursor = Cursor::new(stream);
@@ -219,7 +206,10 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
 
         loop {
             let mut command = 0u8;
-            if commands_stream.read_exact(std::slice::from_mut(&mut command)).is_err() {
+            if commands_stream
+                .read_exact(std::slice::from_mut(&mut command))
+                .is_err()
+            {
                 return Ok(out);
             }
             let tagcode = command & 63;
@@ -232,7 +222,7 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     let (tag, next_data) = data.split_at(4);
                     data = next_data;
                     tag
-                },
+                }
                 2..=20 => COMMON_TAGS[(tagcode - 2) as usize],
                 _ => return Err(Error::InvalidIccStream("invalid tagcode")),
             };
@@ -274,14 +264,17 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
 
     // Main
     let mut command = 0u8;
-    while commands_stream.read_exact(std::slice::from_mut(&mut command)).is_ok() {
+    while commands_stream
+        .read_exact(std::slice::from_mut(&mut command))
+        .is_ok()
+    {
         match command {
             1 => {
                 let num = varint(&mut commands_stream)? as usize;
                 let (bytes, next_data) = data.split_at(num);
                 data = next_data;
                 out.extend_from_slice(bytes);
-            },
+            }
             2 | 3 => {
                 let num = varint(&mut commands_stream)? as usize;
                 let (bytes, next_data) = data.split_at(num);
@@ -292,10 +285,11 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     shuffle4(bytes)
                 };
                 out.extend_from_slice(&bytes);
-            },
+            }
             4 => {
                 let mut flags = 0u8;
-                commands_stream.read_exact(std::slice::from_mut(&mut flags))
+                commands_stream
+                    .read_exact(std::slice::from_mut(&mut flags))
                     .map_err(|_| Error::InvalidIccStream("stream is too short"))?;
                 let width = ((flags & 3) + 1) as usize;
                 let order = (flags >> 2) & 3;
@@ -328,11 +322,11 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     2 => {
                         shuffled = shuffle2(bytes);
                         &shuffled
-                    },
+                    }
                     4 => {
                         shuffled = shuffle4(bytes);
                         &shuffled
-                    },
+                    }
                     _ => unreachable!(),
                 };
 
@@ -347,16 +341,19 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     let p = match order {
                         0 => prev[0],
                         1 => (2 * prev[0]).wrapping_sub(prev[1]),
-                        2 => (3 * prev[0]).wrapping_sub(3 * prev[1]).wrapping_add(prev[2]),
+                        2 => (3 * prev[0])
+                            .wrapping_sub(3 * prev[1])
+                            .wrapping_add(prev[2]),
                         _ => unreachable!(),
                     };
 
                     for j in 0..width.min(num - i) {
-                        let val = (bytes[i + j] as u32).wrapping_add(p >> (8 * (width - 1 - j))) as u8;
+                        let val =
+                            (bytes[i + j] as u32).wrapping_add(p >> (8 * (width - 1 - j))) as u8;
                         out.push(val);
                     }
                 }
-            },
+            }
             10 => {
                 if data.len() < 12 {
                     return Err(Error::InvalidIccStream("stream is too short"));
@@ -365,14 +362,14 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                 let (bytes, next_data) = data.split_at(12);
                 data = next_data;
                 out.extend_from_slice(bytes);
-            },
+            }
             16..=23 => {
                 out.extend_from_slice(COMMON_DATA[command as usize - 16]);
                 out.extend_from_slice(&[0, 0, 0, 0]);
-            },
+            }
             _ => {
                 return Err(Error::InvalidIccStream("invalid command"));
-            },
+            }
         }
     }
     Ok(out)
@@ -385,7 +382,12 @@ struct IccTag {
     len: u32,
 }
 
-fn append_tag_with_data(tags_out: &mut Vec<IccTag>, data_out: &mut Vec<u8>, tag: [u8; 4], data: &[u8]) {
+fn append_tag_with_data(
+    tags_out: &mut Vec<IccTag>,
+    data_out: &mut Vec<u8>,
+    tag: [u8; 4],
+    data: &[u8],
+) {
     append_multiple_tags_with_data(tags_out, data_out, &[tag], data)
 }
 
@@ -487,6 +489,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
         todo!("ICC profile for XYB color space is not supported yet");
     }
 
+    #[rustfmt::skip]
     let mut header = vec![
         0, 0, 0, 0, // profile size
         b'j', b'x', b'l', b' ',
@@ -529,11 +532,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
     let mut data = Vec::new();
     let desc = format!(
         "{:?}_{:?}_{:?}_{:?}_{:?}",
-        colour_space,
-        rendering_intent,
-        white_point,
-        primaries,
-        tf,
+        colour_space, rendering_intent, white_point, primaries, tf,
     );
     append_tag_with_data(
         &mut tags,
@@ -574,23 +573,29 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
             let adj = g / 2;
             let gamma = ((65536u64 * 10000000u64 + adj) / g) as u32;
             create_para(0, &[gamma])
-        },
-        TransferFunction::Bt709 => create_para(3, &[
-            (65536 * 20 + 4) / 9,
-            (65536 * 1000 + 549) / 1099,
-            (65536 * 99 + 549) / 1099,
-            (65536 * 10 + 22) / 45,
-            (65536 * 81 + 500) / 1000,
-        ]),
+        }
+        TransferFunction::Bt709 => create_para(
+            3,
+            &[
+                (65536 * 20 + 4) / 9,
+                (65536 * 1000 + 549) / 1099,
+                (65536 * 99 + 549) / 1099,
+                (65536 * 10 + 22) / 45,
+                (65536 * 81 + 500) / 1000,
+            ],
+        ),
         TransferFunction::Unknown => panic!(),
         TransferFunction::Linear => vec![b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0],
-        TransferFunction::Srgb => create_para(3, &[
-            (65536 * 24 + 5) / 10,
-            (65536 * 1000 + 527) / 1055,
-            (65536 * 55 + 527) / 1055,
-            (65536 * 100 + 646) / 1292,
-            (65536 * 4045 + 50000) / 100000,
-        ]),
+        TransferFunction::Srgb => create_para(
+            3,
+            &[
+                (65536 * 24 + 5) / 10,
+                (65536 * 1000 + 527) / 1055,
+                (65536 * 55 + 527) / 1055,
+                (65536 * 100 + 646) / 1292,
+                (65536 * 4045 + 50000) / 100000,
+            ],
+        ),
         TransferFunction::Pq => create_curv_lut(&tf::pq_table(4096)),
         TransferFunction::Dci => create_para(0, &[(65536 * 26 + 5) / 10]),
         TransferFunction::Hlg => create_curv_lut(&tf::hlg_table(4096)),
@@ -615,7 +620,12 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
 
     match colour_space {
         ColourSpace::Rgb => {
-            append_multiple_tags_with_data(&mut tags, &mut data, &[*b"rTRC", *b"gTRC", *b"bTRC"], &trc);
+            append_multiple_tags_with_data(
+                &mut tags,
+                &mut data,
+                &[*b"rTRC", *b"gTRC", *b"bTRC"],
+                &trc,
+            );
             let p_xyz = primaries_to_xyz_mat(primaries, from_illuminant);
             let p_pcs = matmul3(&chad, &p_xyz);
             let p_pcs_q = p_pcs.map(|f| (f * 65536.0 + 0.5) as i32);
@@ -627,10 +637,10 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
             append_tag_with_data(&mut tags, &mut data, *b"rXYZ", &create_xyz(p_data[0]));
             append_tag_with_data(&mut tags, &mut data, *b"gXYZ", &create_xyz(p_data[1]));
             append_tag_with_data(&mut tags, &mut data, *b"bXYZ", &create_xyz(p_data[2]));
-        },
+        }
         ColourSpace::Grey => {
             append_tag_with_data(&mut tags, &mut data, *b"kTRC", &trc);
-        },
+        }
         ColourSpace::Xyb => todo!(),
         ColourSpace::Unknown => panic!("Unknown color space, ICC profile not embedded?"),
     }

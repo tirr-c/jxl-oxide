@@ -9,7 +9,11 @@ pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
         return;
     }
 
-    let mul = if direction == DctDirection::Forward { 0.5 } else { 1.0 };
+    let mul = if direction == DctDirection::Forward {
+        0.5
+    } else {
+        1.0
+    };
     if width == 2 && height == 1 {
         let v0 = io.get(0, 0);
         let v1 = io.get(1, 0);
@@ -162,12 +166,7 @@ fn dct4(input: [f32; 4], direction: DctDirection) -> [f32; 4] {
         let sum02 = input[0] + input[2];
         let sub02 = input[0] - input[2];
 
-        [
-            sum02 + out0,
-            sub02 + out1,
-            sub02 - out1,
-            sum02 - out0,
-        ]
+        [sum02 + out0, sub02 + out1, sub02 - out1, sum02 - out0]
     }
 }
 

@@ -1,6 +1,6 @@
-use std::{ptr::NonNull, ops::RangeBounds};
+use std::{ops::RangeBounds, ptr::NonNull};
 
-use crate::{SimdVector, SharedSubgrid};
+use crate::{SharedSubgrid, SimdVector};
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -91,7 +91,11 @@ impl<S> SimpleGrid<S> {
     }
 
     #[inline]
-    pub fn subgrid(&self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> crate::SharedSubgrid<'_, S> {
+    pub fn subgrid(
+        &self,
+        range_x: impl RangeBounds<usize>,
+        range_y: impl RangeBounds<usize>,
+    ) -> crate::SharedSubgrid<'_, S> {
         SharedSubgrid::from(self).subgrid(range_x, range_y)
     }
 }
@@ -132,7 +136,13 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     ///
     /// # Panics
     /// Panics if `width` is not zero and `(width - 1) * step >= stride`.
-    pub unsafe fn new_with_step(ptr: NonNull<V>, width: usize, height: usize, step: usize, stride: usize) -> Self {
+    pub unsafe fn new_with_step(
+        ptr: NonNull<V>,
+        width: usize,
+        height: usize,
+        step: usize,
+        stride: usize,
+    ) -> Self {
         assert!(width == 0 || (width - 1) * step < stride);
         Self {
             ptr,
@@ -223,7 +233,10 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
     #[inline]
     pub fn get_row(&self, row: usize) -> &[V] {
-        assert_eq!(self.step, 1, "step is not 1; did you use get_row in modular decoding?");
+        assert_eq!(
+            self.step, 1,
+            "step is not 1; did you use get_row in modular decoding?"
+        );
 
         let ptr = self.get_ptr(0, row);
         unsafe { std::slice::from_raw_parts(ptr as *const _, self.width) }
@@ -239,7 +252,10 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
     #[inline]
     pub fn get_row_mut(&mut self, row: usize) -> &mut [V] {
-        assert_eq!(self.step, 1, "step is not 1; did you use get_row in modular decoding?");
+        assert_eq!(
+            self.step, 1,
+            "step is not 1; did you use get_row in modular decoding?"
+        );
 
         let ptr = self.get_ptr(0, row);
         unsafe { std::slice::from_raw_parts_mut(ptr, self.width) }
@@ -261,7 +277,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 }
 
 impl<'g, V: Copy> CutGrid<'g, V> {
-    pub fn subgrid_mut(&mut self, range_x: impl RangeBounds<usize>, range_y: impl RangeBounds<usize>) -> CutGrid<V> {
+    pub fn subgrid_mut(
+        &mut self,
+        range_x: impl RangeBounds<usize>,
+        range_y: impl RangeBounds<usize>,
+    ) -> CutGrid<V> {
         use std::ops::Bound;
 
         let left = match range_x.start_bound() {
@@ -310,8 +330,15 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut left_grid = CutGrid::new_with_step(left_ptr, x, self.height, self.step, self.stride);
-            let mut right_grid = CutGrid::new_with_step(right_ptr, self.width - x, self.height, self.step, self.stride);
+            let mut left_grid =
+                CutGrid::new_with_step(left_ptr, x, self.height, self.step, self.stride);
+            let mut right_grid = CutGrid::new_with_step(
+                right_ptr,
+                self.width - x,
+                self.height,
+                self.step,
+                self.stride,
+            );
             left_grid.split_base = Some(split_base);
             right_grid.split_base = Some(split_base);
             (left_grid, right_grid)
@@ -330,8 +357,15 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut top_grid = CutGrid::new_with_step(top_ptr, self.width, y, self.step, self.stride);
-            let mut bottom_grid = CutGrid::new_with_step(bottom_ptr, self.width, self.height - y, self.step, self.stride);
+            let mut top_grid =
+                CutGrid::new_with_step(top_ptr, self.width, y, self.step, self.stride);
+            let mut bottom_grid = CutGrid::new_with_step(
+                bottom_ptr,
+                self.width,
+                self.height - y,
+                self.step,
+                self.stride,
+            );
             top_grid.split_base = Some(split_base);
             bottom_grid.split_base = Some(split_base);
             (top_grid, bottom_grid)
@@ -347,8 +381,10 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut left_grid = CutGrid::new_with_step(left_ptr, left_width, self.height, new_step, self.stride);
-            let mut right_grid = CutGrid::new_with_step(right_ptr, right_width, self.height, new_step, self.stride);
+            let mut left_grid =
+                CutGrid::new_with_step(left_ptr, left_width, self.height, new_step, self.stride);
+            let mut right_grid =
+                CutGrid::new_with_step(right_ptr, right_width, self.height, new_step, self.stride);
             left_grid.split_base = Some(split_base);
             right_grid.split_base = Some(split_base);
             (left_grid, right_grid)
@@ -364,8 +400,15 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut top_grid = CutGrid::new_with_step(top_ptr, self.width, top_height, self.step, new_stride);
-            let mut bottom_grid = CutGrid::new_with_step(bottom_ptr, self.width, bottom_height, self.step, new_stride);
+            let mut top_grid =
+                CutGrid::new_with_step(top_ptr, self.width, top_height, self.step, new_stride);
+            let mut bottom_grid = CutGrid::new_with_step(
+                bottom_ptr,
+                self.width,
+                bottom_height,
+                self.step,
+                new_stride,
+            );
             top_grid.split_base = Some(split_base);
             bottom_grid.split_base = Some(split_base);
             (top_grid, bottom_grid)
@@ -382,7 +425,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         self.step = new_step;
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut ret = CutGrid::new_with_step(right_ptr, right_width, self.height, new_step, self.stride);
+            let mut ret =
+                CutGrid::new_with_step(right_ptr, right_width, self.height, new_step, self.stride);
             self.split_base = Some(split_base);
             ret.split_base = Some(split_base);
             ret
@@ -399,7 +443,13 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         self.stride = new_stride;
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut ret = CutGrid::new_with_step(bottom_ptr, self.width, bottom_height, self.step, new_stride);
+            let mut ret = CutGrid::new_with_step(
+                bottom_ptr,
+                self.width,
+                bottom_height,
+                self.step,
+                new_stride,
+            );
             self.split_base = Some(split_base);
             ret.split_base = Some(split_base);
             ret
@@ -430,7 +480,10 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
         // SAFETY: Two pointers are from same allocation since split base is checked.
         let offset_diff = unsafe {
-            right.ptr.as_ptr().offset_from(self.ptr.as_ptr() as *const _)
+            right
+                .ptr
+                .as_ptr()
+                .offset_from(self.ptr.as_ptr() as *const _)
         };
         if offset_diff != new_step as isize {
             return false;
@@ -465,7 +518,10 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
         // SAFETY: Two pointers are from same allocation since split base is checked.
         let offset_diff = unsafe {
-            bottom.ptr.as_ptr().offset_from(self.ptr.as_ptr() as *const _)
+            bottom
+                .ptr
+                .as_ptr()
+                .offset_from(self.ptr.as_ptr() as *const _)
         };
         if offset_diff != new_stride as isize {
             return false;
@@ -479,7 +535,15 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
 impl<'g, V: Copy> CutGrid<'g, V> {
     pub fn into_groups(self, group_width: usize, group_height: usize) -> Vec<CutGrid<'g, V>> {
-        let CutGrid { ptr, split_base, width, height, step, stride, .. } = self;
+        let CutGrid {
+            ptr,
+            split_base,
+            width,
+            height,
+            step,
+            stride,
+            ..
+        } = self;
         let split_base = split_base.unwrap_or(ptr.cast());
 
         let groups_x = (width + group_width - 1) / group_width;
@@ -495,13 +559,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
                 let ptr = unsafe { row_ptr.add(x * step) };
 
                 let mut grid = unsafe {
-                    CutGrid::new_with_step(
-                        NonNull::new(ptr).unwrap(),
-                        gw,
-                        gh,
-                        step,
-                        stride,
-                    )
+                    CutGrid::new_with_step(NonNull::new(ptr).unwrap(), gw, gh, step, stride)
                 };
                 grid.split_base = Some(split_base);
                 groups.push(grid);
@@ -515,7 +573,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 impl<'g> CutGrid<'g, f32> {
     pub fn as_vectored<V: SimdVector>(&mut self) -> Option<CutGrid<'_, V>> {
         assert_eq!(self.step, 1);
-        assert!(V::available(), "Vector type `{}` is not supported by current CPU", std::any::type_name::<V>());
+        assert!(
+            V::available(),
+            "Vector type `{}` is not supported by current CPU",
+            std::any::type_name::<V>()
+        );
 
         let mask = V::SIZE - 1;
         let align_mask = std::mem::align_of::<V>() - 1;
@@ -596,12 +658,18 @@ impl<S: Clone> PaddedGrid<S> {
         // Mirror vertically.
         let (out_chunk, in_chunk) = buf.split_at_mut(stride * padding);
         let in_chunk = &in_chunk[..stride * padding];
-        for (out_row, in_row) in out_chunk.chunks_exact_mut(stride).zip(in_chunk.chunks_exact(stride).rev()) {
+        for (out_row, in_row) in out_chunk
+            .chunks_exact_mut(stride)
+            .zip(in_chunk.chunks_exact(stride).rev())
+        {
             out_row.clone_from_slice(in_row);
         }
 
         let (in_chunk, out_chunk) = buf.split_at_mut(stride * (height + padding));
-        for (out_row, in_row) in out_chunk.chunks_exact_mut(stride).zip(in_chunk.chunks_exact(stride).rev()) {
+        for (out_row, in_row) in out_chunk
+            .chunks_exact_mut(stride)
+            .zip(in_chunk.chunks_exact(stride).rev())
+        {
             out_row.clone_from_slice(in_row);
         }
     }

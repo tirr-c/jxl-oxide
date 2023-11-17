@@ -48,7 +48,9 @@ pub(crate) unsafe fn epf_common<'buf>(
     let output2_it = output2[3 * width..][..(height * width)].chunks_mut(8 * width);
 
     pool.scope(|scope| {
-        for (y8, ((output0, output1), output2)) in output0_it.zip(output1_it).zip(output2_it).enumerate() {
+        for (y8, ((output0, output1), output2)) in
+            output0_it.zip(output1_it).zip(output2_it).enumerate()
+        {
             scope.spawn(move |_| {
                 for dy in 0..(height - y8 * 8).min(8) {
                     let output_buf_rows = [
@@ -68,7 +70,9 @@ pub(crate) unsafe fn epf_common<'buf>(
                         step_multiplier,
                     };
 
-                    unsafe { handle_row(row); }
+                    unsafe {
+                        handle_row(row);
+                    }
                 }
             });
         }
@@ -286,18 +290,18 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
     let mut input = vec![0f32; width * (height + 2)];
     input[width..][..width * height].copy_from_slice(fb.buf());
     input[..width].copy_from_slice(&fb.buf()[..width]);
-    input[width * (height + 1)..][..width].copy_from_slice(&fb.buf()[width * (height - 1)..][..width]);
+    input[width * (height + 1)..][..width]
+        .copy_from_slice(&fb.buf()[width * (height - 1)..][..width]);
 
     let input = &*input;
     let output = fb.buf_mut();
 
     if width == 1 {
         for idx in 0..height {
-            output[idx] = (
-                input[idx + 1] +
-                (input[idx] + input[idx + 1] + input[idx + 1] + input[idx + 2]) * weight1 +
-                (input[idx] + input[idx + 2]) * weight2 * 2.0
-            ) * global_weight;
+            output[idx] = (input[idx + 1]
+                + (input[idx] + input[idx + 1] + input[idx + 1] + input[idx + 2]) * weight1
+                + (input[idx] + input[idx + 2]) * weight2 * 2.0)
+                * global_weight;
         }
         return;
     }
@@ -318,11 +322,10 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
     ];
 
     for (idx, out) in output[1..][..len].iter_mut().enumerate() {
-        *out = (
-            center[idx] +
-            (sides[0][idx] + sides[1][idx] + sides[2][idx] + sides[3][idx]) * weight1 +
-            (diags[0][idx] + diags[1][idx] + diags[2][idx] + diags[3][idx]) * weight2
-        ) * global_weight;
+        *out = (center[idx]
+            + (sides[0][idx] + sides[1][idx] + sides[2][idx] + sides[3][idx]) * weight1
+            + (diags[0][idx] + diags[1][idx] + diags[2][idx] + diags[3][idx]) * weight2)
+            * global_weight;
     }
 
     // left side
@@ -341,11 +344,12 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
     ];
     for idx in 0..height {
         let offset = idx * width;
-        output[offset] = (
-            center[offset] +
-            (sides[0][offset] + sides[1][offset] + sides[2][offset] + sides[3][offset]) * weight1 +
-            (diags[0][offset] + diags[1][offset] + diags[2][offset] + diags[3][offset]) * weight2
-        ) * global_weight;
+        output[offset] = (center[offset]
+            + (sides[0][offset] + sides[1][offset] + sides[2][offset] + sides[3][offset])
+                * weight1
+            + (diags[0][offset] + diags[1][offset] + diags[2][offset] + diags[3][offset])
+                * weight2)
+            * global_weight;
     }
 
     // right side
@@ -364,10 +368,11 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
     ];
     for idx in 0..height {
         let offset = idx * width;
-        output[width - 1 + offset] = (
-            center[offset] +
-            (sides[0][offset] + sides[1][offset] + sides[2][offset] + sides[3][offset]) * weight1 +
-            (diags[0][offset] + diags[1][offset] + diags[2][offset] + diags[3][offset]) * weight2
-        ) * global_weight;
+        output[width - 1 + offset] = (center[offset]
+            + (sides[0][offset] + sides[1][offset] + sides[2][offset] + sides[3][offset])
+                * weight1
+            + (diags[0][offset] + diags[1][offset] + diags[2][offset] + diags[3][offset])
+                * weight2)
+            * global_weight;
     }
 }

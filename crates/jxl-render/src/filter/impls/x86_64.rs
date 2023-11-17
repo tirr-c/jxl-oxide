@@ -3,8 +3,8 @@ use jxl_threadpool::JxlThreadPool;
 
 use super::generic::epf_common;
 
-mod epf_sse2;
 mod epf_avx2;
+mod epf_sse2;
 
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],

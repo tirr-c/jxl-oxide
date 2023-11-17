@@ -8,7 +8,8 @@ type Vector = __m128;
 
 #[inline]
 unsafe fn weight_sse2(scaled_distance: Vector, sigma: f32, step_multiplier: Vector) -> Vector {
-    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma).mul(step_multiplier);
+    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma)
+        .mul(step_multiplier);
     let result = scaled_distance.muladd(neg_inv_sigma, Vector::splat_f32(1.0));
     _mm_max_ps(result, Vector::zero())
 }

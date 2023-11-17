@@ -1,12 +1,11 @@
-use jxl_bitstream::{Bitstream, unpack_signed};
-use jxl_coding::{DecoderRleMode, RleToken, DecoderWithLz77};
+use jxl_bitstream::{unpack_signed, Bitstream};
+use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
 use jxl_grid::{CutGrid, SimpleGrid};
 
 use crate::{
-    ModularChannels,
-    predictor::{PredictorState, Predictor},
-    Result,
-    MaConfig, ma::{MaTreeLeafClustered, FlatMaTree}, ModularChannelInfo, ModularHeader,
+    ma::{FlatMaTree, MaTreeLeafClustered},
+    predictor::{Predictor, PredictorState},
+    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
 };
 
 #[derive(Debug)]
@@ -28,7 +27,9 @@ impl TransformedGrid<'_> {
     fn reborrow(&mut self) -> TransformedGrid {
         match self {
             TransformedGrid::Single(g) => TransformedGrid::Single(g.split_horizontal(0).1),
-            TransformedGrid::Merged { leader, .. } => TransformedGrid::Single(leader.split_horizontal(0).1),
+            TransformedGrid::Merged { leader, .. } => {
+                TransformedGrid::Single(leader.split_horizontal(0).1)
+            }
         }
     }
 }
@@ -58,10 +59,13 @@ impl<'dest> TransformedGrid<'dest> {
                 let tmp = CutGrid::from_buf(&mut [], 0, 0, 0);
                 let leader = std::mem::replace(leader, tmp);
                 *self = Self::Merged { leader, members };
-            },
-            Self::Merged { members: original_members, .. } => {
+            }
+            Self::Merged {
+                members: original_members,
+                ..
+            } => {
                 original_members.extend(members);
-            },
+            }
         }
     }
 
@@ -81,7 +85,7 @@ impl<'dest> TransformedGrid<'dest> {
                     *self = Self::Single(leader);
                 }
                 members
-            },
+            }
         }
     }
 }
@@ -98,13 +102,20 @@ pub struct ModularImageDestination {
 }
 
 impl ModularImageDestination {
-    pub(crate) fn new(header: ModularHeader, ma_ctx: MaConfig, group_dim: u32, bit_depth: u32, channels: ModularChannels) -> Self {
+    pub(crate) fn new(
+        header: ModularHeader,
+        ma_ctx: MaConfig,
+        group_dim: u32,
+        bit_depth: u32,
+        channels: ModularChannels,
+    ) -> Self {
         let mut meta_channels = Vec::new();
         for tr in &header.transform {
             tr.prepare_meta_channels(&mut meta_channels);
         }
 
-        let image_channels = channels.info
+        let image_channels = channels
+            .info
             .iter()
             .map(|ch| SimpleGrid::new(ch.width as usize, ch.height as usize))
             .collect();
@@ -143,13 +154,14 @@ impl ModularImageDestination {
 
         let group_dim = self.group_dim;
         let subimage = self.prepare_subimage()?;
-        let (channel_info, grids): (Vec<_>, Vec<_>) = subimage.channel_info
+        let (channel_info, grids): (Vec<_>, Vec<_>) = subimage
+            .channel_info
             .into_iter()
             .zip(subimage.grid)
             .enumerate()
             .take_while(|&(i, (ref info, _))| {
-                i < subimage.nb_meta_channels ||
-                    (info.width <= group_dim && info.height <= group_dim)
+                i < subimage.nb_meta_channels
+                    || (info.width <= group_dim && info.height <= group_dim)
             })
             .map(|(_, x)| x)
             .unzip();
@@ -173,13 +185,14 @@ impl ModularImageDestination {
         let group_dim = self.group_dim;
         let bit_depth = self.bit_depth;
         let subimage = self.prepare_subimage()?;
-        let it = subimage.channel_info
+        let it = subimage
+            .channel_info
             .into_iter()
             .zip(subimage.grid)
             .enumerate()
             .skip_while(|&(i, (ref info, _))| {
-                i < subimage.nb_meta_channels ||
-                    (info.width <= group_dim && info.height <= group_dim)
+                i < subimage.nb_meta_channels
+                    || (info.width <= group_dim && info.height <= group_dim)
             });
 
         let mut lf_groups = Vec::new();
@@ -193,10 +206,9 @@ impl ModularImageDestination {
             };
             let (groups, grids) = if hshift < 3 || vshift < 3 {
                 let shift = hshift.min(vshift); // shift < 3
-                let pass_idx = *pass_shifts.iter()
-                    .find(|(_, &(minshift, maxshift))| {
-                        (minshift..maxshift).contains(&shift)
-                    })
+                let pass_idx = *pass_shifts
+                    .iter()
+                    .find(|(_, &(minshift, maxshift))| (minshift..maxshift).contains(&shift))
                     .unwrap()
                     .0;
                 let pass_idx = pass_idx as usize;
@@ -214,10 +226,9 @@ impl ModularImageDestination {
             };
 
             if groups.is_empty() {
-                groups.resize_with(
-                    grids.len(),
-                    || TransformedModularSubimage::empty(&subimage.header, &subimage.ma_ctx, bit_depth),
-                );
+                groups.resize_with(grids.len(), || {
+                    TransformedModularSubimage::empty(&subimage.header, &subimage.ma_ctx, bit_depth)
+                });
             } else if groups.len() != grids.len() {
                 panic!();
             }
@@ -225,26 +236,38 @@ impl ModularImageDestination {
             for (subimage, grid) in groups.iter_mut().zip(grids) {
                 let width = grid.width() as u32;
                 let height = grid.height() as u32;
-                subimage.channel_info.push(ModularChannelInfo { width, height, hshift, vshift });
+                subimage.channel_info.push(ModularChannelInfo {
+                    width,
+                    height,
+                    hshift,
+                    vshift,
+                });
                 subimage.channel_indices.push(i);
                 subimage.grid.push(grid.into());
                 subimage.partial = true;
             }
         }
 
-        Ok(TransformedGlobalModular { lf_groups, pass_groups })
+        Ok(TransformedGlobalModular {
+            lf_groups,
+            pass_groups,
+        })
     }
 
     pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
         let mut channels = self.channels.clone();
-        let mut meta_channel_grids = self.meta_channels.iter_mut()
+        let mut meta_channel_grids = self
+            .meta_channels
+            .iter_mut()
             .map(|g| {
                 let width = g.width();
                 let height = g.height();
                 CutGrid::from_buf(g.buf_mut(), width, height, width)
             })
             .collect::<Vec<_>>();
-        let mut grids = self.image_channels.iter_mut()
+        let mut grids = self
+            .image_channels
+            .iter_mut()
             .map(|g| {
                 let width = g.width();
                 let height = g.height();
@@ -304,10 +327,16 @@ impl<'dest> TransformedModularSubimage<'dest> {
 }
 
 impl<'dest> TransformedModularSubimage<'dest> {
-    pub fn recursive(self, bitstream: &mut Bitstream, global_ma_config: Option<&MaConfig>) -> Result<RecursiveModularImage<'dest>> {
+    pub fn recursive(
+        self,
+        bitstream: &mut Bitstream,
+        global_ma_config: Option<&MaConfig>,
+    ) -> Result<RecursiveModularImage<'dest>> {
         let header = bitstream.read_bundle::<crate::ModularHeader>()?;
         let ma_ctx = if header.use_global_tree {
-            global_ma_config.ok_or(crate::Error::GlobalMaTreeNotAvailable)?.clone()
+            global_ma_config
+                .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
+                .clone()
         } else {
             bitstream.read_bundle::<crate::MaConfig>()?
         };
@@ -316,7 +345,10 @@ impl<'dest> TransformedModularSubimage<'dest> {
             header,
             ma_ctx,
             bit_depth: self.bit_depth,
-            channels: ModularChannels { info: self.channel_info, nb_meta_channels: 0 },
+            channels: ModularChannels {
+                info: self.channel_info,
+                nb_meta_channels: 0,
+            },
             meta_channels: Vec::new(),
             image_channels: self.grid,
         };
@@ -338,7 +370,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
     fn decode_channel_loop(
         &mut self,
         stream_index: u32,
-        mut loop_fn: impl FnMut(usize, &mut CutGrid<i32>, &[&CutGrid<i32>], FlatMaTree, &crate::predictor::WpHeader) -> Result<()>,
+        mut loop_fn: impl FnMut(
+            usize,
+            &mut CutGrid<i32>,
+            &[&CutGrid<i32>],
+            FlatMaTree,
+            &crate::predictor::WpHeader,
+        ) -> Result<()>,
     ) -> Result<()> {
         let wp_header = &self.header.wp_params;
         let mut prev: Vec<(&ModularChannelInfo, &CutGrid<'dest, i32>)> = Vec::new();
@@ -346,10 +384,10 @@ impl<'dest> TransformedModularSubimage<'dest> {
             let mut filtered_prev = prev
                 .iter()
                 .filter(|&(prev_info, _)| {
-                    info.width == prev_info.width &&
-                        info.height == prev_info.height &&
-                        info.hshift == prev_info.hshift &&
-                        info.vshift == prev_info.vshift
+                    info.width == prev_info.width
+                        && info.height == prev_info.height
+                        && info.hshift == prev_info.hshift
+                        && info.vshift == prev_info.vshift
                 })
                 .map(|(_, g)| *g)
                 .collect::<Vec<_>>();
@@ -373,11 +411,11 @@ impl<'dest> TransformedModularSubimage<'dest> {
         match self.decode_channels_inner(bitstream, stream_index) {
             Err(e) if e.unexpected_eof() && allow_partial => {
                 tracing::debug!("Partially decoded Modular image");
-            },
+            }
             Err(e) => return Err(e),
             Ok(_) => {
                 self.partial = false;
-            },
+            }
         }
         Ok(())
     }
@@ -409,7 +447,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
             let width = grid.width();
             let height = grid.height();
 
-            if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
+            if let Some(&MaTreeLeafClustered {
+                cluster,
+                predictor,
+                offset,
+                multiplier,
+            }) = ma_tree.single_node()
+            {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
                     if let Some(token) = no_lz77_decoder.single_token(cluster) {
@@ -424,7 +468,8 @@ impl<'dest> TransformedModularSubimage<'dest> {
                         tracing::trace!("Fast path");
                         for y in 0..height {
                             for x in 0..width {
-                                let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                                let token =
+                                    no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                                 let value = unpack_signed(token) * multiplier as i32 + offset;
                                 *grid.get_mut(x, y) = value;
                             }
@@ -442,7 +487,8 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             let n = if y == 0 { w } else { *prev as i64 };
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
-                            let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                            let token =
+                                no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
                             *grid.get_mut(x, y) = value;
                             *prev = value;
@@ -455,7 +501,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
+            let mut predictor = PredictorState::new(
+                width as u32,
+                i as u32,
+                stream_index,
+                prev_rev.len(),
+                wp_header,
+            );
             let mut next = |cluster: u8| -> Result<i32> {
                 let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                 Ok(unpack_signed(token))
@@ -473,7 +525,9 @@ impl<'dest> TransformedModularSubimage<'dest> {
         stream_index: u32,
         mut decoder: DecoderWithLz77<'_>,
     ) -> Result<()> {
-        let dist_multiplier = self.channel_info.iter()
+        let dist_multiplier = self
+            .channel_info
+            .iter()
             .skip_while(|ch| ch.hshift == -1 || ch.vshift == -1)
             .map(|info| info.width)
             .max()
@@ -483,13 +537,23 @@ impl<'dest> TransformedModularSubimage<'dest> {
             let width = grid.width();
             let height = grid.height();
 
-            if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
+            if let Some(&MaTreeLeafClustered {
+                cluster,
+                predictor,
+                offset,
+                multiplier,
+            }) = ma_tree.single_node()
+            {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
                     tracing::trace!("Fast path");
                     for y in 0..height {
                         for x in 0..width {
-                            let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+                            let token = decoder.read_varint_with_multiplier_clustered(
+                                bitstream,
+                                cluster,
+                                dist_multiplier,
+                            )?;
                             let value = unpack_signed(token) * multiplier as i32 + offset;
                             *grid.get_mut(x, y) = value;
                         }
@@ -506,7 +570,11 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             let n = if y == 0 { w } else { *prev as i64 };
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
-                            let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+                            let token = decoder.read_varint_with_multiplier_clustered(
+                                bitstream,
+                                cluster,
+                                dist_multiplier,
+                            )?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
                             *grid.get_mut(x, y) = value;
                             *prev = value;
@@ -519,9 +587,19 @@ impl<'dest> TransformedModularSubimage<'dest> {
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
+            let mut predictor = PredictorState::new(
+                width as u32,
+                i as u32,
+                stream_index,
+                prev_rev.len(),
+                wp_header,
+            );
             let mut next = |cluster: u8| -> Result<i32> {
-                let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+                let token = decoder.read_varint_with_multiplier_clustered(
+                    bitstream,
+                    cluster,
+                    dist_multiplier,
+                )?;
                 Ok(unpack_signed(token))
             };
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
@@ -546,11 +624,11 @@ impl<'dest> TransformedModularSubimage<'dest> {
                     RleToken::Value(v) => {
                         rle_value = unpack_signed(v);
                         rle_value
-                    },
+                    }
                     RleToken::Repeat(len) => {
                         rle_left = len - 1;
                         rle_value
-                    },
+                    }
                 }
             })
         };
@@ -559,7 +637,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
             let width = grid.width();
             let height = grid.height();
 
-            if let Some(&MaTreeLeafClustered { cluster, predictor, offset, multiplier }) = ma_tree.single_node() {
+            if let Some(&MaTreeLeafClustered {
+                cluster,
+                predictor,
+                offset,
+                multiplier,
+            }) = ma_tree.single_node()
+            {
                 tracing::trace!(cluster, ?predictor, "Single MA tree node");
                 if predictor == Predictor::Zero {
                     tracing::trace!("Quite fast path");
@@ -595,7 +679,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(width as u32, i as u32, stream_index, prev_rev.len(), wp_header);
+            let mut predictor = PredictorState::new(
+                width as u32,
+                i as u32,
+                stream_index,
+                prev_rev.len(),
+                wp_header,
+            );
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
         })
     }
@@ -644,14 +734,20 @@ pub struct RecursiveModularImage<'dest> {
 impl<'dest> RecursiveModularImage<'dest> {
     pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
         let mut channels = self.channels.clone();
-        let mut meta_channel_grids = self.meta_channels.iter_mut()
+        let mut meta_channel_grids = self
+            .meta_channels
+            .iter_mut()
             .map(|g| {
                 let width = g.width();
                 let height = g.height();
                 CutGrid::from_buf(g.buf_mut(), width, height, width)
             })
             .collect::<Vec<_>>();
-        let mut grids = self.image_channels.iter_mut().map(|g| g.reborrow()).collect();
+        let mut grids = self
+            .image_channels
+            .iter_mut()
+            .map(|g| g.reborrow())
+            .collect();
         for tr in &self.header.transform {
             tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
         }

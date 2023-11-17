@@ -1,13 +1,10 @@
 const MAT_BRADFORD: [f32; 9] = [
-    0.8951, 0.2664, -0.1614,
-    -0.7502, 1.7135, 0.0367,
-    0.0389, -0.0685, 1.0296,
+    0.8951, 0.2664, -0.1614, -0.7502, 1.7135, 0.0367, 0.0389, -0.0685, 1.0296,
 ];
 
 const MAT_BRADFORD_INV: [f32; 9] = [
-    0.9869929, -0.1470543, 0.1599627,
-    0.4323053, 0.5183603, 0.0492912,
-    -0.0085287, 0.0400428, 0.9684867,
+    0.9869929, -0.1470543, 0.1599627, 0.4323053, 0.5183603, 0.0492912, -0.0085287, 0.0400428,
+    0.9684867,
 ];
 
 #[inline]
@@ -40,9 +37,9 @@ pub fn matmul3vec(a: &[f32; 9], b: &[f32; 3]) -> [f32; 3] {
 
 #[inline]
 fn matinv(mat: &[f32; 9]) -> [f32; 9] {
-    let det = mat[0] * (mat[4] * mat[8] - mat[5] * mat[7]) +
-        mat[1] * (mat[5] * mat[6] - mat[3] * mat[8]) +
-        mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);
+    let det = mat[0] * (mat[4] * mat[8] - mat[5] * mat[7])
+        + mat[1] * (mat[5] * mat[6] - mat[3] * mat[8])
+        + mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);
     [
         (mat[4] * mat[8] - mat[5] * mat[7]) / det,
         (mat[7] * mat[2] - mat[8] * mat[1]) / det,
@@ -79,8 +76,12 @@ pub fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9]
 
 pub fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
     let mut primaries = [
-        primaries[0][0], primaries[1][0], primaries[2][0],
-        primaries[0][1], primaries[1][1], primaries[2][1],
+        primaries[0][0],
+        primaries[1][0],
+        primaries[2][0],
+        primaries[0][1],
+        primaries[1][1],
+        primaries[2][1],
         (1.0 - primaries[0][0] - primaries[0][1]),
         (1.0 - primaries[1][0] - primaries[1][1]),
         (1.0 - primaries[2][0] - primaries[2][1]),
@@ -98,8 +99,12 @@ pub fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] 
 
 pub fn xyz_to_primaries_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
     let primaries = [
-        primaries[0][0], primaries[1][0], primaries[2][0],
-        primaries[0][1], primaries[1][1], primaries[2][1],
+        primaries[0][0],
+        primaries[1][0],
+        primaries[2][0],
+        primaries[0][1],
+        primaries[1][1],
+        primaries[2][1],
         (1.0 - primaries[0][0] - primaries[0][1]),
         (1.0 - primaries[1][0] - primaries[1][1]),
         (1.0 - primaries[2][0] - primaries[2][1]),

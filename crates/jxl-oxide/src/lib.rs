@@ -95,16 +95,16 @@ mod fb;
 use bitstream::ContainerDetectingReader;
 pub use jxl_bitstream as bitstream;
 pub use jxl_color::header as color;
+pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
-pub use jxl_frame::header as frame;
 
-pub use jxl_bitstream::{Bitstream, Bundle};
 use jxl_bitstream::Name;
+pub use jxl_bitstream::{Bitstream, Bundle};
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::SimpleGrid;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
-use jxl_render::{RenderContext, IndexedFrame};
+use jxl_render::{IndexedFrame, RenderContext};
 
 pub use fb::FrameBuffer;
 pub use jxl_threadpool::JxlThreadPool;
@@ -198,10 +198,10 @@ impl UninitializedJxlImage {
             Ok(x) => x,
             Err(e) if e.unexpected_eof() => {
                 return Ok(InitializeResult::NeedMoreData(self));
-            },
+            }
             Err(e) => {
                 return Err(e.into());
-            },
+            }
         };
 
         let embedded_icc = if image_header.metadata.colour_encoding.want_icc {
@@ -210,10 +210,10 @@ impl UninitializedJxlImage {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
                     return Ok(InitializeResult::NeedMoreData(self));
-                },
+                }
                 Err(e) => {
                     return Err(e.into());
-                },
+                }
             };
             let icc = jxl_color::icc::decode_icc(&icc)?;
             Some(icc)
@@ -226,15 +226,18 @@ impl UninitializedJxlImage {
         let skip_bytes = if image_header.metadata.preview.is_some() {
             let frame = match Frame::parse(
                 &mut bitstream,
-                FrameContext { image_header: image_header.clone(), pool: self.pool.clone() },
+                FrameContext {
+                    image_header: image_header.clone(),
+                    pool: self.pool.clone(),
+                },
             ) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
                     return Ok(InitializeResult::NeedMoreData(self));
-                },
+                }
                 Err(e) => {
                     return Err(e.into());
-                },
+                }
             };
 
             let bytes_read = bitstream.num_read_bits() / 8;
@@ -333,7 +336,8 @@ impl JxlImage {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "reader ended before parsing image header",
-                ).into());
+                )
+                .into());
             }
             let buf = &buf[..count];
             uninit.feed_bytes(buf)?;
@@ -341,10 +345,10 @@ impl JxlImage {
             match uninit.try_init()? {
                 InitializeResult::NeedMoreData(x) => {
                     uninit = x;
-                },
+                }
                 InitializeResult::Initialized(x) => {
                     break x;
-                },
+                }
             }
         };
 
@@ -516,10 +520,10 @@ impl JxlImage {
                 Err(e) if e.unexpected_eof() => {
                     self.buffer = buf.to_vec();
                     return Ok(());
-                },
+                }
                 Err(e) => {
                     return Err(e.into());
-                },
+                }
             };
             let frame_index = frame.index();
             assert_eq!(self.frame_offsets.len(), frame_index);
@@ -605,8 +609,14 @@ impl JxlImage {
     }
 
     /// Renders the given keyframe with optional cropping region.
-    pub fn render_frame_cropped(&self, keyframe_index: usize, image_region: Option<CropInfo>) -> Result<Render> {
-        let mut grids = self.ctx.render_keyframe(keyframe_index, image_region.map(From::from))?;
+    pub fn render_frame_cropped(
+        &self,
+        keyframe_index: usize,
+        image_region: Option<CropInfo>,
+    ) -> Result<Render> {
+        let mut grids = self
+            .ctx
+            .render_keyframe(keyframe_index, image_region.map(From::from))?;
         let grids = grids.take_buffer();
         let (color_channels, extra_channels) = self.process_render(grids)?;
 
@@ -624,8 +634,13 @@ impl JxlImage {
     }
 
     /// Renders the currently loading keyframe with optional cropping region.
-    pub fn render_loading_frame_cropped(&mut self, image_region: Option<CropInfo>) -> Result<Render> {
-        let (frame, mut grids) = self.ctx.render_loading_keyframe(image_region.map(From::from))?;
+    pub fn render_loading_frame_cropped(
+        &mut self,
+        image_region: Option<CropInfo>,
+    ) -> Result<Render> {
+        let (frame, mut grids) = self
+            .ctx
+            .render_loading_keyframe(image_region.map(From::from))?;
         let frame_header = frame.header();
         let name = frame_header.name.clone();
         let duration = frame_header.duration;
@@ -648,7 +663,11 @@ impl JxlImage {
         &self,
         mut grids: Vec<SimpleGrid<f32>>,
     ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
-        let color_channels = if self.image_header.metadata.grayscale() { 1 } else { 3 };
+        let color_channels = if self.image_header.metadata.grayscale() {
+            1
+        } else {
+            3
+        };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
         let extra_channels: Vec<_> = grids
             .into_iter()
@@ -707,7 +726,10 @@ impl PixelFormat {
 
     #[inline]
     pub fn has_alpha(self) -> bool {
-        matches!(self, PixelFormat::Graya | PixelFormat::Rgba | PixelFormat::Cmyka)
+        matches!(
+            self,
+            PixelFormat::Graya | PixelFormat::Rgba | PixelFormat::Cmyka
+        )
     }
 
     #[inline]

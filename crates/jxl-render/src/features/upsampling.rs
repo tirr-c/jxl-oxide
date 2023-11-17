@@ -1,5 +1,5 @@
 use jxl_frame::FrameHeader;
-use jxl_grid::{SimpleGrid, PaddedGrid};
+use jxl_grid::{PaddedGrid, SimpleGrid};
 
 pub fn upsample(
     grid: &mut SimpleGrid<f32>,
@@ -13,7 +13,11 @@ pub fn upsample(
     if let Some(ec_idx) = channel_idx.checked_sub(3) {
         let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
         if dim_shift > 0 {
-            tracing::debug!(channel_idx, dim_shift, "Applying non-separable upsampling for extra channel");
+            tracing::debug!(
+                channel_idx,
+                dim_shift,
+                "Applying non-separable upsampling for extra channel"
+            );
 
             let up8 = dim_shift / 3;
             let last_up = dim_shift % 3;
@@ -24,7 +28,7 @@ pub fn upsample(
             match last_up {
                 1 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
                 2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
-                _ => {},
+                _ => {}
             }
         }
 
@@ -38,7 +42,7 @@ pub fn upsample(
     }
 
     match factor {
-        1 => {},
+        1 => {}
         2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
         4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
         8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight),
@@ -50,11 +54,7 @@ fn upsample_inner<const K: usize, const NW: usize>(
     grid: &mut SimpleGrid<f32>,
     weights: &[f32; NW],
 ) {
-    assert!(
-        (K == 2 && NW == 15) ||
-        (K == 4 && NW == 55) ||
-        (K == 8 && NW == 210)
-    );
+    assert!((K == 2 && NW == 15) || (K == 4 && NW == 55) || (K == 8 && NW == 210));
     let grid_width = grid.width();
     let grid_height = grid.height();
     let frame_width = grid_width << K.ilog2();

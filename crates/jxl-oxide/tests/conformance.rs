@@ -1,6 +1,6 @@
 use lcms2::{Profile, Transform};
 
-use jxl_oxide::{JxlImage, FrameBuffer};
+use jxl_oxide::{FrameBuffer, JxlImage};
 
 mod util;
 
@@ -50,7 +50,9 @@ fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<
 }
 
 fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
-    let url = format!("https://storage.googleapis.com/storage/v1/b/jxl-conformance/o/objects%2F{hash}?alt=media");
+    let url = format!(
+        "https://storage.googleapis.com/storage/v1/b/jxl-conformance/o/objects%2F{hash}?alt=media"
+    );
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/cache");
     path.push(hash);
@@ -80,25 +82,32 @@ fn run_test(
     image.set_render_spot_colour(false);
 
     let transform = target_icc.map(|target_icc| {
-        let source_profile = Profile::new_icc(&image.rendered_icc()).expect("failed to parse ICC profile");
+        let source_profile =
+            Profile::new_icc(&image.rendered_icc()).expect("failed to parse ICC profile");
         let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
 
         if image.image_header().metadata.grayscale() {
-            LcmsTransform::Grayscale(Transform::new(
-                &source_profile,
-                lcms2::PixelFormat::GRAY_FLT,
-                &target_profile,
-                lcms2::PixelFormat::GRAY_FLT,
-                lcms2::Intent::RelativeColorimetric,
-            ).expect("failed to create transform"))
+            LcmsTransform::Grayscale(
+                Transform::new(
+                    &source_profile,
+                    lcms2::PixelFormat::GRAY_FLT,
+                    &target_profile,
+                    lcms2::PixelFormat::GRAY_FLT,
+                    lcms2::Intent::RelativeColorimetric,
+                )
+                .expect("failed to create transform"),
+            )
         } else {
-            LcmsTransform::Rgb(Transform::new(
-                &source_profile,
-                lcms2::PixelFormat::RGB_FLT,
-                &target_profile,
-                lcms2::PixelFormat::RGB_FLT,
-                lcms2::Intent::RelativeColorimetric,
-            ).expect("failed to create transform"))
+            LcmsTransform::Rgb(
+                Transform::new(
+                    &source_profile,
+                    lcms2::PixelFormat::RGB_FLT,
+                    &target_profile,
+                    lcms2::PixelFormat::RGB_FLT,
+                    lcms2::Intent::RelativeColorimetric,
+                )
+                .expect("failed to create transform"),
+            )
         }
     });
 

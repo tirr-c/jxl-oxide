@@ -6,7 +6,10 @@ use jxl_frame::{
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 
-use crate::{region::{ImageWithRegion, Region}, Reference};
+use crate::{
+    region::{ImageWithRegion, Region},
+    Reference,
+};
 
 #[derive(Debug)]
 enum BlendMode<'a> {
@@ -55,24 +58,20 @@ impl<'a> BlendParams<'a> {
         let mode = match blending_info.mode {
             FrameBlendMode::Replace => BlendMode::Replace,
             FrameBlendMode::Add => BlendMode::Add,
-            FrameBlendMode::Blend => {
-                BlendMode::Blend(BlendAlpha {
-                    base: base_alpha,
-                    new: new_alpha.unwrap(),
-                    clamp: blending_info.clamp,
-                    swapped: false,
-                    premultiplied: premultiplied.unwrap(),
-                })
-            },
-            FrameBlendMode::MulAdd => {
-                BlendMode::MulAdd(BlendAlpha {
-                    base: base_alpha,
-                    new: new_alpha.unwrap(),
-                    clamp: blending_info.clamp,
-                    swapped: false,
-                    premultiplied: premultiplied.unwrap(),
-                })
-            },
+            FrameBlendMode::Blend => BlendMode::Blend(BlendAlpha {
+                base: base_alpha,
+                new: new_alpha.unwrap(),
+                clamp: blending_info.clamp,
+                swapped: false,
+                premultiplied: premultiplied.unwrap(),
+            }),
+            FrameBlendMode::MulAdd => BlendMode::MulAdd(BlendAlpha {
+                base: base_alpha,
+                new: new_alpha.unwrap(),
+                clamp: blending_info.clamp,
+                swapped: false,
+                premultiplied: premultiplied.unwrap(),
+            }),
             FrameBlendMode::Mul => BlendMode::Mul(blending_info.clamp),
         };
 
@@ -107,7 +106,7 @@ impl<'a> BlendParams<'a> {
                     swapped,
                     premultiplied: premultiplied.unwrap(),
                 })
-            },
+            }
             PatchBlendMode::MulAddAbove | PatchBlendMode::MulAddBelow => {
                 let swapped = blending_info.mode == PatchBlendMode::MulAddBelow;
                 BlendMode::MulAdd(BlendAlpha {
@@ -117,7 +116,7 @@ impl<'a> BlendParams<'a> {
                     swapped,
                     premultiplied: premultiplied.unwrap(),
                 })
-            },
+            }
         };
 
         Some(Self {
@@ -159,7 +158,11 @@ pub(crate) fn blend(
         }
     }
 
-    for (idx, blending_info) in [&header.blending_info; 3].into_iter().chain(&header.ec_blending_info).enumerate() {
+    for (idx, blending_info) in [&header.blending_info; 3]
+        .into_iter()
+        .chain(&header.ec_blending_info)
+        .enumerate()
+    {
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
         let ref_grid = &reference_grids[ref_idx];
 
@@ -167,9 +170,14 @@ pub(crate) fn blend(
             let mut clone_empty = false;
             if let Some(grid) = ref_grid {
                 let base_frame_header = grid.frame.header();
-                let base_frame_region = output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
+                let base_frame_region =
+                    output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
                 if let Ok(base_grid) = grid.image.run_with_image(image_region) {
-                    base_grid.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
+                    base_grid.clone_region_channel(
+                        base_frame_region,
+                        idx,
+                        &mut output_grid.buffer_mut()[idx],
+                    );
                 } else {
                     tracing::warn!("Reference frame is not decoded");
                     clone_empty = true;
@@ -179,7 +187,11 @@ pub(crate) fn blend(
             }
             if clone_empty {
                 let empty_image = ImageWithRegion::from_region(channels, Region::empty());
-                empty_image.clone_region_channel(Region::empty(), idx, &mut output_grid.buffer_mut()[idx]);
+                empty_image.clone_region_channel(
+                    Region::empty(),
+                    idx,
+                    &mut output_grid.buffer_mut()[idx],
+                );
             }
 
             if blending_info.mode == FrameBlendMode::MulAdd {
@@ -204,13 +216,25 @@ pub(crate) fn blend(
         let mut clone_empty = false;
         if let Some(grid) = ref_grid {
             let base_frame_header = grid.frame.header();
-            let base_frame_region = output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
+            let base_frame_region =
+                output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
             if let Ok(base_grid) = grid.image.run_with_image(image_region) {
-                base_grid.clone_region_channel(base_frame_region, idx, &mut output_grid.buffer_mut()[idx]);
+                base_grid.clone_region_channel(
+                    base_frame_region,
+                    idx,
+                    &mut output_grid.buffer_mut()[idx],
+                );
 
                 if let Some(idx) = alpha_idx {
-                    base_alpha_grid = SimpleGrid::new(output_image_region.width as usize, output_image_region.height as usize);
-                    base_grid.clone_region_channel(base_frame_region, idx + 3, &mut base_alpha_grid);
+                    base_alpha_grid = SimpleGrid::new(
+                        output_image_region.width as usize,
+                        output_image_region.height as usize,
+                    );
+                    base_grid.clone_region_channel(
+                        base_frame_region,
+                        idx + 3,
+                        &mut base_alpha_grid,
+                    );
                     base_alpha = Some(&base_alpha_grid)
                 }
             } else {
@@ -223,11 +247,13 @@ pub(crate) fn blend(
 
         let mut blend_params = if clone_empty {
             let new_alpha = alpha_idx.map(|idx| &new_grid.buffer()[idx + 3]);
-            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
+            let premultiplied =
+                alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             BlendParams::from_blending_info(blending_info, None, new_alpha, premultiplied)
         } else {
             let new_alpha = alpha_idx.map(|idx| &new_grid.buffer()[idx + 3]);
-            let premultiplied = alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
+            let premultiplied =
+                alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             BlendParams::from_blending_info(blending_info, base_alpha, new_alpha, premultiplied)
         };
         blend_params.width = output_image_region.width as usize;
@@ -285,16 +311,19 @@ pub fn patch(
         for blending_info in &target.blending {
             if matches!(
                 blending_info.mode,
-                | PatchBlendMode::BlendAbove
-                | PatchBlendMode::BlendBelow
-                | PatchBlendMode::MulAddAbove
-                | PatchBlendMode::MulAddBelow
+                |PatchBlendMode::BlendAbove| PatchBlendMode::BlendBelow
+                    | PatchBlendMode::MulAddAbove
+                    | PatchBlendMode::MulAddBelow
             ) {
                 used_as_alpha[blending_info.alpha_channel as usize + 3] = true;
             }
         }
 
-        for (idx, blending_info) in [&target.blending[0]; 3].into_iter().chain(&target.blending[1..]).enumerate() {
+        for (idx, blending_info) in [&target.blending[0]; 3]
+            .into_iter()
+            .chain(&target.blending[1..])
+            .enumerate()
+        {
             if used_as_alpha[idx] {
                 if blending_info.mode == PatchBlendMode::MulAddAbove {
                     continue;
@@ -307,7 +336,11 @@ pub fn patch(
                         width,
                         height,
                     };
-                    blend_single(&mut base_grid.buffer_mut()[idx], &patch_ref_grid.buffer()[idx], &blend_params);
+                    blend_single(
+                        &mut base_grid.buffer_mut()[idx],
+                        &patch_ref_grid.buffer()[idx],
+                        &blend_params,
+                    );
                     continue;
                 }
 
@@ -318,17 +351,22 @@ pub fn patch(
                     width,
                     height,
                 };
-                blend_single(&mut base_grid.buffer_mut()[idx], &patch_ref_grid.buffer()[idx], &blend_params);
+                blend_single(
+                    &mut base_grid.buffer_mut()[idx],
+                    &patch_ref_grid.buffer()[idx],
+                    &blend_params,
+                );
                 continue;
             }
 
-            let alpha_idx = matches!(
-                blending_info.mode,
-                | PatchBlendMode::BlendAbove
-                | PatchBlendMode::BlendBelow
-                | PatchBlendMode::MulAddAbove
-                | PatchBlendMode::MulAddBelow
-            ).then_some(blending_info.alpha_channel as usize);
+            let alpha_idx =
+                matches!(
+                    blending_info.mode,
+                    |PatchBlendMode::BlendAbove| PatchBlendMode::BlendBelow
+                        | PatchBlendMode::MulAddAbove
+                        | PatchBlendMode::MulAddBelow
+                )
+                .then_some(blending_info.alpha_channel as usize);
             let base_alpha;
             let new_alpha;
             let premultiplied;
@@ -357,7 +395,9 @@ pub fn patch(
                 base_alpha,
                 new_alpha,
                 premultiplied,
-            ) else { continue; };
+            ) else {
+                continue;
+            };
             blend_params.base_topleft = base_topleft;
             blend_params.new_topleft = new_topleft;
             blend_params.width = width;
@@ -368,7 +408,11 @@ pub fn patch(
     }
 }
 
-fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_params: &BlendParams<'_>) {
+fn blend_single(
+    base: &mut SimpleGrid<f32>,
+    new_grid: &SimpleGrid<f32>,
+    blend_params: &BlendParams<'_>,
+) {
     let &BlendParams {
         ref mode,
         base_topleft: (base_x, base_y),
@@ -390,10 +434,11 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                 for dx in 0..width {
                     let base_buf_x = base_x + dx;
                     let new_buf_x = new_x + dx;
-                    base_buf[base_buf_y * base_stride + base_buf_x] = new_buf[new_buf_y * new_stride + new_buf_x];
+                    base_buf[base_buf_y * base_stride + base_buf_x] =
+                        new_buf[new_buf_y * new_stride + new_buf_x];
                 }
             }
-        },
+        }
         BlendMode::Add => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
@@ -401,10 +446,11 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                 for dx in 0..width {
                     let base_buf_x = base_x + dx;
                     let new_buf_x = new_x + dx;
-                    base_buf[base_buf_y * base_stride + base_buf_x] += new_buf[new_buf_y * new_stride + new_buf_x];
+                    base_buf[base_buf_y * base_stride + base_buf_x] +=
+                        new_buf[new_buf_y * new_stride + new_buf_x];
                 }
             }
-        },
+        }
         BlendMode::Mul(clamp) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
@@ -419,7 +465,7 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                     base_buf[base_buf_y * base_stride + base_buf_x] *= new_sample;
                 }
             }
-        },
+        }
         BlendMode::Blend(alpha) => {
             let base_alpha_buf = alpha.base.map(|g| g.buf());
             let new_alpha_buf = alpha.new.buf();
@@ -457,11 +503,12 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                         new_sample + base_sample * (1.0 - new_alpha)
                     } else {
                         let mixed_alpha = base_alpha + new_alpha * (1.0 - base_alpha);
-                        (new_alpha * new_sample + base_alpha * base_sample * (1.0 - new_alpha)) / mixed_alpha
+                        (new_alpha * new_sample + base_alpha * base_sample * (1.0 - new_alpha))
+                            / mixed_alpha
                     };
                 }
             }
-        },
+        }
         BlendMode::MulAdd(alpha) => {
             let base_alpha_buf = alpha.base.map(|g| g.buf());
             let new_alpha_buf = alpha.new.buf();
@@ -495,7 +542,7 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                     base_buf[base_idx] = base_sample + new_alpha * new_sample;
                 }
             }
-        },
+        }
         BlendMode::MixAlpha(clamp) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
@@ -514,6 +561,6 @@ fn blend_single(base: &mut SimpleGrid<f32>, new_grid: &SimpleGrid<f32>, blend_pa
                     base_buf[base_idx] = base + new * (1.0 - base);
                 }
             }
-        },
+        }
     }
 }
