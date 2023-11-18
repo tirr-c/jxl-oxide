@@ -582,27 +582,36 @@ fn load_lf_groups(
     lf_region: Region,
     pool: &JxlThreadPool,
 ) -> Result<()> {
+    #[derive(Default)]
+    struct LfGroupJob<'modular> {
+        idx: u32,
+        lf_group: Option<LfGroup>,
+        modular: Option<TransformedModularSubimage<'modular>>,
+    }
+
     let frame_header = frame.header();
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
     let num_lf_groups = frame_header.num_lf_groups();
 
-    let result = std::sync::RwLock::new(Result::Ok(()));
-    let mut lf_groups_out = Vec::with_capacity(num_lf_groups as usize);
-    lf_groups_out.resize_with(num_lf_groups as usize, || (None, false));
-    for (&idx, lf_group) in lf_groups.iter() {
-        lf_groups_out[idx as usize].1 = !lf_group.partial;
-    }
-
-    pool.scope(|scope| {
-        let mut modular_it = mlf_groups.into_iter();
-        for (idx, (lf_group_out, loaded)) in lf_groups_out.iter_mut().enumerate() {
-            let modular = modular_it.next();
-            if *loaded {
-                continue;
+    let mlf_groups = mlf_groups
+        .into_iter()
+        .map(Some)
+        .chain(std::iter::repeat_with(|| None));
+    let mut lf_groups_out = (0..num_lf_groups)
+        .map(|idx| LfGroupJob {
+            idx,
+            lf_group: None,
+            modular: None,
+        })
+        .zip(mlf_groups)
+        .filter_map(|(job, modular)| {
+            let loaded = lf_groups.get(&job.idx).map(|g| !g.partial).unwrap_or(false);
+            if loaded {
+                return None;
             }
 
-            let idx = idx as u32;
+            let idx = job.idx;
             let left = (idx % lf_groups_per_row) * group_dim;
             let top = (idx / lf_groups_per_row) * group_dim;
             let lf_group_region = Region {
@@ -612,27 +621,37 @@ fn load_lf_groups(
                 height: group_dim,
             };
             if lf_region.intersection(lf_group_region).is_empty() {
-                continue;
+                return None;
             }
 
-            let result = &result;
-            scope.spawn(move |_| {
-                match frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular, idx) {
-                    Some(Ok(g)) => {
-                        *lf_group_out = Some(g);
-                    }
-                    Some(Err(e)) => {
-                        *result.write().unwrap() = Err(e.into());
-                    }
-                    None => {}
-                }
-            });
-        }
-    });
+            Some(LfGroupJob { modular, ..job })
+        })
+        .collect::<Vec<_>>();
 
-    for (idx, (group, _)) in lf_groups_out.into_iter().enumerate() {
-        if let Some(group) = group {
-            lf_groups.insert(idx as u32, group);
+    let result = std::sync::RwLock::new(Result::Ok(()));
+    pool.for_each_mut_slice(
+        &mut lf_groups_out,
+        |LfGroupJob {
+             idx,
+             lf_group,
+             modular,
+         }| {
+            match frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular.take(), *idx)
+            {
+                Some(Ok(g)) => {
+                    *lf_group = Some(g);
+                }
+                Some(Err(e)) => {
+                    *result.write().unwrap() = Err(e.into());
+                }
+                None => {}
+            }
+        },
+    );
+
+    for LfGroupJob { idx, lf_group, .. } in lf_groups_out.into_iter() {
+        if let Some(group) = lf_group {
+            lf_groups.insert(idx, group);
         }
     }
     result.into_inner().unwrap()

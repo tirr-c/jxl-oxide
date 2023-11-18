@@ -124,6 +124,37 @@ impl JxlThreadPool {
             JxlThreadPoolImpl::None => op(JxlScope(JxlScopeInner::None(Default::default()))),
         }
     }
+
+    /// Consumes the `Vec`, and runs a job for each element of the `Vec`.
+    pub fn for_each_vec<T: Send>(&self, v: Vec<T>, op: impl Fn(T) + Send + Sync) {
+        match &self.0 {
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each(v, op)),
+            JxlThreadPoolImpl::None => v.into_iter().for_each(op),
+        }
+    }
+
+    /// Runs a job for each element of the mutable slice.
+    pub fn for_each_mut_slice<'a, T: Send>(
+        &self,
+        v: &'a mut [T],
+        op: impl Fn(&'a mut T) + Send + Sync,
+    ) {
+        match &self.0 {
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each(v, op)),
+            JxlThreadPoolImpl::None => v.iter_mut().for_each(op),
+        }
+    }
+}
+
+#[cfg(feature = "rayon")]
+fn par_for_each<T: Send>(
+    it: impl rayon::iter::IntoParallelIterator<Item = T>,
+    op: impl Fn(T) + Send + Sync,
+) {
+    use rayon::prelude::*;
+    it.into_par_iter().for_each(op);
 }
 
 impl<'scope> JxlScope<'_, 'scope> {

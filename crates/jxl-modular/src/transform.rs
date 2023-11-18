@@ -580,11 +580,9 @@ impl SqueezeParams {
             let width = i0.width();
             let height = i0.height();
             if height > 16 {
-                pool.scope(|scope| {
-                    let remaining = i0.split_vertical(0).1;
-                    for mut group in remaining.into_groups(width, 8) {
-                        scope.spawn(move |_| squeeze::inverse_h(&mut group));
-                    }
+                let remaining = i0.split_vertical(0).1;
+                pool.for_each_vec(remaining.into_groups(width, 8), |mut group| {
+                    squeeze::inverse_h(&mut group)
                 });
             } else {
                 squeeze::inverse_h(i0);
@@ -596,11 +594,9 @@ impl SqueezeParams {
             let width = i0.width();
             let height = i0.height();
             if width > 16 {
-                pool.scope(|scope| {
-                    let remaining = i0.split_horizontal(0).1;
-                    for mut group in remaining.into_groups(8, height) {
-                        scope.spawn(move |_| squeeze::inverse_v(&mut group));
-                    }
+                let remaining = i0.split_horizontal(0).1;
+                pool.for_each_vec(remaining.into_groups(8, height), |mut group| {
+                    squeeze::inverse_v(&mut group)
                 });
             } else {
                 squeeze::inverse_v(i0);

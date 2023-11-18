@@ -12,6 +12,10 @@ edition = "2021"
 
 [dependencies]
 
+[dependencies.rayon]
+version = "1.8.0"
+optional = true
+
 [dependencies.rayon-core]
 version = "1.12.0"
 optional = true
@@ -23,4 +27,4 @@ features = ["std"]
 
 [features]
 default = []
-rayon = ["rayon-core"]
+rayon = ["dep:rayon", "dep:rayon-core"]

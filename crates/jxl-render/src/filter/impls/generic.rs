@@ -26,6 +26,13 @@ pub(crate) unsafe fn epf_common<'buf>(
     pool: &JxlThreadPool,
     handle_row: for<'a> unsafe fn(EpfRow<'a>),
 ) {
+    struct EpfJob<'buf> {
+        y8: usize,
+        output0: &'buf mut [f32],
+        output1: &'buf mut [f32],
+        output2: &'buf mut [f32],
+    }
+
     let width = input[0].width();
     let height = input[0].height();
     assert!(width % 8 == 0);
@@ -46,37 +53,48 @@ pub(crate) unsafe fn epf_common<'buf>(
     let output0_it = output0[3 * width..][..(height * width)].chunks_mut(8 * width);
     let output1_it = output1[3 * width..][..(height * width)].chunks_mut(8 * width);
     let output2_it = output2[3 * width..][..(height * width)].chunks_mut(8 * width);
+    let jobs = output0_it
+        .zip(output1_it)
+        .zip(output2_it)
+        .enumerate()
+        .map(|(y8, ((output0, output1), output2))| EpfJob {
+            y8,
+            output0,
+            output1,
+            output2,
+        })
+        .collect();
 
-    pool.scope(|scope| {
-        for (y8, ((output0, output1), output2)) in
-            output0_it.zip(output1_it).zip(output2_it).enumerate()
-        {
-            scope.spawn(move |_| {
-                for dy in 0..(height - y8 * 8).min(8) {
-                    let output_buf_rows = [
-                        &mut output0[dy * width..][..width],
-                        &mut output1[dy * width..][..width],
-                        &mut output2[dy * width..][..width],
-                    ];
-                    let row = EpfRow {
-                        input_buf,
-                        output_buf_rows,
-                        width,
-                        y8,
-                        dy,
-                        sigma_grid,
-                        channel_scale,
-                        border_sad_mul,
-                        step_multiplier,
-                    };
+    pool.for_each_vec(
+        jobs,
+        |EpfJob {
+             y8,
+             output0,
+             output1,
+             output2,
+         }| {
+            for dy in 0..(height - y8 * 8).min(8) {
+                let output_buf_rows = [
+                    &mut output0[dy * width..][..width],
+                    &mut output1[dy * width..][..width],
+                    &mut output2[dy * width..][..width],
+                ];
+                let row = EpfRow {
+                    input_buf,
+                    output_buf_rows,
+                    width,
+                    y8,
+                    dy,
+                    sigma_grid,
+                    channel_scale,
+                    border_sad_mul,
+                    step_multiplier,
+                };
 
-                    unsafe {
-                        handle_row(row);
-                    }
-                }
-            });
-        }
-    });
+                handle_row(row);
+            }
+        },
+    );
 }
 
 pub fn epf_step0(
