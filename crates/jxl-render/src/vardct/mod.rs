@@ -6,7 +6,7 @@ use jxl_frame::{
 };
 use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_image::ImageHeader;
-use jxl_modular::ChannelShift;
+use jxl_modular::{image::TransformedModularSubimage, ChannelShift};
 use jxl_vardct::{
     BlockInfo, LfChannelCorrelation, LfChannelDequantization, Quantizer, TransformType,
 };
@@ -278,48 +278,68 @@ pub(crate) fn render_vardct(
     };
 
     tracing::trace_span!("Decode and transform").in_scope(|| -> Result<_> {
-        let num_groups = frame_header.num_groups();
-        let num_passes = frame_header.passes.num_passes;
+        struct PassGroupJob<'g, 'modular, 'lf> {
+            group_idx: u32,
+            grid_xyb: [CutGrid<'g, f32>; 3],
+            pass_modular: HashMap<u32, TransformedModularSubimage<'modular>>,
+            lf_group: &'lf LfGroup,
+        }
 
-        let mut group_passes = Vec::with_capacity(num_groups as usize);
-        group_passes.resize_with(num_groups as usize, HashMap::new);
+        let num_passes = frame_header.passes.num_passes;
+        let groups_per_row = frame_header.groups_per_row();
+        let mut it = fb_xyb
+            .groups_with_group_id(frame_header)
+            .into_iter()
+            .filter_map(|(group_idx, grid_xyb)| {
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
+                    return None;
+                };
+
+                Some(PassGroupJob {
+                    group_idx,
+                    grid_xyb,
+                    pass_modular: HashMap::new(),
+                    lf_group,
+                })
+            })
+            .collect::<Vec<_>>();
+
         for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
-            for (group_idx, modular) in pass_image.into_iter().enumerate() {
-                group_passes[group_idx].insert(pass_idx as u32, modular);
+            let mut image_it = pass_image.into_iter().enumerate();
+            for PassGroupJob {
+                group_idx,
+                pass_modular,
+                ..
+            } in &mut it
+            {
+                for (image_idx, modular) in &mut image_it {
+                    if image_idx == *group_idx as usize {
+                        pass_modular.insert(pass_idx as u32, modular);
+                        break;
+                    }
+                }
             }
         }
 
         let result = std::sync::RwLock::new(Result::Ok(()));
-        pool.scope(|scope| {
-            let groups_per_row = frame_header.groups_per_row();
-            let it = fb_xyb
-                .groups_with_group_id(frame_header)
-                .into_iter()
-                .zip(group_passes);
-            for ((group_idx, mut grid_xyb), mut pass_modular) in it {
-                if result.read().unwrap().is_err() {
-                    return;
-                }
-
-                let lf_xyb = &lf_xyb;
-                let lf_groups = &lf_groups;
-
-                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
-                    continue;
-                };
-
+        pool.for_each_vec(
+            it,
+            |PassGroupJob {
+                 group_idx,
+                 mut grid_xyb,
+                 mut pass_modular,
+                 lf_group,
+             }| {
                 if lf_group.hf_meta.is_none() || hf_global.is_none() {
-                    scope.spawn(move |_| {
-                        transform_with_lf_grouped(
-                            lf_xyb,
-                            &mut grid_xyb,
-                            group_idx,
-                            frame_header,
-                            lf_groups,
-                        );
-                    });
-                    continue;
+                    transform_with_lf_grouped(
+                        &lf_xyb,
+                        &mut grid_xyb,
+                        group_idx,
+                        frame_header,
+                        lf_groups,
+                    );
+                    return;
                 }
                 let hf_global = hf_global.unwrap();
 
@@ -338,80 +358,71 @@ pub(crate) fn render_vardct(
                     !group_region.intersection(aligned_region).is_empty()
                 };
 
-                let result = &result;
-                let hf_cfl_data = hf_cfl_data.as_ref();
                 let global_ma_config = gmodular.ma_config.as_ref();
-                scope.spawn(move |_| {
-                    for pass_idx in 0..num_passes {
-                        let modular = pass_modular.remove(&pass_idx);
+                for pass_idx in 0..num_passes {
+                    let modular = pass_modular.remove(&pass_idx);
 
-                        let bitstream = match frame.pass_group_bitstream(pass_idx, group_idx) {
-                            Some(Ok(bitstream)) => bitstream,
-                            Some(Err(e)) => {
-                                *result.write().unwrap() = Err(e.into());
-                                return;
-                            }
-                            None => continue,
-                        };
-                        let allow_partial = bitstream.partial;
-                        let mut bitstream = bitstream.bitstream;
-
-                        let vardct = Some(PassGroupParamsVardct {
-                            lf_vardct: lf_global_vardct,
-                            hf_global,
-                            hf_coeff_output: &mut grid_xyb,
-                        });
-
-                        let r = jxl_frame::data::decode_pass_group(
-                            &mut bitstream,
-                            PassGroupParams {
-                                frame_header,
-                                lf_group,
-                                pass_idx,
-                                group_idx,
-                                global_ma_config,
-                                modular,
-                                vardct,
-                                allow_partial,
-                                pool,
-                            },
-                        );
-                        if !allow_partial && r.is_err() {
-                            *result.write().unwrap() = r.map_err(From::from);
+                    let bitstream = match frame.pass_group_bitstream(pass_idx, group_idx) {
+                        Some(Ok(bitstream)) => bitstream,
+                        Some(Err(e)) => {
+                            *result.write().unwrap() = Err(e.into());
+                            return;
                         }
+                        None => continue,
+                    };
+                    let allow_partial = bitstream.partial;
+                    let mut bitstream = bitstream.bitstream;
+
+                    let vardct = Some(PassGroupParamsVardct {
+                        lf_vardct: lf_global_vardct,
+                        hf_global,
+                        hf_coeff_output: &mut grid_xyb,
+                    });
+
+                    let r = jxl_frame::data::decode_pass_group(
+                        &mut bitstream,
+                        PassGroupParams {
+                            frame_header,
+                            lf_group,
+                            pass_idx,
+                            group_idx,
+                            global_ma_config,
+                            modular,
+                            vardct,
+                            allow_partial,
+                            pool,
+                        },
+                    );
+                    if !allow_partial && r.is_err() {
+                        *result.write().unwrap() = r.map_err(From::from);
+                    }
+                }
+
+                if transform_hf {
+                    dequant_hf_varblock_grouped(
+                        &mut grid_xyb,
+                        group_idx,
+                        image_header,
+                        frame_header,
+                        lf_global,
+                        lf_groups,
+                        hf_global,
+                    );
+
+                    if let Some(cfl) = &hf_cfl_data {
+                        chroma_from_luma_hf_grouped(&mut grid_xyb, group_idx, frame_header, cfl);
                     }
 
-                    if transform_hf {
-                        dequant_hf_varblock_grouped(
-                            &mut grid_xyb,
-                            group_idx,
-                            image_header,
-                            frame_header,
-                            lf_global,
-                            lf_groups,
-                            hf_global,
-                        );
-
-                        if let Some(cfl) = hf_cfl_data {
-                            chroma_from_luma_hf_grouped(
-                                &mut grid_xyb,
-                                group_idx,
-                                frame_header,
-                                cfl,
-                            );
-                        }
-
-                        transform_with_lf_grouped(
-                            lf_xyb,
-                            &mut grid_xyb,
-                            group_idx,
-                            frame_header,
-                            lf_groups,
-                        );
-                    }
-                });
-            }
-        });
+                    transform_with_lf_grouped(
+                        &lf_xyb,
+                        &mut grid_xyb,
+                        group_idx,
+                        frame_header,
+                        lf_groups,
+                    );
+                }
+            },
+        );
 
         result.into_inner().unwrap()
     })?;

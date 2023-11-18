@@ -686,6 +686,7 @@ dependencies = [
 name = "jxl-threadpool"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "rayon-core",
  "tracing",
 ]
