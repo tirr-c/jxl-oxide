@@ -92,15 +92,14 @@ use std::sync::Arc;
 
 mod fb;
 
-use bitstream::ContainerDetectingReader;
-pub use jxl_bitstream as bitstream;
+use jxl_bitstream::ContainerDetectingReader;
 pub use jxl_color::header as color;
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
 
 use jxl_bitstream::Name;
-pub use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::{Bitstream, Bundle};
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::SimpleGrid;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
@@ -161,11 +160,13 @@ impl UninitializedJxlImage {
     /// Creates an image struct in empty, uninitialized state.
     ///
     /// The struct will be created with default thread pool.
+    #[inline]
     pub fn new() -> Self {
         Self::with_threads(default_pool())
     }
 
     /// Creates an image struct in empty, uninitialized state, with custom thread pool.
+    #[inline]
     pub fn with_threads(pool: JxlThreadPool) -> Self {
         Self {
             pool,
@@ -181,6 +182,8 @@ impl UninitializedJxlImage {
         Ok(())
     }
 
+    /// Returns the internal reader.
+    #[inline]
     pub fn reader(&self) -> &ContainerDetectingReader {
         &self.reader
     }
@@ -260,7 +263,7 @@ impl UninitializedJxlImage {
             pool: self.pool.clone(),
             reader: self.reader,
             image_header: image_header.clone(),
-            embedded_icc,
+            original_icc: embedded_icc,
             ctx: RenderContext::with_threads(image_header, self.pool),
             render_spot_colour,
             end_of_image: false,
@@ -288,7 +291,7 @@ pub struct JxlImage {
     pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     image_header: Arc<ImageHeader>,
-    embedded_icc: Option<Vec<u8>>,
+    original_icc: Option<Vec<u8>>,
     ctx: RenderContext,
     render_spot_colour: bool,
     end_of_image: bool,
@@ -301,11 +304,13 @@ impl JxlImage {
     /// Creates an image struct in empty, uninitialized state.
     ///
     /// The struct will be created with default thread pool.
+    #[inline]
     pub fn new_uninit() -> UninitializedJxlImage {
         UninitializedJxlImage::new()
     }
 
     /// Creates an image struct in empty, uninitialized state, with custom thread pool.
+    #[inline]
     pub fn new_uninit_with_threads(pool: JxlThreadPool) -> UninitializedJxlImage {
         UninitializedJxlImage::with_threads(pool)
     }
@@ -384,95 +389,7 @@ impl JxlImage {
         let file = std::fs::File::open(path)?;
         Self::from_reader_with_threads(file, pool)
     }
-}
 
-impl JxlImage {
-    /// Returns the image header.
-    #[inline]
-    pub fn image_header(&self) -> &ImageHeader {
-        &self.image_header
-    }
-
-    /// Returns the thread pool used by the renderer.
-    #[inline]
-    pub fn pool(&self) -> &JxlThreadPool {
-        &self.pool
-    }
-
-    /// Returns the image width with orientation applied.
-    #[inline]
-    pub fn width(&self) -> u32 {
-        self.image_header.width_with_orientation()
-    }
-
-    /// Returns the image height with orientation applied.
-    #[inline]
-    pub fn height(&self) -> u32 {
-        self.image_header.height_with_orientation()
-    }
-
-    /// Returns the embedded ICC profile.
-    ///
-    /// It does *not* describe the colorspace of rendered images. Use
-    /// [`rendered_icc`][Self::rendered_icc] to do color management.
-    #[inline]
-    pub fn embedded_icc(&self) -> Option<&[u8]> {
-        self.embedded_icc.as_deref()
-    }
-
-    /// Returns the ICC profile that describes rendered images.
-    ///
-    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
-    ///   linear sRGB or linear grayscale colorspace.
-    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
-    /// - Else, the profile describes the color encoding signalled in the image header.
-    pub fn rendered_icc(&self) -> Vec<u8> {
-        create_rendered_icc(&self.image_header.metadata, self.embedded_icc.as_deref())
-    }
-
-    /// Returns the pixel format of the rendered image.
-    pub fn pixel_format(&self) -> PixelFormat {
-        let is_grayscale = self.image_header.metadata.grayscale();
-        let mut has_black = false;
-        let mut has_alpha = false;
-        for ec_info in &self.image_header.metadata.ec_info {
-            if ec_info.is_alpha() {
-                has_alpha = true;
-            }
-            if ec_info.is_black() {
-                has_black = true;
-            }
-        }
-
-        match (is_grayscale, has_black, has_alpha) {
-            (false, false, false) => PixelFormat::Rgb,
-            (false, false, true) => PixelFormat::Rgba,
-            (false, true, false) => PixelFormat::Cmyk,
-            (false, true, true) => PixelFormat::Cmyka,
-            (true, _, false) => PixelFormat::Gray,
-            (true, _, true) => PixelFormat::Graya,
-        }
-    }
-
-    /// Sets whether the spot colour channels will be rendered.
-    #[inline]
-    pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
-        if render_spot_colour && self.image_header.metadata.grayscale() {
-            tracing::warn!("Spot colour channels are not rendered on grayscale images");
-            return self;
-        }
-        self.render_spot_colour = render_spot_colour;
-        self
-    }
-
-    /// Returns whether the spot color channels will be rendered.
-    #[inline]
-    pub fn render_spot_colour(&self) -> bool {
-        self.render_spot_colour
-    }
-}
-
-impl JxlImage {
     /// Feeds more data into the decoder.
     pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
         self.reader.feed_bytes(buf)?;
@@ -550,22 +467,100 @@ impl JxlImage {
         self.buffer.clear();
         Ok(())
     }
+}
 
-    pub fn try_take_buffer(&mut self) -> Option<Vec<u8>> {
-        if self.end_of_image {
-            self.buffer_offset += self.buffer.len();
-            Some(std::mem::take(&mut self.buffer))
-        } else {
-            None
+impl JxlImage {
+    /// Returns the image header.
+    #[inline]
+    pub fn image_header(&self) -> &ImageHeader {
+        &self.image_header
+    }
+
+    /// Returns the image width with orientation applied.
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.image_header.width_with_orientation()
+    }
+
+    /// Returns the image height with orientation applied.
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.image_header.height_with_orientation()
+    }
+
+    /// Returns the original ICC profile embedded in the image.
+    ///
+    /// It does *not* describe the colorspace of rendered images. Use
+    /// [`rendered_icc`][Self::rendered_icc] to do color management.
+    #[inline]
+    pub fn original_icc(&self) -> Option<&[u8]> {
+        self.original_icc.as_deref()
+    }
+
+    /// Returns the ICC profile that describes rendered images.
+    ///
+    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
+    ///   linear sRGB or linear grayscale colorspace.
+    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
+    /// - Else, the profile describes the color encoding signalled in the image header.
+    pub fn rendered_icc(&self) -> Vec<u8> {
+        create_rendered_icc(&self.image_header.metadata, self.original_icc.as_deref())
+    }
+
+    /// Returns the pixel format of the rendered image.
+    pub fn pixel_format(&self) -> PixelFormat {
+        let is_grayscale = self.image_header.metadata.grayscale();
+        let mut has_black = false;
+        let mut has_alpha = false;
+        for ec_info in &self.image_header.metadata.ec_info {
+            if ec_info.is_alpha() {
+                has_alpha = true;
+            }
+            if ec_info.is_black() {
+                has_black = true;
+            }
+        }
+
+        match (is_grayscale, has_black, has_alpha) {
+            (false, false, false) => PixelFormat::Rgb,
+            (false, false, true) => PixelFormat::Rgba,
+            (false, true, false) => PixelFormat::Cmyk,
+            (false, true, true) => PixelFormat::Cmyka,
+            (true, _, false) => PixelFormat::Gray,
+            (true, _, true) => PixelFormat::Graya,
         }
     }
 
-    pub fn reader(&self) -> &ContainerDetectingReader {
-        &self.reader
+    /// Sets whether the spot colour channels will be rendered.
+    #[inline]
+    pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
+        if render_spot_colour && self.image_header.metadata.grayscale() {
+            tracing::warn!("Spot colour channels are not rendered on grayscale images");
+            return self;
+        }
+        self.render_spot_colour = render_spot_colour;
+        self
     }
 
-    pub fn reader_mut(&mut self) -> &mut ContainerDetectingReader {
-        &mut self.reader
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_colour(&self) -> bool {
+        self.render_spot_colour
+    }
+}
+
+impl JxlImage {
+    /// Returns the number of currently loaded keyframes.
+    #[inline]
+    pub fn num_loaded_keyframes(&self) -> usize {
+        self.ctx.loaded_keyframes()
+    }
+
+    /// Returns the number of currently loaded frames, including frames that are not displayed
+    /// directly.
+    #[inline]
+    pub fn num_loaded_frames(&self) -> usize {
+        self.ctx.loaded_frames()
     }
 
     /// Returns whether the image is loaded completely, without missing animation keyframes or
@@ -575,16 +570,16 @@ impl JxlImage {
         self.end_of_image
     }
 
+    /// Returns frame data by keyframe index.
+    pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
+        self.ctx.keyframe(keyframe_index)
+    }
+
     /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
     /// exist.
     pub fn frame_header(&self, keyframe_index: usize) -> Option<&FrameHeader> {
         let frame = self.ctx.keyframe(keyframe_index)?;
         Some(frame.header())
-    }
-
-    /// Returns frame data by keyframe index.
-    pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
-        self.ctx.keyframe(keyframe_index)
     }
 
     /// Returns frame data by frame index, including frames that are not displayed directly.
@@ -596,16 +591,12 @@ impl JxlImage {
     pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
         self.frame_offsets.get(frame_index).copied()
     }
+}
 
-    /// Returns the number of currently loaded keyframes.
-    pub fn num_loaded_keyframes(&self) -> usize {
-        self.ctx.loaded_keyframes()
-    }
-
-    /// Returns the number of currently loaded frames, including frames that are not displayed
-    /// directly.
-    pub fn num_loaded_frames(&self) -> usize {
-        self.ctx.loaded_frames()
+impl JxlImage {
+    /// Renders the given keyframe.
+    pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
+        self.render_frame_cropped(keyframe_index, None)
     }
 
     /// Renders the given keyframe with optional cropping region.
@@ -631,6 +622,11 @@ impl JxlImage {
             extra_channels,
         };
         Ok(result)
+    }
+
+    /// Renders the currently loading keyframe.
+    pub fn render_loading_frame(&mut self) -> Result<Render> {
+        self.render_loading_frame_cropped(None)
     }
 
     /// Renders the currently loading keyframe with optional cropping region.
@@ -689,29 +685,40 @@ impl JxlImage {
 
         Ok((color_channels, extra_channels))
     }
+}
 
-    /// Renders the given keyframe.
-    pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
-        self.render_frame_cropped(keyframe_index, None)
+impl JxlImage {
+    /// Returns the thread pool used by the renderer.
+    #[inline]
+    pub fn pool(&self) -> &JxlThreadPool {
+        &self.pool
     }
 
-    /// Renders the currently loading keyframe.
-    pub fn render_loading_frame(&mut self) -> Result<Render> {
-        self.render_loading_frame_cropped(None)
+    /// Returns the internal reader.
+    pub fn reader(&self) -> &ContainerDetectingReader {
+        &self.reader
     }
 }
 
+/// Pixel format of the rendered image.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum PixelFormat {
+    /// Grayscale, single channel
     Gray,
+    /// Grayscale with alpha, two channels
     Graya,
+    /// RGB, three channels
     Rgb,
+    /// RGB with alpha, four channels
     Rgba,
+    /// CMYK, four channels
     Cmyk,
+    /// CMYK with alpha, five channels
     Cmyka,
 }
 
 impl PixelFormat {
+    /// Returns the number of channels of the image.
     #[inline]
     pub fn channels(self) -> usize {
         match self {
@@ -724,6 +731,7 @@ impl PixelFormat {
         }
     }
 
+    /// Returns whether the image has an alpha channel.
     #[inline]
     pub fn has_alpha(self) -> bool {
         matches!(
@@ -732,6 +740,7 @@ impl PixelFormat {
         )
     }
 
+    /// Returns whether the image has a black channel.
     #[inline]
     pub fn has_black(self) -> bool {
         matches!(self, PixelFormat::Cmyk | PixelFormat::Cmyka)
@@ -801,21 +810,34 @@ impl Render {
     /// Extra channels other than black and alpha are not included.
     #[inline]
     pub fn image(&self) -> FrameBuffer {
-        let mut fb: Vec<_> = self.color_channels.clone();
+        let mut fb: Vec<_> = self.color_channels.iter().collect();
 
         // Find black
         for ec in &self.extra_channels {
             if ec.is_black() {
-                fb.push(ec.grid.clone());
+                fb.push(&ec.grid);
                 break;
             }
         }
         // Find alpha
         for ec in &self.extra_channels {
             if ec.is_alpha() {
-                fb.push(ec.grid.clone());
+                fb.push(&ec.grid);
                 break;
             }
+        }
+
+        FrameBuffer::from_grids(&fb, self.orientation)
+    }
+
+    /// Creates a buffer with interleaved channels, with orientation applied.
+    ///
+    /// All extra channels are included.
+    #[inline]
+    pub fn image_all_channels(&self) -> FrameBuffer {
+        let mut fb: Vec<_> = self.color_channels.iter().collect();
+        for ec in &self.extra_channels {
+            fb.push(&ec.grid);
         }
 
         FrameBuffer::from_grids(&fb, self.orientation)
@@ -828,7 +850,7 @@ impl Render {
         self.color_channels
             .iter()
             .chain(self.extra_channels.iter().map(|x| &x.grid))
-            .map(|x| FrameBuffer::from_grids(std::slice::from_ref(x), self.orientation))
+            .map(|x| FrameBuffer::from_grids(&[x], self.orientation))
             .collect()
     }
 

@@ -280,7 +280,7 @@ fn write_png<W: Write>(
 ) {
     // Color encoding information
     let source_icc = image.rendered_icc();
-    let embedded_icc = image.embedded_icc();
+    let embedded_icc = image.original_icc();
     let metadata = &image.image_header().metadata;
     let colour_encoding = &metadata.colour_encoding;
     let cicp = colour_encoding.cicp();
@@ -481,12 +481,7 @@ fn write_npy<W: Write>(output: W, image: &JxlImage, keyframes: &[Render], width:
 
     tracing::debug!("Writing image data");
     for keyframe in keyframes {
-        let mut channels = keyframe.color_channels().to_vec();
-        for ch in keyframe.extra_channels() {
-            channels.push(ch.grid().clone());
-        }
-        let fb = FrameBuffer::from_grids(&channels, metadata.orientation);
-
+        let fb = keyframe.image_all_channels();
         for sample in fb.buf() {
             output.write_all(&sample.to_bits().to_le_bytes()).unwrap();
         }

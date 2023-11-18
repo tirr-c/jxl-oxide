@@ -1,5 +1,6 @@
 use jxl_grid::SimpleGrid;
 
+/// Frame buffer representing a decoded image.
 #[derive(Debug, Clone)]
 pub struct FrameBuffer {
     width: usize,
@@ -9,7 +10,7 @@ pub struct FrameBuffer {
 }
 
 impl FrameBuffer {
-    pub fn new(width: usize, height: usize, channels: usize) -> Self {
+    pub(crate) fn new(width: usize, height: usize, channels: usize) -> Self {
         Self {
             width,
             height,
@@ -18,7 +19,9 @@ impl FrameBuffer {
         }
     }
 
-    pub fn from_grids(grids: &[SimpleGrid<f32>], orientation: u32) -> Self {
+    /// For internal use only.
+    #[doc(hidden)]
+    pub fn from_grids(grids: &[&SimpleGrid<f32>], orientation: u32) -> Self {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
@@ -39,7 +42,8 @@ impl FrameBuffer {
             5..=8 => (height, width),
             _ => unreachable!(),
         };
-        let mut buf = vec![0.0f32; width * height * channels];
+        let mut out = Self::new(outw, outh, channels);
+        let buf = out.buf_mut();
         for y in 0..height {
             for x in 0..width {
                 for (c, g) in grids.iter().enumerate() {
@@ -59,34 +63,49 @@ impl FrameBuffer {
             }
         }
 
-        Self {
-            width: outw,
-            height: outh,
-            channels,
-            buf,
-        }
+        out
     }
 
+    /// Returns the width of the frame buffer.
     #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the frame buffer.
     #[inline]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Returns the number of channels of the frame buffer.
     #[inline]
     pub fn channels(&self) -> usize {
         self.channels
     }
 
+    /// Returns the contents of frame buffer.
+    ///
+    /// The buffer has `width * height * channels` samples, where the index of `channels` varies
+    /// faster.
     #[inline]
     pub fn buf(&self) -> &[f32] {
         &self.buf
     }
 
+    /// Returns the mutable reference to frame buffer.
+    ///
+    /// The buffer has `width * height * channels` samples, where the index of `channels` varies
+    /// faster.
+    #[inline]
+    pub fn buf_mut(&mut self) -> &mut [f32] {
+        &mut self.buf
+    }
+
+    /// Returns the contents of frame buffer, grouped by pixels.
+    ///
+    /// # Panics
+    /// Panics if `N != self.channels()`.
     #[inline]
     pub fn buf_grouped<const N: usize>(&self) -> &[[f32; N]] {
         let grouped_len = self.width * self.height;
@@ -96,11 +115,10 @@ impl FrameBuffer {
         unsafe { std::slice::from_raw_parts(self.buf.as_ptr() as *const [f32; N], grouped_len) }
     }
 
-    #[inline]
-    pub fn buf_mut(&mut self) -> &mut [f32] {
-        &mut self.buf
-    }
-
+    /// Returns the mutable reference to frame buffer, grouped by pixels.
+    ///
+    /// # Panics
+    /// Panics if `N != self.channels()`.
     #[inline]
     pub fn buf_grouped_mut<const N: usize>(&mut self) -> &mut [[f32; N]] {
         let grouped_len = self.width * self.height;
