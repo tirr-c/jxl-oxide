@@ -321,7 +321,7 @@ impl RenderContext {
         } else if prev_keyframes.is_empty() {
             1 + frame_idx
         } else {
-            let last_visible_frame = prev_keyframes[keyframe_idx];
+            let last_visible_frame = prev_keyframes[keyframe_idx - 1];
             frame_idx - last_visible_frame
         };
 
