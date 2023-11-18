@@ -1,19 +1,15 @@
 use jxl_grid::SimpleGrid;
 
-use crate::{
-    ciexyz::*,
-    consts::*,
-    tf,
-    ColourEncoding,
-    Primaries,
-    TransferFunction,
-    WhitePoint,
-};
+use crate::{ciexyz::*, consts::*, tf, ColourEncoding, Primaries, TransferFunction, WhitePoint};
 
 /// Converts given framebuffer to the target color encoding.
 ///
 /// Assumes that input framebuffer is in linear sRGB.
-pub fn from_linear_srgb(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, intensity_target: f32) {
+pub fn from_linear_srgb(
+    fb: &mut [SimpleGrid<f32>],
+    encoding: &ColourEncoding,
+    intensity_target: f32,
+) {
     let target_wp = match &encoding.white_point {
         WhitePoint::D65 => ILLUMINANT_D65,
         WhitePoint::Custom(xy) => [xy.x as f32 / 1e6, xy.y as f32 / 1e6],
@@ -62,30 +58,30 @@ pub fn from_linear_srgb(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, i
             tf::linear_to_gamma(r, gamma);
             tf::linear_to_gamma(g, gamma);
             tf::linear_to_gamma(b, gamma);
-        },
+        }
         TransferFunction::Bt709 => {
             tf::linear_to_bt709(r);
             tf::linear_to_bt709(g);
             tf::linear_to_bt709(b);
-        },
+        }
         TransferFunction::Unknown => {}
-        TransferFunction::Linear => {},
+        TransferFunction::Linear => {}
         TransferFunction::Srgb => {
             tf::linear_to_srgb(r);
             tf::linear_to_srgb(g);
             tf::linear_to_srgb(b);
-        },
+        }
         TransferFunction::Pq => {
             tf::linear_to_pq(r, intensity_target);
             tf::linear_to_pq(g, intensity_target);
             tf::linear_to_pq(b, intensity_target);
-        },
+        }
         TransferFunction::Dci => {
             let gamma = 1.0 / 2.6;
             tf::linear_to_gamma(r, gamma);
             tf::linear_to_gamma(g, gamma);
             tf::linear_to_gamma(b, gamma);
-        },
+        }
         TransferFunction::Hlg => {
             let luminances = {
                 let xyz = primaries_to_xyz_mat(target_primaries, target_wp);
@@ -95,6 +91,6 @@ pub fn from_linear_srgb(fb: &mut [SimpleGrid<f32>], encoding: &ColourEncoding, i
             tf::linear_to_hlg(r);
             tf::linear_to_hlg(g);
             tf::linear_to_hlg(b);
-        },
+        }
     }
 }

@@ -1,24 +1,11 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_image::ImageHeader;
-use jxl_modular::{ChannelShift, Modular, ModularParams, MaConfig, ModularChannelParams};
-use jxl_vardct::{
-    LfChannelDequantization,
-    LfChannelCorrelation,
-    HfBlockContext,
-    Quantizer,
-};
+use jxl_modular::{ChannelShift, MaConfig, Modular, ModularChannelParams, ModularParams};
+use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
-use crate::{
-    FrameHeader,
-    Result,
-    header::Encoding,
-};
+use crate::{header::Encoding, FrameHeader, Result};
 
-use super::{
-    Patches,
-    Splines,
-    NoiseParameters,
-};
+use super::{NoiseParameters, Patches, Splines};
 
 #[derive(Debug)]
 pub struct LfGlobal {
@@ -38,7 +25,11 @@ pub struct LfGlobalParams<'a> {
 }
 
 impl<'a> LfGlobalParams<'a> {
-    pub fn new(image_header: &'a ImageHeader, frame_header: &'a FrameHeader, allow_partial: bool) -> Self {
+    pub fn new(
+        image_header: &'a ImageHeader,
+        frame_header: &'a FrameHeader,
+        allow_partial: bool,
+    ) -> Self {
         Self {
             image_header,
             frame_header,
@@ -51,45 +42,62 @@ impl Bundle<LfGlobalParams<'_>> for LfGlobal {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGlobalParams<'_>) -> Result<Self> {
-        let LfGlobalParams { image_header, frame_header: header, .. } = params;
-        let patches = header.flags.patches().then(|| -> Result<_> {
-            let span = tracing::span!(tracing::Level::TRACE, "Decode Patches");
-            let _guard = span.enter();
+        let LfGlobalParams {
+            image_header,
+            frame_header: header,
+            ..
+        } = params;
+        let patches = header
+            .flags
+            .patches()
+            .then(|| -> Result<_> {
+                let span = tracing::span!(tracing::Level::TRACE, "Decode Patches");
+                let _guard = span.enter();
 
-            let patches = Patches::parse(bitstream, (image_header, header))?;
-            let it = patches
-                .patches
-                .iter()
-                .flat_map(|patch| &patch.patch_targets)
-                .flat_map(|target| &target.blending);
-            for blending_info in it {
-                if blending_info.mode.use_alpha() &&
-                    blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
-                {
-                    return Err(
-                        jxl_bitstream::Error::ValidationFailed("blending_info.alpha_channel out of range")
-                            .into()
-                    );
+                let patches = Patches::parse(bitstream, (image_header, header))?;
+                let it = patches
+                    .patches
+                    .iter()
+                    .flat_map(|patch| &patch.patch_targets)
+                    .flat_map(|target| &target.blending);
+                for blending_info in it {
+                    if blending_info.mode.use_alpha()
+                        && blending_info.alpha_channel as usize
+                            >= image_header.metadata.ec_info.len()
+                    {
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "blending_info.alpha_channel out of range",
+                        )
+                        .into());
+                    }
                 }
-            }
-            Ok(patches)
-        }).transpose()?;
-        let splines = header.flags.splines().then(|| {
-            let span = tracing::span!(tracing::Level::TRACE, "Decode Splines");
-            let _guard = span.enter();
+                Ok(patches)
+            })
+            .transpose()?;
+        let splines = header
+            .flags
+            .splines()
+            .then(|| {
+                let span = tracing::span!(tracing::Level::TRACE, "Decode Splines");
+                let _guard = span.enter();
 
-            Splines::parse(bitstream, header)
-        }).transpose()?;
-        let noise = header.flags.noise().then(|| {
-            let span = tracing::span!(tracing::Level::TRACE, "Decode Noise");
-            let _guard = span.enter();
+                Splines::parse(bitstream, header)
+            })
+            .transpose()?;
+        let noise = header
+            .flags
+            .noise()
+            .then(|| {
+                let span = tracing::span!(tracing::Level::TRACE, "Decode Noise");
+                let _guard = span.enter();
 
-            NoiseParameters::parse(bitstream, ())
-        }).transpose()?;
+                NoiseParameters::parse(bitstream, ())
+            })
+            .transpose()?;
         let lf_dequant = read_bits!(bitstream, Bundle(LfChannelDequantization))?;
-        let vardct = (header.encoding == crate::header::Encoding::VarDct).then(|| {
-            read_bits!(bitstream, Bundle(LfGlobalVarDct))
-        }).transpose()?;
+        let vardct = (header.encoding == crate::header::Encoding::VarDct)
+            .then(|| read_bits!(bitstream, Bundle(LfGlobalVarDct)))
+            .transpose()?;
         let gmodular = read_bits!(bitstream, Bundle(GlobalModular), params)?;
 
         Ok(Self {
@@ -133,11 +141,16 @@ impl Bundle<LfGlobalParams<'_>> for GlobalModular {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGlobalParams<'_>) -> Result<Self> {
-        let LfGlobalParams { image_header, frame_header: header, allow_partial } = params;
+        let LfGlobalParams {
+            image_header,
+            frame_header: header,
+            allow_partial,
+        } = params;
         let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
         let _guard = span.enter();
 
-        let ma_config = bitstream.read_bool()?
+        let ma_config = bitstream
+            .read_bool()?
             .then(|| read_bits!(bitstream, Bundle(MaConfig)))
             .transpose()?;
 
@@ -147,9 +160,24 @@ impl Bundle<LfGlobalParams<'_>> for GlobalModular {
             let height = header.color_sample_height();
             if header.do_ycbcr {
                 // Cb, Y, Cr
-                shifts.push(ModularChannelParams::jpeg(width, height, header.jpeg_upsampling, 0));
-                shifts.push(ModularChannelParams::jpeg(width, height, header.jpeg_upsampling, 1));
-                shifts.push(ModularChannelParams::jpeg(width, height, header.jpeg_upsampling, 2));
+                shifts.push(ModularChannelParams::jpeg(
+                    width,
+                    height,
+                    header.jpeg_upsampling,
+                    0,
+                ));
+                shifts.push(ModularChannelParams::jpeg(
+                    width,
+                    height,
+                    header.jpeg_upsampling,
+                    1,
+                ));
+                shifts.push(ModularChannelParams::jpeg(
+                    width,
+                    height,
+                    header.jpeg_upsampling,
+                    2,
+                ));
             } else {
                 let channel_param = ModularChannelParams::new(width, height);
                 let channels = image_header.metadata.encoded_color_channels();
@@ -159,7 +187,11 @@ impl Bundle<LfGlobalParams<'_>> for GlobalModular {
 
         let extra_channel_from = shifts.len();
 
-        for (&ec_upsampling, ec_info) in header.ec_upsampling.iter().zip(image_header.metadata.ec_info.iter()) {
+        for (&ec_upsampling, ec_info) in header
+            .ec_upsampling
+            .iter()
+            .zip(image_header.metadata.ec_info.iter())
+        {
             let width = header.sample_width(ec_upsampling);
             let height = header.sample_height(ec_upsampling);
             let shift = ChannelShift::from_shift(ec_info.dim_shift);
@@ -167,15 +199,22 @@ impl Bundle<LfGlobalParams<'_>> for GlobalModular {
         }
 
         if let Some(ma_config) = &ma_config {
-            let num_channels = (image_header.metadata.encoded_color_channels() + image_header.metadata.ec_info.len()) as u64;
-            let max_global_ma_nodes = 1024 + header.width as u64 * header.height as u64 * num_channels / 16;
+            let num_channels = (image_header.metadata.encoded_color_channels()
+                + image_header.metadata.ec_info.len()) as u64;
+            let max_global_ma_nodes =
+                1024 + header.width as u64 * header.height as u64 * num_channels / 16;
             let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
             let global_ma_nodes = ma_config.num_tree_nodes();
             if global_ma_nodes > max_global_ma_nodes {
-                tracing::error!(global_ma_nodes, max_global_ma_nodes, "Too many global MA tree nodes");
+                tracing::error!(
+                    global_ma_nodes,
+                    max_global_ma_nodes,
+                    "Too many global MA tree nodes"
+                );
                 return Err(jxl_bitstream::Error::ProfileConformance(
-                    "too many global MA tree nodes"
-                ).into());
+                    "too many global MA tree nodes",
+                )
+                .into());
             }
         }
 

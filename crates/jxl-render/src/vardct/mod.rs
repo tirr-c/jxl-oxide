@@ -1,27 +1,19 @@
 use std::collections::HashMap;
 
-use jxl_frame::{data::{LfGroup, LfGlobal, HfGlobal, GlobalModular, PassGroupParamsVardct, PassGroupParams}, FrameHeader};
+use jxl_frame::{
+    data::{GlobalModular, HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
+    FrameHeader,
+};
 use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_image::ImageHeader;
 use jxl_modular::ChannelShift;
 use jxl_vardct::{
-    LfChannelCorrelation,
-    LfChannelDequantization,
-    Quantizer,
-    TransformType,
-    BlockInfo,
+    BlockInfo, LfChannelCorrelation, LfChannelDequantization, Quantizer, TransformType,
 };
 
 use crate::{
-    dct,
-    region::ImageWithRegion,
-    Region,
-    IndexedFrame,
-    Reference,
-    RenderCache,
-    Error,
+    dct, modular, region::ImageWithRegion, Error, IndexedFrame, Reference, Region, RenderCache,
     Result,
-    modular,
 };
 
 mod transform;
@@ -56,15 +48,16 @@ pub(crate) fn render_vardct(
     let frame_header = frame.header();
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-        ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
-    });
+    let shifts_cbycr: [_; 3] =
+        std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
 
     let lf_global = if let Some(x) = &cache.lf_global {
         x
     } else {
-        let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+        let lf_global = frame
+            .try_parse_lf_global()
+            .ok_or(Error::IncompleteFrame)??;
         cache.lf_global = Some(lf_global);
         cache.lf_global.as_ref().unwrap()
     };
@@ -100,19 +93,34 @@ pub(crate) fn render_vardct(
             aligned_region_div8
         } else {
             aligned_region_div8.pad(1)
-        }.container_aligned(frame_header.group_dim())
+        }
+        .container_aligned(frame_header.group_dim())
     };
 
-    let aligned_region = aligned_region.intersection(Region::with_size(width_rounded as u32, height_rounded as u32));
-    let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
-    let modular_region = modular::compute_modular_region(frame_header, &gmodular, aligned_region, false);
-    let modular_lf_region = modular::compute_modular_region(frame_header, &gmodular, aligned_lf_region, true)
-        .intersection(Region::with_size(width_rounded as u32 / 8, height_rounded as u32 / 8));
+    let aligned_region = aligned_region.intersection(Region::with_size(
+        width_rounded as u32,
+        height_rounded as u32,
+    ));
+    let aligned_lf_region = aligned_lf_region.intersection(Region::with_size(
+        width_rounded as u32 / 8,
+        height_rounded as u32 / 8,
+    ));
+    let modular_region =
+        modular::compute_modular_region(frame_header, &gmodular, aligned_region, false);
+    let modular_lf_region =
+        modular::compute_modular_region(frame_header, &gmodular, aligned_lf_region, true)
+            .intersection(Region::with_size(
+                width_rounded as u32 / 8,
+                height_rounded as u32 / 8,
+            ));
 
     let mut fb_xyb = ImageWithRegion::from_region(3, modular_region);
 
     let mut modular_image = gmodular.modular.image_mut();
-    let groups = modular_image.as_mut().map(|x| x.prepare_groups(frame.pass_shifts())).transpose()?;
+    let groups = modular_image
+        .as_mut()
+        .map(|x| x.prepare_groups(frame.pass_shifts()))
+        .transpose()?;
     let (lf_group_image, pass_group_image) = groups.map(|x| (x.lf_groups, x.pass_groups)).unzip();
     let lf_group_image = lf_group_image.unwrap_or_else(Vec::new);
     let pass_group_image = pass_group_image.unwrap_or_else(|| {
@@ -136,111 +144,118 @@ pub(crate) fn render_vardct(
     })?;
 
     let group_dim = frame_header.group_dim();
-    let (hf_cfl_data, mut lf_xyb) = tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
-        let mut hf_cfl_data = (!subsampled).then(|| {
-            ImageWithRegion::from_region(2, modular_lf_region.downsample(3))
-        });
+    let (hf_cfl_data, mut lf_xyb) =
+        tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
+            let mut hf_cfl_data = (!subsampled)
+                .then(|| ImageWithRegion::from_region(2, modular_lf_region.downsample(3)));
 
-        let mut lf_xyb = ImageWithRegion::from_region(3, modular_lf_region);
+            let mut lf_xyb = ImageWithRegion::from_region(3, modular_lf_region);
 
-        if let Some(x) = lf_frame {
-            let lf_frame = x.image.run_with_image(image_region)?;
-            lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
-            lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
-            lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
-        }
-
-        let lf_groups_per_row = frame_header.lf_groups_per_row();
-        for idx in 0..frame_header.num_lf_groups() {
-            let Some(lf_group) = lf_groups.get(&idx) else { continue; };
-
-            let lf_group_x = idx % lf_groups_per_row;
-            let lf_group_y = idx / lf_groups_per_row;
-            let left = lf_group_x * frame_header.group_dim();
-            let top = lf_group_y * frame_header.group_dim();
-            let lf_group_region = Region {
-                left: left as i32,
-                top: top as i32,
-                width: group_dim,
-                height: group_dim,
-            };
-            if modular_lf_region.intersection(lf_group_region).is_empty() {
-                continue;
+            if let Some(x) = lf_frame {
+                let lf_frame = x.image.run_with_image(image_region)?;
+                lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
+                lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
+                lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
             }
 
-            let left = left - modular_lf_region.left as u32;
-            let top = top - modular_lf_region.top as u32;
+            let lf_groups_per_row = frame_header.lf_groups_per_row();
+            for idx in 0..frame_header.num_lf_groups() {
+                let Some(lf_group) = lf_groups.get(&idx) else {
+                    continue;
+                };
 
-            if lf_frame.is_none() {
-                let quantizer = &lf_global_vardct.quantizer;
-                let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
-                let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
-                let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else { panic!() };
-                copy_lf_dequant(
-                    lf_x,
-                    left as usize >> shifts_cbycr[0].hshift(),
-                    top as usize >> shifts_cbycr[0].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_x_lf,
-                    &channel_data[1],
-                    lf_coeff.extra_precision,
-                );
-                copy_lf_dequant(
-                    lf_y,
-                    left as usize >> shifts_cbycr[1].hshift(),
-                    top as usize >> shifts_cbycr[1].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_y_lf,
-                    &channel_data[0],
-                    lf_coeff.extra_precision,
-                );
-                copy_lf_dequant(
-                    lf_b,
-                    left as usize >> shifts_cbycr[2].hshift(),
-                    top as usize >> shifts_cbycr[2].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_b_lf,
-                    &channel_data[2],
-                    lf_coeff.extra_precision,
-                );
-            }
+                let lf_group_x = idx % lf_groups_per_row;
+                let lf_group_y = idx / lf_groups_per_row;
+                let left = lf_group_x * frame_header.group_dim();
+                let top = lf_group_y * frame_header.group_dim();
+                let lf_group_region = Region {
+                    left: left as i32,
+                    top: top as i32,
+                    width: group_dim,
+                    height: group_dim,
+                };
+                if modular_lf_region.intersection(lf_group_region).is_empty() {
+                    continue;
+                }
 
-            let Some(hf_meta) = &lf_group.hf_meta else { continue; };
+                let left = left - modular_lf_region.left as u32;
+                let top = top - modular_lf_region.top as u32;
 
-            if let Some(cfl) = &mut hf_cfl_data {
-                let corr = &lf_global_vardct.lf_chan_corr;
-                let [x_from_y, b_from_y] = cfl.buffer_mut() else { panic!() };
-                let group_x_from_y = &hf_meta.x_from_y;
-                let group_b_from_y = &hf_meta.b_from_y;
-                let left = left as usize / 8;
-                let top = top as usize / 8;
-                for y in 0..group_x_from_y.height() {
-                    for x in 0..group_x_from_y.width() {
-                        let v = *group_x_from_y.get(x, y).unwrap();
-                        let kx = corr.base_correlation_x + (v as f32 / corr.colour_factor as f32);
-                        *x_from_y.get_mut(left + x, top + y).unwrap() = kx;
+                if lf_frame.is_none() {
+                    let quantizer = &lf_global_vardct.quantizer;
+                    let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
+                    let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
+                    let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
+                        panic!()
+                    };
+                    copy_lf_dequant(
+                        lf_x,
+                        left as usize >> shifts_cbycr[0].hshift(),
+                        top as usize >> shifts_cbycr[0].vshift(),
+                        quantizer,
+                        lf_global.lf_dequant.m_x_lf,
+                        &channel_data[1],
+                        lf_coeff.extra_precision,
+                    );
+                    copy_lf_dequant(
+                        lf_y,
+                        left as usize >> shifts_cbycr[1].hshift(),
+                        top as usize >> shifts_cbycr[1].vshift(),
+                        quantizer,
+                        lf_global.lf_dequant.m_y_lf,
+                        &channel_data[0],
+                        lf_coeff.extra_precision,
+                    );
+                    copy_lf_dequant(
+                        lf_b,
+                        left as usize >> shifts_cbycr[2].hshift(),
+                        top as usize >> shifts_cbycr[2].vshift(),
+                        quantizer,
+                        lf_global.lf_dequant.m_b_lf,
+                        &channel_data[2],
+                        lf_coeff.extra_precision,
+                    );
+                }
+
+                let Some(hf_meta) = &lf_group.hf_meta else {
+                    continue;
+                };
+
+                if let Some(cfl) = &mut hf_cfl_data {
+                    let corr = &lf_global_vardct.lf_chan_corr;
+                    let [x_from_y, b_from_y] = cfl.buffer_mut() else {
+                        panic!()
+                    };
+                    let group_x_from_y = &hf_meta.x_from_y;
+                    let group_b_from_y = &hf_meta.b_from_y;
+                    let left = left as usize / 8;
+                    let top = top as usize / 8;
+                    for y in 0..group_x_from_y.height() {
+                        for x in 0..group_x_from_y.width() {
+                            let v = *group_x_from_y.get(x, y).unwrap();
+                            let kx =
+                                corr.base_correlation_x + (v as f32 / corr.colour_factor as f32);
+                            *x_from_y.get_mut(left + x, top + y).unwrap() = kx;
+                        }
+                    }
+                    for y in 0..group_b_from_y.height() {
+                        for x in 0..group_b_from_y.width() {
+                            let v = *group_b_from_y.get(x, y).unwrap();
+                            let kb =
+                                corr.base_correlation_b + (v as f32 / corr.colour_factor as f32);
+                            *b_from_y.get_mut(left + x, top + y).unwrap() = kb;
+                        }
                     }
                 }
-                for y in 0..group_b_from_y.height() {
-                    for x in 0..group_b_from_y.width() {
-                        let v = *group_b_from_y.get(x, y).unwrap();
-                        let kb = corr.base_correlation_b + (v as f32 / corr.colour_factor as f32);
-                        *b_from_y.get_mut(left + x, top + y).unwrap() = kb;
-                    }
-                }
             }
-        }
 
-        Ok((hf_cfl_data, lf_xyb))
-    })?;
+            Ok((hf_cfl_data, lf_xyb))
+        })?;
 
     if lf_frame.is_none() {
         if !subsampled {
             tracing::trace_span!("LF CfL").in_scope(|| {
-                chroma_from_luma_lf(
-                    lf_xyb.buffer_mut(),
-                    &lf_global_vardct.lf_chan_corr,
-                );
+                chroma_from_luma_lf(lf_xyb.buffer_mut(), &lf_global_vardct.lf_chan_corr);
             });
         }
 
@@ -277,7 +292,10 @@ pub(crate) fn render_vardct(
         let result = std::sync::RwLock::new(Result::Ok(()));
         pool.scope(|scope| {
             let groups_per_row = frame_header.groups_per_row();
-            let it = fb_xyb.groups_with_group_id(frame_header).into_iter().zip(group_passes);
+            let it = fb_xyb
+                .groups_with_group_id(frame_header)
+                .into_iter()
+                .zip(group_passes);
             for ((group_idx, mut grid_xyb), mut pass_modular) in it {
                 if result.read().unwrap().is_err() {
                     return;
@@ -287,7 +305,9 @@ pub(crate) fn render_vardct(
                 let lf_groups = &lf_groups;
 
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else { continue; };
+                let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
+                    continue;
+                };
 
                 if lf_group.hf_meta.is_none() || hf_global.is_none() {
                     scope.spawn(move |_| {
@@ -330,7 +350,7 @@ pub(crate) fn render_vardct(
                             Some(Err(e)) => {
                                 *result.write().unwrap() = Err(e.into());
                                 return;
-                            },
+                            }
                             None => continue,
                         };
                         let allow_partial = bitstream.partial;
@@ -451,7 +471,9 @@ pub fn adaptive_lf_smoothing(
     let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
     let lf_b = 512.0 * lf_dequant.m_b_lf / scale_inv as f32;
 
-    let [in_x, in_y, in_b] = lf_image else { panic!("lf_image should be three-channel image") };
+    let [in_x, in_y, in_b] = lf_image else {
+        panic!("lf_image should be three-channel image")
+    };
     let width = in_x.width();
     let height = in_x.height();
 
@@ -459,12 +481,7 @@ pub fn adaptive_lf_smoothing(
     let in_y = in_y.buf_mut();
     let in_b = in_b.buf_mut();
 
-    impls::adaptive_lf_smoothing_impl(
-        width,
-        height,
-        [in_x, in_y, in_b],
-        [lf_x, lf_y, lf_b],
-    );
+    impls::adaptive_lf_smoothing_impl(width, height, [in_x, in_y, in_b], [lf_x, lf_y, lf_b]);
 }
 
 pub fn dequant_hf_varblock_grouped(
@@ -498,16 +515,23 @@ pub fn dequant_hf_varblock_grouped(
     let group_y = group_idx / groups_per_row;
 
     let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-    let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
+    let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
+        return;
+    };
     let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
     let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
 
-    let Some(hf_meta) = &lf_group.hf_meta else { return; };
+    let Some(hf_meta) = &lf_group.hf_meta else {
+        return;
+    };
 
     let block_info = &hf_meta.block_info;
     let lf_width = (block_info.width() - left_in_lf).min(group_dim as usize / 8);
     let lf_height = (block_info.height() - top_in_lf).min(group_dim as usize / 8);
-    let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width), top_in_lf..(top_in_lf + lf_height));
+    let block_info = hf_meta.block_info.subgrid(
+        left_in_lf..(left_in_lf + lf_width),
+        top_in_lf..(top_in_lf + lf_height),
+    );
 
     for (channel, coeff) in out.iter_mut().enumerate() {
         let quant_bias = oim.quant_bias[channel];
@@ -517,7 +541,9 @@ pub fn dequant_hf_varblock_grouped(
 
         for by in 0..lf_height {
             for bx in 0..lf_width {
-                let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else { continue; };
+                let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else {
+                    continue;
+                };
                 let shifted_bx = bx >> hshift;
                 let shifted_by = by >> vshift;
                 if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
@@ -534,7 +560,8 @@ pub fn dequant_hf_varblock_grouped(
                 let height = bh * 8;
 
                 let need_transpose = dct_select.need_transpose();
-                let mul = 65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
+                let mul =
+                    65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
 
                 let matrix = if need_transpose {
                     dequant_matrices.get_transposed(channel, dct_select)
@@ -560,10 +587,7 @@ pub fn dequant_hf_varblock_grouped(
     }
 }
 
-pub fn chroma_from_luma_lf(
-    coeff_xyb: &mut [SimpleGrid<f32>],
-    lf_chan_corr: &LfChannelCorrelation,
-) {
+pub fn chroma_from_luma_lf(coeff_xyb: &mut [SimpleGrid<f32>], lf_chan_corr: &LfChannelCorrelation) {
     let LfChannelCorrelation {
         colour_factor,
         base_correlation_x,
@@ -578,7 +602,9 @@ pub fn chroma_from_luma_lf(
     let kx = base_correlation_x + (x_factor as f32 / colour_factor as f32);
     let kb = base_correlation_b + (b_factor as f32 / colour_factor as f32);
 
-    let [x, y, b] = coeff_xyb else { panic!("coeff_xyb should be three-channel image") };
+    let [x, y, b] = coeff_xyb else {
+        panic!("coeff_xyb should be three-channel image")
+    };
     for ((x, y), b) in x.buf_mut().iter_mut().zip(y.buf()).zip(b.buf_mut()) {
         let y = *y;
         *x += kx * y;
@@ -605,12 +631,22 @@ pub fn chroma_from_luma_hf_grouped(
     let gw = coeff_x.width();
     let gh = coeff_x.height();
 
-    let cfl_left = (group_x * group_dim / 64).checked_add_signed(-cfl_grid_region.left).unwrap() as usize;
-    let cfl_top = (group_y * group_dim / 64).checked_add_signed(-cfl_grid_region.top).unwrap() as usize;
+    let cfl_left = (group_x * group_dim / 64)
+        .checked_add_signed(-cfl_grid_region.left)
+        .unwrap() as usize;
+    let cfl_top = (group_y * group_dim / 64)
+        .checked_add_signed(-cfl_grid_region.top)
+        .unwrap() as usize;
     let cfl_width = (gw + 63) / 64;
     let cfl_height = (gh + 63) / 64;
-    let x_from_y = cfl_grid[0].subgrid(cfl_left..(cfl_left + cfl_width), cfl_top..(cfl_top + cfl_height));
-    let b_from_y = cfl_grid[1].subgrid(cfl_left..(cfl_left + cfl_width), cfl_top..(cfl_top + cfl_height));
+    let x_from_y = cfl_grid[0].subgrid(
+        cfl_left..(cfl_left + cfl_width),
+        cfl_top..(cfl_top + cfl_height),
+    );
+    let b_from_y = cfl_grid[1].subgrid(
+        cfl_left..(cfl_left + cfl_width),
+        cfl_top..(cfl_top + cfl_height),
+    );
 
     for y in 0..gh {
         let x_from_y = x_from_y.get_row(y / 64);
@@ -660,15 +696,25 @@ pub fn transform_with_lf_grouped(
     let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
     let lf_base_left = lf_base_left as usize;
     let lf_base_top = lf_base_top as usize;
-    let lf = [(shifts_cbycr[0], lf_x), (shifts_cbycr[1], lf_y), (shifts_cbycr[2], lf_b)].map(|(shift, lf)| {
+    let lf = [
+        (shifts_cbycr[0], lf_x),
+        (shifts_cbycr[1], lf_y),
+        (shifts_cbycr[2], lf_b),
+    ]
+    .map(|(shift, lf)| {
         let lf_base_left = lf_base_left >> shift.hshift();
         let lf_base_top = lf_base_top >> shift.vshift();
         let (lf_width, lf_height) = shift.shift_size((lf_width, lf_height));
-        lf.subgrid(lf_base_left..(lf_base_left + lf_width as usize), lf_base_top..(lf_base_top + lf_height as usize))
+        lf.subgrid(
+            lf_base_left..(lf_base_left + lf_width as usize),
+            lf_base_top..(lf_base_top + lf_height as usize),
+        )
     });
 
     let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-    let Some(lf_group) = lf_groups.get(&lf_group_idx) else { return; };
+    let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
+        return;
+    };
     let left_in_lf = ((group_x % 8) * (group_dim / 8)) as usize;
     let top_in_lf = ((group_y % 8) * (group_dim / 8)) as usize;
 
@@ -685,7 +731,10 @@ pub fn transform_with_lf_grouped(
         return;
     };
 
-    let block_info = hf_meta.block_info.subgrid(left_in_lf..(left_in_lf + lf_width as usize), top_in_lf..(top_in_lf + lf_height as usize));
+    let block_info = hf_meta.block_info.subgrid(
+        left_in_lf..(left_in_lf + lf_width as usize),
+        top_in_lf..(top_in_lf + lf_height as usize),
+    );
     let w8 = block_info.width();
     let h8 = block_info.height();
 
@@ -696,7 +745,9 @@ pub fn transform_with_lf_grouped(
 
         for by in 0..h8 {
             for bx in 0..w8 {
-                let &BlockInfo::Data { dct_select, .. } = block_info.get(bx, by) else { continue; };
+                let &BlockInfo::Data { dct_select, .. } = block_info.get(bx, by) else {
+                    continue;
+                };
                 let shifted_bx = bx >> hshift;
                 let shifted_by = by >> vshift;
                 if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
@@ -713,7 +764,10 @@ pub fn transform_with_lf_grouped(
                 let logbh = bh.trailing_zeros() as usize;
 
                 let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
-                if matches!(dct_select, Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3) {
+                if matches!(
+                    dct_select,
+                    Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
+                ) {
                     debug_assert_eq!(bw * bh, 1);
                     *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
                 } else {
@@ -741,22 +795,38 @@ fn scale_f(c: usize, logb: usize) -> f32 {
     // Precomputed for c = 0..32, b = 256
     #[allow(clippy::excessive_precision)]
     const SCALE_F: [f32; 32] = [
-        1.0000000000000000, 0.9996047255830407,
-        0.9984194528776054, 0.9964458326264695,
-        0.9936866130906366, 0.9901456355893141,
-        0.9858278282666936, 0.9807391980963174,
-        0.9748868211368796, 0.9682788310563117,
-        0.9609244059440204, 0.9528337534340876,
-        0.9440180941651672, 0.9344896436056892,
-        0.9242615922757944, 0.9133480844001980,
-        0.9017641950288744, 0.8895259056651056,
-        0.8766500784429904, 0.8631544288990163,
-        0.8490574973847023, 0.8343786191696513,
-        0.8191378932865928, 0.8033561501721485,
-        0.7870549181591013, 0.7702563888779096,
-        0.7529833816270532, 0.7352593067735488,
-        0.7171081282466044, 0.6985543251889097,
-        0.6796228528314652, 0.6603391026591464,
+        1.0000000000000000,
+        0.9996047255830407,
+        0.9984194528776054,
+        0.9964458326264695,
+        0.9936866130906366,
+        0.9901456355893141,
+        0.9858278282666936,
+        0.9807391980963174,
+        0.9748868211368796,
+        0.9682788310563117,
+        0.9609244059440204,
+        0.9528337534340876,
+        0.9440180941651672,
+        0.9344896436056892,
+        0.9242615922757944,
+        0.9133480844001980,
+        0.9017641950288744,
+        0.8895259056651056,
+        0.8766500784429904,
+        0.8631544288990163,
+        0.8490574973847023,
+        0.8343786191696513,
+        0.8191378932865928,
+        0.8033561501721485,
+        0.7870549181591013,
+        0.7702563888779096,
+        0.7529833816270532,
+        0.7352593067735488,
+        0.7171081282466044,
+        0.6985543251889097,
+        0.6796228528314652,
+        0.6603391026591464,
     ];
     SCALE_F[c << logb]
 }

@@ -1,9 +1,12 @@
-use std::{collections::HashMap, sync::{Arc, Mutex, Condvar, MutexGuard}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Condvar, Mutex, MutexGuard},
+};
 
-use jxl_frame::data::{LfGlobal, HfGlobal, LfGroup};
+use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_modular::ChannelShift;
 
-use crate::{region::ImageWithRegion, Region, Result, Error, IndexedFrame};
+use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, Result};
 
 pub type RenderOp = Arc<dyn Fn(FrameRender, Option<Region>) -> FrameRender + Send + Sync + 'static>;
 
@@ -18,9 +21,8 @@ impl RenderCache {
     pub fn new(frame: &crate::IndexedFrame) -> Self {
         let frame_header = frame.header();
         let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-            ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
-        });
+        let shifts_cbycr: [_; 3] =
+            std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
 
         let lf_width = (frame_header.color_sample_width() + 7) / 8;
         let lf_height = (frame_header.color_sample_height() + 7) / 8;
@@ -67,7 +69,10 @@ pub struct FrameRenderHandle {
 
 impl std::fmt::Debug for FrameRenderHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FrameRenderHandle").field("render", &self.render).field("condvar", &self.condvar).finish_non_exhaustive()
+        f.debug_struct("FrameRenderHandle")
+            .field("render", &self.render)
+            .field("condvar", &self.condvar)
+            .finish_non_exhaustive()
     }
 }
 
@@ -83,7 +88,12 @@ impl FrameRenderHandle {
     }
 
     #[inline]
-    pub fn from_cache(frame: Arc<IndexedFrame>, frame_region: Region, cache: RenderCache, render_op: RenderOp) -> Self {
+    pub fn from_cache(
+        frame: Arc<IndexedFrame>,
+        frame_region: Region,
+        cache: RenderCache,
+        render_op: RenderOp,
+    ) -> Self {
         let render = FrameRender::InProgress(Box::new(cache));
         let mut map = HashMap::new();
         map.insert(frame_region, render);
@@ -105,12 +115,12 @@ impl FrameRenderHandle {
                 FrameRender::InProgress(_) => {
                     drop(self.done_render(frame_region, render_result));
                     return Err(Error::IncompleteFrame);
-                },
+                }
                 FrameRender::Err(e) => {
                     drop(self.done_render(frame_region, FrameRender::None));
                     return Err(e);
-                },
-                _ => {},
+                }
+                _ => {}
             }
             self.done_render(frame_region, render_result)
         } else {
@@ -146,12 +156,12 @@ impl FrameRenderHandle {
             FrameRender::Done(_) => {
                 *render_ref = render;
                 Ok(None)
-            },
+            }
             FrameRender::Rendering => Ok(None),
             FrameRender::Err(e) => {
                 *render_ref = FrameRender::None;
                 Err(e)
-            },
+            }
             render => Ok(Some(render)),
         }
     }
@@ -168,17 +178,21 @@ impl FrameRenderHandle {
             FrameRender::Done(_) => {
                 *render_ref = render;
                 None
-            },
+            }
             FrameRender::Rendering => None,
             FrameRender::Err(_) => None,
             render => Some(render),
         }
     }
 
-    fn wait_until_render(&self, frame_region: Region) -> Result<MutexGuard<'_, HashMap<Region, FrameRender>>> {
+    fn wait_until_render(
+        &self,
+        frame_region: Region,
+    ) -> Result<MutexGuard<'_, HashMap<Region, FrameRender>>> {
         let mut guard = self.render.lock().unwrap();
         loop {
-            let render_ref = if let Some(render) = find_compatible_render(&mut guard, frame_region) {
+            let render_ref = if let Some(render) = find_compatible_render(&mut guard, frame_region)
+            {
                 render
             } else {
                 return Err(Error::IncompleteFrame);
@@ -188,18 +202,24 @@ impl FrameRenderHandle {
                 FrameRender::Rendering => {
                     tracing::trace!(index = self.frame.idx, "Waiting...");
                     guard = self.condvar.wait(guard).unwrap();
-                },
+                }
                 FrameRender::Done(_) => {
                     *render_ref = render;
                     return Ok(guard);
-                },
-                FrameRender::None | FrameRender::InProgress(_) => return Err(Error::IncompleteFrame),
+                }
+                FrameRender::None | FrameRender::InProgress(_) => {
+                    return Err(Error::IncompleteFrame)
+                }
                 FrameRender::Err(e) => return Err(e),
             }
         }
     }
 
-    fn done_render(&self, frame_region: Region, render: FrameRender) -> MutexGuard<'_, HashMap<Region, FrameRender>> {
+    fn done_render(
+        &self,
+        frame_region: Region,
+        render: FrameRender,
+    ) -> MutexGuard<'_, HashMap<Region, FrameRender>> {
         assert!(!matches!(render, FrameRender::Rendering));
         let mut guard = self.render.lock().unwrap();
         guard.insert(frame_region, render);
@@ -208,11 +228,15 @@ impl FrameRenderHandle {
     }
 }
 
-fn find_compatible_render(renders: &mut HashMap<Region, FrameRender>, frame_region: Region) -> Option<&mut FrameRender> {
+fn find_compatible_render(
+    renders: &mut HashMap<Region, FrameRender>,
+    frame_region: Region,
+) -> Option<&mut FrameRender> {
     if renders.contains_key(&frame_region) {
         renders.get_mut(&frame_region)
     } else {
-        renders.iter_mut()
+        renders
+            .iter_mut()
             .find(|(r, render)| r.contains(frame_region) && render.as_grid().is_some())
             .map(|(_, region)| region)
     }

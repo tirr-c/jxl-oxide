@@ -26,9 +26,7 @@ impl Bundle<&FrameHeader> for Splines {
         let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
         if num_splines > max_num_splines {
             tracing::error!(num_splines, max_num_splines, "Too many splines");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "too many splines"
-            ).into());
+            return Err(jxl_bitstream::Error::ProfileConformance("too many splines").into());
         }
 
         let mut start_points = vec![(0i64, 0i64); num_splines];
@@ -74,7 +72,11 @@ struct QuantSplineParams<'d> {
 
 impl<'d> QuantSplineParams<'d> {
     fn new(start_point: (i64, i64), num_pixels: usize, decoder: &'d mut Decoder) -> Self {
-        Self { start_point, num_pixels, decoder }
+        Self {
+            start_point,
+            num_pixels,
+            decoder,
+        }
     }
 }
 
@@ -90,17 +92,22 @@ pub struct QuantSpline {
 impl Bundle<QuantSplineParams<'_>> for QuantSpline {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: QuantSplineParams<'_>) -> std::result::Result<Self, Self::Error> {
-        let QuantSplineParams { start_point, num_pixels, decoder } = params;
+    fn parse(
+        bitstream: &mut Bitstream,
+        params: QuantSplineParams<'_>,
+    ) -> std::result::Result<Self, Self::Error> {
+        let QuantSplineParams {
+            start_point,
+            num_pixels,
+            decoder,
+        } = params;
 
         let num_points = decoder.read_varint(bitstream, 3)? as usize;
 
         let max_num_points = usize::min(MAX_NUM_CONTROL_POINTS, num_pixels / 2);
         if num_points > max_num_points {
             tracing::error!(num_points, max_num_points, "Too many spline points");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "too many spline points"
-            ).into())
+            return Err(jxl_bitstream::Error::ProfileConformance("too many spline points").into());
         }
 
         let mut quant_points = Vec::with_capacity(1 + num_points);
@@ -115,12 +122,12 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
             cur_delta.0 += delta_x;
             cur_delta.1 += delta_y;
             manhattan_distance += (cur_delta.0.abs() + cur_delta.1.abs()) as u64;
-            cur_value.0 = cur_value.0
-                .checked_add(cur_delta.0)
-                .ok_or(jxl_bitstream::Error::ValidationFailed("control point overflowed"))?;
-            cur_value.1 = cur_value.1
-                .checked_add(cur_delta.1)
-                .ok_or(jxl_bitstream::Error::ValidationFailed("control point overflowed"))?;
+            cur_value.0 = cur_value.0.checked_add(cur_delta.0).ok_or(
+                jxl_bitstream::Error::ValidationFailed("control point overflowed"),
+            )?;
+            cur_value.1 = cur_value.1.checked_add(cur_delta.1).ok_or(
+                jxl_bitstream::Error::ValidationFailed("control point overflowed"),
+            )?;
             quant_points.push(cur_value);
         }
 

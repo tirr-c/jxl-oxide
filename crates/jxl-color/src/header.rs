@@ -1,12 +1,5 @@
 #![allow(clippy::excessive_precision)]
-use jxl_bitstream::{
-    Bitstream,
-    Bundle,
-    Error,
-    Result,
-    define_bundle,
-    read_bits,
-};
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Error, Result};
 
 define_bundle! {
     #[derive(Debug)]
@@ -45,9 +38,9 @@ impl ColourEncoding {
 
     #[inline]
     pub fn is_srgb_gamut(&self) -> bool {
-        self.colour_space == ColourSpace::Rgb &&
-            self.white_point == WhitePoint::D65 &&
-            self.primaries == Primaries::Srgb
+        self.colour_space == ColourSpace::Rgb
+            && self.white_point == WhitePoint::D65
+            && self.primaries == Primaries::Srgb
     }
 
     /// Returns the CICP tag which represents this `ColourEncoding`.
@@ -130,7 +123,7 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
             WhitePointDiscriminator::Custom => {
                 let white = read_bits!(bitstream, Bundle(Customxy))?;
                 Self::Custom(white)
-            },
+            }
         })
     }
 }
@@ -187,7 +180,7 @@ impl<Ctx> Bundle<Ctx> for Primaries {
                 let green = read_bits!(bitstream, Bundle(Customxy))?;
                 let blue = read_bits!(bitstream, Bundle(Customxy))?;
                 Self::Custom { red, green, blue }
-            },
+            }
         })
     }
 }

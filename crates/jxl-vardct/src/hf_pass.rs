@@ -10,7 +10,10 @@ pub struct HfPassParams<'a> {
 
 impl<'a> HfPassParams<'a> {
     pub fn new(hf_block_ctx: &'a crate::HfBlockContext, num_hf_presets: u32) -> Self {
-        Self { hf_block_ctx, num_hf_presets }
+        Self {
+            hf_block_ctx,
+            num_hf_presets,
+        }
     }
 }
 
@@ -28,20 +31,25 @@ impl Bundle<HfPassParams<'_>> for HfPass {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: HfPassParams<'_>) -> crate::Result<Self> {
-        let HfPassParams { hf_block_ctx, num_hf_presets } = params;
+        let HfPassParams {
+            hf_block_ctx,
+            num_hf_presets,
+        } = params;
         let mut used_orders = read_bits!(bitstream, U32(0x5F, 0x13, 0x00, u(13)))?;
         let mut decoder = (used_orders != 0)
             .then(|| Decoder::parse(bitstream, 8))
             .transpose()?;
 
-        let mut permutation: [_; 13] = std::array::from_fn(|_| [Vec::new(), Vec::new(), Vec::new()]);
+        let mut permutation: [_; 13] =
+            std::array::from_fn(|_| [Vec::new(), Vec::new(), Vec::new()]);
         if let Some(decoder) = &mut decoder {
             for (permutation, (bw, bh)) in permutation.iter_mut().zip(BLOCK_SIZES) {
                 if used_orders & 1 != 0 {
                     let size = (bw * bh) as u32;
                     let skip = size / 64;
                     for permutation in permutation {
-                        *permutation = jxl_coding::read_permutation(bitstream, decoder, size, skip)?;
+                        *permutation =
+                            jxl_coding::read_permutation(bitstream, decoder, size, skip)?;
                     }
                 }
 
@@ -69,7 +77,11 @@ impl HfPass {
     }
 
     #[inline]
-    pub(crate) fn order(&self, order_id: usize, channel: usize) -> impl Iterator<Item = (u8, u8)> + '_ {
+    pub(crate) fn order(
+        &self,
+        order_id: usize,
+        channel: usize,
+    ) -> impl Iterator<Item = (u8, u8)> + '_ {
         struct OrderIter<'a> {
             permutation: &'a [usize],
             natural_order: &'static [(u8, u8)],
@@ -90,7 +102,11 @@ impl HfPass {
 
         let permutation = &self.permutation[order_id][channel];
         let natural_order = natural_order_lazy(order_id);
-        OrderIter { permutation, natural_order, idx: 0 }
+        OrderIter {
+            permutation,
+            natural_order,
+            idx: 0,
+        }
     }
 }
 
@@ -110,15 +126,15 @@ const BLOCK_SIZES: [(usize, usize); 13] = [
     (256, 128),
 ];
 const NATURAL_ORDER: [&[(u8, u8)]; 9] = [
-    &const_compute_natural_order::<{BLOCK_SIZES[0].0 * BLOCK_SIZES[0].1}>(BLOCK_SIZES[0]),
-    &const_compute_natural_order::<{BLOCK_SIZES[1].0 * BLOCK_SIZES[1].1}>(BLOCK_SIZES[1]),
-    &const_compute_natural_order::<{BLOCK_SIZES[2].0 * BLOCK_SIZES[2].1}>(BLOCK_SIZES[2]),
-    &const_compute_natural_order::<{BLOCK_SIZES[3].0 * BLOCK_SIZES[3].1}>(BLOCK_SIZES[3]),
-    &const_compute_natural_order::<{BLOCK_SIZES[4].0 * BLOCK_SIZES[4].1}>(BLOCK_SIZES[4]),
-    &const_compute_natural_order::<{BLOCK_SIZES[5].0 * BLOCK_SIZES[5].1}>(BLOCK_SIZES[5]),
-    &const_compute_natural_order::<{BLOCK_SIZES[6].0 * BLOCK_SIZES[6].1}>(BLOCK_SIZES[6]),
-    &const_compute_natural_order::<{BLOCK_SIZES[7].0 * BLOCK_SIZES[7].1}>(BLOCK_SIZES[7]),
-    &const_compute_natural_order::<{BLOCK_SIZES[8].0 * BLOCK_SIZES[8].1}>(BLOCK_SIZES[8]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[0].0 * BLOCK_SIZES[0].1 }>(BLOCK_SIZES[0]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[1].0 * BLOCK_SIZES[1].1 }>(BLOCK_SIZES[1]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[2].0 * BLOCK_SIZES[2].1 }>(BLOCK_SIZES[2]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[3].0 * BLOCK_SIZES[3].1 }>(BLOCK_SIZES[3]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[4].0 * BLOCK_SIZES[4].1 }>(BLOCK_SIZES[4]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[5].0 * BLOCK_SIZES[5].1 }>(BLOCK_SIZES[5]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[6].0 * BLOCK_SIZES[6].1 }>(BLOCK_SIZES[6]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[7].0 * BLOCK_SIZES[7].1 }>(BLOCK_SIZES[7]),
+    &const_compute_natural_order::<{ BLOCK_SIZES[8].0 * BLOCK_SIZES[8].1 }>(BLOCK_SIZES[8]),
 ];
 
 fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
@@ -136,12 +152,8 @@ fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
         std::sync::Once::new(),
         std::sync::Once::new(),
     ];
-    static mut LARGE_NATURAL_ORDER: [Vec<(u8, u8)>; 4] = [
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    ];
+    static mut LARGE_NATURAL_ORDER: [Vec<(u8, u8)>; 4] =
+        [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     // TODO: Replace this with `OnceLock` when it is available in stable.
     INITIALIZER[idx].call_once(|| {

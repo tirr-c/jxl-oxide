@@ -33,7 +33,9 @@ impl std::fmt::Display for Error {
 
         match self {
             Self::InvalidMaTree => write!(f, "invalid meta-adaptive tree"),
-            Self::GlobalMaTreeNotAvailable => write!(f, "global meta-adaptive tree requested but unavailable"),
+            Self::GlobalMaTreeNotAvailable => {
+                write!(f, "global meta-adaptive tree requested but unavailable")
+            }
             Self::InvalidRctParams => write!(f, "invalid Rct transform parameters"),
             Self::InvalidPaletteParams => write!(f, "invalid Palette transform parameters"),
             Self::InvalidSqueezeParams => write!(f, "invalid Squeeze transform parameters"),

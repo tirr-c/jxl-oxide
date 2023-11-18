@@ -1,12 +1,14 @@
 use std::io::Cursor;
 
+use jxl_oxide::{CropInfo, JxlImage, Render};
 use rand::prelude::*;
-use jxl_oxide::{JxlImage, CropInfo, Render};
 
 mod util;
 
 fn run_test(buf: &[u8], name: &str) {
-    let is_ci = std::env::var_os("CI").map(|v| !v.is_empty()).unwrap_or(false);
+    let is_ci = std::env::var_os("CI")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
     let image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
@@ -33,19 +35,36 @@ fn run_test(buf: &[u8], name: &str) {
     }
 }
 
-fn test_crop_region(image: &JxlImage, tester_image: &JxlImage, crop: CropInfo, name: &str, is_ci: bool) {
-    let CropInfo { width: crop_width, left: crop_left, top: crop_top, .. } = crop;
+fn test_crop_region(
+    image: &JxlImage,
+    tester_image: &JxlImage,
+    crop: CropInfo,
+    name: &str,
+    is_ci: bool,
+) {
+    let CropInfo {
+        width: crop_width,
+        left: crop_left,
+        top: crop_top,
+        ..
+    } = crop;
     let width = image.width();
 
     let num_frames = image.num_loaded_keyframes();
     for idx in 0..num_frames {
         eprintln!("Testing frame #{idx}");
-        let full_render = image.render_frame(idx).expect("Failed to render full image");
+        let full_render = image
+            .render_frame(idx)
+            .expect("Failed to render full image");
         let cropped_render = tester_image
             .render_frame_cropped(idx, Some(crop))
             .expect("Failed to render cropped image");
 
-        for (expected, actual) in full_render.image_planar().into_iter().zip(cropped_render.image_planar()) {
+        for (expected, actual) in full_render
+            .image_planar()
+            .into_iter()
+            .zip(cropped_render.image_planar())
+        {
             let expected = expected.buf();
             let actual = actual.buf();
 

@@ -1,13 +1,8 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{CutGrid, SimpleGrid, SharedSubgrid};
+use jxl_grid::{CutGrid, SharedSubgrid, SimpleGrid};
 use jxl_modular::ChannelShift;
 
-use crate::{
-    BlockInfo,
-    HfBlockContext,
-    HfPass,
-    Result,
-};
+use crate::{BlockInfo, HfBlockContext, HfPass, Result};
 
 /// Parameters for decoding `HfCoeff`.
 #[derive(Debug)]
@@ -27,19 +22,15 @@ pub fn write_hf_coeff(
     hf_coeff_output: &mut [CutGrid<'_, f32>; 3],
 ) -> Result<()> {
     const COEFF_FREQ_CONTEXT: [u32; 63] = [
-        0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
-        15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22,
-        23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26,
-        27, 27, 27, 27, 28, 28, 28, 28, 29, 29, 29, 29, 30, 30, 30, 30,
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19,
+        20, 20, 21, 21, 22, 22, 23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26, 27,
+        27, 27, 27, 28, 28, 28, 28, 29, 29, 29, 29, 30, 30, 30, 30,
     ];
     const COEFF_NUM_NONZERO_CONTEXT: [u32; 63] = [
-          0,  31,  62,  62,  93,  93,  93,  93, 123,
-        123, 123, 123, 152, 152, 152, 152, 152, 152,
-        152, 152, 180, 180, 180, 180, 180, 180, 180,
-        180, 180, 180, 180, 180, 206, 206, 206, 206,
-        206, 206, 206, 206, 206, 206, 206, 206, 206,
-        206, 206, 206, 206, 206, 206, 206, 206, 206,
-        206, 206, 206, 206, 206, 206, 206, 206, 206,
+        0, 31, 62, 62, 93, 93, 93, 93, 123, 123, 123, 123, 152, 152, 152, 152, 152, 152, 152, 152,
+        180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 206, 206, 206, 206, 206, 206,
+        206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
+        206, 206, 206, 206, 206, 206, 206,
     ];
 
     let HfCoeffParams {
@@ -59,8 +50,10 @@ pub fn write_hf_coeff(
         block_ctx_map,
         num_block_clusters,
     } = hf_block_ctx;
-    let lf_idx_mul = (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
-    let upsampling_shifts: [_; 3] = std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
+    let lf_idx_mul =
+        (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
+    let upsampling_shifts: [_; 3] =
+        std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let hshifts = upsampling_shifts.map(|shift| shift.hshift());
     let vshifts = upsampling_shifts.map(|shift| shift.vshift());
 
@@ -85,17 +78,17 @@ pub fn write_hf_coeff(
         } else if y == 0 {
             *grid.get(x - 1, y).unwrap()
         } else {
-            (
-                *grid.get(x, y - 1).unwrap() +
-                *grid.get(x - 1, y).unwrap() +
-                1
-            ) >> 1
+            (*grid.get(x, y - 1).unwrap() + *grid.get(x - 1, y).unwrap() + 1) >> 1
         }
     };
 
     for y in 0..height {
         for x in 0..width {
-            let BlockInfo::Data { dct_select, hf_mul: qf } = *block_info.get(x, y) else {
+            let BlockInfo::Data {
+                dct_select,
+                hf_mul: qf,
+            } = *block_info.get(x, y)
+            else {
                 continue;
             };
             let (w8, h8) = dct_select.dct_select_size();
@@ -133,7 +126,8 @@ pub fn write_hf_coeff(
                 idx
             };
 
-            for c in [1, 0, 2] { // y, x, b
+            for c in [1, 0, 2] {
+                // y, x, b
                 let hshift = hshifts[c];
                 let vshift = vshifts[c];
                 let sx = x >> hshift;
@@ -155,7 +149,11 @@ pub fn write_hf_coeff(
                     block_ctx + idx * num_block_clusters
                 };
 
-                let mut non_zeros = dist.read_varint_with_multiplier_clustered(bitstream, cluster_map[non_zeros_ctx as usize], 0)?;
+                let mut non_zeros = dist.read_varint_with_multiplier_clustered(
+                    bitstream,
+                    cluster_map[non_zeros_ctx as usize],
+                    0,
+                )?;
                 let non_zeros_val = (non_zeros + num_blocks - 1) >> num_blocks_log;
                 let non_zeros_grid = &mut non_zeros_grid[c];
                 for dy in 0..h8 as usize {
@@ -180,9 +178,15 @@ pub fn write_hf_coeff(
                         let prev = is_prev_coeff_nonzero as u32;
                         let non_zeros = (non_zeros - 1) >> num_blocks_log;
                         let idx = idx >> num_blocks_log;
-                        (COEFF_NUM_NONZERO_CONTEXT[non_zeros as usize] + COEFF_FREQ_CONTEXT[idx]) * 2 + prev
+                        (COEFF_NUM_NONZERO_CONTEXT[non_zeros as usize] + COEFF_FREQ_CONTEXT[idx])
+                            * 2
+                            + prev
                     };
-                    let ucoeff = dist.read_varint_with_multiplier_clustered(bitstream, cluster_map[coeff_ctx as usize], 0)?;
+                    let ucoeff = dist.read_varint_with_multiplier_clustered(
+                        bitstream,
+                        cluster_map[coeff_ctx as usize],
+                        0,
+                    )?;
                     if ucoeff == 0 {
                         is_prev_coeff_nonzero = false;
                         continue;
@@ -190,9 +194,15 @@ pub fn write_hf_coeff(
 
                     let coeff = jxl_bitstream::unpack_signed(ucoeff) << coeff_shift;
                     let (x, y) = if dct_select.need_transpose() {
-                        (sx * 8 + coeff_coord.1 as usize, sy * 8 + coeff_coord.0 as usize)
+                        (
+                            sx * 8 + coeff_coord.1 as usize,
+                            sy * 8 + coeff_coord.0 as usize,
+                        )
                     } else {
-                        (sx * 8 + coeff_coord.0 as usize, sy * 8 + coeff_coord.1 as usize)
+                        (
+                            sx * 8 + coeff_coord.0 as usize,
+                            sy * 8 + coeff_coord.1 as usize,
+                        )
                     };
                     *coeff_grid.get_mut(x, y) += coeff as f32;
                     is_prev_coeff_nonzero = true;

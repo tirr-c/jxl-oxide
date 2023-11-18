@@ -1,5 +1,5 @@
 //! Prefix code based on Brotli
-use jxl_bitstream::{Bitstream, read_bits};
+use jxl_bitstream::{read_bits, Bitstream};
 
 use crate::{Error, Result};
 
@@ -35,10 +35,7 @@ impl Histogram {
         }
 
         if current_bits == 1 << 15 {
-            Ok(Self {
-                configs,
-                symbols
-            })
+            Ok(Self { configs, symbols })
         } else {
             Err(Error::InvalidPrefixHistogram)
         }
@@ -74,7 +71,7 @@ impl Histogram {
                     return Err(Error::InvalidPrefixHistogram);
                 }
                 return Ok(Self::with_single_symbol(sym as u16));
-            },
+            }
             2 => {
                 let syms = [
                     0,
@@ -84,7 +81,7 @@ impl Histogram {
                 ];
 
                 syms.into_iter().zip([0u8, 0, 1u8, 1])
-            },
+            }
             3 => {
                 let syms = [
                     0,
@@ -94,7 +91,7 @@ impl Histogram {
                 ];
 
                 syms.into_iter().zip([0u8, 1, 2, 2])
-            },
+            }
             4 => {
                 let syms = [
                     bitstream.read_bits(alphabet_bits)? as usize,
@@ -109,7 +106,7 @@ impl Histogram {
                 } else {
                     syms.into_iter().zip([2u8, 2, 2, 2])
                 }
-            },
+            }
             _ => unreachable!(),
         };
 
@@ -125,11 +122,8 @@ impl Histogram {
     }
 
     fn parse_complex(bitstream: &mut Bitstream, alphabet_size: u32, hskip: u32) -> Result<Self> {
-        const CODE_LENGTH_ORDER: [usize; 18] = [
-            1, 2, 3, 4, 0, 5,
-            17, 6, 16, 7, 8, 9,
-            10, 11, 12, 13, 14, 15,
-        ];
+        const CODE_LENGTH_ORDER: [usize; 18] =
+            [1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let mut code_length_code_lengths = [0u8; 18];
         let mut bitacc = 0usize;
 
@@ -162,7 +156,7 @@ impl Histogram {
                 bitacc += 32 >> len;
 
                 match bitacc.cmp(&32) {
-                    std::cmp::Ordering::Less => {},
+                    std::cmp::Ordering::Less => {}
                     std::cmp::Ordering::Equal => break,
                     std::cmp::Ordering::Greater => return Err(Error::InvalidPrefixHistogram),
                 }
@@ -224,7 +218,7 @@ impl Histogram {
                         *len = repeat_sym;
                         repeat_count -= 1;
                     }
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
                 prev_sym = sym;
             }
@@ -270,7 +264,9 @@ impl Histogram {
 
     #[inline]
     pub fn single_symbol(&self) -> Option<u16> {
-        let &[symbol] = &*self.symbols else { return None; };
+        let &[symbol] = &*self.symbols else {
+            return None;
+        };
         Some(symbol)
     }
 }

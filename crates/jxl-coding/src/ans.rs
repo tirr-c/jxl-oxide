@@ -1,4 +1,4 @@
-use jxl_bitstream::{Bitstream, read_bits};
+use jxl_bitstream::{read_bits, Bitstream};
 
 use crate::{Error, Result};
 
@@ -116,10 +116,10 @@ impl Histogram {
                             *log = dist[idx];
                             *pos = idx;
                         }
-                    },
+                    }
                     data => {
                         *data = Some((dist[idx], idx));
-                    },
+                    }
                 }
                 idx += 1;
             }
@@ -134,7 +134,9 @@ impl Histogram {
             let mut acc = 0;
             let mut prev_dist = 0u16;
             for (idx, code) in dist.iter_mut().enumerate() {
-                if repeat_range_idx < repeat_ranges.len() && repeat_ranges[repeat_range_idx].start <= idx {
+                if repeat_range_idx < repeat_ranges.len()
+                    && repeat_ranges[repeat_range_idx].start <= idx
+                {
                     if repeat_ranges[repeat_range_idx].end == idx {
                         repeat_range_idx += 1;
                     } else {
@@ -158,7 +160,8 @@ impl Histogram {
                 if *code > 1 {
                     let zeros = (*code - 1) as i16;
                     let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
-                    *code = (1 << zeros) + ((bitstream.read_bits(bitcount as usize)? as u16) << (zeros - bitcount));
+                    *code = (1 << zeros)
+                        + ((bitstream.read_bits(bitcount as usize)? as u16) << (zeros - bitcount));
                 }
                 prev_dist = *code;
                 acc += *code;
@@ -170,7 +173,8 @@ impl Histogram {
         }
 
         if let Some(single_sym_idx) = dist.iter().position(|&d| d == 1 << 12) {
-            let buckets = dist.into_iter()
+            let buckets = dist
+                .into_iter()
                 .enumerate()
                 .map(|(i, dist)| Bucket {
                     dist,
@@ -203,7 +207,7 @@ impl Histogram {
         for (idx, &WorkingBucket { dist, .. }) in buckets.iter().enumerate() {
             match dist.cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(idx),
-                std::cmp::Ordering::Equal => {},
+                std::cmp::Ordering::Equal => {}
                 std::cmp::Ordering::Greater => overfull.push(idx),
             }
         }
@@ -214,7 +218,7 @@ impl Histogram {
             buckets[u].alias_offset = buckets[o].alias_cutoff;
             match buckets[o].alias_cutoff.cmp(&bucket_size) {
                 std::cmp::Ordering::Less => underfull.push(o),
-                std::cmp::Ordering::Equal => {},
+                std::cmp::Ordering::Equal => {}
                 std::cmp::Ordering::Greater => overfull.push(o),
             }
         }
@@ -284,16 +288,16 @@ impl Histogram {
                 ((bucket_int >> 16) & 0xffff) as usize,
             )
         } else {
-            (bucket.alias_symbol as usize, bucket.alias_cutoff as usize, bucket.dist as usize)
+            (
+                bucket.alias_symbol as usize,
+                bucket.alias_cutoff as usize,
+                bucket.dist as usize,
+            )
         };
 
         let map_to_alias = pos >= alias_cutoff;
         let (offset, dist_xor) = if is_le {
-            let cond_bucket = if map_to_alias {
-                bucket_int
-            } else {
-                0
-            };
+            let cond_bucket = if map_to_alias { bucket_int } else { 0 };
             (
                 ((cond_bucket >> 32) & 0xffff) as usize,
                 (cond_bucket >> 48) as usize,
@@ -317,7 +321,11 @@ impl Histogram {
         let next_state = (*state >> 12) * dist + offset;
         let appended_state = (next_state << 16) | bitstream.peek_bits(16);
         let select_appended = next_state < (1 << 16);
-        *state = if select_appended { appended_state } else { next_state };
+        *state = if select_appended {
+            appended_state
+        } else {
+            next_state
+        };
         bitstream.consume_bits(if select_appended { 16 } else { 0 })?;
         Ok(symbol)
     }
@@ -338,7 +346,7 @@ fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
                 }
             }
             12
-        },
+        }
         2 => 7,
         3 => {
             if bitstream.read_bool()? {
@@ -346,7 +354,7 @@ fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
             } else {
                 3
             }
-        },
+        }
         4 => 6,
         5 => 8,
         6 => 9,
@@ -356,7 +364,7 @@ fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
             } else {
                 5
             }
-        },
+        }
         _ => unreachable!(),
     })
 }

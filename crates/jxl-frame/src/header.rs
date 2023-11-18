@@ -1,12 +1,6 @@
-use jxl_bitstream::{
-    define_bundle,
-    read_bits,
-    Bitstream,
-    Bundle,
-    Name,
-};
-use jxl_image::{ImageHeader, Extensions, BitDepth, SizeHeader};
 use crate::Result;
+use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Name};
+use jxl_image::{BitDepth, Extensions, ImageHeader, SizeHeader};
 
 define_bundle! {
     /// Frame header.
@@ -171,13 +165,16 @@ impl FrameHeader {
     fn resets_canvas(
         blending_mode: Option<BlendMode>,
         have_crop: bool,
-        x0: i32, y0: i32,
-        width: u32, height: u32,
+        x0: i32,
+        y0: i32,
+        width: u32,
+        height: u32,
         size: &SizeHeader,
-    ) -> bool
-    {
-        blending_mode.map(|mode| mode == BlendMode::Replace).unwrap_or(true) &&
-        (!have_crop || Self::test_full_image(x0, y0, width, height, size))
+    ) -> bool {
+        blending_mode
+            .map(|mode| mode == BlendMode::Replace)
+            .unwrap_or(true)
+            && (!have_crop || Self::test_full_image(x0, y0, width, height, size))
     }
 
     fn compute_default_xqms(encoding: Encoding, xyb_encoded: bool) -> u32 {
@@ -195,7 +192,11 @@ impl FrameHeader {
     }
 
     pub fn sample_width(&self, upsampling: u32) -> u32 {
-        let &Self { mut width, lf_level, .. } = self;
+        let &Self {
+            mut width,
+            lf_level,
+            ..
+        } = self;
 
         if upsampling > 1 {
             width = (width + upsampling - 1) / upsampling;
@@ -209,7 +210,11 @@ impl FrameHeader {
     }
 
     pub fn sample_height(&self, upsampling: u32) -> u32 {
-        let &Self { mut height, lf_level, .. } = self;
+        let &Self {
+            mut height,
+            lf_level,
+            ..
+        } = self;
 
         if upsampling > 1 {
             height = (height + upsampling - 1) / upsampling;
@@ -318,7 +323,11 @@ impl FrameHeader {
         is_aabb_collides(region, (group_left, group_top, group_dim, group_dim))
     }
 
-    pub fn is_lf_group_collides_region(&self, lf_group_idx: u32, region: (u32, u32, u32, u32)) -> bool {
+    pub fn is_lf_group_collides_region(
+        &self,
+        lf_group_idx: u32,
+        region: (u32, u32, u32, u32),
+    ) -> bool {
         let lf_group_dim = self.lf_group_dim();
         let lf_group_per_row = self.lf_groups_per_row();
         let group_left = (lf_group_idx % lf_group_per_row) * lf_group_dim;
@@ -441,7 +450,13 @@ impl<Ctx> Bundle<Ctx> for BlendMode {
             2 => Self::Blend,
             3 => Self::MulAdd,
             4 => Self::Mul,
-            value => return Err(jxl_bitstream::Error::InvalidEnum { name: "BlendMode", value }.into()),
+            value => {
+                return Err(jxl_bitstream::Error::InvalidEnum {
+                    name: "BlendMode",
+                    value,
+                }
+                .into())
+            }
         })
     }
 }

@@ -48,7 +48,10 @@ fn main() {
 
     println!("  Image dimension: {}x{}", image.width(), image.height());
     if image_meta.orientation != 1 {
-        println!("    Encoded image dimension: {}x{}", image_size.width, image_size.height);
+        println!(
+            "    Encoded image dimension: {}x{}",
+            image_size.width, image_size.height
+        );
         print!("    Orientation of encoded image: ");
         match image_meta.orientation {
             2 => println!("flipped horizontally"),
@@ -58,11 +61,14 @@ fn main() {
             6 => println!("rotated 90 degrees CCW"),
             7 => println!("rotated 90 degrees CCW, and then flipped horizontally"),
             8 => println!("rotated 90 degrees CW"),
-            _ => {},
+            _ => {}
         }
     }
 
-    println!("  Bit depth: {} bits", image_meta.bit_depth.bits_per_sample());
+    println!(
+        "  Bit depth: {} bits",
+        image_meta.bit_depth.bits_per_sample()
+    );
     if image_meta.xyb_encoded {
         println!("  XYB encoded, suggested display color encoding:");
     } else {
@@ -88,7 +94,9 @@ fn main() {
         print!("    White point: ");
         match colour_encoding.white_point {
             jxl_oxide::color::WhitePoint::D65 => println!("D65"),
-            jxl_oxide::color::WhitePoint::Custom(xy) => println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6),
+            jxl_oxide::color::WhitePoint::Custom(xy) => {
+                println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
+            }
             jxl_oxide::color::WhitePoint::E => println!("E"),
             jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
         }
@@ -99,11 +107,14 @@ fn main() {
             jxl_oxide::color::Primaries::Custom { red, green, blue } => {
                 println!(
                     "{}, {}; {}, {}; {}, {}",
-                    red.x as f64 / 10e6, red.y as f64 / 10e6,
-                    green.x as f64 / 10e6, green.y as f64 / 10e6,
-                    blue.x as f64 / 10e6, blue.y as f64 / 10e6,
+                    red.x as f64 / 10e6,
+                    red.y as f64 / 10e6,
+                    green.x as f64 / 10e6,
+                    green.y as f64 / 10e6,
+                    blue.x as f64 / 10e6,
+                    blue.y as f64 / 10e6,
                 );
-            },
+            }
             jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
             jxl_oxide::color::Primaries::P3 => println!("P3"),
         }
@@ -122,12 +133,17 @@ fn main() {
     }
 
     if let Some(animation) = &image_meta.animation {
-        println!("  Animated ({}/{} ticks per second)", animation.tps_numerator, animation.tps_denominator);
+        println!(
+            "  Animated ({}/{} ticks per second)",
+            animation.tps_numerator, animation.tps_denominator
+        );
     }
 
     let animated = image_meta.animation.is_some();
     for idx in 0..image.num_loaded_frames() + 1 {
-        let Some(frame) = image.frame(idx) else { break; };
+        let Some(frame) = image.frame(idx) else {
+            break;
+        };
         let frame_header = frame.header();
         let is_keyframe = frame_header.is_keyframe();
         if !args.all_frames && !is_keyframe {
@@ -153,9 +169,17 @@ fn main() {
         print!("  Frame type: ");
         match frame_header.frame_type {
             jxl_oxide::frame::FrameType::RegularFrame => print!("Regular"),
-            jxl_oxide::frame::FrameType::LfFrame => print!("LF, level {} ({}x downsampled)", frame_header.lf_level, 1 << (frame_header.lf_level * 3)),
-            jxl_oxide::frame::FrameType::ReferenceOnly => print!("Reference only, slot {}", frame_header.save_as_reference),
-            jxl_oxide::frame::FrameType::SkipProgressive => print!("Regular (skip progressive rendering)"),
+            jxl_oxide::frame::FrameType::LfFrame => print!(
+                "LF, level {} ({}x downsampled)",
+                frame_header.lf_level,
+                1 << (frame_header.lf_level * 3)
+            ),
+            jxl_oxide::frame::FrameType::ReferenceOnly => {
+                print!("Reference only, slot {}", frame_header.save_as_reference)
+            }
+            jxl_oxide::frame::FrameType::SkipProgressive => {
+                print!("Regular (skip progressive rendering)")
+            }
         }
         println!();
 
@@ -170,19 +194,29 @@ fn main() {
         println!();
 
         if frame_header.do_ycbcr {
-            println!("  YCbCr, upsampling factor: {:?}", frame_header.jpeg_upsampling);
+            println!(
+                "  YCbCr, upsampling factor: {:?}",
+                frame_header.jpeg_upsampling
+            );
         }
         if animated && is_keyframe {
             if frame_header.duration == 0xffffffff {
                 println!("  End of a page");
             } else {
-                println!("  Duration: {} tick{}", frame_header.duration, if frame_header.duration == 1 { "" } else { "s" });
+                println!(
+                    "  Duration: {} tick{}",
+                    frame_header.duration,
+                    if frame_header.duration == 1 { "" } else { "s" }
+                );
             }
         }
 
         if args.with_offset {
             let offset = image.frame_offset(idx).unwrap();
-            println!("  Offset (in codestream): {offset} (0x{offset:x})", offset = offset);
+            println!(
+                "  Offset (in codestream): {offset} (0x{offset:x})",
+                offset = offset
+            );
 
             let toc = frame.toc();
             println!(

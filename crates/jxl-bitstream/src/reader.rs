@@ -60,12 +60,11 @@ impl ContainerDetectingReader {
 
     pub fn kind(&self) -> BitstreamKind {
         match self.state {
-            | DetectState::WaitingSignature => BitstreamKind::Unknown,
-            | DetectState::WaitingBoxHeader
+            DetectState::WaitingSignature => BitstreamKind::Unknown,
+            DetectState::WaitingBoxHeader
             | DetectState::WaitingJxlpIndex(..)
             | DetectState::InAuxBox { .. } => BitstreamKind::Container,
-            | DetectState::InCodestream { kind, .. }
-            | DetectState::Done(kind) => kind,
+            DetectState::InCodestream { kind, .. } | DetectState::Done(kind) => kind,
         }
     }
 
@@ -91,7 +90,9 @@ impl ContainerDetectingReader {
                         buf.drain(..Self::CONTAINER_SIG.len());
                         continue;
                     }
-                    if !Self::CODESTREAM_SIG.starts_with(buf) && !Self::CONTAINER_SIG.starts_with(buf) {
+                    if !Self::CODESTREAM_SIG.starts_with(buf)
+                        && !Self::CONTAINER_SIG.starts_with(buf)
+                    {
                         tracing::error!("Invalid signature");
                         *state = DetectState::InCodestream {
                             kind: BitstreamKind::Invalid,
@@ -100,65 +101,63 @@ impl ContainerDetectingReader {
                         continue;
                     }
                     return Ok(());
-                },
-                DetectState::WaitingBoxHeader => {
-                    match ContainerBoxHeader::parse(buf)? {
-                        HeaderParseResult::Done { header, size } => {
-                            buf.drain(..size);
-                            let tbox = header.box_type();
-                            if tbox == ContainerBoxType::CODESTREAM {
-                                if self.next_jxlp_index == u32::MAX {
-                                    tracing::error!("Duplicate jxlc box found");
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "Duplicate jxlc box found",
-                                    ));
-                                } else if self.next_jxlp_index != 0 {
-                                    tracing::error!("Found jxlc box instead of jxlp box");
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "Found jxlc box instead of jxlp box",
-                                    ));
-                                }
-
-                                self.next_jxlp_index = u32::MAX;
-                                *state = DetectState::InCodestream {
-                                    kind: BitstreamKind::Container,
-                                    bytes_left: header.size().map(|x| x as usize),
-                                };
-                            } else if tbox == ContainerBoxType::PARTIAL_CODESTREAM {
-                                if self.next_jxlp_index == u32::MAX {
-                                    tracing::error!("jxlp box found after jxlc box");
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "jxlp box found after jxlc box",
-                                    ));
-                                }
-
-                                if self.next_jxlp_index >= 0x80000000 {
-                                    tracing::error!(
-                                        "jxlp box #{} should be the last one, found the next one",
-                                        self.next_jxlp_index ^ 0x80000000,
-                                    );
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "another jxlp box found after the signalled last one",
-                                    ));
-                                }
-
-                                *state = DetectState::WaitingJxlpIndex(header);
-                            } else {
-                                let bytes_left = header.size().map(|x| x as usize);
-                                *state = DetectState::InAuxBox {
-                                    header,
-                                    data: Vec::new(),
-                                    bytes_left,
-                                };
+                }
+                DetectState::WaitingBoxHeader => match ContainerBoxHeader::parse(buf)? {
+                    HeaderParseResult::Done { header, size } => {
+                        buf.drain(..size);
+                        let tbox = header.box_type();
+                        if tbox == ContainerBoxType::CODESTREAM {
+                            if self.next_jxlp_index == u32::MAX {
+                                tracing::error!("Duplicate jxlc box found");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "Duplicate jxlc box found",
+                                ));
+                            } else if self.next_jxlp_index != 0 {
+                                tracing::error!("Found jxlc box instead of jxlp box");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "Found jxlc box instead of jxlp box",
+                                ));
                             }
-                            continue;
-                        },
-                        HeaderParseResult::NeedMoreData => return Ok(()),
+
+                            self.next_jxlp_index = u32::MAX;
+                            *state = DetectState::InCodestream {
+                                kind: BitstreamKind::Container,
+                                bytes_left: header.size().map(|x| x as usize),
+                            };
+                        } else if tbox == ContainerBoxType::PARTIAL_CODESTREAM {
+                            if self.next_jxlp_index == u32::MAX {
+                                tracing::error!("jxlp box found after jxlc box");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "jxlp box found after jxlc box",
+                                ));
+                            }
+
+                            if self.next_jxlp_index >= 0x80000000 {
+                                tracing::error!(
+                                    "jxlp box #{} should be the last one, found the next one",
+                                    self.next_jxlp_index ^ 0x80000000,
+                                );
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "another jxlp box found after the signalled last one",
+                                ));
+                            }
+
+                            *state = DetectState::WaitingJxlpIndex(header);
+                        } else {
+                            let bytes_left = header.size().map(|x| x as usize);
+                            *state = DetectState::InAuxBox {
+                                header,
+                                data: Vec::new(),
+                                bytes_left,
+                            };
+                        }
+                        continue;
                     }
+                    HeaderParseResult::NeedMoreData => return Ok(()),
                 },
                 DetectState::WaitingJxlpIndex(header) => {
                     if buf.len() < 4 {
@@ -192,13 +191,18 @@ impl ContainerDetectingReader {
                         kind: BitstreamKind::Container,
                         bytes_left: header.size().map(|x| x as usize - 4),
                     };
-                },
-                DetectState::InCodestream { bytes_left: None, .. } => {
+                }
+                DetectState::InCodestream {
+                    bytes_left: None, ..
+                } => {
                     self.codestream.extend_from_slice(buf);
                     buf.clear();
                     return Ok(());
-                },
-                DetectState::InCodestream { bytes_left: Some(bytes_left), .. } => {
+                }
+                DetectState::InCodestream {
+                    bytes_left: Some(bytes_left),
+                    ..
+                } => {
                     if *bytes_left <= buf.len() {
                         self.codestream.extend(buf.drain(..*bytes_left));
                         *state = DetectState::WaitingBoxHeader;
@@ -208,16 +212,25 @@ impl ContainerDetectingReader {
                         buf.clear();
                         return Ok(());
                     }
-                },
-                DetectState::InAuxBox { data, bytes_left: None, .. } => {
+                }
+                DetectState::InAuxBox {
+                    data,
+                    bytes_left: None,
+                    ..
+                } => {
                     data.extend_from_slice(buf);
                     buf.clear();
                     return Ok(());
-                },
-                DetectState::InAuxBox { header, data, bytes_left: Some(bytes_left) } => {
+                }
+                DetectState::InAuxBox {
+                    header,
+                    data,
+                    bytes_left: Some(bytes_left),
+                } => {
                     if *bytes_left <= buf.len() {
                         data.extend(buf.drain(..*bytes_left));
-                        self.aux_boxes.push((header.box_type(), std::mem::take(data)));
+                        self.aux_boxes
+                            .push((header.box_type(), std::mem::take(data)));
                         *state = DetectState::WaitingBoxHeader;
                     } else {
                         *bytes_left -= buf.len();
@@ -225,7 +238,7 @@ impl ContainerDetectingReader {
                         buf.clear();
                         return Ok(());
                     }
-                },
+                }
                 DetectState::Done(_) => return Ok(()),
             }
         }
@@ -237,7 +250,8 @@ impl ContainerDetectingReader {
 
     pub fn finish(&mut self) {
         if let DetectState::InAuxBox { header, data, .. } = &mut self.state {
-            self.aux_boxes.push((header.box_type(), std::mem::take(data)));
+            self.aux_boxes
+                .push((header.box_type(), std::mem::take(data)));
         }
         self.state = DetectState::Done(self.kind());
     }

@@ -10,12 +10,9 @@ type Vector = __m256;
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
 unsafe fn weight_avx2(scaled_distance: Vector, sigma: f32, step_multiplier: Vector) -> Vector {
-    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma).mul(step_multiplier);
-    let result = _mm256_fmadd_ps(
-        scaled_distance,
-        neg_inv_sigma,
-        Vector::splat_f32(1.0),
-    );
+    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma)
+        .mul(step_multiplier);
+    let result = _mm256_fmadd_ps(scaled_distance, neg_inv_sigma, Vector::splat_f32(1.0));
     _mm256_max_ps(result, Vector::zero())
 }
 

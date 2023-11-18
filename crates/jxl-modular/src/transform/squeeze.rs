@@ -56,11 +56,13 @@ unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
     for y8 in 0..h8 {
         let y = y8 * 8;
 
-        let mut avg = _mm256_i32gather_epi32::<4>(merged.get_mut(0, y) as *mut _ as *const _, offset);
+        let mut avg =
+            _mm256_i32gather_epi32::<4>(merged.get_mut(0, y) as *mut _ as *const _, offset);
         let mut left = avg;
         for x2 in 0..width_iters {
             let x = x2 * 2;
-            let residu = _mm256_i32gather_epi32::<4>(merged.get_mut(x + 1, y) as *mut _ as *const _, offset);
+            let residu =
+                _mm256_i32gather_epi32::<4>(merged.get_mut(x + 1, y) as *mut _ as *const _, offset);
             let next_avg = if x + 2 < width {
                 _mm256_i32gather_epi32::<4>(merged.get_mut(x + 2, y) as *mut _ as *const _, offset)
             } else {
@@ -69,17 +71,9 @@ unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
             let diff = _mm256_add_epi32(residu, tendency_avx2(left, avg, next_avg));
             let first = _mm256_add_epi32(
                 avg,
-                _mm256_srai_epi32::<1>(
-                    _mm256_add_epi32(
-                        diff,
-                        _mm256_srli_epi32::<31>(diff),
-                    )
-                ),
+                _mm256_srai_epi32::<1>(_mm256_add_epi32(diff, _mm256_srli_epi32::<31>(diff))),
             );
-            let second = _mm256_sub_epi32(
-                first,
-                diff,
-            );
+            let second = _mm256_sub_epi32(first, diff);
 
             *merged.get_mut(x, y) = _mm256_extract_epi32::<0>(first);
             *merged.get_mut(x, y + 1) = _mm256_extract_epi32::<1>(first);
@@ -135,11 +129,7 @@ fn inverse_v_base(merged: &mut CutGrid<'_, i32>) {
             } else {
                 avg
             };
-            let top = if y > 0 {
-                merged.get(x, y - 1)
-            } else {
-                avg
-            };
+            let top = if y > 0 { merged.get(x, y - 1) } else { avg };
             let diff = residu + tendency(top, avg, next_avg);
             let first = avg + diff / 2;
             *merged.get_mut(x, y) = first;
@@ -165,8 +155,10 @@ unsafe fn inverse_v_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
         let y = y2 * 2;
         for x8 in 0..w8 {
             let x = x8 * 8;
-            let avg = _mm256_i32gather_epi32::<4>(merged.get_mut(x, y) as *mut _ as *const _, offset);
-            let residu = _mm256_i32gather_epi32::<4>(merged.get_mut(x, y + 1) as *mut _ as *const _, offset);
+            let avg =
+                _mm256_i32gather_epi32::<4>(merged.get_mut(x, y) as *mut _ as *const _, offset);
+            let residu =
+                _mm256_i32gather_epi32::<4>(merged.get_mut(x, y + 1) as *mut _ as *const _, offset);
             let next_avg = if y + 2 < height {
                 _mm256_i32gather_epi32::<4>(merged.get_mut(x, y + 2) as *mut _ as *const _, offset)
             } else {
@@ -181,17 +173,9 @@ unsafe fn inverse_v_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
             let diff = _mm256_add_epi32(residu, tendency_avx2(top, avg, next_avg));
             let first = _mm256_add_epi32(
                 avg,
-                _mm256_srai_epi32::<1>(
-                    _mm256_add_epi32(
-                        diff,
-                        _mm256_srli_epi32::<31>(diff),
-                    )
-                ),
+                _mm256_srai_epi32::<1>(_mm256_add_epi32(diff, _mm256_srli_epi32::<31>(diff))),
             );
-            let second = _mm256_sub_epi32(
-                first,
-                diff,
-            );
+            let second = _mm256_sub_epi32(first, diff);
 
             *merged.get_mut(x, y) = _mm256_extract_epi32::<0>(first);
             *merged.get_mut(x + 1, y) = _mm256_extract_epi32::<1>(first);
@@ -259,33 +243,17 @@ unsafe fn tendency_avx2(
         _mm256_cmpeq_epi32(a_b, _mm256_setzero_si256()),
         non_monotonic,
     );
-    let skip = _mm256_andnot_si256(
-        _mm256_cmpeq_epi32(b_c, _mm256_setzero_si256()),
-        skip,
-    );
+    let skip = _mm256_andnot_si256(_mm256_cmpeq_epi32(b_c, _mm256_setzero_si256()), skip);
 
-    let abs_a_b_3_lo = _mm256_srli_si256::<4>(
-        _mm256_mul_epi32(
-            abs_a_b,
-            _mm256_set1_epi32(0x55555556),
-        )
-    );
+    let abs_a_b_3_lo =
+        _mm256_srli_si256::<4>(_mm256_mul_epi32(abs_a_b, _mm256_set1_epi32(0x55555556)));
     let abs_a_b_3_hi = _mm256_mul_epi32(
         _mm256_srli_si256::<4>(abs_a_b),
         _mm256_set1_epi32(0x55555556),
     );
-    let abs_a_b_3 = _mm256_blend_epi32::<0b10101010>(
-        abs_a_b_3_lo,
-        abs_a_b_3_hi,
-    );
+    let abs_a_b_3 = _mm256_blend_epi32::<0b10101010>(abs_a_b_3_lo, abs_a_b_3_hi);
 
-    let x = _mm256_add_epi32(
-        abs_a_b_3,
-        _mm256_add_epi32(
-            abs_a_c,
-            _mm256_set1_epi32(2),
-        ),
-    );
+    let x = _mm256_add_epi32(abs_a_b_3, _mm256_add_epi32(abs_a_c, _mm256_set1_epi32(2)));
     let x = _mm256_srai_epi32::<2>(x);
 
     let abs_a_b_2_add_x = _mm256_add_epi32(
@@ -311,10 +279,7 @@ unsafe fn tendency_avx2(
     let need_neg = _mm256_cmpgt_epi32(c, a);
     let mask = _mm256_andnot_si256(
         skip,
-        _mm256_or_si256(
-            _mm256_slli_epi32::<1>(need_neg),
-            _mm256_set1_epi32(1),
-        ),
+        _mm256_or_si256(_mm256_slli_epi32::<1>(need_neg), _mm256_set1_epi32(1)),
     );
     _mm256_sign_epi32(x, mask)
 }

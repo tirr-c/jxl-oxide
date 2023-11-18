@@ -1,4 +1,4 @@
-use jxl_grid::{SimpleGrid, CutGrid};
+use jxl_grid::{CutGrid, SimpleGrid};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Region {
@@ -44,7 +44,10 @@ impl Region {
             return true;
         }
 
-        self.left <= target.left && self.top <= target.top && self.right() >= target.right() && self.bottom() >= target.bottom()
+        self.left <= target.left
+            && self.top <= target.top
+            && self.right() >= target.right()
+            && self.bottom() >= target.bottom()
     }
 
     pub fn translate(self, x: i32, y: i32) -> Self {
@@ -188,27 +191,37 @@ impl ImageWithRegion {
             .take(channels)
             .collect();
 
-        Self {
-            region,
-            buffer,
-        }
+        Self { region, buffer }
     }
 
     pub fn from_buffer(buffer: Vec<SimpleGrid<f32>>, left: i32, top: i32) -> Self {
         let channels = buffer.len();
         if channels == 0 {
             Self {
-                region: Region { top, left, width: 0, height: 0 },
+                region: Region {
+                    top,
+                    left,
+                    width: 0,
+                    height: 0,
+                },
                 buffer,
             }
         } else {
             let width = buffer[0].width();
             let height = buffer[0].height();
-            if buffer.iter().any(|g| g.width() != width || g.height() != height) {
+            if buffer
+                .iter()
+                .any(|g| g.width() != width || g.height() != height)
+            {
                 panic!("Buffer size is not uniform");
             }
             Self {
-                region: Region { top, left, width: width as u32, height: height as u32 },
+                region: Region {
+                    top,
+                    left,
+                    width: width as u32,
+                    height: height as u32,
+                },
                 buffer,
             }
         }
@@ -241,7 +254,10 @@ impl ImageWithRegion {
 
     #[inline]
     pub fn add_channel(&mut self) -> &mut SimpleGrid<f32> {
-        self.buffer.push(SimpleGrid::new(self.region.width as usize, self.region.height as usize));
+        self.buffer.push(SimpleGrid::new(
+            self.region.width as usize,
+            self.region.height as usize,
+        ));
         self.buffer.last_mut().unwrap()
     }
 
@@ -261,7 +277,11 @@ impl ImageWithRegion {
             let input_buf = input.buf();
             let output_stride = output.width();
             let output_buf = output.buf_mut();
-            for (input_row, output_row) in input_buf.chunks_exact(input_stride).skip(begin_y).zip(output_buf.chunks_exact_mut(output_stride)) {
+            for (input_row, output_row) in input_buf
+                .chunks_exact(input_stride)
+                .skip(begin_y)
+                .zip(output_buf.chunks_exact_mut(output_stride))
+            {
                 let input_row = &input_row[begin_x..][..output_stride];
                 output_row.copy_from_slice(input_row);
             }
@@ -270,11 +290,25 @@ impl ImageWithRegion {
         out
     }
 
-    pub(crate) fn clone_region_channel(&self, out_region: Region, channel_idx: usize, output: &mut SimpleGrid<f32>) {
-        if output.width() != out_region.width as usize || output.height() != out_region.height as usize {
-            panic!("region mismatch, out_region={:?}, grid size={:?}", out_region, (output.width(), output.height()));
+    pub(crate) fn clone_region_channel(
+        &self,
+        out_region: Region,
+        channel_idx: usize,
+        output: &mut SimpleGrid<f32>,
+    ) {
+        if output.width() != out_region.width as usize
+            || output.height() != out_region.height as usize
+        {
+            panic!(
+                "region mismatch, out_region={:?}, grid size={:?}",
+                out_region,
+                (output.width(), output.height())
+            );
         }
-        let input = self.buffer.get(channel_idx).expect("channel index out of range");
+        let input = self
+            .buffer
+            .get(channel_idx)
+            .expect("channel index out of range");
 
         let intersection = self.region.intersection(out_region);
         if intersection.is_empty() {
@@ -283,14 +317,28 @@ impl ImageWithRegion {
 
         let input_begin_x = intersection.left.abs_diff(self.region.left) as usize;
         let input_begin_y = intersection.top.abs_diff(self.region.top) as usize;
-        let output_begin_x = intersection.left.abs_diff(out_region.left).clamp(0, out_region.width) as usize;
-        let output_begin_y = intersection.top.abs_diff(out_region.top).clamp(0, out_region.height) as usize;
+        let output_begin_x = intersection
+            .left
+            .abs_diff(out_region.left)
+            .clamp(0, out_region.width) as usize;
+        let output_begin_y = intersection
+            .top
+            .abs_diff(out_region.top)
+            .clamp(0, out_region.height) as usize;
 
         let input_stride = input.width();
         let input_buf = input.buf();
         let output_stride = output.width();
         let output_buf = output.buf_mut();
-        for (input_row, output_row) in input_buf.chunks_exact(input_stride).skip(input_begin_y).zip(output_buf.chunks_exact_mut(output_stride).skip(output_begin_y)) {
+        for (input_row, output_row) in input_buf
+            .chunks_exact(input_stride)
+            .skip(input_begin_y)
+            .zip(
+                output_buf
+                    .chunks_exact_mut(output_stride)
+                    .skip(output_begin_y),
+            )
+        {
             let input_row = &input_row[input_begin_x..][..intersection.width as usize];
             let output_row = &mut output_row[output_begin_x..][..intersection.width as usize];
             output_row.copy_from_slice(input_row);
@@ -322,7 +370,12 @@ impl ImageWithRegion {
         let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
             let fb_width = fb.width();
             let shifted = shifts_cbycr[idx].shift_size((width, height));
-            let fb = CutGrid::from_buf(fb.buf_mut(), shifted.0 as usize, shifted.1 as usize, fb_width);
+            let fb = CutGrid::from_buf(
+                fb.buf_mut(),
+                shifted.0 as usize,
+                shifted.1 as usize,
+                fb_width,
+            );
 
             let hshift = shifts_cbycr[idx].hshift();
             let vshift = shifts_cbycr[idx].vshift();

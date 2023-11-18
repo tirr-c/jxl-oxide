@@ -2,16 +2,10 @@ use jxl_bitstream::{Bitstream, Bundle};
 use jxl_image::ImageMetadata;
 use jxl_modular::MaConfig;
 use jxl_threadpool::JxlThreadPool;
-use jxl_vardct::{
-    DequantMatrixSet,
-    DequantMatrixSetParams,
-    HfBlockContext,
-    HfPass,
-    HfPassParams,
-};
+use jxl_vardct::{DequantMatrixSet, DequantMatrixSetParams, HfBlockContext, HfPass, HfPassParams};
 
-use crate::{FrameHeader, Result};
 use super::LfGlobal;
+use crate::{FrameHeader, Result};
 
 #[derive(Debug, Copy, Clone)]
 pub struct HfGlobalParams<'a> {
@@ -29,7 +23,9 @@ impl<'a> HfGlobalParams<'a> {
         lf_global: &'a LfGlobal,
         pool: &'a JxlThreadPool,
     ) -> Self {
-        let Some(lf_vardct) = &lf_global.vardct else { panic!("VarDCT not initialized") };
+        let Some(lf_vardct) = &lf_global.vardct else {
+            panic!("VarDCT not initialized")
+        };
         Self {
             metadata,
             frame_header,
@@ -51,7 +47,13 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: HfGlobalParams<'_>) -> Result<Self> {
-        let HfGlobalParams { metadata, frame_header, ma_config, hf_block_ctx, pool } = params;
+        let HfGlobalParams {
+            metadata,
+            frame_header,
+            ma_config,
+            hf_block_ctx,
+            pool,
+        } = params;
         let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
             frame_header.num_lf_groups(),
@@ -61,7 +63,8 @@ impl Bundle<HfGlobalParams<'_>> for HfGlobal {
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;
 
         let num_groups = frame_header.num_groups();
-        let num_hf_presets = bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros() as usize)? + 1;
+        let num_hf_presets =
+            bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros() as usize)? + 1;
 
         let hf_pass_params = HfPassParams::new(hf_block_ctx, num_hf_presets);
         let hf_passes = std::iter::repeat_with(|| HfPass::parse(bitstream, hf_pass_params))

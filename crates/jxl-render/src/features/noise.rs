@@ -14,7 +14,9 @@ pub fn render_noise(
     params: &NoiseParameters,
 ) -> crate::Result<()> {
     let region = grid.region();
-    let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else { panic!() };
+    let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else {
+        panic!()
+    };
     assert!(region.left >= 0 && region.top >= 0);
 
     let left = region.left as usize;

@@ -1,6 +1,6 @@
 use jxl_frame::{
     data::*,
-    filter::{Gabor, EdgePreservingFilter},
+    filter::{EdgePreservingFilter, Gabor},
     header::Encoding,
     FrameHeader,
 };
@@ -9,18 +9,10 @@ use jxl_image::ImageHeader;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    blend,
-    features,
-    filter,
-    modular,
-    vardct,
-    IndexedFrame,
-    Result,
-    Error,
-    region::{Region, ImageWithRegion},
+    blend, features, filter, modular,
+    region::{ImageWithRegion, Region},
     state::RenderCache,
-    ReferenceFrames,
-    Reference,
+    vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };
 
 pub(crate) fn render_frame(
@@ -35,7 +27,10 @@ pub(crate) fn render_frame(
 
     let image_header = frame.image_header();
     let frame_header = frame.header();
-    let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
+    let full_frame_region = Region::with_size(
+        frame_header.color_sample_width(),
+        frame_header.color_sample_height(),
+    );
     let frame_region = if frame_header.lf_level != 0 {
         // Lower level frames might be padded, so apply padding to LF frames
         frame_region.pad(4 * frame_header.lf_level + 32)
@@ -44,7 +39,9 @@ pub(crate) fn render_frame(
     };
 
     let color_upsample_factor = frame_header.upsampling.ilog2();
-    let max_upsample_factor = frame_header.ec_upsampling.iter()
+    let max_upsample_factor = frame_header
+        .ec_upsampling
+        .iter()
         .zip(image_header.metadata.ec_info.iter())
         .map(|(upsampling, ec_info)| upsampling.ilog2() + ec_info.dim_shift)
         .max()
@@ -52,7 +49,9 @@ pub(crate) fn render_frame(
 
     let mut color_padded_region = if max_upsample_factor > 0 {
         // Additional upsampling pass is needed for every 3 levels of upsampling factor.
-        let padded_region = frame_region.downsample(max_upsample_factor).pad(2 + (max_upsample_factor - 1) / 3);
+        let padded_region = frame_region
+            .downsample(max_upsample_factor)
+            .pad(2 + (max_upsample_factor - 1) / 3);
         let upsample_diff = max_upsample_factor - color_upsample_factor;
         padded_region.upsample(upsample_diff)
     } else {
@@ -86,9 +85,10 @@ pub(crate) fn render_frame(
 
     let (mut fb, gmodular) = match frame_header.encoding {
         Encoding::Modular => {
-            let (grid, gmodular) = modular::render_modular(frame, cache, color_padded_region, &pool)?;
+            let (grid, gmodular) =
+                modular::render_modular(frame, cache, color_padded_region, &pool)?;
             (grid, Some(gmodular))
-        },
+        }
         Encoding::VarDct => {
             let result = vardct::render_vardct(
                 frame,
@@ -103,10 +103,10 @@ pub(crate) fn render_frame(
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
                     let render = lf.image.run_with_image(image_region)?;
                     (super::upsample_lf(&render, &lf.frame, frame_region), None)
-                },
+                }
                 (Err(e), _) => return Err(e),
             }
-        },
+        }
     };
     if fb.region().intersection(full_frame_region) != fb.region() {
         let mut new_fb = fb.clone_intersection(full_frame_region);
@@ -139,17 +139,27 @@ pub(crate) fn render_frame(
 
     if !frame_header.save_before_ct {
         if frame_header.do_ycbcr {
-            let [cb, y, cr, ..] = fb.buffer_mut() else { panic!() };
+            let [cb, y, cr, ..] = fb.buffer_mut() else {
+                panic!()
+            };
             jxl_color::ycbcr_to_rgb([cb, y, cr]);
         }
         convert_color(image_header, fb.buffer_mut());
     }
 
-    Ok(if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
-        fb
-    } else {
-        blend::blend(frame.image_header(), image_region, reference_frames.refs, frame, &fb)
-    })
+    Ok(
+        if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
+            fb
+        } else {
+            blend::blend(
+                frame.image_header(),
+                image_region,
+                reference_frames.refs,
+                frame,
+                &fb,
+            )
+        },
+    )
 }
 
 fn upsample_color_channels(
@@ -199,7 +209,9 @@ fn append_extra_channels(
     let frame_header = frame.header();
 
     let extra_channel_from = gmodular.extra_channel_from();
-    let Some(gmodular) = gmodular.modular.into_image() else { return; };
+    let Some(gmodular) = gmodular.modular.into_image() else {
+        return;
+    };
     let mut channel_data = gmodular.into_image_channels();
     let channel_data = channel_data.drain(extra_channel_from..);
 
@@ -211,7 +223,9 @@ fn append_extra_channels(
 
         let upsample_factor = upsampling.ilog2() + ec_info.dim_shift;
         let region = if upsample_factor > 0 {
-            original_region.downsample(upsample_factor).pad(2 + (upsample_factor - 1) / 3)
+            original_region
+                .downsample(upsample_factor)
+                .pad(2 + (upsample_factor - 1) / 3)
         } else {
             original_region
         };
@@ -224,11 +238,8 @@ fn append_extra_channels(
 
         let upsampled_region = region.upsample(upsample_factor);
         features::upsample(&mut out, image_header, frame_header, idx + 3);
-        let out = ImageWithRegion::from_buffer(
-            vec![out],
-            upsampled_region.left,
-            upsampled_region.top,
-        );
+        let out =
+            ImageWithRegion::from_buffer(vec![out], upsampled_region.left, upsampled_region.top);
         let cropped = fb.add_channel();
         out.clone_region_channel(fb_region, 0, cropped);
     }

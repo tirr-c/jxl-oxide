@@ -61,12 +61,7 @@ unsafe fn run_aarch64_neon(
 }
 
 #[inline(always)]
-fn run_generic(
-    xyb: [&mut [f32]; 3],
-    ob: [f32; 3],
-    inv_mat: [[f32; 3]; 3],
-    itscale: f32,
-) {
+fn run_generic(xyb: [&mut [f32]; 3], ob: [f32; 3], inv_mat: [[f32; 3]; 3], itscale: f32) {
     let [x, y, b] = xyb;
     if x.len() != y.len() || y.len() != b.len() {
         panic!("Grid size mismatch");
@@ -86,8 +81,17 @@ fn run_generic(
         let mix_m = (g_m * g_m).mul_add(g_m, ob[1]) * itscale;
         let mix_s = (g_s * g_s).mul_add(g_s, ob[2]) * itscale;
 
-        *x = mix_l.mul_add(inv_mat[0][0], mix_m.mul_add(inv_mat[0][1], mix_s * inv_mat[0][2]));
-        *y = mix_l.mul_add(inv_mat[1][0], mix_m.mul_add(inv_mat[1][1], mix_s * inv_mat[1][2]));
-        *b = mix_l.mul_add(inv_mat[2][0], mix_m.mul_add(inv_mat[2][1], mix_s * inv_mat[2][2]));
+        *x = mix_l.mul_add(
+            inv_mat[0][0],
+            mix_m.mul_add(inv_mat[0][1], mix_s * inv_mat[0][2]),
+        );
+        *y = mix_l.mul_add(
+            inv_mat[1][0],
+            mix_m.mul_add(inv_mat[1][1], mix_s * inv_mat[1][2]),
+        );
+        *b = mix_l.mul_add(
+            inv_mat[2][0],
+            mix_m.mul_add(inv_mat[2][1], mix_s * inv_mat[2][2]),
+        );
     }
 }

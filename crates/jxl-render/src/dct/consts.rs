@@ -3,10 +3,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 #[allow(clippy::excessive_precision)]
 const SEC_HALF_SMALL: [&[f32]; 4] = [
     // n = 4
-    &[
-        0.541196100146197,
-        1.3065629648763764,
-    ],
+    &[0.541196100146197, 1.3065629648763764],
     // n = 8
     &[
         0.5097955791041592,
@@ -53,15 +50,14 @@ pub fn sec_half(n: usize) -> &'static [f32] {
 
     if let Some(idx) = idx.checked_sub(4) {
         let mut map = SEC_HALF_LARGE.lock().unwrap();
-        map.entry(idx)
-            .or_insert_with(|| {
-                let mut table = vec![0f32; n / 2];
-                for (k, val) in table.iter_mut().enumerate() {
-                    let theta = (2 * k + 1) as f32 / (2 * n) as f32 * std::f32::consts::PI;
-                    *val = theta.cos().recip() / 2.0;
-                }
-                &*table.leak()
-            })
+        map.entry(idx).or_insert_with(|| {
+            let mut table = vec![0f32; n / 2];
+            for (k, val) in table.iter_mut().enumerate() {
+                let theta = (2 * k + 1) as f32 / (2 * n) as f32 * std::f32::consts::PI;
+                *val = theta.cos().recip() / 2.0;
+            }
+            &*table.leak()
+        })
     } else {
         SEC_HALF_SMALL[idx]
     }

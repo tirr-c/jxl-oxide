@@ -24,8 +24,8 @@ mod tf;
 mod xyb;
 mod ycbcr;
 
-pub use error::*;
 pub use convert::from_linear_srgb;
+pub use error::*;
 pub use header::*;
 pub use xyb::xyb_to_linear_srgb;
 pub use ycbcr::ycbcr_to_rgb;

@@ -1,7 +1,7 @@
-use jxl_bitstream::{Bitstream, Bundle, unpack_signed};
+use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_image::ImageHeader;
 
-use crate::{Result, FrameHeader};
+use crate::{FrameHeader, Result};
 
 #[derive(Debug)]
 pub struct Patches {
@@ -60,7 +60,12 @@ impl TryFrom<u32> for PatchBlendMode {
             5 => BlendBelow,
             6 => MulAddAbove,
             7 => MulAddBelow,
-            _ => return Err(jxl_bitstream::Error::InvalidEnum { name: "PatchBlendMode", value }),
+            _ => {
+                return Err(jxl_bitstream::Error::InvalidEnum {
+                    name: "PatchBlendMode",
+                    value,
+                })
+            }
         })
     }
 }
@@ -68,7 +73,10 @@ impl TryFrom<u32> for PatchBlendMode {
 impl PatchBlendMode {
     #[inline]
     pub fn use_alpha(self) -> bool {
-        matches!(self, Self::BlendAbove | Self::BlendBelow | Self::MulAddAbove | Self::MulAddBelow)
+        matches!(
+            self,
+            Self::BlendAbove | Self::BlendBelow | Self::MulAddAbove | Self::MulAddBelow
+        )
     }
 }
 
@@ -80,7 +88,10 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
         (image_header, frame_header): (&ImageHeader, &FrameHeader),
     ) -> Result<Self> {
         let num_extra = image_header.metadata.ec_info.len();
-        let alpha_channel_indices = image_header.metadata.ec_info.iter()
+        let alpha_channel_indices = image_header
+            .metadata
+            .ec_info
+            .iter()
             .enumerate()
             .filter_map(|(idx, info)| info.is_alpha().then_some(idx as u32))
             .collect::<Vec<_>>();
@@ -89,12 +100,11 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
         decoder.begin(bitstream)?;
 
         let num_patches = decoder.read_varint(bitstream, 0)?;
-        let max_num_patches = (1 << 24).min((frame_header.width as u64 * frame_header.height as u64 / 16) as u32);
+        let max_num_patches =
+            (1 << 24).min((frame_header.width as u64 * frame_header.height as u64 / 16) as u32);
         if num_patches > max_num_patches {
             tracing::error!(num_patches, max_num_patches, "Too many patches");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "too many patches"
-            ).into());
+            return Err(jxl_bitstream::Error::ProfileConformance("too many patches").into());
         }
 
         let patches = std::iter::repeat_with(|| -> Result<_> {
@@ -114,7 +124,10 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                     let dy = unpack_signed(dy);
                     (dx + px, dy + py)
                 } else {
-                    (decoder.read_varint(bitstream, 4)? as i32, decoder.read_varint(bitstream, 4)? as i32)
+                    (
+                        decoder.read_varint(bitstream, 4)? as i32,
+                        decoder.read_varint(bitstream, 4)? as i32,
+                    )
                 };
                 prev_xy = Some((x, y));
 
@@ -132,11 +145,19 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                         false
                     };
 
-                    Ok(BlendingModeInformation { mode, alpha_channel, clamp })
-                }).take(num_extra + 1).collect::<Result<Vec<_>>>()?;
+                    Ok(BlendingModeInformation {
+                        mode,
+                        alpha_channel,
+                        clamp,
+                    })
+                })
+                .take(num_extra + 1)
+                .collect::<Result<Vec<_>>>()?;
 
                 Ok(PatchTarget { x, y, blending })
-            }).take(count as usize).collect::<Result<Vec<_>>>()?;
+            })
+            .take(count as usize)
+            .collect::<Result<Vec<_>>>()?;
 
             Ok(PatchRef {
                 ref_idx,
@@ -146,7 +167,9 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                 height,
                 patch_targets,
             })
-        }).take(num_patches as usize).collect::<Result<Vec<_>>>()?;
+        })
+        .take(num_patches as usize)
+        .collect::<Result<Vec<_>>>()?;
 
         decoder.finalize()?;
         Ok(Self { patches })

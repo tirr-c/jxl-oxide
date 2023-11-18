@@ -16,16 +16,16 @@
 //! [`num_lf_groups`]: FrameHeader::num_lf_groups
 //! [`num_groups`]: FrameHeader::num_groups
 //! [`num_passes`]: header::Passes::num_passes
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
 use jxl_image::ImageHeader;
 
+pub mod data;
 mod error;
 pub mod filter;
-pub mod data;
 pub mod header;
 
 pub use error::{Error, Result};
@@ -93,30 +93,29 @@ impl Bundle<FrameContext> for Frame {
         let height = header.height as u64;
         if width > (1 << 30) {
             tracing::error!(width, "Frame width too large; limit is 2^30");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "frame width too large"
-            ).into());
+            return Err(jxl_bitstream::Error::ProfileConformance("frame width too large").into());
         }
         if height > (1 << 30) {
             tracing::error!(width, "Frame height too large; limit is 2^30");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "frame height too large"
-            ).into());
+            return Err(jxl_bitstream::Error::ProfileConformance("frame height too large").into());
         }
         if (width * height) > (1 << 40) {
-            tracing::error!(area = width * height, "Frame area (width * height) too large; limit is 2^40");
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "frame area too large"
-            ).into());
+            tracing::error!(
+                area = width * height,
+                "Frame area (width * height) too large; limit is 2^40"
+            );
+            return Err(jxl_bitstream::Error::ProfileConformance("frame area too large").into());
         }
 
-        for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
+        for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info)
+        {
             if blending_info.mode.use_alpha()
                 && blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
             {
                 return Err(jxl_bitstream::Error::ValidationFailed(
                     "blending_info.alpha_channel out of range",
-                ).into());
+                )
+                .into());
             }
         }
         if header.flags.use_lf_frame() && header.lf_level >= 4 {
@@ -125,9 +124,7 @@ impl Bundle<FrameContext> for Frame {
 
         for ec_info in &image_header.metadata.ec_info {
             if ec_info.dim_shift > 7 + header.group_size_shift {
-                return Err(jxl_bitstream::Error::ValidationFailed(
-                    "dim_shift too large"
-                ).into());
+                return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large").into());
             }
         }
 
@@ -139,16 +136,18 @@ impl Bundle<FrameContext> for Frame {
             {
                 if (ec_upsampling << ec_info.dim_shift) < header.upsampling {
                     return Err(jxl_bitstream::Error::ValidationFailed(
-                        "EC upsampling < color upsampling, which is invalid"
-                    ).into());
+                        "EC upsampling < color upsampling, which is invalid",
+                    )
+                    .into());
                 }
             }
         }
 
         if header.width == 0 || header.height == 0 {
             return Err(jxl_bitstream::Error::ValidationFailed(
-                "Invalid crop dimensions for frame: zero width or height"
-            ).into());
+                "Invalid crop dimensions for frame: zero width or height",
+            )
+            .into());
         }
 
         let mut toc = read_bits!(bitstream, Bundle(Toc), &header)?;
@@ -236,10 +235,15 @@ impl Frame {
         Some(if self.toc.is_single_entry() {
             let group = self.data.get(0)?;
             let mut bitstream = Bitstream::new(&group.bytes);
-            let lf_global = LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, false));
+            let lf_global = LfGlobal::parse(
+                &mut bitstream,
+                LfGlobalParams::new(&self.image_header, &self.header, false),
+            );
             if lf_global.is_ok() {
                 tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
-                self.all_group_offsets.lf_group.store(bitstream.num_read_bits(), Ordering::Relaxed);
+                self.all_group_offsets
+                    .lf_group
+                    .store(bitstream.num_read_bits(), Ordering::Relaxed);
             }
             lf_global
         } else {
@@ -248,7 +252,10 @@ impl Frame {
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
 
             let mut bitstream = Bitstream::new(&group.bytes);
-            LfGlobal::parse(&mut bitstream, LfGlobalParams::new(&self.image_header, &self.header, allow_partial))
+            LfGlobal::parse(
+                &mut bitstream,
+                LfGlobalParams::new(&self.image_header, &self.header, allow_partial),
+            )
         })
     }
 
@@ -277,36 +284,46 @@ impl Frame {
             bitstream.skip_bits(offset).unwrap();
 
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
-            let result = LfGroup::parse(&mut bitstream, LfGroupParams {
-                frame_header: &self.header,
-                quantizer: lf_global_vardct.map(|x| &x.quantizer),
-                global_ma_config,
-                mlf_group,
-                lf_group_idx,
-                allow_partial,
-                pool: &self.pool,
-            });
+            let result = LfGroup::parse(
+                &mut bitstream,
+                LfGroupParams {
+                    frame_header: &self.header,
+                    quantizer: lf_global_vardct.map(|x| &x.quantizer),
+                    global_ma_config,
+                    mlf_group,
+                    lf_group_idx,
+                    allow_partial,
+                    pool: &self.pool,
+                },
+            );
             if allow_partial && result.is_err() {
                 return None;
             }
             tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGroup");
-            self.all_group_offsets.hf_global.store(bitstream.num_read_bits(), Ordering::Relaxed);
+            self.all_group_offsets
+                .hf_global
+                .store(bitstream.num_read_bits(), Ordering::Relaxed);
             Some(result)
         } else {
-            let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
+            let idx = self
+                .toc
+                .group_index_bitstream_order(TocGroupKind::LfGroup(lf_group_idx));
             let group = self.data.get(idx)?;
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
 
             let mut bitstream = Bitstream::new(&group.bytes);
-            let result = LfGroup::parse(&mut bitstream, LfGroupParams {
-                frame_header: &self.header,
-                quantizer: lf_global_vardct.map(|x| &x.quantizer),
-                global_ma_config,
-                mlf_group,
-                lf_group_idx,
-                allow_partial,
-                pool: &self.pool,
-            });
+            let result = LfGroup::parse(
+                &mut bitstream,
+                LfGroupParams {
+                    frame_header: &self.header,
+                    quantizer: lf_global_vardct.map(|x| &x.quantizer),
+                    global_ma_config,
+                    mlf_group,
+                    lf_group_idx,
+                    allow_partial,
+                    pool: &self.pool,
+                },
+            );
             if allow_partial && result.is_err() {
                 return None;
             }
@@ -314,7 +331,10 @@ impl Frame {
         }
     }
 
-    pub fn try_parse_hf_global(&self, cached_lf_global: Option<&LfGlobal>) -> Option<Result<HfGlobal>> {
+    pub fn try_parse_hf_global(
+        &self,
+        cached_lf_global: Option<&LfGlobal>,
+    ) -> Option<Result<HfGlobal>> {
         let is_modular = self.header.encoding == header::Encoding::Modular;
 
         if self.toc.is_single_entry() {
@@ -334,18 +354,24 @@ impl Frame {
             if offset == 0 {
                 let lf_global = lf_global.unwrap();
                 let mut gmodular = lf_global.gmodular.clone();
-                let groups = gmodular.modular.image_mut().map(|x| x.prepare_groups(&self.pass_shifts)).transpose();
+                let groups = gmodular
+                    .modular
+                    .image_mut()
+                    .map(|x| x.prepare_groups(&self.pass_shifts))
+                    .transpose();
                 let groups = match groups {
                     Ok(groups) => groups,
                     Err(e) => return Some(Err(e.into())),
                 };
                 let mlf_group = groups.and_then(|mut x| x.lf_groups.pop());
-                let lf_group = self.try_parse_lf_group(
-                    lf_global.vardct.as_ref(),
-                    lf_global.gmodular.ma_config(),
-                    mlf_group,
-                    0,
-                ).unwrap();
+                let lf_group = self
+                    .try_parse_lf_group(
+                        lf_global.vardct.as_ref(),
+                        lf_global.gmodular.ma_config(),
+                        mlf_group,
+                        0,
+                    )
+                    .unwrap();
                 if let Err(e) = lf_group {
                     return Some(Err(e));
                 }
@@ -353,14 +379,26 @@ impl Frame {
             let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
 
             if self.header.encoding == header::Encoding::Modular {
-                self.all_group_offsets.pass_group.store(offset, Ordering::Relaxed);
+                self.all_group_offsets
+                    .pass_group
+                    .store(offset, Ordering::Relaxed);
                 return None;
             }
 
             bitstream.skip_bits(offset).unwrap();
             let lf_global = lf_global.unwrap();
-            let result = HfGlobal::parse(&mut bitstream, HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global, &self.pool));
-            self.all_group_offsets.pass_group.store(bitstream.num_read_bits(), Ordering::Relaxed);
+            let result = HfGlobal::parse(
+                &mut bitstream,
+                HfGlobalParams::new(
+                    &self.image_header.metadata,
+                    &self.header,
+                    lf_global,
+                    &self.pool,
+                ),
+            );
+            self.all_group_offsets
+                .pass_group
+                .store(bitstream.num_read_bits(), Ordering::Relaxed);
             Some(result)
         } else {
             if self.header.encoding == header::Encoding::Modular {
@@ -383,12 +421,21 @@ impl Frame {
                 None
             };
             let lf_global = cached_lf_global.or(lf_global.as_ref()).unwrap();
-            let params = HfGlobalParams::new(&self.image_header.metadata, &self.header, lf_global, &self.pool);
+            let params = HfGlobalParams::new(
+                &self.image_header.metadata,
+                &self.header,
+                lf_global,
+                &self.pool,
+            );
             Some(HfGlobal::parse(&mut bitstream, params))
         }
     }
 
-    pub fn pass_group_bitstream(&self, pass_idx: u32, group_idx: u32) -> Option<Result<PassGroupBitstream>> {
+    pub fn pass_group_bitstream(
+        &self,
+        pass_idx: u32,
+        group_idx: u32,
+    ) -> Option<Result<PassGroupBitstream>> {
         Some(if self.toc.is_single_entry() {
             if pass_idx != 0 || group_idx != 0 {
                 return None;
@@ -411,7 +458,12 @@ impl Frame {
                 partial: group.bytes.len() < group.toc_group.size as usize,
             })
         } else {
-            let idx = self.toc.group_index_bitstream_order(TocGroupKind::GroupPass { pass_idx, group_idx });
+            let idx = self
+                .toc
+                .group_index_bitstream_order(TocGroupKind::GroupPass {
+                    pass_idx,
+                    group_idx,
+                });
             let group = self.data.get(idx)?;
             let partial = group.bytes.len() < group.toc_group.size as usize;
 

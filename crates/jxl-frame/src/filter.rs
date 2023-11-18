@@ -1,5 +1,5 @@
-use jxl_bitstream::{Bitstream, Bundle};
 use crate::{header::Encoding, Result};
+use jxl_bitstream::{Bitstream, Bundle};
 
 #[derive(Debug, Clone)]
 pub enum Gabor {
@@ -34,8 +34,9 @@ impl<Ctx> Bundle<Ctx> for Gabor {
             }
             if f32::abs(1.0 + (chan_weight[0] + chan_weight[1]) * 4.0) < f32::EPSILON {
                 return Err(jxl_bitstream::Error::ValidationFailed(
-                    "Gaborish weights lead to near 0 unnormalized kernel"
-                ).into());
+                    "Gaborish weights lead to near 0 unnormalized kernel",
+                )
+                .into());
             }
         }
         Ok(Self::Enabled(weights))
@@ -61,7 +62,16 @@ pub enum EdgePreservingFilter {
 }
 
 impl EdgePreservingFilter {
-    const SHARP_LUT_DEFAULT: [f32; 8] = [0.0, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0];
+    const SHARP_LUT_DEFAULT: [f32; 8] = [
+        0.0,
+        1.0 / 7.0,
+        2.0 / 7.0,
+        3.0 / 7.0,
+        4.0 / 7.0,
+        5.0 / 7.0,
+        6.0 / 7.0,
+        1.0,
+    ];
     const CHANNEL_SCALE_DEFAULT: [f32; 3] = [40.0, 5.0, 3.5];
 
     pub fn enabled(&self) -> bool {
@@ -168,7 +178,11 @@ impl Bundle<Encoding> for EpfSigma {
 
     fn parse(bitstream: &mut Bitstream, encoding: Encoding) -> Result<Self> {
         Ok(Self {
-            quant_mul: if encoding == Encoding::VarDct { bitstream.read_f16_as_f32()? } else { 0.46 },
+            quant_mul: if encoding == Encoding::VarDct {
+                bitstream.read_f16_as_f32()?
+            } else {
+                0.46
+            },
             pass0_sigma_scale: bitstream.read_f16_as_f32()?,
             pass2_sigma_scale: bitstream.read_f16_as_f32()?,
             border_sad_mul: bitstream.read_f16_as_f32()?,

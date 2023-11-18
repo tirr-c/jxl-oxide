@@ -1,5 +1,5 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_modular::{MaConfig, Modular, ChannelShift, ModularParams};
+use jxl_modular::{ChannelShift, MaConfig, Modular, ModularParams};
 
 use crate::Result;
 
@@ -65,11 +65,13 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
         let mut qf_thresholds = Vec::new();
         let mut lf_thresholds = [Vec::new(), Vec::new(), Vec::new()];
         let (num_block_clusters, block_ctx_map) = if bitstream.read_bool()? {
-            (15, vec![
-                0, 1, 2, 2, 3, 3, 4, 5, 6, 6, 6, 6, 6,
-                7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
-                7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
-            ])
+            (
+                15,
+                vec![
+                    0, 1, 2, 2, 3, 3, 4, 5, 6, 6, 6, 6, 6, 7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14,
+                    14, 14, 7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
+                ],
+            )
         } else {
             let mut bsize = 1;
             for thr in &mut lf_thresholds {
@@ -168,6 +170,10 @@ impl Bundle<LfCoeffParams<'_, '_>> for LfCoeff {
         let mut subimage = image.prepare_subimage()?;
         subimage.decode(bitstream, 1 + lf_group_idx, allow_partial)?;
         let complete = subimage.finish(pool);
-        Ok(Self { extra_precision, lf_quant, partial: !complete })
+        Ok(Self {
+            extra_precision,
+            lf_quant,
+            partial: !complete,
+        })
     }
 }

@@ -1,6 +1,6 @@
-use jxl_bitstream::{Bundle, Bitstream};
+use jxl_bitstream::{Bitstream, Bundle};
 use jxl_grid::SimpleGrid;
-use jxl_modular::{MaConfig, ModularChannelParams, ModularParams, Modular};
+use jxl_modular::{MaConfig, Modular, ModularChannelParams, ModularParams};
 
 use crate::{Result, TransformType};
 
@@ -76,7 +76,8 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
             bh = (bh + 1) / 2 * 2;
         }
 
-        let nb_blocks = 1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros() as usize)?;
+        let nb_blocks =
+            1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros() as usize)?;
 
         let channels = vec![
             ModularChannelParams::new((lf_width + 63) / 64, (lf_height + 63) / 64),
@@ -84,12 +85,7 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
             ModularChannelParams::new(nb_blocks, 2),
             ModularChannelParams::new(bw as u32, bh as u32),
         ];
-        let params = ModularParams::with_channels(
-            0,
-            bits_per_sample,
-            channels,
-            global_ma_config,
-        );
+        let params = ModularParams::with_channels(0, bits_per_sample, channels, global_ma_config);
         let mut modular = Modular::parse(bitstream, params)?;
         let image = modular.image_mut().unwrap();
         let mut subimage = image.prepare_subimage()?;
@@ -108,7 +104,10 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
         let mut epf_sigma = SimpleGrid::new(bw, bh);
         let epf_sigma_buf = epf_sigma.buf_mut();
         let epf = epf.map(|(quant_mul, sharp_lut)| {
-            (quant_mul * 65536.0 / quantizer_global_scale as f32, sharp_lut)
+            (
+                quant_mul * 65536.0 / quantizer_global_scale as f32,
+                sharp_lut,
+            )
         });
 
         let mut block_info = SimpleGrid::<BlockInfo>::new(bw, bh);
@@ -123,47 +122,51 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
                     let Some(&dct_select) = block_info_raw.get(data_idx, 0) else {
                         tracing::error!(lf_group_idx, x, y, "BlockInfo doesn't fill LF group");
                         return Err(jxl_bitstream::Error::ValidationFailed(
-                            "BlockInfo doesn't fill LF group"
-                        ).into());
+                            "BlockInfo doesn't fill LF group",
+                        )
+                        .into());
                     };
                     let dct_select = TransformType::try_from(dct_select as u8)?;
                     let mul = *block_info_raw.get(data_idx, 1).unwrap();
                     let hf_mul = mul + 1;
                     let (dw, dh) = dct_select.dct_select_size();
 
-                    let epf = epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
+                    let epf =
+                        epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
                             if let Some(info) = block_info.get(x + dx, y + dy) {
                                 if info.is_occupied() {
                                     tracing::error!(
                                         lf_group_idx,
-                                        base_x = x, base_y = y,
+                                        base_x = x,
+                                        base_y = y,
                                         dct_select = format_args!("{:?}", dct_select),
-                                        x = x + dx, y = y + dy,
+                                        x = x + dx,
+                                        y = y + dy,
                                         "Varblocks overlap",
                                     );
                                     return Err(jxl_bitstream::Error::ValidationFailed(
-                                        "Varblocks overlap")
+                                        "Varblocks overlap",
+                                    )
                                     .into());
                                 }
                             } else {
                                 tracing::error!(
                                     lf_group_idx,
-                                    base_x = x, base_y = y,
+                                    base_x = x,
+                                    base_y = y,
                                     dct_select = format_args!("{:?}", dct_select),
                                     "Varblock doesn't fit in an LF group",
                                 );
                                 return Err(jxl_bitstream::Error::ValidationFailed(
-                                    "Varblock doesn't fit in an LF group")
+                                    "Varblock doesn't fit in an LF group",
+                                )
                                 .into());
                             };
 
                             *block_info.get_mut(x + dx, y + dy).unwrap() = if dx == 0 && dy == 0 {
-                                BlockInfo::Data {
-                                    dct_select,
-                                    hf_mul,
-                                }
+                                BlockInfo::Data { dct_select, hf_mul }
                             } else {
                                 BlockInfo::Occupied
                             };

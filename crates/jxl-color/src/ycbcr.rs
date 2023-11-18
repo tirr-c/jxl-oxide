@@ -52,7 +52,10 @@ fn run_generic([cb, y, cr]: [&mut [f32]; 3]) {
         let cr = *b;
 
         *r = cr.mul_add(1.402, y);
-        *g = cb.mul_add(-0.114 * 1.772 / 0.587, cr.mul_add(-0.299 * 1.402 / 0.587, y));
+        *g = cb.mul_add(
+            -0.114 * 1.772 / 0.587,
+            cr.mul_add(-0.299 * 1.402 / 0.587, y),
+        );
         *b = cb.mul_add(1.772, y);
     }
 }

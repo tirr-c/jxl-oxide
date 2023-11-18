@@ -3,14 +3,7 @@ use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
 use jxl_modular::ChannelShift;
 
-use crate::{
-    Region,
-    RenderCache,
-    IndexedFrame,
-    region::ImageWithRegion,
-    Error,
-    Result,
-};
+use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, RenderCache, Result};
 
 pub(crate) fn render_modular(
     frame: &IndexedFrame,
@@ -26,7 +19,9 @@ pub(crate) fn render_modular(
     let lf_global = if let Some(x) = &cache.lf_global {
         x
     } else {
-        let lf_global = frame.try_parse_lf_global().ok_or(Error::IncompleteFrame)??;
+        let lf_global = frame
+            .try_parse_lf_global()
+            .ok_or(Error::IncompleteFrame)??;
         cache.lf_global = Some(lf_global);
         cache.lf_global.as_ref().unwrap()
     };
@@ -34,9 +29,8 @@ pub(crate) fn render_modular(
     let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let shifts_cbycr = [0, 1, 2].map(|idx| {
-        ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx)
-    });
+    let shifts_cbycr =
+        [0, 1, 2].map(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let channels = metadata.encoded_color_channels();
 
     let bit_depth = metadata.bit_depth;
@@ -96,7 +90,7 @@ pub(crate) fn render_modular(
                         Some(Err(e)) => {
                             *result.write().unwrap() = Err(e.into());
                             return;
-                        },
+                        }
                         None => continue,
                     };
 
@@ -131,7 +125,11 @@ pub(crate) fn render_modular(
 
     tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| {
         let channel_data = modular_image.image_channels();
-        for ((g, shift), buffer) in channel_data.iter().zip(shifts_cbycr).zip(fb_xyb.buffer_mut()) {
+        for ((g, shift), buffer) in channel_data
+            .iter()
+            .zip(shifts_cbycr)
+            .zip(fb_xyb.buffer_mut())
+        {
             let region = region.downsample_separate(shift.hshift() as u32, shift.vshift() as u32);
             copy_modular_groups(g, buffer, region, bit_depth, xyb_encoded);
         }
@@ -192,7 +190,12 @@ pub fn copy_modular_groups(
     bit_depth: BitDepth,
     xyb_encoded: bool,
 ) {
-    let Region { left, top, width: rwidth, height: rheight } = region;
+    let Region {
+        left,
+        top,
+        width: rwidth,
+        height: rheight,
+    } = region;
     assert_eq!(rwidth as usize, buffer.width());
     assert_eq!(rheight as usize, buffer.height());
 
