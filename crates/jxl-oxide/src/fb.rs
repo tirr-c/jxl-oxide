@@ -86,8 +86,8 @@ impl FrameBuffer {
 
     /// Returns the contents of frame buffer.
     ///
-    /// The buffer has `width * height * channels` samples, where the index of `channels` varies
-    /// faster.
+    /// The buffer has length of `width * height * channels`, where `n * channels + c`-th sample
+    /// belongs to the `c`-th channel.
     #[inline]
     pub fn buf(&self) -> &[f32] {
         &self.buf
@@ -95,8 +95,8 @@ impl FrameBuffer {
 
     /// Returns the mutable reference to frame buffer.
     ///
-    /// The buffer has `width * height * channels` samples, where the index of `channels` varies
-    /// faster.
+    /// The buffer has length of `width * height * channels`, where `n * channels + c`-th sample
+    /// belongs to the `c`-th channel.
     #[inline]
     pub fn buf_mut(&mut self) -> &mut [f32] {
         &mut self.buf

@@ -583,6 +583,12 @@ impl JxlImage {
     }
 
     /// Returns frame data by frame index, including frames that are not displayed directly.
+    ///
+    /// There are some situations where a frame is not displayed directly:
+    /// - It may be marked as reference only, and meant to be only used by other frames.
+    /// - It may contain LF image (which is 8x downsampled version) of another VarDCT frame.
+    /// - Zero duration frame that is not the last frame of image is blended with following frames
+    ///   and displayed together.
     pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
         self.ctx.frame(frame_idx)
     }
