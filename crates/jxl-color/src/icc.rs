@@ -198,7 +198,7 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     // Tag
     let v = varint(&mut commands_stream)?;
     if let Some(num_tags) = v.checked_sub(1) {
-        if output_size - 128 / 12 < num_tags {
+        if (output_size - 128) / 12 < num_tags {
             return Err(Error::InvalidIccStream("num_tags too large"));
         }
         let num_tags = num_tags as u32;
