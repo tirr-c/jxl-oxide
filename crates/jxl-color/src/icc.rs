@@ -198,6 +198,9 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
     // Tag
     let v = varint(&mut commands_stream)?;
     if let Some(num_tags) = v.checked_sub(1) {
+        if (output_size - 128) / 12 < num_tags {
+            return Err(Error::InvalidIccStream("num_tags too large"));
+        }
         let num_tags = num_tags as u32;
         out.extend_from_slice(&num_tags.to_be_bytes());
 
@@ -237,6 +240,9 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                 b"rXYZ" | b"gXYZ" | b"bXYZ" | b"kXYZ" | b"wtpt" | b"bkpt" | b"lumi" => 20,
                 _ => prev_tagsize,
             };
+            if (tagstart as u64 + tagsize as u64) > output_size {
+                return Err(Error::InvalidIccStream("ICC profile size mismatch"));
+            }
 
             prev_tagstart = tagstart;
             prev_tagsize = tagsize;
@@ -271,12 +277,18 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
         match command {
             1 => {
                 let num = varint(&mut commands_stream)? as usize;
+                if num > data.len() {
+                    return Err(Error::InvalidIccStream("stream is too short"));
+                }
                 let (bytes, next_data) = data.split_at(num);
                 data = next_data;
                 out.extend_from_slice(bytes);
             }
             2 | 3 => {
                 let num = varint(&mut commands_stream)? as usize;
+                if num > data.len() {
+                    return Err(Error::InvalidIccStream("stream is too short"));
+                }
                 let (bytes, next_data) = data.split_at(num);
                 data = next_data;
                 let bytes = if command == 2 {
@@ -371,6 +383,9 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                 return Err(Error::InvalidIccStream("invalid command"));
             }
         }
+    }
+    if out.len() != output_size as usize {
+        return Err(Error::InvalidIccStream("decoded ICC profile size mismatch"));
     }
     Ok(out)
 }
