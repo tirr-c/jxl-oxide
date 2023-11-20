@@ -122,7 +122,15 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                     let dy = decoder.read_varint(bitstream, 6)?;
                     let dx = unpack_signed(dx);
                     let dy = unpack_signed(dy);
-                    (dx + px, dy + py)
+                    let x = dx.checked_add(px);
+                    let y = dy.checked_add(py);
+                    let (Some(x), Some(y)) = (x, y) else {
+                        tracing::error!(px, py, dx, dy, "Patch coord overflow");
+                        return Err(
+                            jxl_bitstream::Error::ValidationFailed("patch coord overflow").into(),
+                        );
+                    };
+                    (x, y)
                 } else {
                     (
                         decoder.read_varint(bitstream, 4)? as i32,
