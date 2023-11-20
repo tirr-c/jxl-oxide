@@ -173,6 +173,9 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
 
                             if let Some((sigma, sharp_lut)) = epf {
                                 let sharpness = sharpness[(y + dy) * bw + (x + dx)];
+                                if !(0..8).contains(&sharpness) {
+                                    return Err(jxl_bitstream::Error::ValidationFailed("Invalid EPF sharpness value").into());
+                                }
                                 let sigma = sigma * sharp_lut[sharpness as usize];
                                 epf_sigma_buf[(y + dy) * bw + (x + dx)] = sigma;
                             }
