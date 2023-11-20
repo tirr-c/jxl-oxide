@@ -34,4 +34,5 @@ test_by_include!(
     icc_output_size_alloc_failed,
     spline_starting_point_overflow,
     noise_on_invisible_frame,
+    sharp_lut_oob,
 );
