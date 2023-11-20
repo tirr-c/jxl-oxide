@@ -36,4 +36,5 @@ test_by_include!(
     sharp_lut_oob,
     modular_zero_width,
     icc_tag_size,
+    hf_coeff_non_zeros,
 );
