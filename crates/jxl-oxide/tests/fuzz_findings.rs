@@ -39,4 +39,5 @@ test_by_include!(
     hf_coeff_non_zeros,
     modular_wrong_palette,
     permutation_overflow,
+    patch_coord_overflow,
 );
