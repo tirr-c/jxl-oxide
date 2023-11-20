@@ -156,9 +156,9 @@ pub fn write_hf_coeff(
                 )?;
                 if non_zeros > (63 << num_blocks_log) {
                     tracing::error!(non_zeros, num_blocks, "non_zeros too large");
-                    return Err(jxl_bitstream::Error::ValidationFailed(
-                        "non_zeros too large"
-                    ).into());
+                    return Err(
+                        jxl_bitstream::Error::ValidationFailed("non_zeros too large").into(),
+                    );
                 }
 
                 let non_zeros_val = (non_zeros + num_blocks - 1) >> num_blocks_log;
