@@ -5,7 +5,6 @@ pub struct ModularParams<'a> {
     pub group_dim: u32,
     pub bit_depth: u32,
     pub channels: Vec<ModularChannelParams>,
-    pub channel_mapping: Option<Vec<SubimageChannelInfo>>,
     pub ma_config: Option<&'a MaConfig>,
 }
 
@@ -39,25 +38,8 @@ impl<'a> ModularParams<'a> {
             group_dim,
             bit_depth,
             channels,
-            channel_mapping: None,
             ma_config,
         }
-    }
-
-    pub fn base_size(&self) -> Option<(u32, u32)> {
-        if self.channels.is_empty() {
-            return Some((0, 0));
-        }
-
-        let bw = self.channels[0].width;
-        let bh = self.channels[0].height;
-        for &ModularChannelParams { width, height, .. } in &self.channels {
-            if bw != width || bh != height {
-                return None;
-            }
-        }
-
-        Some((bw, bh))
     }
 }
 
@@ -90,23 +72,6 @@ impl ModularChannelParams {
             width,
             height,
             shift,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SubimageChannelInfo {
-    pub channel_id: usize,
-    pub base_x: u32,
-    pub base_y: u32,
-}
-
-impl SubimageChannelInfo {
-    pub fn new(channel_id: usize, base_x: u32, base_y: u32) -> Self {
-        SubimageChannelInfo {
-            channel_id,
-            base_x,
-            base_y,
         }
     }
 }
