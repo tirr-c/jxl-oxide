@@ -35,4 +35,5 @@ test_by_include!(
     spline_starting_point_overflow,
     noise_on_invisible_frame,
     sharp_lut_oob,
+    modular_zero_width,
 );

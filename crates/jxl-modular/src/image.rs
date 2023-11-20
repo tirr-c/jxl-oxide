@@ -381,6 +381,10 @@ impl<'dest> TransformedModularSubimage<'dest> {
         let wp_header = &self.header.wp_params;
         let mut prev: Vec<(&ModularChannelInfo, &CutGrid<'dest, i32>)> = Vec::new();
         for (i, (info, grid)) in self.channel_info.iter().zip(&mut self.grid).enumerate() {
+            if info.width == 0 || info.height == 0 {
+                continue;
+            }
+
             let mut filtered_prev = prev
                 .iter()
                 .filter(|&(prev_info, _)| {
