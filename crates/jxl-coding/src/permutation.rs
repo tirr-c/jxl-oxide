@@ -8,7 +8,7 @@ pub fn read_permutation(
     skip: u32,
 ) -> crate::Result<Vec<usize>> {
     let end = decoder.read_varint(bitstream, get_context(size))?;
-    if end > size {
+    if end > size - skip {
         return Err(crate::Error::InvalidPermutation);
     }
 
