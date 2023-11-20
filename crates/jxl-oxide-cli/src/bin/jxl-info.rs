@@ -74,7 +74,7 @@ fn main() {
     } else {
         println!("  Color encoding:");
     }
-    if let Some(icc) = image.embedded_icc() {
+    if let Some(icc) = image.original_icc() {
         print!("    ");
         if image_meta.grayscale() {
             print!("Grayscale, embedded ICC profile ({} bytes)", icc.len());

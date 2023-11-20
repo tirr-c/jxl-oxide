@@ -123,7 +123,7 @@ fn run_test(
         if let Some(transform) = &transform {
             let channels = grids.len();
 
-            let mut fb = FrameBuffer::from_grids(&grids, 1);
+            let mut fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), 1);
             let width = fb.width();
             let height = fb.height();
             transform.transform_in_place(&mut fb);
@@ -138,7 +138,7 @@ fn run_test(
         }
         grids.extend(render.extra_channels().iter().map(|ec| ec.grid().clone()));
 
-        let fb = FrameBuffer::from_grids(&grids, render.orientation());
+        let fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), render.orientation());
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();
