@@ -617,7 +617,11 @@ impl Coder {
 }
 
 fn add_log2_ceil(x: u32) -> u32 {
-    (x + 1).next_power_of_two().trailing_zeros()
+    if x >= 0x80000000 {
+        32
+    } else {
+        (x + 1).next_power_of_two().trailing_zeros()
+    }
 }
 
 /// Read a clustering information of distributions from the bitstream.
