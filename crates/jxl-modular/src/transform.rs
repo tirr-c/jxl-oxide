@@ -261,6 +261,13 @@ impl Palette {
             channels.nb_meta_channels += 1;
         }
 
+        let ModularChannelInfo { width, height, .. } = channels.info[begin_c as usize];
+        for info in &channels.info[(begin_c as usize + 1)..end_c as usize] {
+            if info.width != width || info.height != height {
+                return Err(Error::InvalidPaletteParams);
+            }
+        }
+
         channels
             .info
             .drain((begin_c as usize + 1)..(end_c as usize));

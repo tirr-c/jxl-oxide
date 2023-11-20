@@ -37,4 +37,5 @@ test_by_include!(
     modular_zero_width,
     icc_tag_size,
     hf_coeff_non_zeros,
+    modular_wrong_palette,
 );
