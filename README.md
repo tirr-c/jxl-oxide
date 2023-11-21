@@ -19,7 +19,7 @@ If you want to use it as a library, specify it in `Cargo.toml`:
 
 ```toml
 [dependencies]
-jxl-oxide = "0.5.0"
+jxl-oxide = "0.5.1"
 ```
 
 Note that you'll need a color management system to correctly display some JXL images. (`jxl-dec`
