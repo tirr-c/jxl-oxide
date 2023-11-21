@@ -310,7 +310,9 @@ impl RenderContext {
         let frame_idx = frame.index();
         let (is_keyframe, keyframe_idx) = match self.keyframes.binary_search(&frame_idx) {
             Ok(val) => (true, val),
-            Err(val) => (false, val),
+            // Handle partial rendering. If val != self.keyframes.len(), is_keyframe() should be
+            // false, since if not the index should exist in self.keyframes.
+            Err(val) => (frame.header().is_keyframe(), val),
         };
         let prev_keyframes = &self.keyframes[..keyframe_idx];
 
