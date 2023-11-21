@@ -38,6 +38,7 @@ test_by_include!(
     icc_tag_size,
     hf_coeff_non_zeros,
     modular_wrong_palette,
+    permutation_lehmer_oob,
     permutation_overflow,
     patch_coord_overflow,
     spline_add_one_overflow,
