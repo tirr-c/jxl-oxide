@@ -19,15 +19,15 @@ impl Bundle<&FrameHeader> for Splines {
     fn parse(bitstream: &mut Bitstream, header: &FrameHeader) -> Result<Self> {
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 6)?;
         decoder.begin(bitstream)?;
+
+        let num_splines = decoder.read_varint(bitstream, 2)? as usize;
         let num_pixels = (header.width * header.height) as usize;
-
-        let num_splines = (decoder.read_varint(bitstream, 2)? + 1) as usize;
-
         let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
-        if num_splines > max_num_splines {
+        if num_splines >= max_num_splines {
             tracing::error!(num_splines, max_num_splines, "Too many splines");
             return Err(jxl_bitstream::Error::ProfileConformance("too many splines").into());
         }
+        let num_splines = num_splines + 1;
 
         let mut start_points = vec![(0i64, 0i64); num_splines];
         for i in 0..num_splines {

@@ -40,4 +40,5 @@ test_by_include!(
     modular_wrong_palette,
     permutation_overflow,
     patch_coord_overflow,
+    spline_add_one_overflow,
 );
