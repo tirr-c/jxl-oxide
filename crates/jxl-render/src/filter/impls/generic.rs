@@ -26,7 +26,7 @@ pub(crate) unsafe fn epf_common<'buf>(
     step_multiplier: f32,
     pool: &JxlThreadPool,
     handle_row_simd: Option<for<'a> unsafe fn(EpfRow<'a>)>,
-    handle_row_generic: for<'a> unsafe fn(EpfRow<'a>),
+    handle_row_generic: for<'a> fn(EpfRow<'a>),
 ) {
     struct EpfJob<'buf> {
         y8: usize,
