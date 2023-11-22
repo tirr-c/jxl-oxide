@@ -62,12 +62,12 @@ macro_rules! define_epf_neon {
                         // SAFETY: Indexing doesn't go out of bounds since we have padding after image region.
                         let mut sum_weights = Vector::splat_f32(1.0);
                         let mut sum_channels = input_buf.map(|buf| {
-                            Vector::load(buf.as_ptr().add(out_base_idx))
+                            Vector::load(buf.as_ptr().add(base_idx))
                         });
 
                         if sigma < 0.3 {
                             for (buf, sum) in output_buf_rows.iter_mut().zip(sum_channels) {
-                                sum.store(buf.as_mut_ptr().add(base_x));
+                                sum.store(buf.as_mut_ptr().add(out_base_x));
                             }
                             continue;
                         }
