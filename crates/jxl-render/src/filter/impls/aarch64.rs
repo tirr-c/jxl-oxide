@@ -28,7 +28,8 @@ pub fn epf_step0(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf::epf_row_step0_neon,
+                Some(epf::epf_row_step0_neon),
+                super::generic::epf_row_step0,
             );
         }
     }
@@ -43,6 +44,7 @@ pub fn epf_step0(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             super::generic::epf_row_step0,
         );
     }
@@ -68,7 +70,8 @@ pub fn epf_step1(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf::epf_row_step1_neon,
+                Some(epf::epf_row_step1_neon),
+                super::generic::epf_row_step1,
             );
         }
     }
@@ -83,6 +86,7 @@ pub fn epf_step1(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             super::generic::epf_row_step1,
         );
     }
@@ -108,7 +112,8 @@ pub fn epf_step2(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf::epf_row_step2_neon,
+                Some(epf::epf_row_step2_neon),
+                super::generic::epf_row_step2,
             );
         }
     }
@@ -123,6 +128,7 @@ pub fn epf_step2(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             super::generic::epf_row_step2,
         );
     }
