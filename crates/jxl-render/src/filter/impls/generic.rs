@@ -7,6 +7,7 @@ pub(crate) struct EpfRow<'buf> {
     pub(crate) input_buf: [&'buf [f32]; 3],
     pub(crate) output_buf_rows: [&'buf mut [f32]; 3],
     pub(crate) width: usize,
+    pub(crate) x8: usize,
     pub(crate) y8: usize,
     pub(crate) dy: usize,
     pub(crate) sigma_grid: &'buf SimpleGrid<f32>,
@@ -24,7 +25,8 @@ pub(crate) unsafe fn epf_common<'buf>(
     border_sad_mul: f32,
     step_multiplier: f32,
     pool: &JxlThreadPool,
-    handle_row: for<'a> unsafe fn(EpfRow<'a>),
+    handle_row_simd: Option<for<'a> unsafe fn(EpfRow<'a>)>,
+    handle_row_generic: for<'a> fn(EpfRow<'a>),
 ) {
     struct EpfJob<'buf> {
         y8: usize,
@@ -37,6 +39,9 @@ pub(crate) unsafe fn epf_common<'buf>(
     let height = input[0].height();
     assert!(width % 8 == 0);
 
+    let out_width = output[0].width();
+    let out_height = output[0].height();
+
     let input_buf = [input[0].buf(), input[1].buf(), input[2].buf()];
     let (output0, output1, output2) = {
         let [a, b, c] = output;
@@ -45,14 +50,13 @@ pub(crate) unsafe fn epf_common<'buf>(
     assert_eq!(input_buf[0].len(), width * height);
     assert_eq!(input_buf[1].len(), width * height);
     assert_eq!(input_buf[2].len(), width * height);
-    assert_eq!(output0.len(), width * height);
-    assert_eq!(output1.len(), width * height);
-    assert_eq!(output2.len(), width * height);
+    assert_eq!(output0.len(), out_width * out_height);
+    assert_eq!(output1.len(), out_width * out_height);
+    assert_eq!(output2.len(), out_width * out_height);
 
-    let height = height - 6;
-    let output0_it = output0[3 * width..][..(height * width)].chunks_mut(8 * width);
-    let output1_it = output1[3 * width..][..(height * width)].chunks_mut(8 * width);
-    let output2_it = output2[3 * width..][..(height * width)].chunks_mut(8 * width);
+    let output0_it = output0.chunks_mut(8 * out_width);
+    let output1_it = output1.chunks_mut(8 * out_width);
+    let output2_it = output2.chunks_mut(8 * out_width);
     let jobs = output0_it
         .zip(output1_it)
         .zip(output2_it)
@@ -73,16 +77,42 @@ pub(crate) unsafe fn epf_common<'buf>(
              output1,
              output2,
          }| {
-            for dy in 0..(height - y8 * 8).min(8) {
-                let output_buf_rows = [
-                    &mut output0[dy * width..][..width],
-                    &mut output1[dy * width..][..width],
-                    &mut output2[dy * width..][..width],
-                ];
+            let width_aligned = out_width & !7;
+            for dy in 0..(height - 6 - y8 * 8).min(8) {
+                let x8 = if let Some(handle_row) = handle_row_simd {
+                    let output_buf_rows = [
+                        &mut output0[dy * out_width..][..width_aligned],
+                        &mut output1[dy * out_width..][..width_aligned],
+                        &mut output2[dy * out_width..][..width_aligned],
+                    ];
+                    let row = EpfRow {
+                        input_buf,
+                        output_buf_rows,
+                        width,
+                        x8: 0,
+                        y8,
+                        dy,
+                        sigma_grid,
+                        channel_scale,
+                        border_sad_mul,
+                        step_multiplier,
+                    };
+
+                    handle_row(row);
+                    width_aligned / 8
+                } else {
+                    0
+                };
+
                 let row = EpfRow {
                     input_buf,
-                    output_buf_rows,
+                    output_buf_rows: [
+                        &mut output0[dy * out_width..][..out_width],
+                        &mut output1[dy * out_width..][..out_width],
+                        &mut output2[dy * out_width..][..out_width],
+                    ],
                     width,
+                    x8,
                     y8,
                     dy,
                     sigma_grid,
@@ -91,7 +121,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                     step_multiplier,
                 };
 
-                handle_row(row);
+                handle_row_generic(row);
             }
         },
     );
@@ -116,6 +146,7 @@ pub fn epf_step0(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             epf_row_step0,
         );
     }
@@ -140,6 +171,7 @@ pub fn epf_step1(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             epf_row_step1,
         );
     }
@@ -164,6 +196,7 @@ pub fn epf_step2(
             border_sad_mul,
             step_multiplier,
             pool,
+            None,
             epf_row_step2,
         );
     }
@@ -183,6 +216,7 @@ macro_rules! define_epf {
                     input_buf,
                     mut output_buf_rows,
                     width,
+                    x8,
                     y8,
                     dy,
                     sigma_grid,
@@ -210,21 +244,24 @@ macro_rules! define_epf {
                     ]
                 };
 
-                for x8 in 1..width / 8 {
-                    let base_x = x8 * 8;
+                let output_width = output_buf_rows[0].len();
+                for x8 in x8..(output_width + 7) / 8 {
+                    let base_x = (x8 + 1) * 8;
+                    let out_base_x = x8 * 8;
+                    let block_width = (output_width - out_base_x).min(8);
                     let base_idx = (y + 3) * width + base_x;
 
-                    let Some(&sigma_val) = sigma_grid.get(x8 - 1, y8) else { break; };
+                    let Some(&sigma_val) = sigma_grid.get(x8, y8) else { break; };
                     if sigma_val < 0.3 {
                         for (input_ch, output_ch) in input_buf.iter().zip(output_buf_rows.iter_mut()) {
-                            output_ch[base_x..][..8].copy_from_slice(&input_ch[base_idx..][..8]);
+                            output_ch[out_base_x..][..block_width].copy_from_slice(&input_ch[base_idx..][..block_width]);
                         }
                         continue;
                     }
 
-                    for (dx, sm) in sm.into_iter().enumerate() {
+                    for (dx, sm) in sm.into_iter().enumerate().take(block_width) {
                         let base_idx = base_idx + dx;
-                        let base_x = base_x + dx;
+                        let out_base_x = out_base_x + dx;
 
                         let mut sum_weights = 1.0f32;
                         let mut sum_channels = [0.0f32; 3];
@@ -256,7 +293,7 @@ macro_rules! define_epf {
                         }
 
                         for (sum, ch) in sum_channels.into_iter().zip(output_buf_rows.iter_mut()) {
-                            ch[base_x] = sum / sum_weights;
+                            ch[out_base_x] = sum / sum_weights;
                         }
                     }
                 }
@@ -305,7 +342,8 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
         return;
     }
 
-    let mut input = vec![0f32; width * (height + 2)];
+    let mut input = SimpleGrid::new(width, height + 2);
+    let input = input.buf_mut();
     input[width..][..width * height].copy_from_slice(fb.buf());
     input[..width].copy_from_slice(&fb.buf()[..width]);
     input[width * (height + 1)..][..width]

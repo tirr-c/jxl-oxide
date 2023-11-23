@@ -40,19 +40,7 @@ pub fn apply_epf(
         SimpleGrid::new(padded_width, padded_height),
         SimpleGrid::new(padded_width, padded_height),
     ];
-    let mut fb_out = [
-        SimpleGrid::new(padded_width, padded_height),
-        SimpleGrid::new(padded_width, padded_height),
-        SimpleGrid::new(padded_width, padded_height),
-    ];
-    for (output, input) in fb_in.iter_mut().zip(&*fb) {
-        let output = output.buf_mut();
-        let input = input.buf();
-        for y in 0..height {
-            output[(y + 3) * padded_width + 8..][..width]
-                .copy_from_slice(&input[y * width..][..width]);
-        }
-    }
+    let fb_out = <&mut [_; 3]>::try_from(fb).unwrap();
 
     tracing::debug!("Preparing sigma grid");
     let sigma_region = region.downsample(3);
@@ -103,6 +91,14 @@ pub fn apply_epf(
     // Step 0
     if iters == 3 {
         tracing::debug!("Running step 0");
+        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
+            let output = output.buf_mut();
+            let input = input.buf();
+            for y in 0..height {
+                output[(y + 3) * padded_width + 8..][..width]
+                    .copy_from_slice(&input[y * width..][..width]);
+            }
+        }
         for output in &mut fb_in {
             let output = output.buf_mut();
 
@@ -135,19 +131,26 @@ pub fn apply_epf(
 
         super::impls::epf_step0(
             &fb_in,
-            &mut fb_out,
+            fb_out,
             sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass0_sigma_scale,
             pool,
         );
-        std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
+        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
+            let output = output.buf_mut();
+            let input = input.buf();
+            for y in 0..height {
+                output[(y + 3) * padded_width + 8..][..width]
+                    .copy_from_slice(&input[y * width..][..width]);
+            }
+        }
         for output in &mut fb_in {
             let output = output.buf_mut();
 
@@ -180,19 +183,26 @@ pub fn apply_epf(
 
         super::impls::epf_step1(
             &fb_in,
-            &mut fb_out,
+            fb_out,
             sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             1.0,
             pool,
         );
-        std::mem::swap(&mut fb_in, &mut fb_out);
     }
 
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
+        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
+            let output = output.buf_mut();
+            let input = input.buf();
+            for y in 0..height {
+                output[(y + 3) * padded_width + 8..][..width]
+                    .copy_from_slice(&input[y * width..][..width]);
+            }
+        }
         for output in &mut fb_in {
             let output = output.buf_mut();
 
@@ -225,22 +235,12 @@ pub fn apply_epf(
 
         super::impls::epf_step2(
             &fb_in,
-            &mut fb_out,
+            fb_out,
             sigma_grid,
             channel_scale,
             sigma.border_sad_mul,
             sigma.pass2_sigma_scale,
             pool,
         );
-        std::mem::swap(&mut fb_in, &mut fb_out);
-    }
-
-    for (output, input) in fb.iter_mut().zip(fb_in) {
-        let output = output.buf_mut();
-        let input = input.buf();
-        for y in 0..height {
-            output[y * width..][..width]
-                .copy_from_slice(&input[(y + 3) * padded_width + 8..][..width]);
-        }
     }
 }

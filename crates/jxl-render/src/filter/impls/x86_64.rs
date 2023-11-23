@@ -26,7 +26,8 @@ pub fn epf_step0(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf_avx2::epf_row_step0_avx2,
+                Some(epf_avx2::epf_row_step0_avx2),
+                super::generic::epf_row_step0,
             );
         }
     }
@@ -41,7 +42,8 @@ pub fn epf_step0(
             border_sad_mul,
             step_multiplier,
             pool,
-            epf_sse2::epf_row_step0_sse2,
+            Some(epf_sse2::epf_row_step0_sse2),
+            super::generic::epf_row_step0,
         )
     }
 }
@@ -66,7 +68,8 @@ pub fn epf_step1(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf_avx2::epf_row_step1_avx2,
+                Some(epf_avx2::epf_row_step1_avx2),
+                super::generic::epf_row_step1,
             );
         }
     }
@@ -81,7 +84,8 @@ pub fn epf_step1(
             border_sad_mul,
             step_multiplier,
             pool,
-            epf_sse2::epf_row_step1_sse2,
+            Some(epf_sse2::epf_row_step1_sse2),
+            super::generic::epf_row_step1,
         )
     }
 }
@@ -106,7 +110,8 @@ pub fn epf_step2(
                 border_sad_mul,
                 step_multiplier,
                 pool,
-                epf_avx2::epf_row_step2_avx2,
+                Some(epf_avx2::epf_row_step2_avx2),
+                super::generic::epf_row_step2,
             );
         }
     }
@@ -121,7 +126,8 @@ pub fn epf_step2(
             border_sad_mul,
             step_multiplier,
             pool,
-            epf_sse2::epf_row_step2_sse2,
+            Some(epf_sse2::epf_row_step2_sse2),
+            super::generic::epf_row_step2,
         )
     }
 }

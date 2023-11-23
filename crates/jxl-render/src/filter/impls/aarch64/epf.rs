@@ -26,6 +26,7 @@ macro_rules! define_epf_neon {
                     input_buf,
                     mut output_buf_rows,
                     width,
+                    x8,
                     y8,
                     dy,
                     sigma_grid,
@@ -49,11 +50,13 @@ macro_rules! define_epf_neon {
                     ]
                 };
 
-                for x8 in 1..width / 8 {
-                    let Some(&sigma) = sigma_grid.get(x8 - 1, y8) else { break; };
+                let output_width = output_buf_rows[0].len();
+                for x8 in x8..output_width / 8 {
+                    let Some(&sigma) = sigma_grid.get(x8, y8) else { break; };
 
                     for (dx, sm) in sm.into_iter().enumerate() {
-                        let base_x = x8 * 8 + dx * Vector::SIZE;
+                        let base_x = (x8 + 1) * 8 + dx * Vector::SIZE;
+                        let out_base_x = base_x - 8;
                         let base_idx = (y + 3) * width + base_x;
 
                         // SAFETY: Indexing doesn't go out of bounds since we have padding after image region.
@@ -64,7 +67,7 @@ macro_rules! define_epf_neon {
 
                         if sigma < 0.3 {
                             for (buf, sum) in output_buf_rows.iter_mut().zip(sum_channels) {
-                                sum.store(buf.as_mut_ptr().add(base_x));
+                                sum.store(buf.as_mut_ptr().add(out_base_x));
                             }
                             continue;
                         }
@@ -103,7 +106,7 @@ macro_rules! define_epf_neon {
 
                         for (buf, sum) in output_buf_rows.iter_mut().zip(sum_channels) {
                             let val = sum.div(sum_weights);
-                            val.store(buf.as_mut_ptr().add(base_x));
+                            val.store(buf.as_mut_ptr().add(out_base_x));
                         }
                     }
                 }
