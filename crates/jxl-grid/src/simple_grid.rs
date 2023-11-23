@@ -1,6 +1,6 @@
 use std::{ops::RangeBounds, ptr::NonNull};
 
-use crate::{SharedSubgrid, SimdVector};
+use crate::{SharedSubgrid, SimdVector, AllocHandle, Error, AllocTracker};
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -20,12 +20,13 @@ const fn compute_align<S>() -> usize {
 /// A continuous buffer in the "raster order".
 ///
 /// The buffer is aligned so that it can be used in SIMD instructions.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SimpleGrid<S> {
     width: usize,
     height: usize,
     offset: usize,
     buf: Vec<S>,
+    handle: Option<AllocHandle>,
 }
 
 impl<S: Default + Clone> SimpleGrid<S> {
@@ -40,12 +41,43 @@ impl<S: Default + Clone> SimpleGrid<S> {
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
         let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
         buf.resize_with(len + offset, S::default);
+
         Self {
             width,
             height,
             offset,
             buf,
+            handle: None,
         }
+    }
+
+    pub fn with_alloc_tracker(
+        width: usize,
+        height: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, Error> {
+        let len = width * height;
+        let buf_len = len + Self::ALIGN / std::mem::size_of::<S>();
+        let handle = tracker.map(|tracker| tracker.alloc(buf_len)).transpose()?;
+        let mut buf = vec![S::default(); buf_len];
+
+        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
+        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
+        buf.resize_with(len + offset, S::default);
+
+        Ok(Self {
+            width,
+            height,
+            offset,
+            buf,
+            handle,
+        })
+    }
+
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
+        out.buf_mut().clone_from_slice(self.buf());
+        Ok(out)
     }
 }
 
@@ -58,6 +90,11 @@ impl<S> SimpleGrid<S> {
     #[inline]
     pub fn height(&self) -> usize {
         self.height
+    }
+
+    #[inline]
+    pub fn tracker(&self) -> Option<AllocTracker> {
+        self.handle.as_ref().map(|handle| handle.tracker())
     }
 
     #[inline]
@@ -598,7 +635,7 @@ impl<'g> CutGrid<'g, f32> {
 }
 
 /// `[SimpleGrid]` with padding.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PaddedGrid<S: Clone> {
     pub grid: SimpleGrid<S>,
     padding: usize,

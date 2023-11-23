@@ -25,7 +25,7 @@ pub(crate) fn render_modular(
         cache.lf_global = Some(lf_global);
         cache.lf_global.as_ref().unwrap()
     };
-    let mut gmodular = lf_global.gmodular.clone();
+    let mut gmodular = lf_global.gmodular.try_clone()?;
     let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
@@ -145,7 +145,7 @@ pub(crate) fn render_modular(
         modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
-    tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| {
+    tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| -> Result<_> {
         let channel_data = modular_image.image_channels();
         for ((g, shift), buffer) in channel_data
             .iter()
@@ -160,8 +160,8 @@ pub(crate) fn render_modular(
             fb_xyb.add_channel();
             fb_xyb.add_channel();
             let fb_xyb = fb_xyb.buffer_mut();
-            fb_xyb[1] = fb_xyb[0].clone();
-            fb_xyb[2] = fb_xyb[0].clone();
+            fb_xyb[1] = fb_xyb[0].try_clone()?;
+            fb_xyb[2] = fb_xyb[0].try_clone()?;
         }
         if xyb_encoded {
             let fb_xyb = fb_xyb.buffer_mut();
@@ -178,7 +178,9 @@ pub(crate) fn render_modular(
                 *b *= lf_global.lf_dequant.m_b_lf_unscaled();
             }
         }
-    });
+
+        Ok(())
+    })?;
 
     Ok((fb_xyb, gmodular))
 }

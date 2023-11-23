@@ -353,7 +353,10 @@ impl Frame {
 
             if offset == 0 {
                 let lf_global = lf_global.unwrap();
-                let mut gmodular = lf_global.gmodular.clone();
+                let mut gmodular = match lf_global.gmodular.try_clone() {
+                    Ok(gmodular) => gmodular,
+                    Err(e) => return Some(Err(e)),
+                };
                 let groups = gmodular
                     .modular
                     .image_mut()

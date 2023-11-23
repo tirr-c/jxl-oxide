@@ -3,6 +3,7 @@
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
+    Buffer(jxl_grid::Error),
     Modular(jxl_modular::Error),
     Frame(jxl_frame::Error),
     Color(jxl_color::Error),
@@ -23,6 +24,12 @@ impl From<jxl_bitstream::Error> for Error {
 impl From<jxl_coding::Error> for Error {
     fn from(err: jxl_coding::Error) -> Self {
         Self::Decoder(err)
+    }
+}
+
+impl From<jxl_grid::Error> for Error {
+    fn from(err: jxl_grid::Error) -> Self {
+        Self::Buffer(err)
     }
 }
 
@@ -51,6 +58,7 @@ impl std::fmt::Display for Error {
         match self {
             Bitstream(err) => write!(f, "bitstream error: {}", err),
             Decoder(err) => write!(f, "entropy decoder error: {}", err),
+            Buffer(err) => write!(f, "{}", err),
             Modular(err) => write!(f, "modular subimage decode error: {}", err),
             Frame(err) => write!(f, "frame error: {}", err),
             Color(err) => write!(f, "color management error: {err}"),
@@ -73,6 +81,8 @@ impl std::error::Error for Error {
         match self {
             Bitstream(err) => Some(err),
             Decoder(err) => Some(err),
+            Buffer(err) => Some(err),
+            Modular(err) => Some(err),
             Frame(err) => Some(err),
             Color(err) => Some(err),
             _ => None,
@@ -85,6 +95,7 @@ impl Error {
         match self {
             Error::Bitstream(e) => e.unexpected_eof(),
             Error::Decoder(e) => e.unexpected_eof(),
+            Error::Modular(e) => e.unexpected_eof(),
             Error::Frame(e) => e.unexpected_eof(),
             Error::Color(e) => e.unexpected_eof(),
             _ => false,

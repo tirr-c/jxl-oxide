@@ -90,7 +90,7 @@ impl<'dest> TransformedGrid<'dest> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ModularImageDestination {
     header: ModularHeader,
     ma_ctx: MaConfig,
@@ -129,6 +129,18 @@ impl ModularImageDestination {
             meta_channels,
             image_channels,
         }
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            header: self.header.clone(),
+            ma_ctx: self.ma_ctx.clone(),
+            group_dim: self.group_dim,
+            bit_depth: self.bit_depth,
+            channels: self.channels.clone(),
+            meta_channels: self.meta_channels.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
+            image_channels: self.image_channels.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
+        })
     }
 
     pub fn image_channels(&self) -> &[SimpleGrid<i32>] {

@@ -23,12 +23,12 @@ pub use param::*;
 ///    - creating a subimage of existing image by calling [self.make_subimage_params_lf_group] or
 ///      [self.make_subimage_params_pass_group].
 /// 2. Decode pixels by calling [self.decode_image] or [self.decode_image_gmodular].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ModularData {
     image: image::ModularImageDestination,
 }
@@ -50,6 +50,18 @@ impl Modular {
     /// Creates an empty Modular image.
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        let inner = if let Some(inner) = &self.inner {
+            Some(ModularData {
+                image: inner.image.try_clone()?,
+            })
+        } else {
+            None
+        };
+
+        Ok(Self { inner })
     }
 }
 

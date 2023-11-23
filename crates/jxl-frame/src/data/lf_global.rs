@@ -120,7 +120,7 @@ define_bundle! {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GlobalModular {
     pub ma_config: Option<MaConfig>,
     pub modular: Modular,
@@ -128,6 +128,14 @@ pub struct GlobalModular {
 }
 
 impl GlobalModular {
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            ma_config: self.ma_config.clone(),
+            modular: self.modular.try_clone()?,
+            extra_channel_from: self.extra_channel_from,
+        })
+    }
+
     pub fn ma_config(&self) -> Option<&MaConfig> {
         self.ma_config.as_ref()
     }

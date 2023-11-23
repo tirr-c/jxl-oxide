@@ -61,7 +61,7 @@ pub(crate) fn render_vardct(
         cache.lf_global = Some(lf_global);
         cache.lf_global.as_ref().unwrap()
     };
-    let mut gmodular = lf_global.gmodular.clone();
+    let mut gmodular = lf_global.gmodular.try_clone()?;
     let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
 
     let width = frame_header.color_sample_width() as usize;

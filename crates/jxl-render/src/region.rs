@@ -1,5 +1,7 @@
 use jxl_grid::{CutGrid, SimpleGrid};
 
+use crate::Result;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Region {
     pub left: i32,
@@ -177,7 +179,7 @@ impl Region {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ImageWithRegion {
     region: Region,
     buffer: Vec<SimpleGrid<f32>>,
@@ -225,6 +227,13 @@ impl ImageWithRegion {
                 buffer,
             }
         }
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            region: self.region,
+            buffer: self.buffer.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
+        })
     }
 
     #[inline]
