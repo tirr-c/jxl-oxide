@@ -30,13 +30,18 @@ impl AllocTracker {
             |bytes_left| bytes_left.checked_sub(bytes),
         );
 
-        if result.is_ok() {
-            Ok(AllocHandle {
-                bytes,
-                inner: Arc::clone(&self.inner),
-            })
-        } else {
-            Err(crate::Error::OutOfMemory(bytes))
+        match result {
+            Ok(prev) => {
+                tracing::trace!(bytes, left = prev - bytes, "Created allocation handle");
+                Ok(AllocHandle {
+                    bytes,
+                    inner: Arc::clone(&self.inner),
+                })
+            }
+            Err(left) => {
+                tracing::trace!(bytes, left, "Allocation failed");
+                Err(crate::Error::OutOfMemory(bytes))
+            }
         }
     }
 }
@@ -49,9 +54,9 @@ pub struct AllocHandle {
 
 impl Drop for AllocHandle {
     fn drop(&mut self) {
-        self.inner
-            .bytes_left
-            .fetch_add(self.bytes, Ordering::Relaxed);
+        let bytes = self.bytes;
+        let prev = self.inner.bytes_left.fetch_add(bytes, Ordering::Relaxed);
+        tracing::trace!(bytes, left = prev + bytes, "Released allocation handle");
         self.bytes = 0;
     }
 }
