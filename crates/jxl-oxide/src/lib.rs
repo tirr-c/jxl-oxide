@@ -127,16 +127,19 @@ pub struct JxlImageBuilder {
 }
 
 impl JxlImageBuilder {
+    /// Sets a custom thread pool.
     pub fn pool(mut self, pool: JxlThreadPool) -> Self {
         self.pool = Some(pool);
         self
     }
 
+    /// Sets an allocation tracker.
     pub fn alloc_tracker(mut self, tracker: AllocTracker) -> Self {
         self.tracker = Some(tracker);
         self
     }
 
+    /// Consumes the builder, and creates an empty, uninitialized JPEG XL image decoder.
     pub fn build_uninit(self) -> UninitializedJxlImage {
         UninitializedJxlImage {
             pool: self.pool.unwrap_or_else(default_pool),
@@ -146,7 +149,7 @@ impl JxlImageBuilder {
         }
     }
 
-    /// Reads image with the given reader.
+    /// Consumes the builder, and creates a JPEG XL image decoder by reading image from the reader.
     pub fn read(self, mut reader: impl std::io::Read) -> Result<JxlImage> {
         let mut uninit = self.build_uninit();
         let mut buf = vec![0u8; 4096];
@@ -184,7 +187,7 @@ impl JxlImageBuilder {
         Ok(image)
     }
 
-    /// Reads image from the file.
+    /// Consumes the builder, and creates a JPEG XL image decoder by reading image from the file.
     pub fn open(self, path: impl AsRef<std::path::Path>) -> Result<JxlImage> {
         let file = std::fs::File::open(path)?;
         self.read(file)
@@ -356,6 +359,7 @@ pub struct JxlImage {
 }
 
 impl JxlImage {
+    /// Creates a decoder builder with default options.
     #[inline]
     pub fn builder() -> JxlImageBuilder {
         JxlImageBuilder::default()
