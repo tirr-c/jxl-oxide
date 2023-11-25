@@ -4,28 +4,28 @@
 //!
 //! # Decoding an image
 //!
-//! Decoding a JPEG XL image starts with constructing [`JxlImage`]. If you're reading a file, you
-//! can use [`JxlImage::open`]:
+//! Decoding a JPEG XL image starts with constructing [`JxlImage`]. First create a builder using
+//! [`JxlImage::builder`], and use [`open`][JxlImageBuilder::open] to read a file:
 //!
 //! ```no_run
 //! # use jxl_oxide::JxlImage;
-//! let image = JxlImage::open("input.jxl").expect("Failed to read image header");
+//! let image = JxlImage::builder().open("input.jxl").expect("Failed to read image header");
 //! println!("{:?}", image.image_header()); // Prints the image header
 //! ```
 //!
 //! Or, if you're reading from a reader that implements [`Read`][std::io::Read], you can use
-//! [`JxlImage::from_reader`]:
+//! [`read`][JxlImageBuilder::read]:
 //!
 //! ```no_run
 //! # use jxl_oxide::JxlImage;
 //! # let reader = std::io::empty();
-//! let image = JxlImage::from_reader(reader).expect("Failed to read image header");
+//! let image = JxlImage::builder().read(reader).expect("Failed to read image header");
 //! println!("{:?}", image.image_header()); // Prints the image header
 //! ```
 //!
 //! In async context, you'll probably want to feed byte buffers directly. In this case, create an
-//! image struct with *uninitialized state* using [`JxlImage::new_uninit`], and call
-//! [`feed_bytes`][UninitializedJxlImage::feed_bytes] and
+//! image struct with *uninitialized state* using [`build_uninit`][JxlImageBuilder::build_uninit],
+//! and call [`feed_bytes`][UninitializedJxlImage::feed_bytes] and
 //! [`try_init`][UninitializedJxlImage::try_init]:
 //!
 //! ```no_run
@@ -52,7 +52,7 @@
 //! #   0x85, 0xb8, 0x27, 0x1a, 0x48, 0x45, 0x84, 0x1b, 0x71, 0x4f, 0xa8, 0x3e,
 //! #   0x8e, 0x30, 0x03, 0x92, 0x84, 0x01,
 //! # ]);
-//! let mut uninit_image = JxlImage::new_uninit();
+//! let mut uninit_image = JxlImage::builder().build_uninit();
 //! let image = loop {
 //!     uninit_image.feed_bytes(reader.read().await?);
 //!     match uninit_image.try_init()? {
@@ -78,7 +78,7 @@
 //!
 //! # fn present_image(_: Render) {}
 //! # fn main() -> jxl_oxide::Result<()> {
-//! # let image = JxlImage::open("input.jxl").unwrap();
+//! # let image = JxlImage::builder().open("input.jxl").unwrap();
 //! for keyframe_idx in 0..image.num_loaded_keyframes() {
 //!     let render = image.render_frame(keyframe_idx)?;
 //!     present_image(render);
@@ -196,9 +196,9 @@ impl JxlImageBuilder {
 /// # Examples
 /// ```no_run
 /// # fn read_bytes() -> jxl_oxide::Result<&'static [u8]> { Ok(&[]) }
-/// # use jxl_oxide::{UninitializedJxlImage, InitializeResult};
+/// # use jxl_oxide::{JxlImage, InitializeResult};
 /// # fn main() -> jxl_oxide::Result<()> {
-/// let mut uninit_image = UninitializedJxlImage::new();
+/// let mut uninit_image = JxlImage::builder().build_uninit();
 /// let image = loop {
 ///     let buf = read_bytes()?;
 ///     uninit_image.feed_bytes(buf)?;
