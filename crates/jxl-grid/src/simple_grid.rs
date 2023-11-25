@@ -59,6 +59,12 @@ impl<S: Default + Clone> SimpleGrid<S> {
         })
     }
 
+    pub fn clone_untracked(&self) -> Self {
+        let mut out = Self::with_alloc_tracker(self.width, self.height, None).unwrap();
+        out.buf_mut().clone_from_slice(self.buf());
+        out
+    }
+
     pub fn try_clone(&self) -> Result<Self, Error> {
         let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
         out.buf_mut().clone_from_slice(self.buf());

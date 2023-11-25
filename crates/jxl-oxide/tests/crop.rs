@@ -11,13 +11,17 @@ fn run_test(buf: &[u8], name: &str) {
         .unwrap_or(false);
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
-    let image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
+    let image = JxlImage::builder()
+        .read(Cursor::new(buf))
+        .expect("Failed to open file");
     let width = image.width();
     let height = image.height();
     let width_dist = rand::distributions::Uniform::new_inclusive(128, (width / 2).max(128));
     let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
 
-    let tester_image = JxlImage::from_reader(Cursor::new(buf)).expect("Failed to open file");
+    let tester_image = JxlImage::builder()
+        .read(Cursor::new(buf))
+        .expect("Failed to open file");
 
     for _ in 0..4 {
         let crop_width = width_dist.sample(&mut rng);
@@ -122,8 +126,8 @@ macro_rules! testcase_with_crop {
                 let path = util::conformance_path(stringify!($testimage));
                 let buf = std::fs::read(path).expect("Failed to open file");
 
-                let mut image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
-                let mut tester_image = JxlImage::from_reader(Cursor::new(&buf)).expect("Failed to open file");
+                let mut image = JxlImage::builder().read(Cursor::new(&buf)).expect("Failed to open file");
+                let mut tester_image = JxlImage::builder().read(Cursor::new(&buf)).expect("Failed to open file");
 
                 let regions = [
                     $($region,)*
