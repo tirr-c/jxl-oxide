@@ -32,7 +32,7 @@ pub struct SimpleGrid<S> {
 impl<S: Default + Clone> SimpleGrid<S> {
     const ALIGN: usize = compute_align::<S>();
 
-    /// Create a new buffer.
+    /// Create a new buffer, recording the allocation if a tracker is given.
     #[inline]
     pub fn with_alloc_tracker(
         width: usize,
@@ -40,7 +40,7 @@ impl<S: Default + Clone> SimpleGrid<S> {
         tracker: Option<&AllocTracker>,
     ) -> Result<Self, Error> {
         let len = width * height;
-        let buf_len = len + Self::ALIGN / std::mem::size_of::<S>();
+        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
         let handle = tracker
             .map(|tracker| tracker.alloc::<S>(buf_len))
             .transpose()?;
@@ -59,12 +59,15 @@ impl<S: Default + Clone> SimpleGrid<S> {
         })
     }
 
+    /// Clones the buffer without recording an allocation.
     pub fn clone_untracked(&self) -> Self {
         let mut out = Self::with_alloc_tracker(self.width, self.height, None).unwrap();
         out.buf_mut().clone_from_slice(self.buf());
         out
     }
 
+    /// Tries to clone the buffer, and records the allocation in the same tracker as the original
+    /// buffer.
     pub fn try_clone(&self) -> Result<Self, Error> {
         let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
         out.buf_mut().clone_from_slice(self.buf());
