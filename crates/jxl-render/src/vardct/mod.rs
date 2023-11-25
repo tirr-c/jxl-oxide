@@ -46,6 +46,7 @@ pub(crate) fn render_vardct(
 
     let image_header = frame.image_header();
     let frame_header = frame.header();
+    let tracker = frame.alloc_tracker();
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let shifts_cbycr: [_; 3] =
@@ -114,7 +115,7 @@ pub(crate) fn render_vardct(
                 height_rounded as u32 / 8,
             ));
 
-    let mut fb_xyb = ImageWithRegion::from_region(3, modular_region);
+    let mut fb_xyb = ImageWithRegion::from_region_and_tracker(3, modular_region, tracker)?;
 
     let mut modular_image = gmodular.modular.image_mut();
     let groups = modular_image
@@ -147,9 +148,17 @@ pub(crate) fn render_vardct(
     let (hf_cfl_data, mut lf_xyb) =
         tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
             let mut hf_cfl_data = (!subsampled)
-                .then(|| ImageWithRegion::from_region(2, modular_lf_region.downsample(3)));
+                .then(|| {
+                    ImageWithRegion::from_region_and_tracker(
+                        2,
+                        modular_lf_region.downsample(3),
+                        tracker,
+                    )
+                })
+                .transpose()?;
 
-            let mut lf_xyb = ImageWithRegion::from_region(3, modular_lf_region);
+            let mut lf_xyb =
+                ImageWithRegion::from_region_and_tracker(3, modular_lf_region, tracker)?;
 
             if let Some(x) = lf_frame {
                 let lf_frame = x.image.run_with_image(image_region)?;
@@ -265,8 +274,8 @@ pub(crate) fn render_vardct(
                     lf_xyb.buffer_mut(),
                     &lf_global.lf_dequant,
                     &lf_global_vardct.quantizer,
-                );
-            });
+                )
+            })?;
         }
     }
 
@@ -390,6 +399,7 @@ pub(crate) fn render_vardct(
                             modular,
                             vardct,
                             allow_partial,
+                            tracker,
                             pool,
                         },
                     );
@@ -427,18 +437,15 @@ pub(crate) fn render_vardct(
         result.into_inner().unwrap()
     })?;
 
-    pool.scope(|scope| {
-        if fb_xyb.region() != aligned_region {
-            scope.spawn(|_| {
-                fb_xyb = fb_xyb.clone_intersection(aligned_region);
-            });
-        }
-        if let Some(modular_image) = modular_image {
-            tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
-                modular_image.prepare_subimage().unwrap().finish(pool);
-            });
-        }
-    });
+    if fb_xyb.region() != aligned_region {
+        fb_xyb = fb_xyb.clone_intersection(aligned_region)?;
+    }
+
+    if let Some(modular_image) = modular_image {
+        tracing::trace_span!("Extra channel inverse transform").in_scope(|| {
+            modular_image.prepare_subimage().unwrap().finish(pool);
+        });
+    }
 
     Ok((fb_xyb, gmodular))
 }
@@ -476,7 +483,7 @@ pub fn adaptive_lf_smoothing(
     lf_image: &mut [SimpleGrid<f32>],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
-) {
+) -> Result<()> {
     let scale_inv = quantizer.global_scale * quantizer.quant_lf;
     let lf_x = 512.0 * lf_dequant.m_x_lf / scale_inv as f32;
     let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
@@ -485,6 +492,7 @@ pub fn adaptive_lf_smoothing(
     let [in_x, in_y, in_b] = lf_image else {
         panic!("lf_image should be three-channel image")
     };
+    let tracker = in_x.tracker();
     let width = in_x.width();
     let height = in_x.height();
 
@@ -492,7 +500,13 @@ pub fn adaptive_lf_smoothing(
     let in_y = in_y.buf_mut();
     let in_b = in_b.buf_mut();
 
-    impls::adaptive_lf_smoothing_impl(width, height, [in_x, in_y, in_b], [lf_x, lf_y, lf_b]);
+    impls::adaptive_lf_smoothing_impl(
+        width,
+        height,
+        [in_x, in_y, in_b],
+        [lf_x, lf_y, lf_b],
+        tracker.as_ref(),
+    )
 }
 
 pub fn dequant_hf_varblock_grouped(

@@ -523,6 +523,7 @@ impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixParams {
                     bit_depth,
                     vec![jxl_modular::ChannelShift::from_shift(0); 3],
                     global_ma_config,
+                    None,
                 );
                 let mut params = Modular::parse(bitstream, modular_params)?;
                 let image = params.image_mut().unwrap();

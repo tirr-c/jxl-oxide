@@ -1,6 +1,9 @@
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AllocTracker {
     inner: Arc<AllocTrackerInner>,
 }
@@ -19,7 +22,8 @@ impl AllocTracker {
         }
     }
 
-    pub fn alloc(&self, bytes: usize) -> Result<AllocHandle, crate::Error> {
+    pub fn alloc<T>(&self, count: usize) -> Result<AllocHandle, crate::Error> {
+        let bytes = count * std::mem::size_of::<T>();
         let result = self.inner.bytes_left.fetch_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
@@ -27,7 +31,10 @@ impl AllocTracker {
         );
 
         if result.is_ok() {
-            Ok(AllocHandle { bytes, inner: Arc::clone(&self.inner) })
+            Ok(AllocHandle {
+                bytes,
+                inner: Arc::clone(&self.inner),
+            })
         } else {
             Err(crate::Error::OutOfMemory(bytes))
         }
@@ -42,13 +49,17 @@ pub struct AllocHandle {
 
 impl Drop for AllocHandle {
     fn drop(&mut self) {
-        self.inner.bytes_left.fetch_add(self.bytes, Ordering::Relaxed);
+        self.inner
+            .bytes_left
+            .fetch_add(self.bytes, Ordering::Relaxed);
         self.bytes = 0;
     }
 }
 
 impl AllocHandle {
     pub fn tracker(&self) -> AllocTracker {
-        AllocTracker { inner: Arc::clone(&self.inner) }
+        AllocTracker {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }

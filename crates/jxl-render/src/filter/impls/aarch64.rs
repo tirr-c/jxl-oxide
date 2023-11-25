@@ -4,6 +4,8 @@ use std::arch::is_aarch64_feature_detected;
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
+use crate::Result;
+
 use super::generic::epf_common;
 
 mod epf;
@@ -134,33 +136,40 @@ pub fn epf_step2(
     }
 }
 
-pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) -> Result<()> {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
             for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-                run_gabor_inner_neon(fb, weight1, weight2)
+                run_gabor_inner_neon(fb, weight1, weight2)?
             }
         }
-        return;
+        return Ok(());
     }
 
     for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-        super::generic::run_gabor_inner(fb, weight1, weight2);
+        super::generic::run_gabor_inner(fb, weight1, weight2)?;
     }
+    Ok(())
 }
 
 #[target_feature(enable = "neon")]
-unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: f32) {
+unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: f32) -> Result<()> {
     let global_weight = (1.0 + weight1 * 4.0 + weight2 * 4.0).recip();
 
     let width = fb.width();
     let height = fb.height();
     if width * height <= 1 {
-        return;
+        return Ok(());
     }
 
+    let tracker = fb.tracker();
     let io = fb.buf_mut();
+
+    let _handle = tracker
+        .as_ref()
+        .map(|x| x.alloc::<f32>(width))
+        .transpose()?;
     let mut prev_row = io[..width].to_vec();
 
     let input_t = prev_row.as_mut_ptr();
@@ -266,4 +275,5 @@ unsafe fn run_gabor_inner_neon(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: 
     } else {
         *input_c.add(width - 1) = vget_lane_f32::<0>(sum);
     }
+    Ok(())
 }

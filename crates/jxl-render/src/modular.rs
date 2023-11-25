@@ -13,6 +13,7 @@ pub(crate) fn render_modular(
 ) -> Result<(ImageWithRegion, GlobalModular)> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
+    let tracker = frame.alloc_tracker();
     let metadata = &image_header.metadata;
     let xyb_encoded = image_header.metadata.xyb_encoded;
 
@@ -34,7 +35,8 @@ pub(crate) fn render_modular(
     let channels = metadata.encoded_color_channels();
 
     let bit_depth = metadata.bit_depth;
-    let mut fb_xyb = ImageWithRegion::from_region(channels, region);
+    let mut fb_xyb =
+        ImageWithRegion::from_region_and_tracker(channels, region, frame.alloc_tracker())?;
 
     let modular_image = gmodular.modular.image_mut().unwrap();
     let groups = modular_image.prepare_groups(frame.pass_shifts())?;
@@ -130,6 +132,7 @@ pub(crate) fn render_modular(
                         group_idx,
                         modular,
                         allow_partial,
+                        tracker,
                         pool,
                     );
                     if !allow_partial && r.is_err() {
@@ -157,8 +160,8 @@ pub(crate) fn render_modular(
         }
 
         if channels == 1 {
-            fb_xyb.add_channel();
-            fb_xyb.add_channel();
+            fb_xyb.add_channel()?;
+            fb_xyb.add_channel()?;
             let fb_xyb = fb_xyb.buffer_mut();
             fb_xyb[1] = fb_xyb[0].try_clone()?;
             fb_xyb[2] = fb_xyb[0].try_clone()?;

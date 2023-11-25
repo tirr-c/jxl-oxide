@@ -1,4 +1,4 @@
-use jxl_grid::SimpleGrid;
+use jxl_grid::{AllocTracker, SimpleGrid};
 
 #[inline(always)]
 pub fn adaptive_lf_smoothing_impl(
@@ -6,23 +6,24 @@ pub fn adaptive_lf_smoothing_impl(
     height: usize,
     [in_x, in_y, in_b]: [&mut [f32]; 3],
     [lf_x, lf_y, lf_b]: [f32; 3],
-) {
+    tracker: Option<&AllocTracker>,
+) -> crate::Result<()> {
     const SCALE_SELF: f32 = 0.052262735;
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
     if width <= 2 || height <= 2 {
         // Nothing to do
-        return;
+        return Ok(());
     }
 
     assert_eq!(in_x.len(), in_y.len());
     assert_eq!(in_y.len(), in_b.len());
     assert_eq!(in_x.len(), width * height);
 
-    let mut udsum_x = SimpleGrid::new(width, height - 2);
-    let mut udsum_y = SimpleGrid::new(width, height - 2);
-    let mut udsum_b = SimpleGrid::new(width, height - 2);
+    let mut udsum_x = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_y = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_b = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
 
     for (g, out) in [
         (&mut *in_x, udsum_x.buf_mut()),
@@ -90,4 +91,6 @@ pub fn adaptive_lf_smoothing_impl(
             in_b_prev = b_self;
         }
     }
+
+    Ok(())
 }

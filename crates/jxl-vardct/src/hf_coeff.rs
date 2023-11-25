@@ -1,12 +1,12 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{CutGrid, SharedSubgrid, SimpleGrid};
+use jxl_grid::{AllocTracker, CutGrid, SharedSubgrid, SimpleGrid};
 use jxl_modular::ChannelShift;
 
 use crate::{BlockInfo, HfBlockContext, HfPass, Result};
 
 /// Parameters for decoding `HfCoeff`.
 #[derive(Debug)]
-pub struct HfCoeffParams<'a> {
+pub struct HfCoeffParams<'a, 'b> {
     pub num_hf_presets: u32,
     pub hf_block_ctx: &'a HfBlockContext,
     pub block_info: SharedSubgrid<'a, BlockInfo>,
@@ -14,6 +14,7 @@ pub struct HfCoeffParams<'a> {
     pub lf_quant: Option<[SharedSubgrid<'a, i32>; 3]>,
     pub hf_pass: &'a HfPass,
     pub coeff_shift: u32,
+    pub tracker: Option<&'b AllocTracker>,
 }
 
 pub fn write_hf_coeff(
@@ -41,6 +42,7 @@ pub fn write_hf_coeff(
         lf_quant,
         hf_pass,
         coeff_shift,
+        tracker,
     } = params;
     let mut dist = hf_pass.clone_decoder();
 
@@ -66,10 +68,20 @@ pub fn write_hf_coeff(
 
     let width = block_info.width();
     let height = block_info.height();
-    let mut non_zeros_grid = upsampling_shifts.map(|shift| {
-        let (width, height) = shift.shift_size((width as u32, height as u32));
-        SimpleGrid::new(width as usize, height as usize)
-    });
+    let mut non_zeros_grid = [
+        {
+            let (width, height) = upsampling_shifts[0].shift_size((width as u32, height as u32));
+            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
+        },
+        {
+            let (width, height) = upsampling_shifts[1].shift_size((width as u32, height as u32));
+            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
+        },
+        {
+            let (width, height) = upsampling_shifts[2].shift_size((width as u32, height as u32));
+            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
+        },
+    ];
     let predict_non_zeros = |grid: &SimpleGrid<u32>, x: usize, y: usize| {
         if x == 0 && y == 0 {
             32u32

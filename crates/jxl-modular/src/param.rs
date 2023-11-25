@@ -1,14 +1,17 @@
+use jxl_grid::AllocTracker;
+
 use super::MaConfig;
 
 #[derive(Debug, Clone)]
-pub struct ModularParams<'a> {
+pub struct ModularParams<'a, 'b> {
     pub group_dim: u32,
     pub bit_depth: u32,
     pub channels: Vec<ModularChannelParams>,
     pub ma_config: Option<&'a MaConfig>,
+    pub tracker: Option<&'b AllocTracker>,
 }
 
-impl<'a> ModularParams<'a> {
+impl<'a, 'b> ModularParams<'a, 'b> {
     pub fn new(
         width: u32,
         height: u32,
@@ -16,6 +19,7 @@ impl<'a> ModularParams<'a> {
         bit_depth: u32,
         channel_shifts: Vec<ChannelShift>,
         ma_config: Option<&'a MaConfig>,
+        tracker: Option<&'b AllocTracker>,
     ) -> Self {
         let channels = channel_shifts
             .into_iter()
@@ -25,7 +29,7 @@ impl<'a> ModularParams<'a> {
                 shift,
             })
             .collect();
-        Self::with_channels(group_dim, bit_depth, channels, ma_config)
+        Self::with_channels(group_dim, bit_depth, channels, ma_config, tracker)
     }
 
     pub fn with_channels(
@@ -33,12 +37,14 @@ impl<'a> ModularParams<'a> {
         bit_depth: u32,
         channels: Vec<ModularChannelParams>,
         ma_config: Option<&'a MaConfig>,
+        tracker: Option<&'b AllocTracker>,
     ) -> Self {
         Self {
             group_dim,
             bit_depth,
             channels,
             ma_config,
+            tracker,
         }
     }
 }

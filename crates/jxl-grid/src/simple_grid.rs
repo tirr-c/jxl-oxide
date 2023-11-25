@@ -1,6 +1,6 @@
 use std::{ops::RangeBounds, ptr::NonNull};
 
-use crate::{SharedSubgrid, SimdVector, AllocHandle, Error, AllocTracker};
+use crate::{AllocHandle, AllocTracker, Error, SharedSubgrid, SimdVector};
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -34,23 +34,6 @@ impl<S: Default + Clone> SimpleGrid<S> {
 
     /// Create a new buffer.
     #[inline]
-    pub fn new(width: usize, height: usize) -> Self {
-        let len = width * height;
-        let mut buf = vec![S::default(); len + Self::ALIGN / std::mem::size_of::<S>()];
-
-        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
-        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize_with(len + offset, S::default);
-
-        Self {
-            width,
-            height,
-            offset,
-            buf,
-            handle: None,
-        }
-    }
-
     pub fn with_alloc_tracker(
         width: usize,
         height: usize,
@@ -58,7 +41,9 @@ impl<S: Default + Clone> SimpleGrid<S> {
     ) -> Result<Self, Error> {
         let len = width * height;
         let buf_len = len + Self::ALIGN / std::mem::size_of::<S>();
-        let handle = tracker.map(|tracker| tracker.alloc(buf_len)).transpose()?;
+        let handle = tracker
+            .map(|tracker| tracker.alloc::<S>(buf_len))
+            .transpose()?;
         let mut buf = vec![S::default(); buf_len];
 
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
@@ -643,11 +628,20 @@ pub struct PaddedGrid<S: Clone> {
 
 impl<S: Default + Clone> PaddedGrid<S> {
     /// Create a new buffer.
-    pub fn new(width: usize, height: usize, padding: usize) -> Self {
-        Self {
-            grid: SimpleGrid::new(width + padding * 2, height + padding * 2),
+    pub fn with_alloc_tracker(
+        width: usize,
+        height: usize,
+        padding: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, crate::Error> {
+        Ok(Self {
+            grid: SimpleGrid::with_alloc_tracker(
+                width + padding * 2,
+                height + padding * 2,
+                tracker,
+            )?,
             padding,
-        }
+        })
     }
 }
 

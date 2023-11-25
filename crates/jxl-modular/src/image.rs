@@ -1,6 +1,6 @@
 use jxl_bitstream::{unpack_signed, Bitstream};
 use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
 use crate::{
     ma::{FlatMaTree, MaTreeLeafClustered},
@@ -108,19 +108,22 @@ impl ModularImageDestination {
         group_dim: u32,
         bit_depth: u32,
         channels: ModularChannels,
-    ) -> Self {
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self> {
         let mut meta_channels = Vec::new();
         for tr in &header.transform {
-            tr.prepare_meta_channels(&mut meta_channels);
+            tr.prepare_meta_channels(&mut meta_channels, tracker)?;
         }
 
         let image_channels = channels
             .info
             .iter()
-            .map(|ch| SimpleGrid::new(ch.width as usize, ch.height as usize))
-            .collect();
+            .map(|ch| {
+                SimpleGrid::with_alloc_tracker(ch.width as usize, ch.height as usize, tracker)
+            })
+            .collect::<std::result::Result<_, _>>()?;
 
-        Self {
+        Ok(Self {
             header,
             ma_ctx,
             group_dim,
@@ -128,7 +131,7 @@ impl ModularImageDestination {
             channels,
             meta_channels,
             image_channels,
-        }
+        })
     }
 
     pub fn try_clone(&self) -> Result<Self> {
@@ -138,8 +141,16 @@ impl ModularImageDestination {
             group_dim: self.group_dim,
             bit_depth: self.bit_depth,
             channels: self.channels.clone(),
-            meta_channels: self.meta_channels.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
-            image_channels: self.image_channels.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
+            meta_channels: self
+                .meta_channels
+                .iter()
+                .map(|x| x.try_clone())
+                .collect::<std::result::Result<_, _>>()?,
+            image_channels: self
+                .image_channels
+                .iter()
+                .map(|x| x.try_clone())
+                .collect::<std::result::Result<_, _>>()?,
         })
     }
 
@@ -343,6 +354,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
         self,
         bitstream: &mut Bitstream,
         global_ma_config: Option<&MaConfig>,
+        tracker: Option<&AllocTracker>,
     ) -> Result<RecursiveModularImage<'dest>> {
         let header = bitstream.read_bundle::<crate::ModularHeader>()?;
         let ma_ctx = if header.use_global_tree {
@@ -365,7 +377,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
             image_channels: self.grid,
         };
         for tr in &image.header.transform {
-            tr.prepare_meta_channels(&mut image.meta_channels);
+            tr.prepare_meta_channels(&mut image.meta_channels, tracker)?;
         }
         Ok(image)
     }

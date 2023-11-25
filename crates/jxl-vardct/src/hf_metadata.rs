@@ -1,12 +1,12 @@
 use jxl_bitstream::{Bitstream, Bundle};
-use jxl_grid::SimpleGrid;
+use jxl_grid::{AllocTracker, SimpleGrid};
 use jxl_modular::{MaConfig, Modular, ModularChannelParams, ModularParams};
 
 use crate::{Result, TransformType};
 
 /// Parameters for decoding `HfMetadata`.
 #[derive(Debug)]
-pub struct HfMetadataParams<'ma, 'pool> {
+pub struct HfMetadataParams<'ma, 'pool, 'tracker> {
     pub num_lf_groups: u32,
     pub lf_group_idx: u32,
     pub lf_width: u32,
@@ -16,6 +16,7 @@ pub struct HfMetadataParams<'ma, 'pool> {
     pub global_ma_config: Option<&'ma MaConfig>,
     pub epf: Option<(f32, [f32; 8])>,
     pub quantizer_global_scale: u32,
+    pub tracker: Option<&'tracker AllocTracker>,
     pub pool: &'pool jxl_threadpool::JxlThreadPool,
 }
 
@@ -47,10 +48,10 @@ pub enum BlockInfo {
     },
 }
 
-impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
+impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: HfMetadataParams<'_, '_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: HfMetadataParams) -> Result<Self> {
         let HfMetadataParams {
             num_lf_groups,
             lf_group_idx,
@@ -61,6 +62,7 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
             global_ma_config,
             epf,
             quantizer_global_scale,
+            tracker,
             pool,
         } = params;
 
@@ -85,7 +87,8 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
             ModularChannelParams::new(nb_blocks, 2),
             ModularChannelParams::new(bw as u32, bh as u32),
         ];
-        let params = ModularParams::with_channels(0, bits_per_sample, channels, global_ma_config);
+        let params =
+            ModularParams::with_channels(0, bits_per_sample, channels, global_ma_config, tracker);
         let mut modular = Modular::parse(bitstream, params)?;
         let image = modular.image_mut().unwrap();
         let mut subimage = image.prepare_subimage()?;
@@ -101,7 +104,7 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
 
         let sharpness = sharpness.buf();
 
-        let mut epf_sigma = SimpleGrid::new(bw, bh);
+        let mut epf_sigma = SimpleGrid::with_alloc_tracker(bw, bh, tracker)?;
         let epf_sigma_buf = epf_sigma.buf_mut();
         let epf = epf.map(|(quant_mul, sharp_lut)| {
             (
@@ -110,7 +113,7 @@ impl Bundle<HfMetadataParams<'_, '_>> for HfMetadata {
             )
         });
 
-        let mut block_info = SimpleGrid::<BlockInfo>::new(bw, bh);
+        let mut block_info = SimpleGrid::<BlockInfo>::with_alloc_tracker(bw, bh, tracker)?;
         let mut x;
         let mut y = 0usize;
         let mut data_idx = 0usize;

@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
 use crate::Result;
 
@@ -183,17 +183,28 @@ impl Region {
 pub struct ImageWithRegion {
     region: Region,
     buffer: Vec<SimpleGrid<f32>>,
+    tracker: Option<AllocTracker>,
 }
 
 impl ImageWithRegion {
-    pub fn from_region(channels: usize, region: Region) -> Self {
+    pub fn from_region_and_tracker(
+        channels: usize,
+        region: Region,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self> {
         let width = region.width as usize;
         let height = region.height as usize;
-        let buffer = std::iter::repeat_with(|| SimpleGrid::new(width, height))
-            .take(channels)
-            .collect();
+        let buffer =
+            std::iter::repeat_with(|| SimpleGrid::with_alloc_tracker(width, height, tracker))
+                .take(channels)
+                .collect::<std::result::Result<_, _>>()?;
+        let tracker = tracker.cloned();
 
-        Self { region, buffer }
+        Ok(Self {
+            region,
+            buffer,
+            tracker,
+        })
     }
 
     pub fn from_buffer(buffer: Vec<SimpleGrid<f32>>, left: i32, top: i32) -> Self {
@@ -207,6 +218,7 @@ impl ImageWithRegion {
                     height: 0,
                 },
                 buffer,
+                tracker: None,
             }
         } else {
             let width = buffer[0].width();
@@ -217,6 +229,7 @@ impl ImageWithRegion {
             {
                 panic!("Buffer size is not uniform");
             }
+            let tracker = buffer[0].tracker();
             Self {
                 region: Region {
                     top,
@@ -225,6 +238,7 @@ impl ImageWithRegion {
                     height: height as u32,
                 },
                 buffer,
+                tracker,
             }
         }
     }
@@ -232,8 +246,18 @@ impl ImageWithRegion {
     pub fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             region: self.region,
-            buffer: self.buffer.iter().map(|x| x.try_clone()).collect::<std::result::Result<_, _>>()?,
+            buffer: self
+                .buffer
+                .iter()
+                .map(|x| x.try_clone())
+                .collect::<std::result::Result<_, _>>()?,
+            tracker: self.tracker.clone(),
         })
+    }
+
+    #[inline]
+    pub fn alloc_tracker(&self) -> Option<&AllocTracker> {
+        self.tracker.as_ref()
     }
 
     #[inline]
@@ -262,12 +286,13 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub fn add_channel(&mut self) -> &mut SimpleGrid<f32> {
-        self.buffer.push(SimpleGrid::new(
+    pub fn add_channel(&mut self) -> Result<&mut SimpleGrid<f32>> {
+        self.buffer.push(SimpleGrid::with_alloc_tracker(
             self.region.width as usize,
             self.region.height as usize,
-        ));
-        self.buffer.last_mut().unwrap()
+            self.tracker.as_ref(),
+        )?);
+        Ok(self.buffer.last_mut().unwrap())
     }
 
     #[inline]
@@ -275,11 +300,12 @@ impl ImageWithRegion {
         self.buffer.drain(range);
     }
 
-    pub fn clone_intersection(&self, new_region: Region) -> Self {
+    pub fn clone_intersection(&self, new_region: Region) -> Result<Self> {
         let intersection = self.region.intersection(new_region);
         let begin_x = intersection.left.abs_diff(self.region.left) as usize;
         let begin_y = intersection.top.abs_diff(self.region.top) as usize;
-        let mut out = Self::from_region(self.channels(), intersection);
+        let mut out =
+            Self::from_region_and_tracker(self.channels(), intersection, self.tracker.as_ref())?;
 
         for (input, output) in self.buffer.iter().zip(out.buffer.iter_mut()) {
             let input_stride = input.width();
@@ -296,7 +322,7 @@ impl ImageWithRegion {
             }
         }
 
-        out
+        Ok(out)
     }
 
     pub(crate) fn clone_region_channel(

@@ -3,6 +3,8 @@
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
+use crate::Result;
+
 pub(crate) struct EpfRow<'buf> {
     pub(crate) input_buf: [&'buf [f32]; 3],
     pub(crate) output_buf_rows: [&'buf mut [f32]; 3],
@@ -326,23 +328,29 @@ define_epf! {
     );
 }
 
-pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) -> Result<()> {
     for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-        run_gabor_inner(fb, weight1, weight2);
+        run_gabor_inner(fb, weight1, weight2)?;
     }
+    Ok(())
 }
 
 #[inline(always)]
-pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2: f32) {
+pub fn run_gabor_inner(
+    fb: &mut jxl_grid::SimpleGrid<f32>,
+    weight1: f32,
+    weight2: f32,
+) -> Result<()> {
     let global_weight = (1.0 + weight1 * 4.0 + weight2 * 4.0).recip();
 
+    let tracker = fb.tracker();
     let width = fb.width();
     let height = fb.height();
     if width * height <= 1 {
-        return;
+        return Ok(());
     }
 
-    let mut input = SimpleGrid::new(width, height + 2);
+    let mut input = SimpleGrid::with_alloc_tracker(width, height + 2, tracker.as_ref())?;
     let input = input.buf_mut();
     input[width..][..width * height].copy_from_slice(fb.buf());
     input[..width].copy_from_slice(&fb.buf()[..width]);
@@ -359,7 +367,7 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
                 + (input[idx] + input[idx + 2]) * weight2 * 2.0)
                 * global_weight;
         }
-        return;
+        return Ok(());
     }
 
     let len = width * height - 2;
@@ -431,4 +439,5 @@ pub fn run_gabor_inner(fb: &mut jxl_grid::SimpleGrid<f32>, weight1: f32, weight2
                 * weight2)
             * global_weight;
     }
+    Ok(())
 }

@@ -10,7 +10,7 @@ pub fn apply_epf(
     lf_groups: &HashMap<u32, LfGroup>,
     frame_header: &FrameHeader,
     pool: &jxl_threadpool::JxlThreadPool,
-) {
+) -> crate::Result<()> {
     let EdgePreservingFilter::Enabled {
         iters,
         channel_scale,
@@ -19,12 +19,13 @@ pub fn apply_epf(
         ..
     } = frame_header.restoration_filter.epf
     else {
-        return;
+        return Ok(());
     };
 
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
 
+    let tracker = fb.alloc_tracker().cloned();
     let region = fb.region();
     let fb = fb.buffer_mut();
     assert!(region.left % 8 == 0);
@@ -36,15 +37,16 @@ pub fn apply_epf(
     let padded_width = (width + 8 + 3 + 7) & !7;
     let padded_height = height + 6;
     let mut fb_in = [
-        SimpleGrid::new(padded_width, padded_height),
-        SimpleGrid::new(padded_width, padded_height),
-        SimpleGrid::new(padded_width, padded_height),
+        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
+        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
+        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
     ];
     let fb_out = <&mut [_; 3]>::try_from(fb).unwrap();
 
     tracing::debug!("Preparing sigma grid");
     let sigma_region = region.downsample(3);
-    let mut sigma_image = ImageWithRegion::from_region(1, sigma_region);
+    let mut sigma_image =
+        ImageWithRegion::from_region_and_tracker(1, sigma_region, tracker.as_ref())?;
     let sigma_grid = &mut sigma_image.buffer_mut()[0];
     let mut need_sigma_init = true;
 
@@ -243,4 +245,6 @@ pub fn apply_epf(
             pool,
         );
     }
+
+    Ok(())
 }

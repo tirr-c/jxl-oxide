@@ -1,9 +1,9 @@
 use std::num::Wrapping;
 
 use jxl_frame::{data::NoiseParameters, FrameHeader};
-use jxl_grid::{PaddedGrid, SimpleGrid};
+use jxl_grid::{AllocTracker, PaddedGrid, SimpleGrid};
 
-use crate::region::ImageWithRegion;
+use crate::{region::ImageWithRegion, Result};
 
 pub fn render_noise(
     header: &FrameHeader,
@@ -12,8 +12,9 @@ pub fn render_noise(
     base_correlations_xb: Option<(f32, f32)>,
     grid: &mut ImageWithRegion,
     params: &NoiseParameters,
-) -> crate::Result<()> {
+) -> Result<()> {
     let region = grid.region();
+    let tracker = grid.alloc_tracker().cloned();
     let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else {
         panic!()
     };
@@ -26,7 +27,12 @@ pub fn render_noise(
     let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
 
     // TODO: Initialize smaller noise grid.
-    let noise_buffer = init_noise(visible_frames_num, invisible_frames_num, header);
+    let noise_buffer = init_noise(
+        visible_frames_num,
+        invisible_frames_num,
+        header,
+        tracker.as_ref(),
+    )?;
 
     for fy in 0..height {
         let y = fy + top;
@@ -79,7 +85,8 @@ fn init_noise(
     visible_frames: usize,
     invisible_frames: usize,
     header: &FrameHeader,
-) -> [SimpleGrid<f32>; 3] {
+    tracker: Option<&AllocTracker>,
+) -> Result<[SimpleGrid<f32>; 3]> {
     let seed0 = rng_seed0(visible_frames, invisible_frames);
 
     // We use header.width and header.height because
@@ -96,9 +103,9 @@ fn init_noise(
     const PADDING: usize = 2;
 
     let mut noise_buffer: [PaddedGrid<f32>; 3] = [
-        PaddedGrid::new(width, height, PADDING),
-        PaddedGrid::new(width, height, PADDING),
-        PaddedGrid::new(width, height, PADDING),
+        PaddedGrid::with_alloc_tracker(width, height, PADDING, tracker)?,
+        PaddedGrid::with_alloc_tracker(width, height, PADDING, tracker)?,
+        PaddedGrid::with_alloc_tracker(width, height, PADDING, tracker)?,
     ];
 
     for group_idx in 0..groups_num {
@@ -114,9 +121,9 @@ fn init_noise(
     }
 
     let mut convolved: [SimpleGrid<f32>; 3] = [
-        SimpleGrid::new(width, height),
-        SimpleGrid::new(width, height),
-        SimpleGrid::new(width, height),
+        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
     ];
 
     let mut laplacian = [[0.16f32; 5]; 5];
@@ -141,7 +148,7 @@ fn init_noise(
         });
     }
 
-    convolved
+    Ok(convolved)
 }
 
 #[inline]

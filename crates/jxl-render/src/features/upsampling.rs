@@ -6,7 +6,7 @@ pub fn upsample(
     image_header: &jxl_image::ImageHeader,
     frame_header: &FrameHeader,
     channel_idx: usize,
-) {
+) -> crate::Result<()> {
     let metadata = &image_header.metadata;
 
     let factor;
@@ -23,11 +23,11 @@ pub fn upsample(
             let last_up = dim_shift % 3;
 
             for _ in 0..up8 {
-                upsample_inner::<8, 210>(grid, &metadata.up8_weight);
+                upsample_inner::<8, 210>(grid, &metadata.up8_weight)?;
             }
             match last_up {
-                1 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
-                2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
+                1 => upsample_inner::<2, 15>(grid, &metadata.up2_weight)?,
+                2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight)?,
                 _ => {}
             }
         }
@@ -42,7 +42,7 @@ pub fn upsample(
     }
 
     match factor {
-        1 => {}
+        1 => Ok(()),
         2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
         4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
         8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight),
@@ -53,8 +53,9 @@ pub fn upsample(
 fn upsample_inner<const K: usize, const NW: usize>(
     grid: &mut SimpleGrid<f32>,
     weights: &[f32; NW],
-) {
+) -> crate::Result<()> {
     assert!((K == 2 && NW == 15) || (K == 4 && NW == 55) || (K == 8 && NW == 210));
+    let tracker = grid.tracker();
     let grid_width = grid.width();
     let grid_height = grid.height();
     let frame_width = grid_width << K.ilog2();
@@ -62,7 +63,8 @@ fn upsample_inner<const K: usize, const NW: usize>(
 
     // 5x5 kernel
     const PADDING: usize = 2;
-    let mut padded = PaddedGrid::new(grid_width, grid_height, PADDING);
+    let mut padded =
+        PaddedGrid::with_alloc_tracker(grid_width, grid_height, PADDING, tracker.as_ref())?;
     let padded_width = grid_width + PADDING * 2;
 
     let grid_buf = grid.buf();
@@ -99,7 +101,7 @@ fn upsample_inner<const K: usize, const NW: usize>(
         }
     }
 
-    *grid = SimpleGrid::new(frame_width, frame_height);
+    *grid = SimpleGrid::with_alloc_tracker(frame_width, frame_height, tracker.as_ref())?;
     let padded_buf = padded.buf_padded();
     let grid_buf = grid.buf_mut();
     for y in 0..frame_height {
@@ -128,4 +130,6 @@ fn upsample_inner<const K: usize, const NW: usize>(
             grid_buf[y * frame_width + x] = sum.clamp(min, max);
         }
     }
+
+    Ok(())
 }

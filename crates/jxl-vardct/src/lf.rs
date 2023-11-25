@@ -1,4 +1,5 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_grid::AllocTracker;
 use jxl_modular::{ChannelShift, MaConfig, Modular, ModularParams};
 
 use crate::Result;
@@ -115,7 +116,7 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
 
 /// Paramters for decoding `LfCoeff`.
 #[derive(Debug)]
-pub struct LfCoeffParams<'ma, 'pool> {
+pub struct LfCoeffParams<'ma, 'pool, 'tracker> {
     pub lf_group_idx: u32,
     pub lf_width: u32,
     pub lf_height: u32,
@@ -123,6 +124,7 @@ pub struct LfCoeffParams<'ma, 'pool> {
     pub bits_per_sample: u32,
     pub global_ma_config: Option<&'ma MaConfig>,
     pub allow_partial: bool,
+    pub tracker: Option<&'tracker AllocTracker>,
     pub pool: &'pool jxl_threadpool::JxlThreadPool,
 }
 
@@ -134,10 +136,10 @@ pub struct LfCoeff {
     pub partial: bool,
 }
 
-impl Bundle<LfCoeffParams<'_, '_>> for LfCoeff {
+impl Bundle<LfCoeffParams<'_, '_, '_>> for LfCoeff {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: LfCoeffParams<'_, '_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfCoeffParams) -> Result<Self> {
         let LfCoeffParams {
             lf_group_idx,
             lf_width,
@@ -146,6 +148,7 @@ impl Bundle<LfCoeffParams<'_, '_>> for LfCoeff {
             bits_per_sample,
             global_ma_config,
             allow_partial,
+            tracker,
             pool,
         } = params;
 
@@ -164,6 +167,7 @@ impl Bundle<LfCoeffParams<'_, '_>> for LfCoeff {
             bits_per_sample,
             channel_shifts,
             global_ma_config,
+            tracker,
         );
         let mut lf_quant = Modular::parse(bitstream, lf_quant_params)?;
         let image = lf_quant.image_mut().unwrap();

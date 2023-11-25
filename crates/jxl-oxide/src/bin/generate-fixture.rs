@@ -3,7 +3,7 @@ use std::io::prelude::*;
 fn main() {
     let stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
-    let image = jxl_oxide::JxlImage::from_reader(stdin).unwrap();
+    let image = jxl_oxide::JxlImage::builder().read(stdin).unwrap();
 
     let mut header = [0u8; 12];
     let image_header = image.image_header();

@@ -33,10 +33,10 @@ struct ModularData {
     image: image::ModularImageDestination,
 }
 
-impl Bundle<ModularParams<'_>> for Modular {
+impl Bundle<ModularParams<'_, '_>> for Modular {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
         let inner = if params.channels.is_empty() {
             None
         } else {
@@ -95,10 +95,10 @@ impl Modular {
     }
 }
 
-impl Bundle<ModularParams<'_>> for ModularData {
+impl Bundle<ModularParams<'_, '_>> for ModularData {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         if header.nb_transforms > 512 {
             tracing::error!(
@@ -168,7 +168,8 @@ impl Bundle<ModularParams<'_>> for ModularData {
                 params.group_dim,
                 params.bit_depth,
                 channels,
-            ),
+                params.tracker,
+            )?,
         })
     }
 }
@@ -190,7 +191,7 @@ struct ModularChannels {
 }
 
 impl ModularChannels {
-    fn from_params(params: &ModularParams<'_>) -> Self {
+    fn from_params(params: &ModularParams) -> Self {
         let info = params
             .channels
             .iter()
