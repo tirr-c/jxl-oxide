@@ -1,4 +1,4 @@
-use jxl_oxide::{JxlImage, JxlThreadPool, AllocTracker};
+use jxl_oxide::{AllocTracker, JxlImage, JxlThreadPool};
 
 fn fuzz_decode(data: &[u8]) {
     let image = JxlImage::builder()

@@ -11,7 +11,9 @@ pub fn adaptive_lf_smoothing_impl(
 ) -> crate::Result<()> {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Feature set is checked above.
-        return unsafe { adaptive_lf_smoothing_core_avx2(width, height, lf_image, lf_scale, tracker) };
+        return unsafe {
+            adaptive_lf_smoothing_core_avx2(width, height, lf_image, lf_scale, tracker)
+        };
     }
 
     generic::adaptive_lf_smoothing_impl(width, height, lf_image, lf_scale, tracker)
