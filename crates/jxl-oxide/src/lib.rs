@@ -279,7 +279,7 @@ impl UninitializedJxlImage {
                 &mut bitstream,
                 FrameContext {
                     image_header: image_header.clone(),
-                    tracker: None,
+                    tracker: self.tracker.as_ref(),
                     pool: self.pool.clone(),
                 },
             ) {

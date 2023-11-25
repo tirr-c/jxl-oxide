@@ -422,6 +422,7 @@ impl Frame {
                     &self.image_header.metadata,
                     &self.header,
                     lf_global,
+                    self.tracker.as_ref(),
                     &self.pool,
                 ),
             );
@@ -454,6 +455,7 @@ impl Frame {
                 &self.image_header.metadata,
                 &self.header,
                 lf_global,
+                self.tracker.as_ref(),
                 &self.pool,
             );
             Some(HfGlobal::parse(&mut bitstream, params))
