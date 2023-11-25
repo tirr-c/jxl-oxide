@@ -120,6 +120,7 @@ fn default_pool() -> JxlThreadPool {
     JxlThreadPool::none()
 }
 
+/// JPEG XL image decoder builder.
 #[derive(Debug, Default)]
 pub struct JxlImageBuilder {
     pool: Option<JxlThreadPool>,
