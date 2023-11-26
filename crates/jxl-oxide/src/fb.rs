@@ -10,7 +10,10 @@ pub struct FrameBuffer {
 }
 
 impl FrameBuffer {
-    pub(crate) fn new(width: usize, height: usize, channels: usize) -> Self {
+    /// Creates a new framebuffer with given dimension.
+    ///
+    /// Note that framebuffer allocations are not tracked.
+    pub fn new(width: usize, height: usize, channels: usize) -> Self {
         Self {
             width,
             height,

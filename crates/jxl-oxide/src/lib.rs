@@ -870,6 +870,123 @@ impl Render {
     }
 }
 
+impl Render {
+    /// Creates a stream that writes to borrowed buffer.
+    ///
+    /// The stream will include black and alpha channels, if exists, in addition to color channels.
+    /// Orientation is applied.
+    pub fn stream(&self) -> ImageStream {
+        let orientation = self.orientation;
+        assert!((1..=8).contains(&orientation));
+        let mut width = self.color_channels[0].width() as u32;
+        let mut height = self.color_channels[0].height() as u32;
+        if orientation >= 5 {
+            std::mem::swap(&mut width, &mut height);
+        }
+        let mut grids: Vec<_> = self.color_channels.iter().collect();
+
+        // Find black
+        for ec in &self.extra_channels {
+            if ec.is_black() {
+                grids.push(&ec.grid);
+                break;
+            }
+        }
+        // Find alpha
+        for ec in &self.extra_channels {
+            if ec.is_alpha() {
+                grids.push(&ec.grid);
+                break;
+            }
+        }
+
+        ImageStream {
+            orientation,
+            width,
+            height,
+            grids,
+            y: 0,
+            x: 0,
+            c: 0,
+        }
+    }
+}
+
+/// Image stream that writes to borrowed buffer.
+pub struct ImageStream<'r> {
+    orientation: u32,
+    width: u32,
+    height: u32,
+    grids: Vec<&'r SimpleGrid<f32>>,
+    y: u32,
+    x: u32,
+    c: u32,
+}
+
+impl ImageStream<'_> {
+    /// Returns width of the image.
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Returns height of the image.
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Returns the number of channels of the image.
+    #[inline]
+    pub fn channels(&self) -> u32 {
+        self.grids.len() as u32
+    }
+
+    /// Writes next samples to the buffer, returning how many samples are written.
+    pub fn write_to_buffer(&mut self, buf: &mut [f32]) -> usize {
+        let channels = self.grids.len() as u32;
+        let mut buf_it = buf.iter_mut();
+        let mut count = 0usize;
+        'outer: while self.y < self.height {
+            while self.x < self.width {
+                while self.c < channels {
+                    let Some(v) = buf_it.next() else {
+                        break 'outer;
+                    };
+                    let (x, y) = self.to_original_coord(self.x, self.y);
+                    *v = *self.grids[self.c as usize]
+                        .get(x as usize, y as usize)
+                        .unwrap();
+                    count += 1;
+                    self.c += 1;
+                }
+                self.c = 0;
+                self.x += 1;
+            }
+            self.x = 0;
+            self.y += 1;
+        }
+        count
+    }
+
+    #[inline]
+    fn to_original_coord(&self, x: u32, y: u32) -> (u32, u32) {
+        let width = self.width;
+        let height = self.height;
+        match self.orientation {
+            1 => (x, y),
+            2 => (width - x - 1, y),
+            3 => (width - x - 1, height - y - 1),
+            4 => (x, height - y - 1),
+            5 => (y, x),
+            6 => (y, width - x - 1),
+            7 => (height - y - 1, width - x - 1),
+            8 => (height - y - 1, x),
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// Extra channel of the image.
 #[derive(Debug)]
 pub struct ExtraChannel {
