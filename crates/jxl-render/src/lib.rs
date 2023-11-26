@@ -7,6 +7,7 @@ use jxl_frame::{
     header::FrameType,
     Frame, FrameContext,
 };
+use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 
 mod blend;
@@ -33,6 +34,7 @@ use state::*;
 pub struct RenderContext {
     image_header: Arc<ImageHeader>,
     pool: JxlThreadPool,
+    tracker: Option<AllocTracker>,
     pub(crate) frames: Vec<Arc<IndexedFrame>>,
     pub(crate) renders: Vec<Arc<FrameRenderHandle>>,
     pub(crate) keyframes: Vec<usize>,
@@ -47,16 +49,33 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    /// Creates a new render context without any multithreading.
-    pub fn new(image_header: Arc<ImageHeader>) -> Self {
-        Self::with_threads(image_header, JxlThreadPool::none())
+    pub fn builder() -> RenderContextBuilder {
+        RenderContextBuilder::default()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct RenderContextBuilder {
+    pool: Option<JxlThreadPool>,
+    tracker: Option<AllocTracker>,
+}
+
+impl RenderContextBuilder {
+    pub fn pool(mut self, pool: JxlThreadPool) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
-    /// Creates a new render context with custom thread pool.
-    pub fn with_threads(image_header: Arc<ImageHeader>, pool: JxlThreadPool) -> Self {
-        Self {
+    pub fn alloc_tracker(mut self, tracker: AllocTracker) -> Self {
+        self.tracker = Some(tracker);
+        self
+    }
+
+    pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
+        RenderContext {
             image_header,
-            pool,
+            tracker: self.tracker,
+            pool: self.pool.unwrap_or_else(JxlThreadPool::none),
             frames: Vec::new(),
             renders: Vec::new(),
             keyframes: Vec::new(),
@@ -69,6 +88,13 @@ impl RenderContext {
             loading_render_cache: None,
             loading_region: None,
         }
+    }
+}
+
+impl RenderContext {
+    #[inline]
+    pub fn alloc_tracker(&self) -> Option<&AllocTracker> {
+        self.tracker.as_ref()
     }
 }
 
@@ -193,6 +219,7 @@ impl RenderContext {
             bitstream,
             FrameContext {
                 image_header: image_header.clone(),
+                tracker: self.tracker.as_ref(),
                 pool: self.pool.clone(),
             },
         ) {
@@ -440,7 +467,7 @@ impl RenderContext {
         let mut grid = self.render_by_index(idx, image_region)?;
         let frame = &*self.frames[idx];
 
-        self.postprocess_keyframe(frame, &mut grid, image_region);
+        self.postprocess_keyframe(frame, &mut grid, image_region)?;
         Ok(grid)
     }
 
@@ -469,7 +496,7 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         };
 
-        self.postprocess_keyframe(frame, &mut grid, image_region);
+        self.postprocess_keyframe(frame, &mut grid, image_region)?;
         Ok((frame, grid))
     }
 
@@ -536,7 +563,7 @@ impl RenderContext {
 
         if frame.header().lf_level > 0 {
             let frame_region = image_region_to_frame(frame, image_region, true);
-            Ok(upsample_lf(&image, frame, frame_region))
+            Ok(upsample_lf(&image, frame, frame_region)?)
         } else {
             Ok(image)
         }
@@ -547,10 +574,14 @@ impl RenderContext {
         frame: &IndexedFrame,
         grid: &mut ImageWithRegion,
         image_region: Option<Region>,
-    ) {
+    ) -> Result<()> {
         let frame_region = image_region_to_frame(frame, image_region, frame.header().lf_level > 0);
         if grid.region() != frame_region {
-            let mut new_grid = ImageWithRegion::from_region(grid.channels(), frame_region);
+            let mut new_grid = ImageWithRegion::from_region_and_tracker(
+                grid.channels(),
+                frame_region,
+                self.tracker.as_ref(),
+            )?;
             for (ch, g) in new_grid.buffer_mut().iter_mut().enumerate() {
                 grid.clone_region_channel(frame_region, ch, g);
             }
@@ -572,6 +603,7 @@ impl RenderContext {
 
         let channels = if self.metadata().grayscale() { 1 } else { 3 };
         grid.remove_channels(channels..3);
+        Ok(())
     }
 }
 
@@ -663,11 +695,15 @@ fn upsample_lf(
     image: &ImageWithRegion,
     frame: &IndexedFrame,
     frame_region: Region,
-) -> ImageWithRegion {
+) -> Result<ImageWithRegion> {
     let factor = frame.header().lf_level * 3;
     let step = 1usize << factor;
     let new_region = image.region().upsample(factor);
-    let mut new_image = ImageWithRegion::from_region(image.channels(), new_region);
+    let mut new_image = ImageWithRegion::from_region_and_tracker(
+        image.channels(),
+        new_region,
+        frame.alloc_tracker(),
+    )?;
     for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
         let height = original.height();
         let width = original.width();

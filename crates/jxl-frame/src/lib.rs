@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use jxl_bitstream::{read_bits, Bitstream, Bundle};
+use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
 
 pub mod data;
@@ -41,6 +42,7 @@ use crate::data::*;
 #[derive(Debug)]
 pub struct Frame {
     pool: JxlThreadPool,
+    tracker: Option<AllocTracker>,
     image_header: Arc<ImageHeader>,
     header: FrameHeader,
     toc: Toc,
@@ -74,16 +76,22 @@ impl From<TocGroup> for GroupData {
 }
 
 #[derive(Debug, Clone)]
-pub struct FrameContext {
+pub struct FrameContext<'a> {
     pub image_header: Arc<ImageHeader>,
+    pub tracker: Option<&'a AllocTracker>,
     pub pool: JxlThreadPool,
 }
 
-impl Bundle<FrameContext> for Frame {
+impl Bundle<FrameContext<'_>> for Frame {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, ctx: FrameContext) -> Result<Self> {
-        let FrameContext { image_header, pool } = ctx;
+        let FrameContext {
+            image_header,
+            tracker,
+            pool,
+        } = ctx;
+        let tracker = tracker.cloned();
 
         bitstream.zero_pad_to_byte()?;
         let base_offset = bitstream.num_read_bits() / 8;
@@ -166,6 +174,7 @@ impl Bundle<FrameContext> for Frame {
 
         Ok(Self {
             pool,
+            tracker,
             image_header,
             header,
             toc,
@@ -178,6 +187,11 @@ impl Bundle<FrameContext> for Frame {
 }
 
 impl Frame {
+    #[inline]
+    pub fn alloc_tracker(&self) -> Option<&AllocTracker> {
+        self.tracker.as_ref()
+    }
+
     pub fn image_header(&self) -> &ImageHeader {
         &self.image_header
     }
@@ -237,7 +251,12 @@ impl Frame {
             let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = LfGlobal::parse(
                 &mut bitstream,
-                LfGlobalParams::new(&self.image_header, &self.header, false),
+                LfGlobalParams::new(
+                    &self.image_header,
+                    &self.header,
+                    self.tracker.as_ref(),
+                    false,
+                ),
             );
             if lf_global.is_ok() {
                 tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
@@ -254,7 +273,12 @@ impl Frame {
             let mut bitstream = Bitstream::new(&group.bytes);
             LfGlobal::parse(
                 &mut bitstream,
-                LfGlobalParams::new(&self.image_header, &self.header, allow_partial),
+                LfGlobalParams::new(
+                    &self.image_header,
+                    &self.header,
+                    self.tracker.as_ref(),
+                    allow_partial,
+                ),
             )
         })
     }
@@ -293,6 +317,7 @@ impl Frame {
                     mlf_group,
                     lf_group_idx,
                     allow_partial,
+                    tracker: self.tracker.as_ref(),
                     pool: &self.pool,
                 },
             );
@@ -321,6 +346,7 @@ impl Frame {
                     mlf_group,
                     lf_group_idx,
                     allow_partial,
+                    tracker: self.tracker.as_ref(),
                     pool: &self.pool,
                 },
             );
@@ -353,7 +379,10 @@ impl Frame {
 
             if offset == 0 {
                 let lf_global = lf_global.unwrap();
-                let mut gmodular = lf_global.gmodular.clone();
+                let mut gmodular = match lf_global.gmodular.try_clone() {
+                    Ok(gmodular) => gmodular,
+                    Err(e) => return Some(Err(e)),
+                };
                 let groups = gmodular
                     .modular
                     .image_mut()
@@ -393,6 +422,7 @@ impl Frame {
                     &self.image_header.metadata,
                     &self.header,
                     lf_global,
+                    self.tracker.as_ref(),
                     &self.pool,
                 ),
             );
@@ -425,6 +455,7 @@ impl Frame {
                 &self.image_header.metadata,
                 &self.header,
                 lf_global,
+                self.tracker.as_ref(),
                 &self.pool,
             );
             Some(HfGlobal::parse(&mut bitstream, params))

@@ -102,14 +102,14 @@ pub(crate) fn render_frame(
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
                     let render = lf.image.run_with_image(image_region)?;
-                    (super::upsample_lf(&render, &lf.frame, frame_region), None)
+                    (super::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
             }
         }
     };
     if fb.region().intersection(full_frame_region) != fb.region() {
-        let mut new_fb = fb.clone_intersection(full_frame_region);
+        let mut new_fb = fb.clone_intersection(full_frame_region)?;
         std::mem::swap(&mut fb, &mut new_fb);
     }
 
@@ -118,13 +118,13 @@ pub(crate) fn render_frame(
         filter::apply_jpeg_upsampling([a, b, c], frame_header.jpeg_upsampling);
     }
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
-        filter::apply_gabor_like([a, b, c], weights);
+        filter::apply_gabor_like([a, b, c], weights)?;
     }
-    filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &pool);
+    filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &pool)?;
 
-    upsample_color_channels(&mut fb, image_header, frame_header, frame_region);
+    upsample_color_channels(&mut fb, image_header, frame_header, frame_region)?;
     if let Some(gmodular) = gmodular {
-        append_extra_channels(frame, &mut fb, gmodular, frame_region);
+        append_extra_channels(frame, &mut fb, gmodular, frame_region)?;
     }
 
     render_features(
@@ -157,7 +157,7 @@ pub(crate) fn render_frame(
                 reference_frames.refs,
                 frame,
                 &fb,
-            )
+            )?
         },
     )
 }
@@ -167,21 +167,22 @@ fn upsample_color_channels(
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     original_region: Region,
-) {
+) -> Result<()> {
     let upsample_factor = frame_header.upsampling.ilog2();
     let upsampled_region = fb.region().upsample(upsample_factor);
     let upsampled_buffer = if upsample_factor == 0 {
         if fb.region() == original_region {
-            return;
+            return Ok(());
         }
         fb.take_buffer()
     } else {
         let mut buffer = fb.take_buffer();
-        tracing::trace_span!("Upsample color channels").in_scope(|| {
+        tracing::trace_span!("Upsample color channels").in_scope(|| -> Result<_> {
             for (idx, g) in buffer.iter_mut().enumerate() {
-                features::upsample(g, image_header, frame_header, idx);
+                features::upsample(g, image_header, frame_header, idx)?;
             }
-        });
+            Ok(())
+        })?;
         buffer
     };
 
@@ -190,12 +191,17 @@ fn upsample_color_channels(
         upsampled_region.left,
         upsampled_region.top,
     );
-    tracing::trace_span!("Copy upsampled color channels").in_scope(|| {
-        *fb = ImageWithRegion::from_region(upsampled_fb.channels(), original_region);
+    tracing::trace_span!("Copy upsampled color channels").in_scope(|| -> Result<_> {
+        *fb = ImageWithRegion::from_region_and_tracker(
+            upsampled_fb.channels(),
+            original_region,
+            fb.alloc_tracker(),
+        )?;
         for (channel_idx, output) in fb.buffer_mut().iter_mut().enumerate() {
             upsampled_fb.clone_region_channel(original_region, channel_idx, output);
         }
-    });
+        Ok(())
+    })
 }
 
 fn append_extra_channels(
@@ -203,14 +209,15 @@ fn append_extra_channels(
     fb: &mut ImageWithRegion,
     gmodular: GlobalModular,
     original_region: Region,
-) {
+) -> Result<()> {
     let fb_region = fb.region();
     let image_header = frame.image_header();
     let frame_header = frame.header();
+    let tracker = frame.alloc_tracker();
 
     let extra_channel_from = gmodular.extra_channel_from();
     let Some(gmodular) = gmodular.modular.into_image() else {
-        return;
+        return Ok(());
     };
     let mut channel_data = gmodular.into_image_channels();
     let channel_data = channel_data.drain(extra_channel_from..);
@@ -233,16 +240,18 @@ fn append_extra_channels(
 
         let width = region.width as usize;
         let height = region.height as usize;
-        let mut out = SimpleGrid::new(width, height);
+        let mut out = SimpleGrid::with_alloc_tracker(width, height, tracker)?;
         modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
 
         let upsampled_region = region.upsample(upsample_factor);
-        features::upsample(&mut out, image_header, frame_header, idx + 3);
+        features::upsample(&mut out, image_header, frame_header, idx + 3)?;
         let out =
             ImageWithRegion::from_buffer(vec![out], upsampled_region.left, upsampled_region.top);
-        let cropped = fb.add_channel();
+        let cropped = fb.add_channel()?;
         out.clone_region_channel(fb_region, 0, cropped);
     }
+
+    Ok(())
 }
 
 fn render_features(

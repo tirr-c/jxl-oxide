@@ -615,6 +615,9 @@ dependencies = [
 [[package]]
 name = "jxl-grid"
 version = "0.2.0"
+dependencies = [
+ "tracing",
+]
 
 [[package]]
 name = "jxl-image"

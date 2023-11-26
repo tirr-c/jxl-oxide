@@ -1,7 +1,9 @@
 use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
-use jxl_oxide::{CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render};
+use jxl_oxide::{
+    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render,
+};
 use lcms2::Profile;
 
 enum LcmsTransform {
@@ -39,6 +41,9 @@ struct Args {
     /// (unstable) Region to render, in format of 'width height left top'
     #[arg(long, value_parser = parse_crop_info)]
     crop: Option<CropInfo>,
+    /// (unstable) Approximate memory limit, in bytes
+    #[arg(long, default_value_t = 0)]
+    approx_memory_limit: usize,
     /// Format to output
     #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
     output_format: OutputFormat,
@@ -130,8 +135,14 @@ fn main() {
     #[cfg(not(feature = "rayon"))]
     let pool = JxlThreadPool::none();
 
-    let mut image =
-        JxlImage::open_with_threads(&args.input, pool.clone()).expect("Failed to open file");
+    let mut image_builder = JxlImage::builder().pool(pool.clone());
+    if args.approx_memory_limit != 0 {
+        let tracker = AllocTracker::with_limit(args.approx_memory_limit);
+        image_builder = image_builder.alloc_tracker(tracker);
+    }
+    let mut image = image_builder
+        .open(&args.input)
+        .expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }

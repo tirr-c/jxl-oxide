@@ -1,5 +1,5 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::CutGrid;
+use jxl_grid::{AllocTracker, CutGrid};
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, MaConfig};
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{write_hf_coeff, HfCoeffParams};
@@ -8,7 +8,7 @@ use super::{HfGlobal, LfGlobalVarDct, LfGroup};
 use crate::{FrameHeader, Result};
 
 #[derive(Debug)]
-pub struct PassGroupParams<'frame, 'buf, 'g> {
+pub struct PassGroupParams<'frame, 'buf, 'g, 'tracker> {
     pub frame_header: &'frame FrameHeader,
     pub lf_group: &'frame LfGroup,
     pub pass_idx: u32,
@@ -17,6 +17,7 @@ pub struct PassGroupParams<'frame, 'buf, 'g> {
     pub modular: Option<TransformedModularSubimage<'g>>,
     pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
     pub allow_partial: bool,
+    pub tracker: Option<&'tracker AllocTracker>,
     pub pool: &'frame JxlThreadPool,
 }
 
@@ -37,6 +38,7 @@ pub fn decode_pass_group(bitstream: &mut Bitstream, params: PassGroupParams) -> 
         modular,
         vardct,
         allow_partial,
+        tracker,
         pool,
     } = params;
 
@@ -100,6 +102,7 @@ pub fn decode_pass_group(bitstream: &mut Bitstream, params: PassGroupParams) -> 
             lf_quant,
             hf_pass,
             coeff_shift,
+            tracker,
         };
 
         match write_hf_coeff(bitstream, params, hf_coeff_output) {
@@ -121,6 +124,7 @@ pub fn decode_pass_group(bitstream: &mut Bitstream, params: PassGroupParams) -> 
             group_idx,
             modular,
             allow_partial,
+            tracker,
             pool,
         )?;
     }
@@ -137,9 +141,10 @@ pub fn decode_pass_group_modular(
     group_idx: u32,
     modular: TransformedModularSubimage,
     allow_partial: bool,
+    tracker: Option<&AllocTracker>,
     pool: &JxlThreadPool,
 ) -> Result<()> {
-    let mut modular = modular.recursive(bitstream, global_ma_config)?;
+    let mut modular = modular.recursive(bitstream, global_ma_config, tracker)?;
     let mut subimage = modular.prepare_subimage()?;
     subimage.decode(
         bitstream,

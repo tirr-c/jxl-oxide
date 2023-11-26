@@ -128,7 +128,7 @@ impl FrameRenderHandle {
             self.wait_until_render(frame_region)?
         };
         let render = find_compatible_render(&mut guard, frame_region).unwrap();
-        let grid = render.as_grid().unwrap().clone();
+        let grid = render.as_grid().unwrap().try_clone()?;
         Ok(grid)
     }
 

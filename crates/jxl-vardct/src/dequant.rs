@@ -1,4 +1,5 @@
 use jxl_bitstream::{Bitstream, Bundle, BundleDefault};
+use jxl_grid::AllocTracker;
 use jxl_modular::{Modular, ModularParams};
 
 use crate::{Result, TransformType};
@@ -384,15 +385,16 @@ impl DequantMatrixParams {
 
 /// Parameters for decoding `DequantMatrixSet`.
 #[derive(Debug, Copy, Clone)]
-pub struct DequantMatrixSetParams<'a, 'pool> {
+pub struct DequantMatrixSetParams<'a, 'pool, 'tracker> {
     dct_select: TransformType,
     bit_depth: u32,
     stream_index: u32,
     global_ma_config: Option<&'a jxl_modular::MaConfig>,
+    tracker: Option<&'tracker AllocTracker>,
     pool: &'pool jxl_threadpool::JxlThreadPool,
 }
 
-impl<'a, 'pool> DequantMatrixSetParams<'a, 'pool> {
+impl<'a, 'pool, 'tracker> DequantMatrixSetParams<'a, 'pool, 'tracker> {
     /// Create a new `DequantMatrixSetParams` with the given information.
     ///
     /// `num_lf_groups` is used to compute the stream index for Modular images.
@@ -400,6 +402,7 @@ impl<'a, 'pool> DequantMatrixSetParams<'a, 'pool> {
         bit_depth: u32,
         num_lf_groups: u32,
         global_ma_config: Option<&'a jxl_modular::MaConfig>,
+        tracker: Option<&'tracker AllocTracker>,
         pool: &'pool jxl_threadpool::JxlThreadPool,
     ) -> Self {
         Self {
@@ -407,12 +410,13 @@ impl<'a, 'pool> DequantMatrixSetParams<'a, 'pool> {
             bit_depth,
             stream_index: 1 + num_lf_groups * 3,
             global_ma_config,
+            tracker,
             pool,
         }
     }
 }
 
-impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixParams {
+impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixParams {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams) -> Result<Self> {
@@ -454,6 +458,7 @@ impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixParams {
             bit_depth,
             stream_index,
             global_ma_config,
+            tracker,
             pool,
         } = params;
 
@@ -523,6 +528,7 @@ impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixParams {
                     bit_depth,
                     vec![jxl_modular::ChannelShift::from_shift(0); 3],
                     global_ma_config,
+                    tracker,
                 );
                 let mut params = Modular::parse(bitstream, modular_params)?;
                 let image = params.image_mut().unwrap();
@@ -558,10 +564,10 @@ pub struct DequantMatrixSet {
     matrices_tr: Vec<[Vec<f32>; 3]>,
 }
 
-impl Bundle<DequantMatrixSetParams<'_, '_>> for DequantMatrixSet {
+impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams<'_, '_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: DequantMatrixSetParams) -> Result<Self> {
         use TransformType::*;
         const DCT_SELECT_LIST: [TransformType; 17] = [
             Dct8, Hornuss, Dct2, Dct4, Dct16, Dct32, Dct8x16, Dct8x32, Dct16x32, Dct4x8, Afv0,

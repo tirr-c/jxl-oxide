@@ -4,28 +4,28 @@
 //!
 //! # Decoding an image
 //!
-//! Decoding a JPEG XL image starts with constructing [`JxlImage`]. If you're reading a file, you
-//! can use [`JxlImage::open`]:
+//! Decoding a JPEG XL image starts with constructing [`JxlImage`]. First create a builder using
+//! [`JxlImage::builder`], and use [`open`][JxlImageBuilder::open] to read a file:
 //!
 //! ```no_run
 //! # use jxl_oxide::JxlImage;
-//! let image = JxlImage::open("input.jxl").expect("Failed to read image header");
+//! let image = JxlImage::builder().open("input.jxl").expect("Failed to read image header");
 //! println!("{:?}", image.image_header()); // Prints the image header
 //! ```
 //!
 //! Or, if you're reading from a reader that implements [`Read`][std::io::Read], you can use
-//! [`JxlImage::from_reader`]:
+//! [`read`][JxlImageBuilder::read]:
 //!
 //! ```no_run
 //! # use jxl_oxide::JxlImage;
 //! # let reader = std::io::empty();
-//! let image = JxlImage::from_reader(reader).expect("Failed to read image header");
+//! let image = JxlImage::builder().read(reader).expect("Failed to read image header");
 //! println!("{:?}", image.image_header()); // Prints the image header
 //! ```
 //!
 //! In async context, you'll probably want to feed byte buffers directly. In this case, create an
-//! image struct with *uninitialized state* using [`JxlImage::new_uninit`], and call
-//! [`feed_bytes`][UninitializedJxlImage::feed_bytes] and
+//! image struct with *uninitialized state* using [`build_uninit`][JxlImageBuilder::build_uninit],
+//! and call [`feed_bytes`][UninitializedJxlImage::feed_bytes] and
 //! [`try_init`][UninitializedJxlImage::try_init]:
 //!
 //! ```no_run
@@ -52,7 +52,7 @@
 //! #   0x85, 0xb8, 0x27, 0x1a, 0x48, 0x45, 0x84, 0x1b, 0x71, 0x4f, 0xa8, 0x3e,
 //! #   0x8e, 0x30, 0x03, 0x92, 0x84, 0x01,
 //! # ]);
-//! let mut uninit_image = JxlImage::new_uninit();
+//! let mut uninit_image = JxlImage::builder().build_uninit();
 //! let image = loop {
 //!     uninit_image.feed_bytes(reader.read().await?);
 //!     match uninit_image.try_init()? {
@@ -78,7 +78,7 @@
 //!
 //! # fn present_image(_: Render) {}
 //! # fn main() -> jxl_oxide::Result<()> {
-//! # let image = JxlImage::open("input.jxl").unwrap();
+//! # let image = JxlImage::builder().open("input.jxl").unwrap();
 //! for keyframe_idx in 0..image.num_loaded_keyframes() {
 //!     let render = image.render_frame(keyframe_idx)?;
 //!     present_image(render);
@@ -101,7 +101,7 @@ pub use jxl_image as image;
 use jxl_bitstream::Name;
 use jxl_bitstream::{Bitstream, Bundle};
 pub use jxl_frame::{Frame, FrameHeader};
-pub use jxl_grid::SimpleGrid;
+pub use jxl_grid::{AllocTracker, SimpleGrid};
 pub use jxl_image::{ExtraChannelType, ImageHeader};
 use jxl_render::{IndexedFrame, RenderContext};
 
@@ -120,14 +120,89 @@ fn default_pool() -> JxlThreadPool {
     JxlThreadPool::none()
 }
 
+/// JPEG XL image decoder builder.
+#[derive(Debug, Default)]
+pub struct JxlImageBuilder {
+    pool: Option<JxlThreadPool>,
+    tracker: Option<AllocTracker>,
+}
+
+impl JxlImageBuilder {
+    /// Sets a custom thread pool.
+    pub fn pool(mut self, pool: JxlThreadPool) -> Self {
+        self.pool = Some(pool);
+        self
+    }
+
+    /// Sets an allocation tracker.
+    pub fn alloc_tracker(mut self, tracker: AllocTracker) -> Self {
+        self.tracker = Some(tracker);
+        self
+    }
+
+    /// Consumes the builder, and creates an empty, uninitialized JPEG XL image decoder.
+    pub fn build_uninit(self) -> UninitializedJxlImage {
+        UninitializedJxlImage {
+            pool: self.pool.unwrap_or_else(default_pool),
+            tracker: self.tracker,
+            reader: ContainerDetectingReader::new(),
+            buffer: Vec::new(),
+        }
+    }
+
+    /// Consumes the builder, and creates a JPEG XL image decoder by reading image from the reader.
+    pub fn read(self, mut reader: impl std::io::Read) -> Result<JxlImage> {
+        let mut uninit = self.build_uninit();
+        let mut buf = vec![0u8; 4096];
+        let mut image = loop {
+            let count = reader.read(&mut buf)?;
+            if count == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "reader ended before parsing image header",
+                )
+                .into());
+            }
+            let buf = &buf[..count];
+            uninit.feed_bytes(buf)?;
+
+            match uninit.try_init()? {
+                InitializeResult::NeedMoreData(x) => {
+                    uninit = x;
+                }
+                InitializeResult::Initialized(x) => {
+                    break x;
+                }
+            }
+        };
+
+        while !image.end_of_image {
+            let count = reader.read(&mut buf)?;
+            if count == 0 {
+                break;
+            }
+            let buf = &buf[..count];
+            image.feed_bytes(buf)?;
+        }
+
+        Ok(image)
+    }
+
+    /// Consumes the builder, and creates a JPEG XL image decoder by reading image from the file.
+    pub fn open(self, path: impl AsRef<std::path::Path>) -> Result<JxlImage> {
+        let file = std::fs::File::open(path)?;
+        self.read(file)
+    }
+}
+
 /// Empty, uninitialized JPEG XL image.
 ///
 /// # Examples
 /// ```no_run
 /// # fn read_bytes() -> jxl_oxide::Result<&'static [u8]> { Ok(&[]) }
-/// # use jxl_oxide::{UninitializedJxlImage, InitializeResult};
+/// # use jxl_oxide::{JxlImage, InitializeResult};
 /// # fn main() -> jxl_oxide::Result<()> {
-/// let mut uninit_image = UninitializedJxlImage::new();
+/// let mut uninit_image = JxlImage::builder().build_uninit();
 /// let image = loop {
 ///     let buf = read_bytes()?;
 ///     uninit_image.feed_bytes(buf)?;
@@ -146,35 +221,12 @@ fn default_pool() -> JxlThreadPool {
 /// ```
 pub struct UninitializedJxlImage {
     pool: JxlThreadPool,
+    tracker: Option<AllocTracker>,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
 }
 
-impl Default for UninitializedJxlImage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl UninitializedJxlImage {
-    /// Creates an image struct in empty, uninitialized state.
-    ///
-    /// The struct will be created with default thread pool.
-    #[inline]
-    pub fn new() -> Self {
-        Self::with_threads(default_pool())
-    }
-
-    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
-    #[inline]
-    pub fn with_threads(pool: JxlThreadPool) -> Self {
-        Self {
-            pool,
-            reader: ContainerDetectingReader::new(),
-            buffer: Vec::new(),
-        }
-    }
-
     /// Feeds more data into the decoder.
     pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
         self.reader.feed_bytes(buf)?;
@@ -231,6 +283,7 @@ impl UninitializedJxlImage {
                 &mut bitstream,
                 FrameContext {
                     image_header: image_header.clone(),
+                    tracker: self.tracker.as_ref(),
                     pool: self.pool.clone(),
                 },
             ) {
@@ -259,12 +312,18 @@ impl UninitializedJxlImage {
 
         let render_spot_colour = !image_header.metadata.grayscale();
 
+        let mut builder = RenderContext::builder().pool(self.pool.clone());
+        if let Some(tracker) = self.tracker {
+            builder = builder.alloc_tracker(tracker);
+        }
+        let ctx = builder.build(image_header.clone());
+
         let mut image = JxlImage {
             pool: self.pool.clone(),
             reader: self.reader,
-            image_header: image_header.clone(),
+            image_header,
             original_icc: embedded_icc,
-            ctx: RenderContext::with_threads(image_header, self.pool),
+            ctx,
             render_spot_colour,
             end_of_image: false,
             buffer: Vec::new(),
@@ -301,93 +360,10 @@ pub struct JxlImage {
 }
 
 impl JxlImage {
-    /// Creates an image struct in empty, uninitialized state.
-    ///
-    /// The struct will be created with default thread pool.
+    /// Creates a decoder builder with default options.
     #[inline]
-    pub fn new_uninit() -> UninitializedJxlImage {
-        UninitializedJxlImage::new()
-    }
-
-    /// Creates an image struct in empty, uninitialized state, with custom thread pool.
-    #[inline]
-    pub fn new_uninit_with_threads(pool: JxlThreadPool) -> UninitializedJxlImage {
-        UninitializedJxlImage::with_threads(pool)
-    }
-
-    /// Reads image with the given reader.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use jxl_oxide::JxlImage;
-    /// # let reader = std::io::empty();
-    /// let image = JxlImage::from_reader(reader).expect("Failed to read image header");
-    /// println!("{:?}", image.image_header()); // Prints the image header
-    /// ```
-    pub fn from_reader(reader: impl std::io::Read) -> Result<Self> {
-        Self::from_reader_with_threads(reader, default_pool())
-    }
-
-    /// Reads image with the given reader, with custom thread pool.
-    pub fn from_reader_with_threads(
-        mut reader: impl std::io::Read,
-        pool: JxlThreadPool,
-    ) -> Result<Self> {
-        let mut uninit = Self::new_uninit_with_threads(pool);
-        let mut buf = vec![0u8; 4096];
-        let mut image = loop {
-            let count = reader.read(&mut buf)?;
-            if count == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "reader ended before parsing image header",
-                )
-                .into());
-            }
-            let buf = &buf[..count];
-            uninit.feed_bytes(buf)?;
-
-            match uninit.try_init()? {
-                InitializeResult::NeedMoreData(x) => {
-                    uninit = x;
-                }
-                InitializeResult::Initialized(x) => {
-                    break x;
-                }
-            }
-        };
-
-        while !image.end_of_image {
-            let count = reader.read(&mut buf)?;
-            if count == 0 {
-                break;
-            }
-            let buf = &buf[..count];
-            image.feed_bytes(buf)?;
-        }
-
-        Ok(image)
-    }
-
-    /// Reads image from the file.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use jxl_oxide::JxlImage;
-    /// let image = JxlImage::open("input.jxl").expect("Failed to read image header");
-    /// println!("{:?}", image.image_header()); // Prints the image header
-    /// ```
-    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        Self::open_with_threads(path, default_pool())
-    }
-
-    /// Reads image from the file, with custom thread pool.
-    pub fn open_with_threads(
-        path: impl AsRef<std::path::Path>,
-        pool: JxlThreadPool,
-    ) -> Result<Self> {
-        let file = std::fs::File::open(path)?;
-        Self::from_reader_with_threads(file, pool)
+    pub fn builder() -> JxlImageBuilder {
+        JxlImageBuilder::default()
     }
 
     /// Feeds more data into the decoder.

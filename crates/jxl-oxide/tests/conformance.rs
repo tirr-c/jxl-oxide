@@ -119,7 +119,11 @@ fn run_test(
 
         eprintln!("Testing keyframe #{keyframe_idx}");
 
-        let mut grids = render.color_channels().to_vec();
+        let mut grids = render
+            .color_channels()
+            .iter()
+            .map(|x| x.clone_untracked())
+            .collect::<Vec<_>>();
         if let Some(transform) = &transform {
             let channels = grids.len();
 
@@ -136,7 +140,12 @@ fn run_test(
                 }
             }
         }
-        grids.extend(render.extra_channels().iter().map(|ec| ec.grid().clone()));
+        grids.extend(
+            render
+                .extra_channels()
+                .iter()
+                .map(|ec| ec.grid().clone_untracked()),
+        );
 
         let fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), render.orientation());
         let width = fb.width();
@@ -196,7 +205,7 @@ macro_rules! conformance_test {
                 let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
 
                 let path = util::conformance_path(stringify!($name));
-                let image = JxlImage::open(path).expect("Failed to open file");
+                let image = JxlImage::builder().open(path).expect("Failed to open file");
 
                 run_test(image, target_icc, expected, $peak_error, $max_rmse);
             }

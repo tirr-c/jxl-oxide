@@ -3,6 +3,7 @@
 pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
+    Buffer(jxl_grid::Error),
     Modular(jxl_modular::Error),
     VarDct(jxl_vardct::Error),
     InvalidTocPermutation,
@@ -18,6 +19,12 @@ impl From<jxl_bitstream::Error> for Error {
 impl From<jxl_coding::Error> for Error {
     fn from(err: jxl_coding::Error) -> Self {
         Self::Decoder(err)
+    }
+}
+
+impl From<jxl_grid::Error> for Error {
+    fn from(err: jxl_grid::Error) -> Self {
+        Self::Buffer(err)
     }
 }
 
@@ -38,6 +45,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::Bitstream(err) => write!(f, "bitstream error: {}", err),
             Self::Decoder(err) => write!(f, "entropy decoder error: {}", err),
+            Self::Buffer(err) => write!(f, "{}", err),
             Self::Modular(err) => write!(f, "modular stream error: {}", err),
             Self::VarDct(err) => write!(f, "vardct error: {}", err),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
@@ -53,7 +61,9 @@ impl std::error::Error for Error {
         match self {
             Self::Bitstream(err) => Some(err),
             Self::Decoder(err) => Some(err),
+            Self::Buffer(err) => Some(err),
             Self::Modular(err) => Some(err),
+            Self::VarDct(err) => Some(err),
             _ => None,
         }
     }

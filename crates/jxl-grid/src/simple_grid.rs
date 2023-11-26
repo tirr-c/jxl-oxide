@@ -1,6 +1,6 @@
 use std::{ops::RangeBounds, ptr::NonNull};
 
-use crate::{SharedSubgrid, SimdVector};
+use crate::{AllocHandle, AllocTracker, Error, SharedSubgrid, SimdVector};
 
 const fn compute_align<S>() -> usize {
     let base_align = std::mem::align_of::<S>();
@@ -20,32 +20,58 @@ const fn compute_align<S>() -> usize {
 /// A continuous buffer in the "raster order".
 ///
 /// The buffer is aligned so that it can be used in SIMD instructions.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SimpleGrid<S> {
     width: usize,
     height: usize,
     offset: usize,
     buf: Vec<S>,
+    handle: Option<AllocHandle>,
 }
 
 impl<S: Default + Clone> SimpleGrid<S> {
     const ALIGN: usize = compute_align::<S>();
 
-    /// Create a new buffer.
+    /// Create a new buffer, recording the allocation if a tracker is given.
     #[inline]
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn with_alloc_tracker(
+        width: usize,
+        height: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, Error> {
         let len = width * height;
-        let mut buf = vec![S::default(); len + Self::ALIGN / std::mem::size_of::<S>()];
+        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
+        let handle = tracker
+            .map(|tracker| tracker.alloc::<S>(buf_len))
+            .transpose()?;
+        let mut buf = vec![S::default(); buf_len];
 
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
         let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
         buf.resize_with(len + offset, S::default);
-        Self {
+
+        Ok(Self {
             width,
             height,
             offset,
             buf,
-        }
+            handle,
+        })
+    }
+
+    /// Clones the buffer without recording an allocation.
+    pub fn clone_untracked(&self) -> Self {
+        let mut out = Self::with_alloc_tracker(self.width, self.height, None).unwrap();
+        out.buf_mut().clone_from_slice(self.buf());
+        out
+    }
+
+    /// Tries to clone the buffer, and records the allocation in the same tracker as the original
+    /// buffer.
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
+        out.buf_mut().clone_from_slice(self.buf());
+        Ok(out)
     }
 }
 
@@ -58,6 +84,11 @@ impl<S> SimpleGrid<S> {
     #[inline]
     pub fn height(&self) -> usize {
         self.height
+    }
+
+    #[inline]
+    pub fn tracker(&self) -> Option<AllocTracker> {
+        self.handle.as_ref().map(|handle| handle.tracker())
     }
 
     #[inline]
@@ -598,7 +629,7 @@ impl<'g> CutGrid<'g, f32> {
 }
 
 /// `[SimpleGrid]` with padding.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PaddedGrid<S: Clone> {
     pub grid: SimpleGrid<S>,
     padding: usize,
@@ -606,11 +637,20 @@ pub struct PaddedGrid<S: Clone> {
 
 impl<S: Default + Clone> PaddedGrid<S> {
     /// Create a new buffer.
-    pub fn new(width: usize, height: usize, padding: usize) -> Self {
-        Self {
-            grid: SimpleGrid::new(width + padding * 2, height + padding * 2),
+    pub fn with_alloc_tracker(
+        width: usize,
+        height: usize,
+        padding: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, crate::Error> {
+        Ok(Self {
+            grid: SimpleGrid::with_alloc_tracker(
+                width + padding * 2,
+                height + padding * 2,
+                tracker,
+            )?,
             padding,
-        }
+        })
     }
 }
 

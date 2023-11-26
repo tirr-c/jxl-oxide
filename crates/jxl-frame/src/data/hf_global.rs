@@ -1,4 +1,5 @@
 use jxl_bitstream::{Bitstream, Bundle};
+use jxl_grid::AllocTracker;
 use jxl_image::ImageMetadata;
 use jxl_modular::MaConfig;
 use jxl_threadpool::JxlThreadPool;
@@ -8,19 +9,21 @@ use super::LfGlobal;
 use crate::{FrameHeader, Result};
 
 #[derive(Debug, Copy, Clone)]
-pub struct HfGlobalParams<'a> {
+pub struct HfGlobalParams<'a, 'b> {
     metadata: &'a ImageMetadata,
     frame_header: &'a FrameHeader,
     ma_config: Option<&'a MaConfig>,
     hf_block_ctx: &'a HfBlockContext,
+    tracker: Option<&'b AllocTracker>,
     pool: &'a JxlThreadPool,
 }
 
-impl<'a> HfGlobalParams<'a> {
+impl<'a, 'b> HfGlobalParams<'a, 'b> {
     pub fn new(
         metadata: &'a ImageMetadata,
         frame_header: &'a FrameHeader,
         lf_global: &'a LfGlobal,
+        tracker: Option<&'b AllocTracker>,
         pool: &'a JxlThreadPool,
     ) -> Self {
         let Some(lf_vardct) = &lf_global.vardct else {
@@ -31,6 +34,7 @@ impl<'a> HfGlobalParams<'a> {
             frame_header,
             ma_config: lf_global.gmodular.ma_config.as_ref(),
             hf_block_ctx: &lf_vardct.hf_block_ctx,
+            tracker,
             pool,
         }
     }
@@ -43,21 +47,23 @@ pub struct HfGlobal {
     pub hf_passes: Vec<HfPass>,
 }
 
-impl Bundle<HfGlobalParams<'_>> for HfGlobal {
+impl Bundle<HfGlobalParams<'_, '_>> for HfGlobal {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: HfGlobalParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: HfGlobalParams) -> Result<Self> {
         let HfGlobalParams {
             metadata,
             frame_header,
             ma_config,
             hf_block_ctx,
+            tracker,
             pool,
         } = params;
         let dequant_matrix_params = DequantMatrixSetParams::new(
             metadata.bit_depth.bits_per_sample(),
             frame_header.num_lf_groups(),
             ma_config,
+            tracker,
             pool,
         );
         let dequant_matrices = DequantMatrixSet::parse(bitstream, dequant_matrix_params)?;

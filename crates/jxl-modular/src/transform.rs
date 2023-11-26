@@ -1,7 +1,7 @@
 use std::num::Wrapping;
 
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
 use super::{
     predictor::{Predictor, PredictorState, WpHeader},
@@ -33,13 +33,22 @@ impl TransformInfo {
         }
     }
 
-    pub(super) fn prepare_meta_channels(&self, meta_channels: &mut Vec<SimpleGrid<i32>>) {
+    pub(super) fn prepare_meta_channels(
+        &self,
+        meta_channels: &mut Vec<SimpleGrid<i32>>,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<()> {
         if let Self::Palette(pal) = self {
             meta_channels.insert(
                 0,
-                SimpleGrid::new(pal.nb_colours as usize, pal.num_c as usize),
+                SimpleGrid::with_alloc_tracker(
+                    pal.nb_colours as usize,
+                    pal.num_c as usize,
+                    tracker,
+                )?,
             );
         }
+        Ok(())
     }
 
     pub(super) fn transform_channels<'dest>(

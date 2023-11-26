@@ -1,17 +1,19 @@
 use jxl_bitstream::{Bitstream, Bundle};
+use jxl_grid::AllocTracker;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
 use crate::{filter::EdgePreservingFilter, header::Encoding, FrameHeader, Result};
 
 #[derive(Debug)]
-pub struct LfGroupParams<'a, 'dest> {
+pub struct LfGroupParams<'a, 'dest, 'tracker> {
     pub frame_header: &'a FrameHeader,
     pub quantizer: Option<&'a Quantizer>,
     pub global_ma_config: Option<&'a MaConfig>,
     pub mlf_group: Option<TransformedModularSubimage<'dest>>,
     pub lf_group_idx: u32,
     pub allow_partial: bool,
+    pub tracker: Option<&'tracker AllocTracker>,
     pub pool: &'a jxl_threadpool::JxlThreadPool,
 }
 
@@ -22,16 +24,17 @@ pub struct LfGroup {
     pub partial: bool,
 }
 
-impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
+impl Bundle<LfGroupParams<'_, '_, '_>> for LfGroup {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: LfGroupParams<'_, '_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfGroupParams) -> Result<Self> {
         let LfGroupParams {
             frame_header,
             global_ma_config,
             mlf_group,
             lf_group_idx,
             allow_partial,
+            tracker,
             pool,
             ..
         } = params;
@@ -48,6 +51,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
                 bits_per_sample: frame_header.bit_depth.bits_per_sample(),
                 global_ma_config,
                 allow_partial,
+                tracker,
                 pool,
             };
             LfCoeff::parse(bitstream, lf_coeff_params)
@@ -66,7 +70,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
 
         let mut is_mlf_complete = true;
         if let Some(image) = mlf_group {
-            let mut subimage = image.recursive(bitstream, global_ma_config)?;
+            let mut subimage = image.recursive(bitstream, global_ma_config, tracker)?;
             let mut subimage = subimage.prepare_subimage()?;
             subimage.decode(
                 bitstream,
@@ -93,6 +97,7 @@ impl Bundle<LfGroupParams<'_, '_>> for LfGroup {
                         } => Some((sigma.quant_mul, *sharp_lut)),
                     },
                     quantizer_global_scale: params.quantizer.unwrap().global_scale,
+                    tracker,
                     pool,
                 };
                 HfMetadata::parse(bitstream, hf_meta_params)

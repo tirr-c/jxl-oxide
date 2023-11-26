@@ -8,7 +8,7 @@ use jxl_image::ImageHeader;
 
 use crate::{
     region::{ImageWithRegion, Region},
-    Reference,
+    Reference, Result,
 };
 
 #[derive(Debug)]
@@ -145,10 +145,12 @@ pub(crate) fn blend(
     reference_grids: [Option<Reference>; 4],
     new_frame: &Frame,
     new_grid: &ImageWithRegion,
-) -> ImageWithRegion {
+) -> Result<ImageWithRegion> {
     let header = new_frame.header();
     let channels = 3 + image_header.metadata.ec_info.len();
-    let mut output_grid = ImageWithRegion::from_region(channels, new_grid.region());
+    let tracker = new_frame.alloc_tracker();
+    let mut output_grid =
+        ImageWithRegion::from_region_and_tracker(channels, new_grid.region(), tracker)?;
     let output_image_region = new_grid.region().translate(header.x0, header.y0);
 
     let mut used_as_alpha = vec![false; 3 + image_header.metadata.ec_info.len()];
@@ -186,7 +188,8 @@ pub(crate) fn blend(
                 clone_empty = true;
             }
             if clone_empty {
-                let empty_image = ImageWithRegion::from_region(channels, Region::empty());
+                let empty_image =
+                    ImageWithRegion::from_region_and_tracker(channels, Region::empty(), tracker)?;
                 empty_image.clone_region_channel(
                     Region::empty(),
                     idx,
@@ -226,10 +229,11 @@ pub(crate) fn blend(
                 );
 
                 if let Some(idx) = alpha_idx {
-                    base_alpha_grid = SimpleGrid::new(
+                    base_alpha_grid = SimpleGrid::with_alloc_tracker(
                         output_image_region.width as usize,
                         output_image_region.height as usize,
-                    );
+                        tracker,
+                    )?;
                     base_grid.clone_region_channel(
                         base_frame_region,
                         idx + 3,
@@ -263,7 +267,7 @@ pub(crate) fn blend(
         blend_single(base_grid, &new_grid.buffer()[idx], &blend_params);
     }
 
-    output_grid
+    Ok(output_grid)
 }
 
 pub fn patch(

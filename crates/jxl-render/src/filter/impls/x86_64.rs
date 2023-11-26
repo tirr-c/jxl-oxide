@@ -132,24 +132,32 @@ pub fn epf_step2(
     }
 }
 
-pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) {
+pub fn apply_gabor_like(
+    fb: [&mut SimpleGrid<f32>; 3],
+    weights_xyb: [[f32; 2]; 3],
+) -> crate::Result<()> {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
         unsafe {
             for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-                run_gabor_inner_avx2(fb, weight1, weight2)
+                run_gabor_inner_avx2(fb, weight1, weight2)?
             }
         }
-        return;
+        return Ok(());
     }
 
     for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-        super::generic::run_gabor_inner(fb, weight1, weight2);
+        super::generic::run_gabor_inner(fb, weight1, weight2)?;
     }
+    Ok(())
 }
 
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
-unsafe fn run_gabor_inner_avx2(fb: &mut SimpleGrid<f32>, weight1: f32, weight2: f32) {
+unsafe fn run_gabor_inner_avx2(
+    fb: &mut SimpleGrid<f32>,
+    weight1: f32,
+    weight2: f32,
+) -> crate::Result<()> {
     super::generic::run_gabor_inner(fb, weight1, weight2)
 }

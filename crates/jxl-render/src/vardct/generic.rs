@@ -1,31 +1,34 @@
+use jxl_grid::{AllocTracker, SimpleGrid};
+
 #[inline(always)]
 pub fn adaptive_lf_smoothing_impl(
     width: usize,
     height: usize,
     [in_x, in_y, in_b]: [&mut [f32]; 3],
     [lf_x, lf_y, lf_b]: [f32; 3],
-) {
+    tracker: Option<&AllocTracker>,
+) -> crate::Result<()> {
     const SCALE_SELF: f32 = 0.052262735;
     const SCALE_SIDE: f32 = 0.2034514;
     const SCALE_DIAG: f32 = 0.03348292;
 
     if width <= 2 || height <= 2 {
         // Nothing to do
-        return;
+        return Ok(());
     }
 
     assert_eq!(in_x.len(), in_y.len());
     assert_eq!(in_y.len(), in_b.len());
     assert_eq!(in_x.len(), width * height);
 
-    let mut udsum_x = vec![0.0f32; width * (height - 2)];
-    let mut udsum_y = vec![0.0f32; width * (height - 2)];
-    let mut udsum_b = vec![0.0f32; width * (height - 2)];
+    let mut udsum_x = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_y = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_b = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
 
     for (g, out) in [
-        (&mut *in_x, &mut udsum_x),
-        (&mut *in_y, &mut udsum_y),
-        (&mut *in_b, &mut udsum_b),
+        (&mut *in_x, udsum_x.buf_mut()),
+        (&mut *in_y, udsum_y.buf_mut()),
+        (&mut *in_b, udsum_b.buf_mut()),
     ] {
         let up = g.chunks_exact(width);
         let down = g[width * 2..].chunks_exact(width);
@@ -41,9 +44,9 @@ pub fn adaptive_lf_smoothing_impl(
     let mut in_y_row = in_y.chunks_exact_mut(width).skip(1);
     let mut in_b_row = in_b.chunks_exact_mut(width).skip(1);
 
-    let mut udsum_x_row = udsum_x.chunks_exact(width);
-    let mut udsum_y_row = udsum_y.chunks_exact(width);
-    let mut udsum_b_row = udsum_b.chunks_exact(width);
+    let mut udsum_x_row = udsum_x.buf_mut().chunks_exact(width);
+    let mut udsum_y_row = udsum_y.buf_mut().chunks_exact(width);
+    let mut udsum_b_row = udsum_b.buf_mut().chunks_exact(width);
 
     loop {
         let Some(udsum_x) = udsum_x_row.next() else {
@@ -88,4 +91,6 @@ pub fn adaptive_lf_smoothing_impl(
             in_b_prev = b_self;
         }
     }
+
+    Ok(())
 }

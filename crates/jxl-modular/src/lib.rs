@@ -23,20 +23,20 @@ pub use param::*;
 ///    - creating a subimage of existing image by calling [self.make_subimage_params_lf_group] or
 ///      [self.make_subimage_params_pass_group].
 /// 2. Decode pixels by calling [self.decode_image] or [self.decode_image_gmodular].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Modular {
     inner: Option<ModularData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ModularData {
     image: image::ModularImageDestination,
 }
 
-impl Bundle<ModularParams<'_>> for Modular {
+impl Bundle<ModularParams<'_, '_>> for Modular {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
         let inner = if params.channels.is_empty() {
             None
         } else {
@@ -50,6 +50,18 @@ impl Modular {
     /// Creates an empty Modular image.
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        let inner = if let Some(inner) = &self.inner {
+            Some(ModularData {
+                image: inner.image.try_clone()?,
+            })
+        } else {
+            None
+        };
+
+        Ok(Self { inner })
     }
 }
 
@@ -83,10 +95,10 @@ impl Modular {
     }
 }
 
-impl Bundle<ModularParams<'_>> for ModularData {
+impl Bundle<ModularParams<'_, '_>> for ModularData {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: ModularParams<'_>) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
         let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
         if header.nb_transforms > 512 {
             tracing::error!(
@@ -156,7 +168,8 @@ impl Bundle<ModularParams<'_>> for ModularData {
                 params.group_dim,
                 params.bit_depth,
                 channels,
-            ),
+                params.tracker,
+            )?,
         })
     }
 }
@@ -178,7 +191,7 @@ struct ModularChannels {
 }
 
 impl ModularChannels {
-    fn from_params(params: &ModularParams<'_>) -> Self {
+    fn from_params(params: &ModularParams) -> Self {
         let info = params
             .channels
             .iter()

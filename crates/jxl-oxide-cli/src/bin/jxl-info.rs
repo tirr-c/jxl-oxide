@@ -39,7 +39,9 @@ fn main() {
     let span = tracing::span!(tracing::Level::TRACE, "jxl-info");
     let _guard = span.enter();
 
-    let image = JxlImage::open(&args.input).expect("Failed to open file");
+    let image = JxlImage::builder()
+        .open(&args.input)
+        .expect("Failed to open file");
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
     let image_reader = image.reader();
