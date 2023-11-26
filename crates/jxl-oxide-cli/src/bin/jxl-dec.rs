@@ -438,7 +438,13 @@ fn write_png<W: Write>(
             writer.set_frame_delay(numer, denom).unwrap();
         }
 
-        let mut fb = keyframe.image();
+        let mut stream = keyframe.stream();
+        let mut fb = FrameBuffer::new(
+            stream.width() as usize,
+            stream.height() as usize,
+            stream.channels() as usize,
+        );
+        stream.write_to_buffer(fb.buf_mut());
         if let Some(transform) = &transform {
             transform.transform_in_place(&mut fb);
         }
