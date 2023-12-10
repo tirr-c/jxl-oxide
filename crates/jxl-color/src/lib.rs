@@ -2,17 +2,11 @@
 //! specification. Especially, these functions can perform conversion from the XYB colorspace to
 //! all of the "enum colorspaces" which can be signalled in the JPEG XL image header.
 //!
-//! # Functions
-//! - [`xyb_to_linear_srgb`] performs inverse XYB transform, which converts samples in the XYB
-//!   colorspace to the linear sRGB signals.
-//! - [`ycbcr_to_rgb`] converts YCbCr samples to RGB samples.
-//! - [`from_linear_srgb`] converts linear sRGB samples, mainly produced by the previous call to
-//!   [`xyb_to_linear_srgb`], to the given enum colorspace.
-//!
 //! # Modules
 //! - [`consts`] defines constants used by the various colorspaces.
 //! - [`icc`] provides functions related to ICC profiles.
 
+mod cms;
 mod ciexyz;
 pub mod consts;
 mod convert;
@@ -24,8 +18,8 @@ mod tf;
 mod xyb;
 mod ycbcr;
 
-pub use convert::from_linear_srgb;
+pub use cms::*;
+pub use convert::*;
 pub use error::*;
 pub use header::*;
-pub use xyb::xyb_to_linear_srgb;
 pub use ycbcr::ycbcr_to_rgb;

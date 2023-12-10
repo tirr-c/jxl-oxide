@@ -59,6 +59,10 @@ pub fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
 }
 
 pub fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
+    if from_illuminant == to_illuminant {
+        return [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    }
+
     let from_w = illuminant_to_xyz(from_illuminant);
     let to_w = illuminant_to_xyz(to_illuminant);
 

@@ -1,18 +1,270 @@
 #![allow(clippy::excessive_precision)]
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Error, Result};
 
-define_bundle! {
-    #[derive(Debug)]
-    pub struct ColourEncoding {
-        all_default: ty(Bool) default(true),
-        pub want_icc: ty(Bool) cond(!all_default) default(false),
-        pub colour_space: ty(Enum(ColourSpace)) cond(!all_default) default(ColourSpace::Rgb),
-        pub white_point: ty(Bundle(WhitePoint)) cond(!all_default && !want_icc && colour_space != ColourSpace::Xyb) default(WhitePoint::D65),
-        pub primaries: ty(Bundle(Primaries)) cond(!all_default && !want_icc && colour_space != ColourSpace::Xyb && colour_space != ColourSpace::Grey) default(Primaries::Srgb),
-        pub tf: ty(Bundle(TransferFunction)) cond(!all_default && !want_icc),
-        pub rendering_intent: ty(Enum(RenderingIntent)) cond(!all_default && !want_icc) default(RenderingIntent::Relative),
+use crate::consts::*;
+
+#[derive(Debug, Clone)]
+pub enum ColourEncoding {
+    Enum(EnumColourEncoding),
+    IccProfile(ColourSpace),
+    /// PCSXYZ color encoding.
+    ///
+    /// PCSXYZ color encoding is not specified in JPEG XL spec. This is for users who want to
+    /// request XYZ encoded framebuffer for further processing.
+    PcsXyz,
+}
+
+impl Default for ColourEncoding {
+    fn default() -> Self {
+        Self::Enum(Default::default())
+    }
+}
+
+impl<Ctx> Bundle<Ctx> for ColourEncoding {
+    type Error = jxl_bitstream::Error;
+
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> Result<Self> {
+        let all_default = bitstream.read_bool()?;
+        Ok(if all_default {
+            Self::default()
+        } else {
+            let want_icc = bitstream.read_bool()?;
+            let colour_space = read_bits!(bitstream, Enum(ColourSpace))?;
+            if want_icc {
+                Self::IccProfile(colour_space)
+            } else {
+                let white_point = if colour_space == ColourSpace::Xyb {
+                    WhitePoint::D65
+                } else {
+                    WhitePoint::parse(bitstream, ())?
+                };
+                let primaries = if matches!(colour_space, ColourSpace::Xyb | ColourSpace::Grey) {
+                    Primaries::Srgb
+                } else {
+                    Primaries::parse(bitstream, ())?
+                };
+                let tf = TransferFunction::parse(bitstream, ())?;
+                let rendering_intent = read_bits!(bitstream, Enum(RenderingIntent))?;
+                Self::Enum(EnumColourEncoding {
+                    colour_space,
+                    white_point,
+                    primaries,
+                    tf,
+                    rendering_intent,
+                })
+            }
+        })
+    }
+}
+
+impl ColourEncoding {
+    #[inline]
+    pub fn colour_space(&self) -> ColourSpace {
+        match self {
+            Self::Enum(e) => e.colour_space,
+            Self::IccProfile(x) => *x,
+            Self::PcsXyz => ColourSpace::Unknown,
+        }
     }
 
+    #[inline]
+    pub fn want_icc(&self) -> bool {
+        matches!(self, Self::IccProfile(_))
+    }
+
+    /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
+    #[inline]
+    pub fn is_srgb(&self) -> bool {
+        matches!(self, Self::Enum(EnumColourEncoding {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Srgb,
+            ..
+        }))
+    }
+
+    #[inline]
+    pub fn is_srgb_gamut(&self) -> bool {
+        matches!(self, Self::Enum(EnumColourEncoding {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            ..
+        }))
+    }
+
+    /// Returns the CICP tag which represents this `ColourEncoding`.
+    #[inline]
+    pub fn cicp(&self) -> Option<[u8; 4]> {
+        let Self::Enum(e) = self else { return None; };
+        e.cicp()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EnumColourEncoding {
+    pub colour_space: ColourSpace,
+    pub white_point: WhitePoint,
+    pub primaries: Primaries,
+    pub tf: TransferFunction,
+    pub rendering_intent: RenderingIntent,
+}
+
+impl EnumColourEncoding {
+    pub fn xyb() -> Self {
+        Self {
+            colour_space: ColourSpace::Xyb,
+            // Below are ignored for XYB color encoding
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Linear,
+            rendering_intent: RenderingIntent::Perceptual,
+        }
+    }
+
+    pub fn srgb(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Srgb,
+            rendering_intent,
+        }
+    }
+
+    pub fn srgb_gamma22(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Gamma(4545455),
+            rendering_intent,
+        }
+    }
+
+    pub fn gray_srgb() -> Self {
+        Self {
+            colour_space: ColourSpace::Grey,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Srgb,
+            rendering_intent: RenderingIntent::Relative,
+        }
+    }
+
+    pub fn gray_gamma22() -> Self {
+        Self {
+            colour_space: ColourSpace::Grey,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Gamma(4545455),
+            rendering_intent: RenderingIntent::Relative,
+        }
+    }
+
+    pub fn bt709(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Bt709,
+            rendering_intent,
+        }
+    }
+
+    pub fn dci_p3(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::Dci,
+            primaries: Primaries::P3,
+            tf: TransferFunction::Dci,
+            rendering_intent,
+        }
+    }
+
+    pub fn display_p3(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::P3,
+            tf: TransferFunction::Srgb,
+            rendering_intent,
+        }
+    }
+
+    pub fn display_p3_pq(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::P3,
+            tf: TransferFunction::Pq,
+            rendering_intent,
+        }
+    }
+
+    pub fn bt2100_pq(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Bt2100,
+            tf: TransferFunction::Pq,
+            rendering_intent,
+        }
+    }
+
+    pub fn bt2100_hlg(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Bt2100,
+            tf: TransferFunction::Hlg,
+            rendering_intent,
+        }
+    }
+}
+
+impl EnumColourEncoding {
+    /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
+    #[inline]
+    pub fn is_srgb(&self) -> bool {
+        matches!(self, Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Srgb,
+            ..
+        })
+    }
+
+    #[inline]
+    pub fn is_srgb_gamut(&self) -> bool {
+        matches!(self, Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            ..
+        })
+    }
+
+    #[inline]
+    pub fn is_hdr(&self) -> bool {
+        matches!(self.tf, TransferFunction::Pq | TransferFunction::Hlg)
+    }
+
+    /// Returns the CICP tag which represents this `ColourEncoding`.
+    pub fn cicp(&self) -> Option<[u8; 4]> {
+        let primaries_cicp = self.primaries.cicp();
+        let tf_cicp = self.tf.cicp();
+        if let (Some(primaries), Some(tf)) = (primaries_cicp, tf_cicp) {
+            Some([primaries, tf, 0, 1])
+        } else {
+            None
+        }
+    }
+}
+
+define_bundle! {
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Customxy {
         pub x: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
@@ -29,35 +281,17 @@ define_bundle! {
     }
 }
 
-impl ColourEncoding {
-    /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
+impl Customxy {
     #[inline]
-    pub fn is_srgb(&self) -> bool {
-        self.is_srgb_gamut() && self.tf == TransferFunction::Srgb
-    }
-
-    #[inline]
-    pub fn is_srgb_gamut(&self) -> bool {
-        self.colour_space == ColourSpace::Rgb
-            && self.white_point == WhitePoint::D65
-            && self.primaries == Primaries::Srgb
-    }
-
-    /// Returns the CICP tag which represents this `ColourEncoding`.
-    pub fn cicp(&self) -> Option<[u8; 4]> {
-        let primaries_cicp = self.primaries.cicp();
-        let tf_cicp = self.tf.cicp();
-        if let (Some(primaries), Some(tf)) = (primaries_cicp, tf_cicp) {
-            Some([primaries, tf, 0, 1])
-        } else {
-            None
-        }
+    pub fn as_float(self) -> [f32; 2] {
+        [self.x as f32 / 1e6, self.y as f32 / 1e6]
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum ColourSpace {
+    #[default]
     Rgb = 0,
     Grey = 1,
     Xyb = 2,
@@ -128,6 +362,18 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
     }
 }
 
+impl WhitePoint {
+    #[inline]
+    pub fn as_chromaticity(self) -> [f32; 2] {
+        match self {
+            Self::D65 => ILLUMINANT_D65,
+            Self::Custom(xy) => xy.as_float(),
+            Self::E => ILLUMINANT_E,
+            Self::Dci => ILLUMINANT_DCI,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
 enum PrimariesDiscriminator {
@@ -186,6 +432,20 @@ impl<Ctx> Bundle<Ctx> for Primaries {
 }
 
 impl Primaries {
+    #[inline]
+    pub fn as_chromaticity(self) -> [[f32; 2]; 3] {
+        match self {
+            Self::Srgb => PRIMARIES_SRGB,
+            Self::Custom { red, green, blue } => [
+                red.as_float(),
+                green.as_float(),
+                blue.as_float(),
+            ],
+            Self::Bt2100 => PRIMARIES_BT2100,
+            Self::P3 => PRIMARIES_P3,
+        }
+    }
+
     pub fn cicp(&self) -> Option<u8> {
         match self {
             Primaries::Srgb => Some(1),

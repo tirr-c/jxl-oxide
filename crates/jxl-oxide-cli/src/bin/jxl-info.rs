@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use jxl_oxide::JxlImage;
+use jxl_oxide::{JxlImage, color::ColourSpace};
 
 /// Prints information about JPEG XL image.
 #[derive(Debug, Parser)]
@@ -76,62 +76,68 @@ fn main() {
     } else {
         println!("  Color encoding:");
     }
-    if let Some(icc) = image.original_icc() {
-        print!("    ");
-        if image_meta.grayscale() {
-            print!("Grayscale, embedded ICC profile ({} bytes)", icc.len());
-        } else {
-            println!("Embedded ICC profile ({} bytes)", icc.len());
-        }
-    } else {
-        let colour_encoding = &image_meta.colour_encoding;
-        print!("    Colorspace: ");
-        match colour_encoding.colour_space {
-            jxl_oxide::color::ColourSpace::Rgb => println!("RGB"),
-            jxl_oxide::color::ColourSpace::Grey => println!("Grayscale"),
-            jxl_oxide::color::ColourSpace::Xyb => println!("XYB"),
-            jxl_oxide::color::ColourSpace::Unknown => println!("Unknown"),
-        }
-
-        print!("    White point: ");
-        match colour_encoding.white_point {
-            jxl_oxide::color::WhitePoint::D65 => println!("D65"),
-            jxl_oxide::color::WhitePoint::Custom(xy) => {
-                println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
+    match &image_meta.colour_encoding {
+        jxl_oxide::color::ColourEncoding::PcsXyz => {
+            unreachable!("ColourEncoding::CieXyzD65 cannot be embedded in image");
+        },
+        jxl_oxide::color::ColourEncoding::Enum(colour_encoding) => {
+            print!("    Colorspace: ");
+            match colour_encoding.colour_space {
+                jxl_oxide::color::ColourSpace::Rgb => println!("RGB"),
+                jxl_oxide::color::ColourSpace::Grey => println!("Grayscale"),
+                jxl_oxide::color::ColourSpace::Xyb => println!("XYB"),
+                jxl_oxide::color::ColourSpace::Unknown => println!("Unknown"),
             }
-            jxl_oxide::color::WhitePoint::E => println!("E"),
-            jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
-        }
 
-        print!("    Primaries: ");
-        match colour_encoding.primaries {
-            jxl_oxide::color::Primaries::Srgb => println!("sRGB"),
-            jxl_oxide::color::Primaries::Custom { red, green, blue } => {
-                println!(
-                    "{}, {}; {}, {}; {}, {}",
-                    red.x as f64 / 10e6,
-                    red.y as f64 / 10e6,
-                    green.x as f64 / 10e6,
-                    green.y as f64 / 10e6,
-                    blue.x as f64 / 10e6,
-                    blue.y as f64 / 10e6,
-                );
+            print!("    White point: ");
+            match colour_encoding.white_point {
+                jxl_oxide::color::WhitePoint::D65 => println!("D65"),
+                jxl_oxide::color::WhitePoint::Custom(xy) => {
+                    println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
+                }
+                jxl_oxide::color::WhitePoint::E => println!("E"),
+                jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
             }
-            jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
-            jxl_oxide::color::Primaries::P3 => println!("P3"),
-        }
 
-        print!("    Transfer function: ");
-        match colour_encoding.tf {
-            jxl_oxide::color::TransferFunction::Gamma(g) => println!("Gamma {}", g as f64 / 10e7),
-            jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
-            jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
-            jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
-            jxl_oxide::color::TransferFunction::Srgb => println!("sRGB"),
-            jxl_oxide::color::TransferFunction::Pq => println!("PQ (HDR)"),
-            jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
-            jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
-        }
+            print!("    Primaries: ");
+            match colour_encoding.primaries {
+                jxl_oxide::color::Primaries::Srgb => println!("sRGB"),
+                jxl_oxide::color::Primaries::Custom { red, green, blue } => {
+                    println!(
+                        "{}, {}; {}, {}; {}, {}",
+                        red.x as f64 / 10e6,
+                        red.y as f64 / 10e6,
+                        green.x as f64 / 10e6,
+                        green.y as f64 / 10e6,
+                        blue.x as f64 / 10e6,
+                        blue.y as f64 / 10e6,
+                    );
+                }
+                jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
+                jxl_oxide::color::Primaries::P3 => println!("P3"),
+            }
+
+            print!("    Transfer function: ");
+            match colour_encoding.tf {
+                jxl_oxide::color::TransferFunction::Gamma(g) => println!("Gamma {}", g as f64 / 10e7),
+                jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
+                jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
+                jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
+                jxl_oxide::color::TransferFunction::Srgb => println!("sRGB"),
+                jxl_oxide::color::TransferFunction::Pq => println!("PQ (HDR)"),
+                jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
+                jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
+            }
+        },
+        jxl_oxide::color::ColourEncoding::IccProfile(colour_space) => {
+            let icc = image.original_icc().unwrap();
+            print!("    ");
+            if *colour_space == ColourSpace::Grey {
+                print!("Grayscale, embedded ICC profile ({} bytes)", icc.len());
+            } else {
+                println!("Embedded ICC profile ({} bytes)", icc.len());
+            }
+        },
     }
 
     if let Some(animation) = &image_meta.animation {

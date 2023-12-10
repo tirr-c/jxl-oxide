@@ -93,6 +93,7 @@ use std::sync::Arc;
 mod fb;
 
 use jxl_bitstream::ContainerDetectingReader;
+pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_color::header as color;
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
@@ -259,7 +260,7 @@ impl UninitializedJxlImage {
             }
         };
 
-        let embedded_icc = if image_header.metadata.colour_encoding.want_icc {
+        let embedded_icc = if image_header.metadata.colour_encoding.want_icc() {
             tracing::debug!("Image has an embedded ICC profile");
             let icc = match jxl_color::icc::read_icc(&mut bitstream) {
                 Ok(x) => x,
@@ -313,6 +314,9 @@ impl UninitializedJxlImage {
         let render_spot_colour = !image_header.metadata.grayscale();
 
         let mut builder = RenderContext::builder().pool(self.pool.clone());
+        if let Some(icc) = embedded_icc {
+            builder = builder.embedded_icc(icc);
+        }
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
@@ -322,7 +326,6 @@ impl UninitializedJxlImage {
             pool: self.pool.clone(),
             reader: self.reader,
             image_header,
-            original_icc: embedded_icc,
             ctx,
             render_spot_colour,
             end_of_image: false,
@@ -350,7 +353,6 @@ pub struct JxlImage {
     pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     image_header: Arc<ImageHeader>,
-    original_icc: Option<Vec<u8>>,
     ctx: RenderContext,
     render_spot_colour: bool,
     end_of_image: bool,
@@ -464,23 +466,35 @@ impl JxlImage {
         self.image_header.height_with_orientation()
     }
 
+    #[inline]
+    pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
+        self.ctx.set_cms(cms);
+    }
+
     /// Returns the original ICC profile embedded in the image.
     ///
     /// It does *not* describe the colorspace of rendered images. Use
     /// [`rendered_icc`][Self::rendered_icc] to do color management.
     #[inline]
     pub fn original_icc(&self) -> Option<&[u8]> {
-        self.original_icc.as_deref()
+        self.ctx.embedded_icc()
+    }
+
+    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
+    pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
+        self.ctx.request_color_encoding(
+            ColorEncodingWithProfile::with_icc(jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown), icc_profile)
+        )
     }
 
     /// Returns the ICC profile that describes rendered images.
-    ///
-    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
-    ///   linear sRGB or linear grayscale colorspace.
-    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
-    /// - Else, the profile describes the color encoding signalled in the image header.
     pub fn rendered_icc(&self) -> Vec<u8> {
-        create_rendered_icc(&self.image_header.metadata, self.original_icc.as_deref())
+        let encoding = self.ctx.requested_color_encoding();
+        if encoding.encoding().want_icc() {
+            encoding.icc_profile().to_vec()
+        } else {
+            jxl_color::icc::colour_encoding_to_icc(encoding.encoding())
+        }
     }
 
     /// Returns the pixel format of the rendered image.
@@ -1057,14 +1071,4 @@ impl From<CropInfo> for jxl_render::Region {
             height: value.height,
         }
     }
-}
-
-fn create_rendered_icc(metadata: &image::ImageMetadata, embedded_icc: Option<&[u8]>) -> Vec<u8> {
-    if !metadata.xyb_encoded {
-        if let Some(icc) = embedded_icc {
-            return icc.to_vec();
-        }
-    }
-
-    jxl_color::icc::colour_encoding_to_icc(&metadata.colour_encoding)
 }

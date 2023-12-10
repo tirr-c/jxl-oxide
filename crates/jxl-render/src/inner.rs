@@ -1,3 +1,4 @@
+use jxl_color::{ColourEncoding, EnumColourEncoding};
 use jxl_frame::{
     data::*,
     filter::{EdgePreservingFilter, Gabor},
@@ -137,14 +138,9 @@ pub(crate) fn render_frame(
         frame_visibility.1,
     )?;
 
-    if !frame_header.save_before_ct {
-        if frame_header.do_ycbcr {
-            let [cb, y, cr, ..] = fb.buffer_mut() else {
-                panic!()
-            };
-            jxl_color::ycbcr_to_rgb([cb, y, cr]);
-        }
-        convert_color(image_header, fb.buffer_mut());
+    // save_before_ct is always false if is_last = true
+    if !frame_header.save_before_ct && !frame_header.is_last {
+        convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
     }
 
     Ok(
@@ -303,30 +299,33 @@ fn render_features(
     Ok(())
 }
 
-pub fn convert_color(image_header: &ImageHeader, grid: &mut [SimpleGrid<f32>]) {
+fn convert_color_for_record(
+    image_header: &ImageHeader,
+    do_ycbcr: bool,
+    grid: &mut [SimpleGrid<f32>],
+) {
+    // save_before_ct = false
+
     let metadata = &image_header.metadata;
-    if metadata.xyb_encoded {
+    if do_ycbcr {
+        // xyb_encoded = false
+        let [cb, y, cr, ..] = grid else { panic!() };
+        jxl_color::ycbcr_to_rgb([cb, y, cr]);
+    } else if metadata.xyb_encoded {
+        // want_icc = false
         let [x, y, b, ..] = grid else { panic!() };
-        tracing::trace_span!("XYB to linear sRGB").in_scope(|| {
-            jxl_color::xyb_to_linear_srgb(
-                [x, y, b],
+        tracing::trace_span!("XYB to target colorspace").in_scope(|| {
+            tracing::trace!(colour_encoding = ?metadata.colour_encoding);
+            let transform = jxl_color::ColorTransform::new(
+                &jxl_color::ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb())),
+                &jxl_color::ColorEncodingWithProfile::new(metadata.colour_encoding.clone()),
                 &metadata.opsin_inverse_matrix,
                 metadata.tone_mapping.intensity_target,
             );
-        });
-
-        if metadata.colour_encoding.want_icc {
-            // Don't convert tf, return linear sRGB as is
-            return;
-        }
-
-        tracing::trace_span!("Linear sRGB to target colorspace").in_scope(|| {
-            tracing::trace!(colour_encoding = ?metadata.colour_encoding);
-            jxl_color::from_linear_srgb(
-                grid,
-                &metadata.colour_encoding,
-                metadata.tone_mapping.intensity_target,
-            );
+            transform.run(
+                &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
+                &jxl_color::NullCms,
+            ).unwrap();
         });
     }
 }

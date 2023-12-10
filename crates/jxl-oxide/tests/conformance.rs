@@ -1,24 +1,6 @@
-use lcms2::{Profile, Transform};
-
-use jxl_oxide::{FrameBuffer, JxlImage};
+use jxl_oxide::JxlImage;
 
 mod util;
-
-enum LcmsTransform {
-    Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgb(Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
-}
-
-impl LcmsTransform {
-    fn transform_in_place(&self, fb: &mut FrameBuffer) {
-        use LcmsTransform::*;
-
-        match self {
-            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
-            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
-        }
-    }
-}
 
 fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<Vec<f32>> {
     let mut magic = [0u8; 6];
@@ -81,35 +63,10 @@ fn run_test(
 
     image.set_render_spot_colour(false);
 
-    let transform = target_icc.map(|target_icc| {
-        let source_profile =
-            Profile::new_icc(&image.rendered_icc()).expect("failed to parse ICC profile");
-        let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
-
-        if image.image_header().metadata.grayscale() {
-            LcmsTransform::Grayscale(
-                Transform::new(
-                    &source_profile,
-                    lcms2::PixelFormat::GRAY_FLT,
-                    &target_profile,
-                    lcms2::PixelFormat::GRAY_FLT,
-                    lcms2::Intent::RelativeColorimetric,
-                )
-                .expect("failed to create transform"),
-            )
-        } else {
-            LcmsTransform::Rgb(
-                Transform::new(
-                    &source_profile,
-                    lcms2::PixelFormat::RGB_FLT,
-                    &target_profile,
-                    lcms2::PixelFormat::RGB_FLT,
-                    lcms2::Intent::RelativeColorimetric,
-                )
-                .expect("failed to create transform"),
-            )
-        }
-    });
+    image.set_cms(util::Lcms2);
+    if let Some(target_icc) = target_icc {
+        image.request_icc(target_icc);
+    }
 
     let num_keyframes = image.num_loaded_keyframes();
     for idx in 0..num_keyframes {
@@ -119,41 +76,13 @@ fn run_test(
 
         eprintln!("Testing keyframe #{keyframe_idx}");
 
-        let mut grids = render
-            .color_channels()
-            .iter()
-            .map(|x| x.clone_untracked())
-            .collect::<Vec<_>>();
-        if let Some(transform) = &transform {
-            let channels = grids.len();
+        let fb = render.image_all_channels();
+        let interleaved_buffer = fb.buf();
+        assert_eq!(expected.len(), interleaved_buffer.len());
 
-            let mut fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), 1);
-            let width = fb.width();
-            let height = fb.height();
-            transform.transform_in_place(&mut fb);
-            let fb = fb.buf();
-            for y in 0..height {
-                for x in 0..width {
-                    for c in 0..channels {
-                        grids[c].buf_mut()[y * width + x] = fb[c + (x + y * width) * channels];
-                    }
-                }
-            }
-        }
-        grids.extend(
-            render
-                .extra_channels()
-                .iter()
-                .map(|ec| ec.grid().clone_untracked()),
-        );
-
-        let fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), render.orientation());
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();
-
-        let interleaved_buffer = fb.buf();
-        assert_eq!(expected.len(), interleaved_buffer.len());
 
         let mut sum_se = vec![0.0f32; channels];
         let mut peak_error = 0.0f32;

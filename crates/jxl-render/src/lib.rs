@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, Bundle};
+use jxl_color::{ColourEncoding, ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding};
 use jxl_frame::{
     data::{LfGlobalVarDct, LfGroup},
     header::FrameType,
@@ -30,7 +31,6 @@ use region::ImageWithRegion;
 use state::*;
 
 /// Render context that tracks loaded and rendered frames.
-#[derive(Debug)]
 pub struct RenderContext {
     image_header: Arc<ImageHeader>,
     pool: JxlThreadPool,
@@ -46,6 +46,15 @@ pub struct RenderContext {
     pub(crate) loading_frame: Option<IndexedFrame>,
     pub(crate) loading_render_cache: Option<RenderCache>,
     pub(crate) loading_region: Option<Region>,
+    embedded_icc: Vec<u8>,
+    requested_color_encoding: ColorEncodingWithProfile,
+    cms: Box<dyn ColorManagementSystem + Send + Sync>,
+}
+
+impl std::fmt::Debug for RenderContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderContext").finish_non_exhaustive()
+    }
 }
 
 impl RenderContext {
@@ -56,11 +65,17 @@ impl RenderContext {
 
 #[derive(Debug, Default)]
 pub struct RenderContextBuilder {
+    embedded_icc: Vec<u8>,
     pool: Option<JxlThreadPool>,
     tracker: Option<AllocTracker>,
 }
 
 impl RenderContextBuilder {
+    pub fn embedded_icc(mut self, icc: Vec<u8>) -> Self {
+        self.embedded_icc = icc;
+        self
+    }
+
     pub fn pool(mut self, pool: JxlThreadPool) -> Self {
         self.pool = Some(pool);
         self
@@ -72,6 +87,11 @@ impl RenderContextBuilder {
     }
 
     pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
+        let colour_encoding = if image_header.metadata.colour_encoding.want_icc() {
+            ColourEncoding::Enum(EnumColourEncoding::srgb(jxl_color::RenderingIntent::Relative))
+        } else {
+            image_header.metadata.colour_encoding.clone()
+        };
         RenderContext {
             image_header,
             tracker: self.tracker,
@@ -87,6 +107,9 @@ impl RenderContextBuilder {
             loading_frame: None,
             loading_render_cache: None,
             loading_region: None,
+            embedded_icc: self.embedded_icc,
+            requested_color_encoding: ColorEncodingWithProfile::new(colour_encoding),
+            cms: Box::new(jxl_color::NullCms),
         }
     }
 }
@@ -95,6 +118,23 @@ impl RenderContext {
     #[inline]
     pub fn alloc_tracker(&self) -> Option<&AllocTracker> {
         self.tracker.as_ref()
+    }
+}
+
+impl RenderContext {
+    #[inline]
+    pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
+        self.cms = Box::new(cms);
+    }
+
+    #[inline]
+    pub fn request_color_encoding(&mut self, encoding: ColorEncodingWithProfile) {
+        self.requested_color_encoding = encoding;
+    }
+
+    #[inline]
+    pub fn requested_color_encoding(&self) -> &ColorEncodingWithProfile {
+        &self.requested_color_encoding
     }
 }
 
@@ -109,6 +149,11 @@ impl RenderContext {
     #[inline]
     pub fn height(&self) -> u32 {
         self.image_header.size.height
+    }
+
+    #[inline]
+    pub fn embedded_icc(&self) -> Option<&[u8]> {
+        (!self.embedded_icc.is_empty()).then_some(&self.embedded_icc)
     }
 
     /// Returns the number of loaded keyframes in the context.
@@ -591,18 +636,46 @@ impl RenderContext {
         let image_header = frame.image_header();
         let frame_header = frame.header();
 
-        if frame_header.save_before_ct {
-            if frame_header.do_ycbcr {
+        tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<()> {
+            let header_color_encoding = &image_header.metadata.colour_encoding;
+            let frame_color_encoding = if (frame_header.save_before_ct || frame_header.is_last) && image_header.metadata.xyb_encoded {
+                ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
+            } else if header_color_encoding.want_icc() {
+                ColorEncodingWithProfile::with_icc(header_color_encoding.clone(), self.embedded_icc.clone())
+            } else {
+                ColorEncodingWithProfile::new(header_color_encoding.clone())
+            };
+            tracing::trace!(?frame_color_encoding);
+            tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
+            tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
+
+            if (frame_header.save_before_ct || frame_header.is_last) && frame_header.do_ycbcr {
                 let [cb, y, cr, ..] = grid.buffer_mut() else {
                     panic!()
                 };
                 jxl_color::ycbcr_to_rgb([cb, y, cr]);
             }
-            inner::convert_color(image_header, grid.buffer_mut());
-        }
 
-        let channels = if self.metadata().grayscale() { 1 } else { 3 };
-        grid.remove_channels(channels..3);
+            let transform = jxl_color::ColorTransform::new(
+                &frame_color_encoding,
+                &self.requested_color_encoding,
+                &image_header.metadata.opsin_inverse_matrix,
+                image_header.metadata.tone_mapping.intensity_target,
+            );
+
+            let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
+            let mut channels = color_channels.iter_mut().map(|x| x.buf_mut()).collect::<Vec<_>>();
+            for (grid, ec_info) in extra_channels.iter_mut().zip(&image_header.metadata.ec_info) {
+                if ec_info.is_black() {
+                    channels.push(grid.buf_mut());
+                    break;
+                }
+            }
+            let output_channels = transform.run(&mut channels, &*self.cms)?;
+            grid.remove_channels(output_channels..3);
+            Ok(())
+        })?;
+
         Ok(())
     }
 }

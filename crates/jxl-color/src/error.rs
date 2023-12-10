@@ -6,6 +6,8 @@ pub enum Error {
     InvalidIccStream(&'static str),
     IccProfileEmbedded,
     InvalidEnumColorspace,
+    CmsNotAvailable,
+    CmsFailure(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -30,6 +32,8 @@ impl std::fmt::Display for Error {
             InvalidIccStream(s) => write!(f, "invalid ICC stream: {s}"),
             IccProfileEmbedded => write!(f, "embedded ICC profile is signalled, use it instead"),
             InvalidEnumColorspace => write!(f, "unknown colorspace without embedded ICC profile"),
+            CmsNotAvailable => write!(f, "color management system is not available"),
+            CmsFailure(err) => write!(f, "color management system error: {err}"),
         }
     }
 }
@@ -41,6 +45,7 @@ impl std::error::Error for Error {
         match self {
             Bitstream(err) => Some(err),
             Decoder(err) => Some(err),
+            CmsFailure(err) => Some(&**err),
             _ => None,
         }
     }

@@ -1,5 +1,5 @@
-/// Converts the linear samples with the given gamma.
-pub fn linear_to_gamma(mut samples: &mut [f32], gamma: f32) {
+/// Applies gamma to samples.
+pub fn apply_gamma(mut samples: &mut [f32], gamma: f32) {
     #[cfg(target_arch = "aarch64")]
     {
         if std::arch::is_aarch64_feature_detected!("neon") {
@@ -279,6 +279,27 @@ unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
     }
 }
 
+/// Converts samples in sRGB transfer curve to linear. Inverse of `linear_to_srgb`.
+pub fn srgb_to_linear(samples: &mut [f32]) {
+    #[allow(clippy::excessive_precision)]
+    const P: [f32; 5] = [
+        2.200248328e-4, 1.043637593e-2, 1.624820318e-1, 7.961564959e-1, 8.210152774e-1,
+    ];
+    #[allow(clippy::excessive_precision)]
+    const Q: [f32; 5] = [
+        2.631846970e-1, 1.076976492, 4.987528350e-1, -5.512498495e-2, 6.521209011e-3,
+    ];
+
+    for x in samples {
+        let a = x.abs();
+        *x = if a <= 0.04045 {
+            a / 12.92
+        } else {
+            crate::fastmath::rational_poly::eval_generic(a, P, Q)
+        }.copysign(*x);
+    }
+}
+
 /// Converts the linear samples with the BT.709 transfer curve.
 pub fn linear_to_bt709(mut samples: &mut [f32]) {
     #[cfg(target_arch = "aarch64")]
@@ -382,6 +403,17 @@ unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
     remainder
 }
 
+pub fn bt709_to_linear(samples: &mut [f32]) {
+    for x in samples {
+        let a = *x;
+        *x = if a <= 0.081 {
+            a / 4.5
+        } else {
+            crate::fastmath::fast_powf_generic(a.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
+        };
+    }
+}
+
 /// Converts the linear samples with the PQ transfer function, where linear sample value of 1.0
 /// represents `intensity_target` nits.
 pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
@@ -422,6 +454,24 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     out
 }
 
+pub fn hlg_oo(
+    [samples_r, samples_g, samples_b]: [&mut [f32]; 3],
+    [lr, lg, lb]: [f32; 3],
+    intensity_target: f32,
+) {
+    let gamma = 1.2f32 * 1.111f32.powf((intensity_target / 1e3).log2());
+    // 1/g - 1
+    let exp = gamma - 1.0;
+
+    for ((r, g), b) in samples_r.iter_mut().zip(samples_g).zip(samples_b) {
+        let mixed = r.mul_add(lr, g.mul_add(lg, *b * lb));
+        let mult = mixed.powf(exp);
+        *r *= mult;
+        *g *= mult;
+        *b *= mult;
+    }
+}
+
 /// Converts the display-referred samples to scene-referred signals using the hybrid log-gamma
 /// transfer function.
 pub fn hlg_inverse_oo(
@@ -430,6 +480,7 @@ pub fn hlg_inverse_oo(
     intensity_target: f32,
 ) {
     let gamma = 1.2f32 * 1.111f32.powf((intensity_target / 1e3).log2());
+    // 1/g - 1
     let exp = (1.0 - gamma) / gamma;
 
     for ((r, g), b) in samples_r.iter_mut().zip(samples_g).zip(samples_b) {
@@ -441,18 +492,31 @@ pub fn hlg_inverse_oo(
     }
 }
 
+const HLG_A: f32 = 0.17883277;
+const HLG_B: f32 = 0.28466892;
+const HLG_C: f32 = 0.5599107;
+
 /// Converts the scene-referred linear samples with the hybrid log-gamma transfer function.
 pub fn linear_to_hlg(samples: &mut [f32]) {
-    const A: f32 = 0.17883277;
-    const B: f32 = 0.28466892;
-    const C: f32 = 0.5599107;
-
     for s in samples {
         let a = s.abs();
         *s = if a <= 1.0 / 12.0 {
             (3.0 * a).sqrt()
         } else {
-            A * a.mul_add(12.0, -B).ln() + C
+            HLG_A * a.mul_add(12.0, -HLG_B).ln() + HLG_C
+        }
+        .copysign(*s);
+    }
+}
+
+/// HLG inverse OETF, maps non-linear HLG signal to scene-referred linear sample.
+pub fn hlg_to_linear(samples: &mut [f32]) {
+    for s in samples {
+        let a = s.abs();
+        *s = if a <= 0.5 {
+            a * a / 3.0
+        } else {
+            (((a - HLG_C) / HLG_A).exp() + HLG_B) / 12.0
         }
         .copysign(*s);
     }
