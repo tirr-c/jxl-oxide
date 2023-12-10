@@ -2,7 +2,8 @@ use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
 use jxl_oxide::{
-    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render, color::EnumColourEncoding,
+    color::EnumColourEncoding, AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool,
+    PixelFormat, Render,
 };
 use lcms2::{Profile, Transform};
 
@@ -54,8 +55,14 @@ impl jxl_oxide::ColorManagementSystem for Lcms2 {
             unsafe {
                 let buf_in_ptr = buf_in.as_ptr();
                 let buf_out_ptr = buf_out.as_mut_ptr();
-                let transform_buf_in = std::slice::from_raw_parts(buf_in_ptr as *const u8, chunk_len * from_channels * std::mem::size_of::<f32>());
-                let transform_buf_out = std::slice::from_raw_parts_mut(buf_out_ptr as *mut u8, chunk_len * to_channels * std::mem::size_of::<f32>());
+                let transform_buf_in = std::slice::from_raw_parts(
+                    buf_in_ptr as *const u8,
+                    chunk_len * from_channels * std::mem::size_of::<f32>(),
+                );
+                let transform_buf_out = std::slice::from_raw_parts_mut(
+                    buf_out_ptr as *mut u8,
+                    chunk_len * to_channels * std::mem::size_of::<f32>(),
+                );
                 transform.transform_pixels(transform_buf_in, transform_buf_out);
             }
             for k in 0..chunk_len {
@@ -193,16 +200,20 @@ fn main() {
         tracing::warn!("Partial image");
     }
 
-    let output_png = args.output.is_some() && matches!(args.output_format, OutputFormat::Png | OutputFormat::Png8 | OutputFormat::Png16);
+    let output_png = args.output.is_some()
+        && matches!(
+            args.output_format,
+            OutputFormat::Png | OutputFormat::Png8 | OutputFormat::Png16
+        );
     if let Some(icc_path) = &args.target_icc {
         tracing::debug!("Setting target ICC profile");
         let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
         image.request_icc(icc_profile);
     } else if output_png && image.pixel_format().has_black() {
         tracing::debug!("Input is CMYK; setting target color encoding to sRGB");
-        image.request_color_encoding(
-            EnumColourEncoding::srgb(jxl_oxide::color::RenderingIntent::Relative)
-        );
+        image.request_color_encoding(EnumColourEncoding::srgb(
+            jxl_oxide::color::RenderingIntent::Relative,
+        ));
     }
 
     let image_size = &image.image_header().size;

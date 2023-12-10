@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use jxl_oxide::{JxlImage, color::ColourSpace};
+use jxl_oxide::{color::ColourSpace, JxlImage};
 
 /// Prints information about JPEG XL image.
 #[derive(Debug, Parser)]
@@ -79,7 +79,7 @@ fn main() {
     match &image_meta.colour_encoding {
         jxl_oxide::color::ColourEncoding::PcsXyz => {
             unreachable!("ColourEncoding::CieXyzD65 cannot be embedded in image");
-        },
+        }
         jxl_oxide::color::ColourEncoding::Enum(colour_encoding) => {
             print!("    Colorspace: ");
             match colour_encoding.colour_space {
@@ -119,7 +119,9 @@ fn main() {
 
             print!("    Transfer function: ");
             match colour_encoding.tf {
-                jxl_oxide::color::TransferFunction::Gamma(g) => println!("Gamma {}", g as f64 / 10e7),
+                jxl_oxide::color::TransferFunction::Gamma(g) => {
+                    println!("Gamma {}", g as f64 / 10e7)
+                }
                 jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
                 jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
                 jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
@@ -128,7 +130,7 @@ fn main() {
                 jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
                 jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
             }
-        },
+        }
         jxl_oxide::color::ColourEncoding::IccProfile(colour_space) => {
             let icc = image.original_icc().unwrap();
             print!("    ");
@@ -137,7 +139,7 @@ fn main() {
             } else {
                 println!("Embedded ICC profile ({} bytes)", icc.len());
             }
-        },
+        }
     }
 
     if let Some(animation) = &image_meta.animation {

@@ -16,7 +16,8 @@ pub trait ColorManagementSystem {
         intent: RenderingIntent,
         channels: &mut [&mut [f32]],
     ) -> Result<usize, crate::Error> {
-        self.transform_impl(from, to, intent, channels).map_err(crate::Error::CmsFailure)
+        self.transform_impl(from, to, intent, channels)
+            .map_err(crate::Error::CmsFailure)
     }
 }
 

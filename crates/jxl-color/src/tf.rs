@@ -283,11 +283,19 @@ unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
 pub fn srgb_to_linear(samples: &mut [f32]) {
     #[allow(clippy::excessive_precision)]
     const P: [f32; 5] = [
-        2.200248328e-4, 1.043637593e-2, 1.624820318e-1, 7.961564959e-1, 8.210152774e-1,
+        2.200248328e-4,
+        1.043637593e-2,
+        1.624820318e-1,
+        7.961564959e-1,
+        8.210152774e-1,
     ];
     #[allow(clippy::excessive_precision)]
     const Q: [f32; 5] = [
-        2.631846970e-1, 1.076976492, 4.987528350e-1, -5.512498495e-2, 6.521209011e-3,
+        2.631846970e-1,
+        1.076976492,
+        4.987528350e-1,
+        -5.512498495e-2,
+        6.521209011e-3,
     ];
 
     for x in samples {
@@ -296,7 +304,8 @@ pub fn srgb_to_linear(samples: &mut [f32]) {
             a / 12.92
         } else {
             crate::fastmath::rational_poly::eval_generic(a, P, Q)
-        }.copysign(*x);
+        }
+        .copysign(*x);
     }
 }
 

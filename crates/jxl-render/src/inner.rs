@@ -321,15 +321,19 @@ fn convert_color_for_record(
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
             tracing::trace!(colour_encoding = ?metadata.colour_encoding);
             let transform = jxl_color::ColorTransform::new(
-                &jxl_color::ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb())),
+                &jxl_color::ColorEncodingWithProfile::new(ColourEncoding::Enum(
+                    EnumColourEncoding::xyb(),
+                )),
                 &jxl_color::ColorEncodingWithProfile::new(metadata.colour_encoding.clone()),
                 &metadata.opsin_inverse_matrix,
                 metadata.tone_mapping.intensity_target,
             );
-            transform.run(
-                &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
-                &jxl_color::NullCms,
-            ).unwrap();
+            transform
+                .run(
+                    &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
+                    &jxl_color::NullCms,
+                )
+                .unwrap();
         });
     }
 }

@@ -1,15 +1,9 @@
-pub(crate) fn run(
-    xyb: [&mut [f32]; 3],
-    ob: [f32; 3],
-    intensity_target: f32,
-) {
+pub(crate) fn run(xyb: [&mut [f32]; 3], ob: [f32; 3], intensity_target: f32) {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma") {
             // SAFETY: Feature set is checked above.
-            return unsafe {
-                run_x86_64_avx2(xyb, ob, intensity_target)
-            };
+            return unsafe { run_x86_64_avx2(xyb, ob, intensity_target) };
         }
     }
 
@@ -17,9 +11,7 @@ pub(crate) fn run(
     {
         if std::arch::is_aarch64_feature_detected!("neon") {
             // SAFETY: Feature set is checked above.
-            return unsafe {
-                run_aarch64_neon(xyb, ob, intensity_target)
-            };
+            return unsafe { run_aarch64_neon(xyb, ob, intensity_target) };
         }
     }
 
@@ -29,30 +21,18 @@ pub(crate) fn run(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
-unsafe fn run_x86_64_avx2(
-    xyb: [&mut [f32]; 3],
-    ob: [f32; 3],
-    intensity_target: f32,
-) {
+unsafe fn run_x86_64_avx2(xyb: [&mut [f32]; 3], ob: [f32; 3], intensity_target: f32) {
     run_generic(xyb, ob, intensity_target)
 }
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-unsafe fn run_aarch64_neon(
-    xyb: [&mut [f32]; 3],
-    ob: [f32; 3],
-    intensity_target: f32,
-) {
+unsafe fn run_aarch64_neon(xyb: [&mut [f32]; 3], ob: [f32; 3], intensity_target: f32) {
     run_generic(xyb, ob, intensity_target)
 }
 
 #[inline(always)]
-fn run_generic(
-    xyb: [&mut [f32]; 3],
-    ob: [f32; 3],
-    intensity_target: f32,
-) {
+fn run_generic(xyb: [&mut [f32]; 3], ob: [f32; 3], intensity_target: f32) {
     let itscale = 255.0 / intensity_target;
 
     let [x, y, b] = xyb;

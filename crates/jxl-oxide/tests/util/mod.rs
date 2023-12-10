@@ -50,8 +50,14 @@ impl jxl_oxide::ColorManagementSystem for Lcms2 {
             unsafe {
                 let buf_in_ptr = buf_in.as_ptr();
                 let buf_out_ptr = buf_out.as_mut_ptr();
-                let transform_buf_in = std::slice::from_raw_parts(buf_in_ptr as *const u8, chunk_len * from_channels * std::mem::size_of::<f32>());
-                let transform_buf_out = std::slice::from_raw_parts_mut(buf_out_ptr as *mut u8, chunk_len * to_channels * std::mem::size_of::<f32>());
+                let transform_buf_in = std::slice::from_raw_parts(
+                    buf_in_ptr as *const u8,
+                    chunk_len * from_channels * std::mem::size_of::<f32>(),
+                );
+                let transform_buf_out = std::slice::from_raw_parts_mut(
+                    buf_out_ptr as *mut u8,
+                    chunk_len * to_channels * std::mem::size_of::<f32>(),
+                );
                 transform.transform_pixels(transform_buf_in, transform_buf_out);
             }
             for k in 0..chunk_len {

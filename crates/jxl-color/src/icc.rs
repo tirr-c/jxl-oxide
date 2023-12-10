@@ -479,7 +479,13 @@ fn create_para(ty: u16, params: &[u32]) -> Vec<u8> {
 
 /// Creates an ICCv4 profile from the given [`ColourEncoding`].
 pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
-    let EnumColourEncoding { colour_space, white_point, primaries, tf, rendering_intent } = match colour_encoding {
+    let EnumColourEncoding {
+        colour_space,
+        white_point,
+        primaries,
+        tf,
+        rendering_intent,
+    } = match colour_encoding {
         ColourEncoding::Enum(e) => e.clone(),
         ColourEncoding::IccProfile(colour_space) => EnumColourEncoding {
             tf: TransferFunction::Linear,
@@ -488,7 +494,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
         },
         ColourEncoding::PcsXyz => {
             return nciexyz_icc_profile(ILLUMINANT_D50);
-        },
+        }
     };
 
     if colour_space == ColourSpace::Xyb {
@@ -729,18 +735,10 @@ pub(crate) fn nciexyz_icc_profile(white_point: [f32; 2]) -> Vec<u8> {
     append_tag_with_data(&mut tags, &mut data, *b"chad", &chad_data);
 
     let a2b0_lut = [
-        b'm', b'A', b'B', b' ',
-        0, 0, 0, 0,
-        3, 3, 0, 0,
-        0, 0, 0, 0x20,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        // y = x^1 (linear)
-        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+        b'm', b'A', b'B', b' ', 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, // y = x^1 (linear)
+        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, b'p', b'a', b'r', b'a', 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 1, 0, 0, b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
     ];
     append_tag_with_data(&mut tags, &mut data, *b"A2B0", &a2b0_lut);
 

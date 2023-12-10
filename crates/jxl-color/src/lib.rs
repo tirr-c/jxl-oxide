@@ -6,8 +6,8 @@
 //! - [`consts`] defines constants used by the various colorspaces.
 //! - [`icc`] provides functions related to ICC profiles.
 
-mod cms;
 mod ciexyz;
+mod cms;
 pub mod consts;
 mod convert;
 mod error;

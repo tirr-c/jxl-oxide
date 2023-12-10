@@ -75,29 +75,37 @@ impl ColourEncoding {
     /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
     #[inline]
     pub fn is_srgb(&self) -> bool {
-        matches!(self, Self::Enum(EnumColourEncoding {
-            colour_space: ColourSpace::Rgb,
-            white_point: WhitePoint::D65,
-            primaries: Primaries::Srgb,
-            tf: TransferFunction::Srgb,
-            ..
-        }))
+        matches!(
+            self,
+            Self::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Srgb,
+                ..
+            })
+        )
     }
 
     #[inline]
     pub fn is_srgb_gamut(&self) -> bool {
-        matches!(self, Self::Enum(EnumColourEncoding {
-            colour_space: ColourSpace::Rgb,
-            white_point: WhitePoint::D65,
-            primaries: Primaries::Srgb,
-            ..
-        }))
+        matches!(
+            self,
+            Self::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                ..
+            })
+        )
     }
 
     /// Returns the CICP tag which represents this `ColourEncoding`.
     #[inline]
     pub fn cicp(&self) -> Option<[u8; 4]> {
-        let Self::Enum(e) = self else { return None; };
+        let Self::Enum(e) = self else {
+            return None;
+        };
         e.cicp()
     }
 }
@@ -238,23 +246,29 @@ impl EnumColourEncoding {
     /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
     #[inline]
     pub fn is_srgb(&self) -> bool {
-        matches!(self, Self {
-            colour_space: ColourSpace::Rgb,
-            white_point: WhitePoint::D65,
-            primaries: Primaries::Srgb,
-            tf: TransferFunction::Srgb,
-            ..
-        })
+        matches!(
+            self,
+            Self {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Srgb,
+                ..
+            }
+        )
     }
 
     #[inline]
     pub fn is_srgb_gamut(&self) -> bool {
-        matches!(self, Self {
-            colour_space: ColourSpace::Rgb,
-            white_point: WhitePoint::D65,
-            primaries: Primaries::Srgb,
-            ..
-        })
+        matches!(
+            self,
+            Self {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                ..
+            }
+        )
     }
 
     #[inline]
@@ -446,11 +460,9 @@ impl Primaries {
     pub fn as_chromaticity(self) -> [[f32; 2]; 3] {
         match self {
             Self::Srgb => PRIMARIES_SRGB,
-            Self::Custom { red, green, blue } => [
-                red.as_float(),
-                green.as_float(),
-                blue.as_float(),
-            ],
+            Self::Custom { red, green, blue } => {
+                [red.as_float(), green.as_float(), blue.as_float()]
+            }
             Self::Bt2100 => PRIMARIES_BT2100,
             Self::P3 => PRIMARIES_P3,
         }

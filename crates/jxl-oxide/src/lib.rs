@@ -93,8 +93,8 @@ use std::sync::Arc;
 mod fb;
 
 use jxl_bitstream::ContainerDetectingReader;
-pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_color::header as color;
+pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
@@ -482,17 +482,20 @@ impl JxlImage {
 
     /// Requests the decoder to render in specific color encoding, described by an ICC profile.
     pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
-        self.ctx.request_color_encoding(
-            ColorEncodingWithProfile::with_icc(jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown), icc_profile)
-        )
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::with_icc(
+                jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown),
+                icc_profile,
+            ))
     }
 
     /// Requests the decoder to render in specific color encoding, described by
     /// `EnumColourEncoding`.
     pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
-        self.ctx.request_color_encoding(
-            ColorEncodingWithProfile::new(jxl_color::ColourEncoding::Enum(color_encoding))
-        )
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::new(
+                jxl_color::ColourEncoding::Enum(color_encoding),
+            ))
     }
 
     /// Returns the ICC profile that describes rendered images.
@@ -517,7 +520,10 @@ impl JxlImage {
 
         let encoding = self.ctx.requested_color_encoding();
         let (is_grayscale, has_black) = match encoding.encoding() {
-            ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Grey, .. }) => (true, false),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Grey,
+                ..
+            }) => (true, false),
             ColourEncoding::Enum(_) => (false, false),
             ColourEncoding::IccProfile(_) => {
                 let profile = encoding.icc_profile();
@@ -530,7 +536,7 @@ impl JxlImage {
                         _ => (false, false),
                     }
                 }
-            },
+            }
             ColourEncoding::PcsXyz => (false, false),
         };
         let mut has_alpha = false;
@@ -685,11 +691,7 @@ impl JxlImage {
         mut grids: Vec<SimpleGrid<f32>>,
     ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
         let pixel_format = self.pixel_format();
-        let color_channels = if pixel_format.is_grayscale() {
-            1
-        } else {
-            3
-        };
+        let color_channels = if pixel_format.is_grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
         let extra_channels: Vec<_> = grids
             .into_iter()

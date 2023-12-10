@@ -2,7 +2,9 @@
 use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, Bundle};
-use jxl_color::{ColourEncoding, ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding};
+use jxl_color::{
+    ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, EnumColourEncoding,
+};
 use jxl_frame::{
     data::{LfGlobalVarDct, LfGroup},
     header::FrameType,
@@ -89,9 +91,9 @@ impl RenderContextBuilder {
     pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
         let requested_color_encoding = if image_header.metadata.colour_encoding.want_icc() {
             if image_header.metadata.xyb_encoded {
-                ColorEncodingWithProfile::new(
-                    ColourEncoding::Enum(EnumColourEncoding::srgb(jxl_color::RenderingIntent::Relative))
-                )
+                ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::srgb(
+                    jxl_color::RenderingIntent::Relative,
+                )))
             } else {
                 ColorEncodingWithProfile::with_icc(
                     image_header.metadata.colour_encoding.clone(),
@@ -99,9 +101,7 @@ impl RenderContextBuilder {
                 )
             }
         } else {
-            ColorEncodingWithProfile::new(
-                image_header.metadata.colour_encoding.clone()
-            )
+            ColorEncodingWithProfile::new(image_header.metadata.colour_encoding.clone())
         };
 
         RenderContext {
@@ -648,60 +648,70 @@ impl RenderContext {
         let metadata = self.metadata();
         let frame_header = frame.header();
 
-        tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<()> {
-            let header_color_encoding = &metadata.colour_encoding;
-            let want_icc = header_color_encoding.want_icc();
-            let frame_color_encoding = if (frame_header.save_before_ct || want_icc) && metadata.xyb_encoded {
-                ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
-            } else if want_icc {
-                ColorEncodingWithProfile::with_icc(header_color_encoding.clone(), self.embedded_icc.clone())
-            } else {
-                ColorEncodingWithProfile::new(header_color_encoding.clone())
-            };
-            tracing::trace!(?frame_color_encoding);
-            tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
-            tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
-
-            if frame_header.save_before_ct && frame_header.do_ycbcr {
-                let [cb, y, cr, ..] = grid.buffer_mut() else {
-                    panic!()
+        tracing::trace_span!("Transform to requested color encoding").in_scope(
+            || -> Result<()> {
+                let header_color_encoding = &metadata.colour_encoding;
+                let want_icc = header_color_encoding.want_icc();
+                let frame_color_encoding = if (frame_header.save_before_ct || want_icc)
+                    && metadata.xyb_encoded
+                {
+                    ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
+                } else if want_icc {
+                    ColorEncodingWithProfile::with_icc(
+                        header_color_encoding.clone(),
+                        self.embedded_icc.clone(),
+                    )
+                } else {
+                    ColorEncodingWithProfile::new(header_color_encoding.clone())
                 };
-                jxl_color::ycbcr_to_rgb([cb, y, cr]);
-            }
+                tracing::trace!(?frame_color_encoding);
+                tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
+                tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-            let transform = jxl_color::ColorTransform::new(
-                &frame_color_encoding,
-                &self.requested_color_encoding,
-                &metadata.opsin_inverse_matrix,
-                metadata.tone_mapping.intensity_target,
-            );
-
-            let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
-            let mut channels = color_channels.iter_mut().map(|x| x.buf_mut()).collect::<Vec<_>>();
-            let mut has_black = false;
-            for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
-                if ec_info.is_black() {
-                    channels.push(grid.buf_mut());
-                    has_black = true;
-                    break;
+                if frame_header.save_before_ct && frame_header.do_ycbcr {
+                    let [cb, y, cr, ..] = grid.buffer_mut() else {
+                        panic!()
+                    };
+                    jxl_color::ycbcr_to_rgb([cb, y, cr]);
                 }
-            }
 
-            if has_black {
-                // 0 means full ink; invert samples
-                for grid in channels.iter_mut() {
-                    for v in &mut **grid {
-                        *v = 1.0 - *v;
+                let transform = jxl_color::ColorTransform::new(
+                    &frame_color_encoding,
+                    &self.requested_color_encoding,
+                    &metadata.opsin_inverse_matrix,
+                    metadata.tone_mapping.intensity_target,
+                );
+
+                let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
+                let mut channels = color_channels
+                    .iter_mut()
+                    .map(|x| x.buf_mut())
+                    .collect::<Vec<_>>();
+                let mut has_black = false;
+                for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
+                    if ec_info.is_black() {
+                        channels.push(grid.buf_mut());
+                        has_black = true;
+                        break;
                     }
                 }
-            }
 
-            let output_channels = transform.run(&mut channels, &*self.cms)?;
-            if output_channels < 3 {
-                grid.remove_channels(output_channels..3);
-            }
-            Ok(())
-        })?;
+                if has_black {
+                    // 0 means full ink; invert samples
+                    for grid in channels.iter_mut() {
+                        for v in &mut **grid {
+                            *v = 1.0 - *v;
+                        }
+                    }
+                }
+
+                let output_channels = transform.run(&mut channels, &*self.cms)?;
+                if output_channels < 3 {
+                    grid.remove_channels(output_channels..3);
+                }
+                Ok(())
+            },
+        )?;
 
         Ok(())
     }
