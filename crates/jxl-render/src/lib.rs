@@ -696,7 +696,9 @@ impl RenderContext {
             }
 
             let output_channels = transform.run(&mut channels, &*self.cms)?;
-            grid.remove_channels(output_channels..3);
+            if output_channels < 3 {
+                grid.remove_channels(output_channels..3);
+            }
             Ok(())
         })?;
 

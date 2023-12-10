@@ -487,6 +487,14 @@ impl JxlImage {
         )
     }
 
+    /// Requests the decoder to render in specific color encoding, described by
+    /// `EnumColourEncoding`.
+    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
+        self.ctx.request_color_encoding(
+            ColorEncodingWithProfile::new(jxl_color::ColourEncoding::Enum(color_encoding))
+        )
+    }
+
     /// Returns the ICC profile that describes rendered images.
     pub fn rendered_icc(&self) -> Vec<u8> {
         let encoding = self.ctx.requested_color_encoding();
@@ -495,6 +503,12 @@ impl JxlImage {
         } else {
             jxl_color::icc::colour_encoding_to_icc(encoding.encoding())
         }
+    }
+
+    #[inline]
+    pub fn rendered_cicp(&self) -> Option<[u8; 4]> {
+        let encoding = self.ctx.requested_color_encoding();
+        encoding.encoding().cicp()
     }
 
     /// Returns the pixel format of the rendered image.

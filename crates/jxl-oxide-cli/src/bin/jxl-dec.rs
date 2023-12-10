@@ -2,7 +2,7 @@ use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
 use jxl_oxide::{
-    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render,
+    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render, color::EnumColourEncoding,
 };
 use lcms2::{Profile, Transform};
 
@@ -66,26 +66,6 @@ impl jxl_oxide::ColorManagementSystem for Lcms2 {
         }
 
         Ok(to_channels)
-    }
-}
-
-enum LcmsTransform {
-    Grayscale(lcms2::Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
-    GrayscaleAlpha(lcms2::Transform<[f32; 2], [f32; 2], lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgb(lcms2::Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgba(lcms2::Transform<[f32; 4], [f32; 4], lcms2::GlobalContext, lcms2::AllowCache>),
-}
-
-impl LcmsTransform {
-    fn transform_in_place(&self, fb: &mut FrameBuffer) {
-        use LcmsTransform::*;
-
-        match self {
-            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
-            GrayscaleAlpha(t) => t.transform_in_place(fb.buf_grouped_mut()),
-            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
-            Rgba(t) => t.transform_in_place(fb.buf_grouped_mut()),
-        }
     }
 }
 
@@ -213,10 +193,16 @@ fn main() {
         tracing::warn!("Partial image");
     }
 
+    let output_png = args.output.is_some() && matches!(args.output_format, OutputFormat::Png | OutputFormat::Png8 | OutputFormat::Png16);
     if let Some(icc_path) = &args.target_icc {
         tracing::debug!("Setting target ICC profile");
         let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
         image.request_icc(icc_profile);
+    } else if output_png && image.pixel_format().has_black() {
+        tracing::debug!("Input is CMYK; setting target color encoding to sRGB");
+        image.request_color_encoding(
+            EnumColourEncoding::srgb(jxl_oxide::color::RenderingIntent::Relative)
+        );
     }
 
     let image_size = &image.image_header().size;
@@ -225,8 +211,12 @@ fn main() {
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
 
     if let Some(icc_path) = &args.icc_output {
-        tracing::debug!("Writing ICC profile");
-        std::fs::write(icc_path, image.rendered_icc()).expect("Failed to write ICC profile");
+        if let Some(icc) = image.original_icc() {
+            tracing::debug!("Writing ICC profile");
+            std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
+        } else {
+            tracing::info!("No embedded ICC profile, skipping icc_output");
+        }
     }
 
     let crop = args.crop.and_then(|crop| {
@@ -365,10 +355,8 @@ fn write_png<W: Write>(
 ) {
     // Color encoding information
     let source_icc = image.rendered_icc();
-    let embedded_icc = image.original_icc();
+    let cicp = image.rendered_cicp();
     let metadata = &image.image_header().metadata;
-    let colour_encoding = &metadata.colour_encoding;
-    let cicp = colour_encoding.cicp();
 
     let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let mut encoder = png::Encoder::new(output, width, height);
@@ -404,92 +392,23 @@ fn write_png<W: Write>(
             .unwrap();
     }
 
-    let mut transform = None;
-    let icc_cicp = if let Some(icc) = embedded_icc {
-        if metadata.xyb_encoded {
-            let source_profile = Profile::new_icc(&source_icc)
-                .expect("Failed to create profile from jxl-oxide ICC profile");
-
-            let target_profile = Profile::new_icc(icc);
-            match target_profile {
-                Err(err) => {
-                    tracing::warn!("Embedded ICC has error: {}", err);
-                    None
-                }
-                Ok(target_profile) => {
-                    transform = Some(match color_type {
-                        png::ColorType::Grayscale => LcmsTransform::Grayscale(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::GRAY_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::GRAY_FLT,
-                                lcms2::Intent::AbsoluteColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::GrayscaleAlpha => LcmsTransform::GrayscaleAlpha(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
-                                &target_profile,
-                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
-                                lcms2::Intent::AbsoluteColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::Rgb => LcmsTransform::Rgb(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::RGB_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::RGB_FLT,
-                                lcms2::Intent::AbsoluteColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::Rgba => LcmsTransform::Rgba(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::RGBA_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::RGBA_FLT,
-                                lcms2::Intent::AbsoluteColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        _ => unreachable!(),
-                    });
-
-                    Some((icc, None))
-                }
-            }
-        } else {
-            Some((icc, None))
-        }
-    } else {
-        // TODO: emit gAMA and cHRM
-        Some((&*source_icc, cicp))
-    };
     encoder.validate_sequence(true);
 
     let mut writer = encoder.write_header().expect("failed to write header");
 
-    if let Some((icc, cicp)) = &icc_cicp {
-        tracing::debug!("Embedding ICC profile");
-        let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(icc, 7);
-        let mut iccp_chunk_data = vec![b'0', 0, 0];
-        iccp_chunk_data.extend(compressed_icc);
-        writer
-            .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
-            .expect("failed to write iCCP");
+    tracing::debug!("Embedding ICC profile");
+    let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&source_icc, 7);
+    let mut iccp_chunk_data = vec![b'0', 0, 0];
+    iccp_chunk_data.extend(compressed_icc);
+    writer
+        .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
+        .expect("failed to write iCCP");
 
-        if let Some(cicp) = *cicp {
-            tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-            writer
-                .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
-                .expect("failed to write cICP");
-        }
+    if let Some(cicp) = cicp {
+        tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
+        writer
+            .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
+            .expect("failed to write cICP");
     }
 
     tracing::debug!("Writing image data");
@@ -519,9 +438,6 @@ fn write_png<W: Write>(
             stream.channels() as usize,
         );
         stream.write_to_buffer(fb.buf_mut());
-        if let Some(transform) = &transform {
-            transform.transform_in_place(&mut fb);
-        }
 
         if sixteen_bits {
             let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];
