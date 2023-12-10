@@ -39,6 +39,17 @@ impl ColorEncodingWithProfile {
     pub fn icc_profile(&self) -> &[u8] {
         &self.icc_profile
     }
+
+    #[inline]
+    pub fn is_grayscale(&self) -> bool {
+        match &self.encoding {
+            ColourEncoding::Enum(encoding) => encoding.colour_space == ColourSpace::Grey,
+            ColourEncoding::IccProfile(_) => {
+                self.icc_profile.len() > 0x14 && self.icc_profile[0x10..0x14] == *b"GRAY"
+            },
+            ColourEncoding::PcsXyz => false,
+        }
+    }
 }
 
 impl ColorEncodingWithProfile {
@@ -78,6 +89,7 @@ impl ColorEncodingWithProfile {
 
 #[derive(Debug, Clone)]
 pub struct ColorTransform {
+    begin_channels: usize,
     ops: Vec<ColorTransformOp>,
 }
 
@@ -88,8 +100,26 @@ impl ColorTransform {
         oim: &OpsinInverseMatrix,
         intensity_target: f32,
     ) -> Self {
+        let begin_channels = match &from.encoding {
+            ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Grey, .. }) => 1,
+            ColourEncoding::Enum(_) => 3,
+            ColourEncoding::IccProfile(_) => {
+                let profile = from.icc_profile();
+                if profile.len() < 0x14 {
+                    3
+                } else {
+                    match &profile[0x10..0x14] {
+                        [b'G', b'R', b'A', b'Y'] => 1,
+                        [b'C', b'M', b'Y', b'K'] => 4,
+                        _ => 3,
+                    }
+                }
+            },
+            ColourEncoding::PcsXyz => 3,
+        };
+
         if from.is_equivalent(to) {
-            return Self { ops: Vec::new() };
+            return Self { begin_channels, ops: Vec::new() };
         }
 
         let mut ops = Vec::new();
@@ -113,7 +143,7 @@ impl ColorTransform {
                         from: colour_encoding_to_icc(&ColourEncoding::Enum(EnumColourEncoding::srgb_linear(RenderingIntent::Perceptual))),
                         to: to.icc_profile.clone(),
                     });
-                    return Self { ops };
+                    return Self { begin_channels, ops };
                 }
                 ops.push(ColorTransformOp::Matrix(srgb_to_xyz_mat()));
                 ILLUMINANT_D65
@@ -125,7 +155,7 @@ impl ColorTransform {
                     from: colour_encoding_to_icc(encoding),
                     to: to.icc_profile.clone(),
                 });
-                return Self { ops };
+                return Self { begin_channels, ops };
             },
             ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Rgb, white_point, primaries, tf, .. }) => {
                 let illuminant = white_point.as_chromaticity();
@@ -155,6 +185,7 @@ impl ColorTransform {
                     },
                     inverse: true,
                 });
+                ops.push(ColorTransformOp::ResizeChannels(3));
                 ops.push(ColorTransformOp::Matrix(mat));
                 illuminant
             },
@@ -171,7 +202,7 @@ impl ColorTransform {
                     from: from.icc_profile.clone(),
                     to: to_profile,
                 });
-                return Self { ops };
+                return Self { begin_channels, ops };
             },
             ColourEncoding::PcsXyz => {
                 ILLUMINANT_D50
@@ -207,13 +238,14 @@ impl ColorTransform {
                 let mat = crate::ciexyz::xyz_to_primaries_mat(PRIMARIES_SRGB, illuminant);
                 ops.push(ColorTransformOp::Matrix(adapt_mat(connecting_illuminant, illuminant)));
                 ops.push(ColorTransformOp::Matrix(mat));
+                ops.push(ColorTransformOp::ResizeChannels(1));
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
                     hdr_params: HdrParams {
                         luminances,
                         intensity_target,
                     },
-                    inverse: true,
+                    inverse: false,
                 });
             },
             ColourEncoding::Enum(ref e) => todo!("Unsupported output enum colorspace {:?}", e),
@@ -234,7 +266,7 @@ impl ColorTransform {
             },
         }
 
-        Self { ops }
+        Self { begin_channels, ops }
     }
 
     pub fn xyb_to_enum(encoding: &EnumColourEncoding, oim: &OpsinInverseMatrix, intensity_target: f32) -> Self {
@@ -247,9 +279,9 @@ impl ColorTransform {
     }
 
     pub fn run<Cms: ColorManagementSystem + ?Sized>(&self, channels: &mut [&mut [f32]], cms: &Cms) -> Result<usize, crate::Error> {
-        let mut num_channels = channels.len();
+        let mut num_channels = self.begin_channels;
         for op in &self.ops {
-            num_channels = op.run(channels, cms)?;
+            num_channels = op.run(channels, num_channels, cms)?;
         }
         Ok(num_channels)
     }
@@ -273,6 +305,7 @@ enum ColorTransformOp {
         from: Vec<u8>,
         to: Vec<u8>,
     },
+    ResizeChannels(usize),
 }
 
 impl std::fmt::Debug for ColorTransformOp {
@@ -288,6 +321,9 @@ impl std::fmt::Debug for ColorTransformOp {
             Self::IccToIcc { inputs, outputs, from, to } => {
                 f.debug_struct("IccToIcc").field("inputs", inputs).field("outputs", outputs).field("from", &format_args!("({} byte(s))", from.len())).field("to", &format_args!("({} byte(s))", to.len())).finish()
             },
+            Self::ResizeChannels(arg0) => {
+                f.debug_tuple("ResizeChannels").field(arg0).finish()
+            },
         }
     }
 }
@@ -301,6 +337,7 @@ impl ColorTransformOp {
             ColorTransformOp::TransferFunction { .. }  => None,
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
+            ColorTransformOp::ResizeChannels(_) => None,
         }
     }
 
@@ -312,12 +349,14 @@ impl ColorTransformOp {
             ColorTransformOp::TransferFunction { .. }  => None,
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
+            ColorTransformOp::ResizeChannels(outputs) => Some(outputs),
         }
     }
 
     fn run<Cms: ColorManagementSystem + ?Sized>(
         &self,
         channels: &mut [&mut [f32]],
+        num_input_channels: usize,
         cms: &Cms,
     ) -> Result<usize, crate::Error> {
         let channel_count = channels.len();
@@ -346,15 +385,29 @@ impl ColorTransformOp {
                 3
             },
             Self::TransferFunction { tf, hdr_params, inverse: false } => {
-                apply_transfer_function(channels, *tf, *hdr_params);
+                apply_transfer_function(&mut channels[..num_input_channels], *tf, *hdr_params);
                 channels.len()
             },
             Self::TransferFunction { tf, hdr_params, inverse: true } => {
-                apply_inverse_transfer_function(channels, *tf, *hdr_params);
+                apply_inverse_transfer_function(&mut channels[..num_input_channels], *tf, *hdr_params);
                 channels.len()
             },
             Self::IccToIcc { from, to, .. } => {
                 cms.transform(from, to, RenderingIntent::Relative, channels)?
+            },
+            Self::ResizeChannels(outputs) => {
+                let inputs = num_input_channels;
+                let outputs = *outputs;
+                if inputs < outputs {
+                    let (base, channels) = channels.split_at_mut(inputs);
+                    let base = base.last().unwrap();
+                    let base_len = base.len();
+                    for ch in channels {
+                        let len = ch.len().min(base_len);
+                        ch[..len].copy_from_slice(&base[..len]);
+                    }
+                }
+                outputs
             },
         })
     }
