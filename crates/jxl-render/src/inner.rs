@@ -138,8 +138,7 @@ pub(crate) fn render_frame(
         frame_visibility.1,
     )?;
 
-    // save_before_ct is always false if is_last = true
-    if !frame_header.save_before_ct && !frame_header.is_last {
+    if !frame_header.save_before_ct {
         convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
     }
 
@@ -312,7 +311,12 @@ fn convert_color_for_record(
         let [cb, y, cr, ..] = grid else { panic!() };
         jxl_color::ycbcr_to_rgb([cb, y, cr]);
     } else if metadata.xyb_encoded {
-        // want_icc = false
+        // want_icc = false || is_last = true
+        // in any case, blending does not occur when want_icc = true
+        if metadata.colour_encoding.want_icc() {
+            return;
+        }
+
         let [x, y, b, ..] = grid else { panic!() };
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
             tracing::trace!(colour_encoding = ?metadata.colour_encoding);

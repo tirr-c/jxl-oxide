@@ -650,9 +650,10 @@ impl RenderContext {
 
         tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<()> {
             let header_color_encoding = &metadata.colour_encoding;
-            let frame_color_encoding = if (frame_header.save_before_ct || frame_header.is_last) && metadata.xyb_encoded {
+            let want_icc = header_color_encoding.want_icc();
+            let frame_color_encoding = if (frame_header.save_before_ct || want_icc) && metadata.xyb_encoded {
                 ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
-            } else if header_color_encoding.want_icc() {
+            } else if want_icc {
                 ColorEncodingWithProfile::with_icc(header_color_encoding.clone(), self.embedded_icc.clone())
             } else {
                 ColorEncodingWithProfile::new(header_color_encoding.clone())
@@ -661,7 +662,7 @@ impl RenderContext {
             tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
             tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-            if (frame_header.save_before_ct || frame_header.is_last) && frame_header.do_ycbcr {
+            if frame_header.save_before_ct && frame_header.do_ycbcr {
                 let [cb, y, cr, ..] = grid.buffer_mut() else {
                     panic!()
                 };
