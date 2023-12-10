@@ -143,7 +143,6 @@ impl ColorTransform {
                 illuminant
             },
             ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Grey, white_point, tf, .. }) => {
-                // TODO: address rendering intent
                 let illuminant = white_point.as_chromaticity();
                 // primaries don't matter for grayscale
                 let mat = crate::ciexyz::primaries_to_xyz_mat(PRIMARIES_SRGB, illuminant);
@@ -263,7 +262,6 @@ enum ColorTransformOp {
         intensity_target: f32,
     },
     Matrix([f32; 9]),
-    Bias([f32; 3]),
     TransferFunction {
         tf: TransferFunction,
         hdr_params: HdrParams,
@@ -284,7 +282,6 @@ impl std::fmt::Debug for ColorTransformOp {
                 f.debug_struct("XybToMixedLms").field("opsin_bias", opsin_bias).field("intensity_target", intensity_target).finish()
             },
             Self::Matrix(arg0) => f.debug_tuple("Matrix").field(arg0).finish(),
-            Self::Bias(arg0) => f.debug_tuple("Bias").field(arg0).finish(),
             Self::TransferFunction { tf, hdr_params, inverse } => {
                 f.debug_struct("TransferFunction").field("tf", tf).field("hdr_params", hdr_params).field("inverse", inverse).finish()
             },
@@ -299,7 +296,7 @@ impl ColorTransformOp {
     #[inline]
     fn inputs(&self) -> Option<usize> {
         match *self {
-            ColorTransformOp::XybToMixedLms { .. } | ColorTransformOp::Matrix(_) | ColorTransformOp::Bias(_) => Some(3),
+            ColorTransformOp::XybToMixedLms { .. } | ColorTransformOp::Matrix(_) => Some(3),
             ColorTransformOp::TransferFunction { tf: TransferFunction::Hlg, .. } => Some(3),
             ColorTransformOp::TransferFunction { .. }  => None,
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
@@ -310,7 +307,7 @@ impl ColorTransformOp {
     #[inline]
     fn outputs(&self) -> Option<usize> {
         match *self {
-            ColorTransformOp::XybToMixedLms { .. } | ColorTransformOp::Matrix(_) | ColorTransformOp::Bias(_) => Some(3),
+            ColorTransformOp::XybToMixedLms { .. } | ColorTransformOp::Matrix(_) => Some(3),
             ColorTransformOp::TransferFunction { tf: TransferFunction::Hlg, .. } => Some(3),
             ColorTransformOp::TransferFunction { .. }  => None,
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
@@ -345,15 +342,6 @@ impl ColorTransformOp {
                     *a = result[0];
                     *b = result[1];
                     *c = result[2];
-                }
-                3
-            },
-            Self::Bias(bias) => {
-                let [a, b, c, ..] = channels else { unreachable!() };
-                for ((a, b), c) in a.iter_mut().zip(&mut **b).zip(&mut **c) {
-                    *a += bias[0];
-                    *b += bias[1];
-                    *c += bias[2];
                 }
                 3
             },

@@ -645,12 +645,12 @@ impl RenderContext {
             *grid = new_grid;
         }
 
-        let image_header = frame.image_header();
+        let metadata = self.metadata();
         let frame_header = frame.header();
 
         tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<()> {
-            let header_color_encoding = &image_header.metadata.colour_encoding;
-            let frame_color_encoding = if (frame_header.save_before_ct || frame_header.is_last) && image_header.metadata.xyb_encoded {
+            let header_color_encoding = &metadata.colour_encoding;
+            let frame_color_encoding = if (frame_header.save_before_ct || frame_header.is_last) && metadata.xyb_encoded {
                 ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
             } else if header_color_encoding.want_icc() {
                 ColorEncodingWithProfile::with_icc(header_color_encoding.clone(), self.embedded_icc.clone())
@@ -671,14 +671,14 @@ impl RenderContext {
             let transform = jxl_color::ColorTransform::new(
                 &frame_color_encoding,
                 &self.requested_color_encoding,
-                &image_header.metadata.opsin_inverse_matrix,
-                image_header.metadata.tone_mapping.intensity_target,
+                &metadata.opsin_inverse_matrix,
+                metadata.tone_mapping.intensity_target,
             );
 
             let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
             let mut channels = color_channels.iter_mut().map(|x| x.buf_mut()).collect::<Vec<_>>();
             let mut has_black = false;
-            for (grid, ec_info) in extra_channels.iter_mut().zip(&image_header.metadata.ec_info) {
+            for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
                 if ec_info.is_black() {
                     channels.push(grid.buf_mut());
                     has_black = true;
