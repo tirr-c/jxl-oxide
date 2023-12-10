@@ -1,4 +1,4 @@
-use crate::{ciexyz::*, consts::*, tf, TransferFunction, EnumColourEncoding, ColourEncoding, OpsinInverseMatrix, ColourSpace, icc::nciexyz_icc_profile, RenderingIntent, ColorManagementSystem};
+use crate::{ciexyz::*, consts::*, tf, TransferFunction, EnumColourEncoding, ColourEncoding, OpsinInverseMatrix, ColourSpace, icc::{nciexyz_icc_profile, colour_encoding_to_icc}, RenderingIntent, ColorManagementSystem};
 
 #[derive(Clone)]
 pub struct ColorEncodingWithProfile {
@@ -95,7 +95,7 @@ impl ColorTransform {
         let mut ops = Vec::new();
 
         let connecting_illuminant = match from.encoding {
-            ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Xyb, .. }) => {
+            ref encoding @ ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Xyb, .. }) => {
                 let inv_mat = oim.inv_mat;
                 #[rustfmt::skip]
                 let matrix = [
@@ -106,11 +106,28 @@ impl ColorTransform {
                 ops.push(ColorTransformOp::XybToMixedLms { opsin_bias: oim.opsin_bias, intensity_target });
                 ops.push(ColorTransformOp::Matrix(matrix));
                 // result: RGB; D65 illuminant, sRGB primaries, linear tf
+                if to.encoding.want_icc() {
+                    ops.push(ColorTransformOp::IccToIcc {
+                        inputs: 0,
+                        outputs: 0,
+                        from: colour_encoding_to_icc(encoding),
+                        to: to.icc_profile.clone(),
+                    });
+                    return Self { ops };
+                }
                 ops.push(ColorTransformOp::Matrix(srgb_to_xyz_mat()));
                 ILLUMINANT_D65
             },
+            ref encoding @ (ColourEncoding::Enum(_) | ColourEncoding::PcsXyz) if to.encoding.want_icc() => {
+                ops.push(ColorTransformOp::IccToIcc {
+                    inputs: 0,
+                    outputs: 0,
+                    from: colour_encoding_to_icc(encoding),
+                    to: to.icc_profile.clone(),
+                });
+                return Self { ops };
+            },
             ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Rgb, white_point, primaries, tf, .. }) => {
-                // TODO: address rendering intent
                 let illuminant = white_point.as_chromaticity();
                 let mat = crate::ciexyz::primaries_to_xyz_mat(primaries.as_chromaticity(), illuminant);
                 let luminances = [mat[3], mat[4], mat[5]];
@@ -144,13 +161,18 @@ impl ColorTransform {
             },
             ColourEncoding::Enum(ref e) => todo!("Unsupported input enum colorspace {:?}", e),
             ColourEncoding::IccProfile(_) => {
+                let to_profile = if to.encoding.want_icc() {
+                    to.icc_profile.clone()
+                } else {
+                    colour_encoding_to_icc(&to.encoding)
+                };
                 ops.push(ColorTransformOp::IccToIcc {
                     inputs: 0,
                     outputs: 3,
                     from: from.icc_profile.clone(),
-                    to: nciexyz_icc_profile(ILLUMINANT_D50),
+                    to: to_profile,
                 });
-                ILLUMINANT_D50
+                return Self { ops };
             },
             ColourEncoding::PcsXyz => {
                 ILLUMINANT_D50
