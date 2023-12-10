@@ -677,12 +677,24 @@ impl RenderContext {
 
             let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
             let mut channels = color_channels.iter_mut().map(|x| x.buf_mut()).collect::<Vec<_>>();
+            let mut has_black = false;
             for (grid, ec_info) in extra_channels.iter_mut().zip(&image_header.metadata.ec_info) {
                 if ec_info.is_black() {
                     channels.push(grid.buf_mut());
+                    has_black = true;
                     break;
                 }
             }
+
+            if has_black {
+                // 0 means full ink; invert samples
+                for grid in channels.iter_mut() {
+                    for v in &mut **grid {
+                        *v = 1.0 - *v;
+                    }
+                }
+            }
+
             let output_channels = transform.run(&mut channels, &*self.cms)?;
             grid.remove_channels(output_channels..3);
             Ok(())

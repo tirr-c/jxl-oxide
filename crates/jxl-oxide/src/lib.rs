@@ -261,7 +261,6 @@ impl UninitializedJxlImage {
         };
 
         let embedded_icc = if image_header.metadata.colour_encoding.want_icc() {
-            tracing::debug!("Image has an embedded ICC profile");
             let icc = match jxl_color::icc::read_icc(&mut bitstream) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
@@ -271,6 +270,7 @@ impl UninitializedJxlImage {
                     return Err(e.into());
                 }
             };
+            tracing::debug!("Image has an embedded ICC profile");
             let icc = jxl_color::icc::decode_icc(&icc)?;
             Some(icc)
         } else {
