@@ -143,6 +143,16 @@ impl EnumColourEncoding {
         }
     }
 
+    pub(crate) fn srgb_linear(rendering_intent: RenderingIntent) -> Self {
+        Self {
+            colour_space: ColourSpace::Rgb,
+            white_point: WhitePoint::D65,
+            primaries: Primaries::Srgb,
+            tf: TransferFunction::Linear,
+            rendering_intent,
+        }
+    }
+
     pub fn gray_srgb() -> Self {
         Self {
             colour_space: ColourSpace::Grey,

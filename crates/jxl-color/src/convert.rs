@@ -95,7 +95,7 @@ impl ColorTransform {
         let mut ops = Vec::new();
 
         let connecting_illuminant = match from.encoding {
-            ref encoding @ ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Xyb, .. }) => {
+            ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Xyb, .. }) => {
                 let inv_mat = oim.inv_mat;
                 #[rustfmt::skip]
                 let matrix = [
@@ -110,7 +110,7 @@ impl ColorTransform {
                     ops.push(ColorTransformOp::IccToIcc {
                         inputs: 0,
                         outputs: 0,
-                        from: colour_encoding_to_icc(encoding),
+                        from: colour_encoding_to_icc(&ColourEncoding::Enum(EnumColourEncoding::srgb_linear(RenderingIntent::Perceptual))),
                         to: to.icc_profile.clone(),
                     });
                     return Self { ops };
@@ -256,7 +256,7 @@ impl ColorTransform {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum ColorTransformOp {
     XybToMixedLms {
         opsin_bias: [f32; 3],
@@ -275,6 +275,24 @@ enum ColorTransformOp {
         from: Vec<u8>,
         to: Vec<u8>,
     },
+}
+
+impl std::fmt::Debug for ColorTransformOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::XybToMixedLms { opsin_bias, intensity_target } => {
+                f.debug_struct("XybToMixedLms").field("opsin_bias", opsin_bias).field("intensity_target", intensity_target).finish()
+            },
+            Self::Matrix(arg0) => f.debug_tuple("Matrix").field(arg0).finish(),
+            Self::Bias(arg0) => f.debug_tuple("Bias").field(arg0).finish(),
+            Self::TransferFunction { tf, hdr_params, inverse } => {
+                f.debug_struct("TransferFunction").field("tf", tf).field("hdr_params", hdr_params).field("inverse", inverse).finish()
+            },
+            Self::IccToIcc { inputs, outputs, from, to } => {
+                f.debug_struct("IccToIcc").field("inputs", inputs).field("outputs", outputs).field("from", &format_args!("({} byte(s))", from.len())).field("to", &format_args!("({} byte(s))", to.len())).finish()
+            },
+        }
+    }
 }
 
 impl ColorTransformOp {

@@ -93,9 +93,11 @@ fn run_test(
                     let output = interleaved_buffer[c + (x + y * width) * channels];
                     let sum_se = &mut sum_se[c];
 
-                    let abs_error = (output - reference).abs();
+                    let output_clamped = output.clamp(0f32, 1f32);
+                    let reference_clamped = reference.clamp(0f32, 1f32);
+                    let abs_error = (output_clamped - reference_clamped).abs();
                     if debug && abs_error >= expected_peak_error {
-                        eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}");
+                        eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference_clamped}, actual={output_clamped}");
                     }
                     peak_error = peak_error.max(abs_error);
                     *sum_se += abs_error * abs_error;

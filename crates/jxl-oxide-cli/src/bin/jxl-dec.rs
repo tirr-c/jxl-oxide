@@ -110,6 +110,9 @@ struct Args {
     /// Format to output
     #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
     output_format: OutputFormat,
+    /// (unstable) Path to target ICC profile
+    #[arg(long)]
+    target_icc: Option<PathBuf>,
     /// Print debug information
     #[arg(short, long)]
     verbose: bool,
@@ -208,6 +211,12 @@ fn main() {
         .expect("Failed to open file");
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
+    }
+
+    if let Some(icc_path) = &args.target_icc {
+        tracing::debug!("Setting target ICC profile");
+        let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
+        image.request_icc(icc_profile);
     }
 
     let image_size = &image.image_header().size;

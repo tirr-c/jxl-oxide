@@ -87,11 +87,23 @@ impl RenderContextBuilder {
     }
 
     pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
-        let colour_encoding = if image_header.metadata.colour_encoding.want_icc() {
-            ColourEncoding::Enum(EnumColourEncoding::srgb(jxl_color::RenderingIntent::Relative))
+        let requested_color_encoding = if image_header.metadata.colour_encoding.want_icc() {
+            if image_header.metadata.xyb_encoded {
+                ColorEncodingWithProfile::new(
+                    ColourEncoding::Enum(EnumColourEncoding::srgb(jxl_color::RenderingIntent::Relative))
+                )
+            } else {
+                ColorEncodingWithProfile::with_icc(
+                    image_header.metadata.colour_encoding.clone(),
+                    self.embedded_icc.clone(),
+                )
+            }
         } else {
-            image_header.metadata.colour_encoding.clone()
+            ColorEncodingWithProfile::new(
+                image_header.metadata.colour_encoding.clone()
+            )
         };
+
         RenderContext {
             image_header,
             tracker: self.tracker,
@@ -108,7 +120,7 @@ impl RenderContextBuilder {
             loading_render_cache: None,
             loading_region: None,
             embedded_icc: self.embedded_icc,
-            requested_color_encoding: ColorEncodingWithProfile::new(colour_encoding),
+            requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
         }
     }

@@ -499,15 +499,30 @@ impl JxlImage {
 
     /// Returns the pixel format of the rendered image.
     pub fn pixel_format(&self) -> PixelFormat {
-        let is_grayscale = self.image_header.metadata.grayscale();
-        let mut has_black = false;
+        use jxl_color::{ColourEncoding, ColourSpace, EnumColourEncoding};
+
+        let encoding = self.ctx.requested_color_encoding();
+        let (is_grayscale, has_black) = match encoding.encoding() {
+            ColourEncoding::Enum(EnumColourEncoding { colour_space: ColourSpace::Grey, .. }) => (true, false),
+            ColourEncoding::Enum(_) => (false, false),
+            ColourEncoding::IccProfile(_) => {
+                let profile = encoding.icc_profile();
+                if profile.len() < 0x14 {
+                    (false, false)
+                } else {
+                    match &profile[0x10..0x14] {
+                        [b'G', b'R', b'A', b'Y'] => (true, false),
+                        [b'C', b'M', b'Y', b'K'] => (false, true),
+                        _ => (false, false),
+                    }
+                }
+            },
+            ColourEncoding::PcsXyz => (false, false),
+        };
         let mut has_alpha = false;
         for ec_info in &self.image_header.metadata.ec_info {
             if ec_info.is_alpha() {
                 has_alpha = true;
-            }
-            if ec_info.is_black() {
-                has_black = true;
             }
         }
 
@@ -655,7 +670,8 @@ impl JxlImage {
         &self,
         mut grids: Vec<SimpleGrid<f32>>,
     ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
-        let color_channels = if self.image_header.metadata.grayscale() {
+        let pixel_format = self.pixel_format();
+        let color_channels = if pixel_format.is_grayscale() {
             1
         } else {
             3
@@ -669,6 +685,7 @@ impl JxlImage {
                 name: ec_info.name.clone(),
                 grid,
             })
+            .filter(|x| !x.is_black() || pixel_format.has_black()) // filter black channel
             .collect();
 
         if self.render_spot_colour {
@@ -725,6 +742,11 @@ impl PixelFormat {
             PixelFormat::Cmyk => 4,
             PixelFormat::Cmyka => 5,
         }
+    }
+
+    #[inline]
+    pub fn is_grayscale(self) -> bool {
+        matches!(self, Self::Gray | Self::Graya)
     }
 
     /// Returns whether the image has an alpha channel.
