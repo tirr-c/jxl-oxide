@@ -734,11 +734,22 @@ pub(crate) fn nciexyz_icc_profile(white_point: [f32; 2]) -> Vec<u8> {
     }
     append_tag_with_data(&mut tags, &mut data, *b"chad", &chad_data);
 
+    #[rustfmt::skip]
     let a2b0_lut = [
-        b'm', b'A', b'B', b' ', 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, // y = x^1 (linear)
-        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, b'p', b'a', b'r', b'a', 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 1, 0, 0, b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+        b'm', b'A', b'B', b' ',
+        0, 0, 0, 0,
+        // 3 inputs, 3 outputs
+        3, 3, 0, 0,
+        // B curve at 0x20
+        0, 0, 0, 0x20,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        // y = x^1 (linear)
+        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+        b'p', b'a', b'r', b'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
     ];
     append_tag_with_data(&mut tags, &mut data, *b"A2B0", &a2b0_lut);
 
