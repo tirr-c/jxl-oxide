@@ -2,8 +2,10 @@ use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
 use jxl_oxide::{
-    color::EnumColourEncoding, AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool,
-    PixelFormat, Render,
+    color::{
+        ColourSpace, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction, WhitePoint,
+    },
+    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render,
 };
 use lcms2::{Profile, Transform};
 
@@ -97,6 +99,9 @@ struct Args {
     /// Format to output
     #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
     output_format: OutputFormat,
+    /// (unstable) Target colorspace specification
+    #[arg(long)]
+    target_colorspace: Option<ColorspaceSpec>,
     /// (unstable) Path to target ICC profile
     #[arg(long)]
     target_icc: Option<PathBuf>,
@@ -119,6 +124,111 @@ enum OutputFormat {
     Png16,
     /// Numpy, used for conformance test.
     Npy,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ColorspaceSpec {
+    ty: Option<ColourSpace>,
+    white_point: Option<WhitePoint>,
+    gamut: Option<Primaries>,
+    tf: Option<TransferFunction>,
+    intent: Option<RenderingIntent>,
+}
+
+#[derive(Debug)]
+enum ColorspaceSpecParseErrorKind {
+    Empty,
+    UnknownPreset(String),
+    UnknownParam(String),
+    InvalidParam(&'static str),
+    InvalidParamValue { name: String, value: String },
+    MissingParams(Vec<&'static str>),
+}
+
+#[derive(Debug)]
+struct ColorspaceSpecParseError {
+    kind: ColorspaceSpecParseErrorKind,
+    message: String,
+}
+
+impl std::fmt::Display for ColorspaceSpecParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ColorspaceSpecParseError {}
+
+impl std::str::FromStr for ColorspaceSpec {
+    type Err = ColorspaceSpecParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut params = s.split(';').peekable();
+
+        let first = params.peek().ok_or(ColorspaceSpecParseError {
+            message: String::from("parameters are required"),
+            kind: ColorspaceSpecParseErrorKind::Empty,
+        })?;
+        let mut spec = ColorspaceSpec::from_preset(first).or_else(|_| {
+            let mut spec = ColorspaceSpec::new();
+            spec.add_param(first).map(|_| spec)
+        })?;
+
+        for param in params {
+            spec.add_param(param)?;
+        }
+
+        Ok(spec)
+    }
+}
+
+impl ColorspaceSpec {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn from_preset(preset: &str) -> Result<Self, ColorspaceSpecParseError> {
+        Ok(match preset {
+            "srgb" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Srgb),
+                tf: Some(TransferFunction::Srgb),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "display_p3" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::P3),
+                tf: Some(TransferFunction::Srgb),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "bt2020" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Bt2100),
+                tf: Some(TransferFunction::Bt709),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "bt2100" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Bt2100),
+                tf: None,
+                intent: Some(RenderingIntent::Relative),
+            },
+            _ => {
+                return Err(ColorspaceSpecParseError {
+                    kind: ColorspaceSpecParseErrorKind::UnknownParam(preset.to_owned()),
+                    message: format!("unknown preset: {preset}"),
+                })
+            }
+        })
+    }
+
+    fn add_param(&mut self, param: &str) -> Result<(), ColorspaceSpecParseError> {
+        todo!()
+    }
 }
 
 fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
