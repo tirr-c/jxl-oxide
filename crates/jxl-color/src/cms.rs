@@ -1,5 +1,6 @@
 use crate::RenderingIntent;
 
+/// Color management system that handles ICCv4 profiles.
 pub trait ColorManagementSystem {
     fn transform_impl(
         &self,
@@ -21,6 +22,7 @@ pub trait ColorManagementSystem {
     }
 }
 
+/// "Null" color management system that fails on every operation.
 #[derive(Debug, Copy, Clone)]
 pub struct NullCms;
 impl ColorManagementSystem for NullCms {

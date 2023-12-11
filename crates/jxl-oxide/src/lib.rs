@@ -466,39 +466,22 @@ impl JxlImage {
         self.image_header.height_with_orientation()
     }
 
+    /// Sets color management system implementation to be used by the renderer.
     #[inline]
     pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
         self.ctx.set_cms(cms);
     }
 
-    /// Returns the original ICC profile embedded in the image.
-    ///
-    /// It does *not* describe the colorspace of rendered images. Use
-    /// [`rendered_icc`][Self::rendered_icc] to do color management.
+    /// Returns the *original* ICC profile embedded in the image.
     #[inline]
     pub fn original_icc(&self) -> Option<&[u8]> {
         self.ctx.embedded_icc()
     }
 
-    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
-    pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
-        self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::with_icc(
-                jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown),
-                icc_profile,
-            ))
-    }
-
-    /// Requests the decoder to render in specific color encoding, described by
-    /// `EnumColourEncoding`.
-    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
-        self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::new(
-                jxl_color::ColourEncoding::Enum(color_encoding),
-            ))
-    }
-
     /// Returns the ICC profile that describes rendered images.
+    ///
+    /// The returned profile will change if different color encoding is specified using
+    /// [`request_icc`] or [`request_color_encoding`].
     pub fn rendered_icc(&self) -> Vec<u8> {
         let encoding = self.ctx.requested_color_encoding();
         if encoding.encoding().want_icc() {
@@ -508,6 +491,7 @@ impl JxlImage {
         }
     }
 
+    /// Returns the CICP tag of the color encoding of rendered images, if there's any.
     #[inline]
     pub fn rendered_cicp(&self) -> Option<[u8; 4]> {
         let encoding = self.ctx.requested_color_encoding();
@@ -556,6 +540,30 @@ impl JxlImage {
         }
     }
 
+    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
+    pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::with_icc(
+                jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown),
+                icc_profile,
+            ))
+    }
+
+    /// Requests the decoder to render in specific color encoding, described by
+    /// `EnumColourEncoding`.
+    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::new(
+                jxl_color::ColourEncoding::Enum(color_encoding),
+            ))
+    }
+
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_colour(&self) -> bool {
+        self.render_spot_colour
+    }
+
     /// Sets whether the spot colour channels will be rendered.
     #[inline]
     pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
@@ -565,12 +573,6 @@ impl JxlImage {
         }
         self.render_spot_colour = render_spot_colour;
         self
-    }
-
-    /// Returns whether the spot color channels will be rendered.
-    #[inline]
-    pub fn render_spot_colour(&self) -> bool {
-        self.render_spot_colour
     }
 }
 
@@ -760,6 +762,7 @@ impl PixelFormat {
         }
     }
 
+    /// Returns whether the image is grayscale.
     #[inline]
     pub fn is_grayscale(self) -> bool {
         matches!(self, Self::Gray | Self::Graya)
