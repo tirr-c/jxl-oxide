@@ -655,7 +655,7 @@ fn main() {
                     &image,
                     &keyframes,
                     pixel_format,
-                    Some(png::BitDepth::Eight),
+                    Some(png::BitDepth::Sixteen),
                     width,
                     height,
                 );
