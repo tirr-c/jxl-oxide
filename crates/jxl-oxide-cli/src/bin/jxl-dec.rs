@@ -104,24 +104,41 @@ struct Args {
     ///
     /// Specification string consists of (optional) preset and a sequence of parameters delimited by semicolons.
     ///
-    /// Parameters have a syntax of `name=value`. Valid parameter names are:
-    /// - `type`: Color space type.
-    ///   Valid values: `rgb`, `gray`, `xyb`.
-    /// - `gamut`: Color gamut. Invalid if type is Gray or XYB.
-    ///   Valid values: `srgb`, `p3`, `bt2100`, three xy-chromaticity coordinates delimited by commas.
-    /// - `white_point`: White point. Invalid if type is XYB.
-    ///   Valid values: `d65`, `dci`, `e`, xy-chromaticity coordinate.
-    /// - `tf`: Transfer function. Invalid if type is XYB.
-    ///   Valid values: `srgb`, `bt709`, `dci`, `pq`, `hlg`, `linear`, gamma value.
-    /// - `intent`: Rendering intent.
-    ///   Valid values: `relative`, `perceptual`, `saturation`, `absolute`.
+    /// Parameters have a syntax of `name=value`. Possible parameter names:
+    /// - type:   Color space type. Possible values:
+    ///           - rgb
+    ///           - gray
+    ///           - xyb
+    /// - gamut:  Color gamut. Invalid if type is Gray or XYB. Possible values:
+    ///           - srgb
+    ///           - p3
+    ///           - bt2100
+    ///           - (three xy-chromaticity coordinates delimited by commas)
+    /// - wp:     White point. Invalid if type is XYB. Possible values:
+    ///           - d65
+    ///           - dci
+    ///           - e
+    ///           - (xy-chromaticity coordinate)
+    /// - tf:     Transfer function. Invalid if type is XYB. Possible values:
+    ///           - srgb
+    ///           - bt709
+    ///           - dci
+    ///           - pq
+    ///           - hlg
+    ///           - linear
+    ///           - (gamma value)
+    /// - intent: Rendering intent. Possible values:
+    ///           - relative
+    ///           - perceptual
+    ///           - saturation
+    ///           - absolute
     ///
-    /// Presets define a set of parameters commonly used together:
-    /// - `srgb`: type=rgb;gamut=srgb;white_point=d65;tf=srgb;intent=relative
-    /// - `display_p3`: type=rgb;gamut=p3;white_point=d65;tf=srgb;intent=relative
-    /// - `rec2020`: type=rgb;gamut=bt2100;white_point=d65;tf=bt709;intent=relative
-    /// - `rec2100`: type=rgb;gamut=bt2100;white_point=d65;intent=relative
-    ///   Transfer function is not set for `rec2100` preset; one should be provided, e.g. `rec2100;tf=pq`
+    /// Presets define a set of parameters commonly used together. Possible presets:
+    /// - srgb:       type=rgb;gamut=srgb;wp=d65;tf=srgb;intent=relative
+    /// - display_p3: type=rgb;gamut=p3;wp=d65;tf=srgb;intent=relative
+    /// - rec2020:    type=rgb;gamut=bt2100;wp=d65;tf=bt709;intent=relative
+    /// - rec2100:    type=rgb;gamut=bt2100;wp=d65;intent=relative
+    ///               Transfer function is not set for this preset; one should be provided, e.g. rec2100;tf=pq
     #[arg(long, value_parser = parse_color_encoding, verbatim_doc_comment)]
     target_colorspace: Option<EnumColourEncoding>,
     /// (unstable) Path to target ICC profile
@@ -395,7 +412,14 @@ fn parse_color_encoding(val: &str) -> Result<EnumColourEncoding, ColorspaceSpecP
         spec.add_param(param)?;
     }
 
-    let ty = spec.ty.ok_or("color space type is required")?;
+    let ty = if let Some(ty) = spec.ty {
+        ty
+    } else if spec.white_point.is_some() && spec.gamut.is_some() && spec.tf.is_some() {
+        ColourSpace::Rgb
+    } else {
+        return Err("color space type is required".into());
+    };
+
     Ok(match ty {
         ColourSpace::Rgb => {
             let white_point = spec.white_point.ok_or("white point is required")?;
