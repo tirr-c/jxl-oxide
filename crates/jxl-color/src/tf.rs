@@ -423,23 +423,38 @@ pub fn bt709_to_linear(samples: &mut [f32]) {
     }
 }
 
-/// Converts the linear samples with the PQ transfer function, where linear sample value of 1.0
-/// represents `intensity_target` nits.
-pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
-    const M1: f32 = 1305.0 / 8192.0;
-    const M2: f32 = 2523.0 / 32.0;
-    const C1: f32 = 107.0 / 128.0;
-    const C2: f32 = 2413.0 / 128.0;
-    const C3: f32 = 2392.0 / 128.0;
+const PQ_M1: f32 = 1305.0 / 8192.0;
+const PQ_M2: f32 = 2523.0 / 32.0;
+const PQ_C1: f32 = 107.0 / 128.0;
+const PQ_C2: f32 = 2413.0 / 128.0;
+const PQ_C3: f32 = 2392.0 / 128.0;
 
+/// Converts the linear samples with the PQ transfer function, where linear sample value of 1.0
+/// represents `intensity_target` nits (PQ inverse EOTF).
+pub fn linear_to_pq(samples: &mut [f32], intensity_target: f32) {
     let y_mult = intensity_target / 10000.0;
 
     for s in samples {
         let a = s.abs();
-        let y_m1 = (a * y_mult).powf(M1);
-        *s = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0)))
-            .powf(M2)
+        let y_m1 = (a * y_mult).powf(PQ_M1);
+        *s = ((y_m1.mul_add(PQ_C2, PQ_C1)) / (y_m1.mul_add(PQ_C3, 1.0)))
+            .powf(PQ_M2)
             .copysign(*s);
+    }
+}
+
+/// Converts non-linear PQ signals to linear display luminance values, where luminance value of 1.0
+/// represents `intensity_target` nits (PQ EOTF).
+pub fn pq_to_linear(samples: &mut [f32], intensity_target: f32) {
+    let y_mult = 10000.0 / intensity_target;
+
+    for s in samples {
+        let a = s.abs();
+        let pow_m2 = a.powf(PQ_M2.recip());
+        let y_num = (pow_m2 - PQ_C1).max(0.0);
+        let y_den = PQ_C2 - PQ_C3 * pow_m2;
+        let y = (y_num / y_den).powf(PQ_M1.recip());
+        *s = (y * y_mult).copysign(*s);
     }
 }
 
@@ -463,6 +478,8 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
     out
 }
 
+/// Converts scene luminance values to display luminance values using the hybrid log-gamma
+/// transfer function (HLG OOTF).
 pub fn hlg_oo(
     [samples_r, samples_g, samples_b]: [&mut [f32]; 3],
     [lr, lg, lb]: [f32; 3],
@@ -482,7 +499,7 @@ pub fn hlg_oo(
 }
 
 /// Converts the display-referred samples to scene-referred signals using the hybrid log-gamma
-/// transfer function.
+/// transfer function (HLG inverse OOTF).
 pub fn hlg_inverse_oo(
     [samples_r, samples_g, samples_b]: [&mut [f32]; 3],
     [lr, lg, lb]: [f32; 3],

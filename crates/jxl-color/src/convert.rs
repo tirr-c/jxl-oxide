@@ -625,7 +625,10 @@ fn apply_inverse_transfer_function(
             }
         }
         TransferFunction::Pq => {
-            todo!()
+            let intensity_target = hdr_params.intensity_target;
+            for ch in channels {
+                tf::pq_to_linear(ch, intensity_target);
+            }
         }
         TransferFunction::Dci => {
             let gamma = 2.6;
@@ -641,10 +644,10 @@ fn apply_inverse_transfer_function(
             let luminances = hdr_params.luminances;
             let intensity_target = hdr_params.intensity_target;
 
-            tf::hlg_oo([r, g, b], luminances, intensity_target);
             tf::hlg_to_linear(r);
             tf::hlg_to_linear(g);
             tf::hlg_to_linear(b);
+            tf::hlg_oo([r, g, b], luminances, intensity_target);
         }
     }
 }
