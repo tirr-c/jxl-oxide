@@ -2,27 +2,80 @@ use std::{io::prelude::*, path::PathBuf};
 
 use clap::Parser;
 use jxl_oxide::{
+    color::{
+        ColourSpace, Customxy, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction,
+        WhitePoint,
+    },
     AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render,
 };
-use lcms2::Profile;
+use lcms2::{Profile, Transform};
 
-enum LcmsTransform {
-    Grayscale(lcms2::Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
-    GrayscaleAlpha(lcms2::Transform<[f32; 2], [f32; 2], lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgb(lcms2::Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgba(lcms2::Transform<[f32; 4], [f32; 4], lcms2::GlobalContext, lcms2::AllowCache>),
-}
+struct Lcms2;
+impl jxl_oxide::ColorManagementSystem for Lcms2 {
+    fn transform_impl(
+        &self,
+        from: &[u8],
+        to: &[u8],
+        intent: jxl_oxide::color::RenderingIntent,
+        channels: &mut [&mut [f32]],
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        use lcms2::ColorSpaceSignatureExt;
 
-impl LcmsTransform {
-    fn transform_in_place(&self, fb: &mut FrameBuffer) {
-        use LcmsTransform::*;
+        let from_profile = Profile::new_icc(from)?;
+        let from_channels = from_profile.color_space().channels() as usize;
+        let to_profile = Profile::new_icc(to)?;
+        let to_channels = to_profile.color_space().channels() as usize;
+        let max_channels = from_channels.max(to_channels);
+        assert!(channels.len() >= max_channels);
 
-        match self {
-            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
-            GrayscaleAlpha(t) => t.transform_in_place(fb.buf_grouped_mut()),
-            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
-            Rgba(t) => t.transform_in_place(fb.buf_grouped_mut()),
+        #[allow(clippy::unusual_byte_groupings)]
+        let format_base = 0b010_00000_000000_000_0000_100;
+        let from_pixel_format = lcms2::PixelFormat(format_base | ((from_channels as u32) << 3));
+        let to_pixel_format = lcms2::PixelFormat(format_base | ((to_channels as u32) << 3));
+        let transform = Transform::new(
+            &from_profile,
+            from_pixel_format,
+            &to_profile,
+            to_pixel_format,
+            match intent {
+                jxl_oxide::color::RenderingIntent::Perceptual => lcms2::Intent::Perceptual,
+                jxl_oxide::color::RenderingIntent::Relative => lcms2::Intent::RelativeColorimetric,
+                jxl_oxide::color::RenderingIntent::Saturation => lcms2::Intent::Saturation,
+                jxl_oxide::color::RenderingIntent::Absolute => lcms2::Intent::AbsoluteColorimetric,
+            },
+        )?;
+
+        let mut buf_in = vec![0f32; 1024 * from_channels];
+        let mut buf_out = vec![0f32; 1024 * to_channels];
+        let len = channels.iter().map(|x| x.len()).min().unwrap();
+        for idx in (0..len).step_by(1024) {
+            let chunk_len = (len - idx).min(1024);
+            for k in 0..chunk_len {
+                for (channel_idx, ch) in channels[..from_channels].iter().enumerate() {
+                    buf_in[k * from_channels + channel_idx] = ch[idx + k];
+                }
+            }
+            unsafe {
+                let buf_in_ptr = buf_in.as_ptr();
+                let buf_out_ptr = buf_out.as_mut_ptr();
+                let transform_buf_in = std::slice::from_raw_parts(
+                    buf_in_ptr as *const u8,
+                    chunk_len * from_channels * std::mem::size_of::<f32>(),
+                );
+                let transform_buf_out = std::slice::from_raw_parts_mut(
+                    buf_out_ptr as *mut u8,
+                    chunk_len * to_channels * std::mem::size_of::<f32>(),
+                );
+                transform.transform_pixels(transform_buf_in, transform_buf_out);
+            }
+            for k in 0..chunk_len {
+                for (channel_idx, ch) in channels[..to_channels].iter_mut().enumerate() {
+                    ch[idx + k] = buf_out[k * to_channels + channel_idx];
+                }
+            }
         }
+
+        Ok(to_channels)
     }
 }
 
@@ -47,6 +100,50 @@ struct Args {
     /// Format to output
     #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
     output_format: OutputFormat,
+    /// (unstable) Target colorspace specification
+    ///
+    /// Specification string consists of (optional) preset and a sequence of parameters delimited by semicolons.
+    ///
+    /// Parameters have a syntax of `name=value`. Possible parameter names:
+    /// - type:   Color space type. Possible values:
+    ///           - rgb
+    ///           - gray
+    ///           - xyb
+    /// - gamut:  Color gamut. Invalid if type is Gray or XYB. Possible values:
+    ///           - srgb
+    ///           - p3
+    ///           - bt2100
+    ///           - (three xy-chromaticity coordinates delimited by commas)
+    /// - wp:     White point. Invalid if type is XYB. Possible values:
+    ///           - d65
+    ///           - dci
+    ///           - e
+    ///           - (xy-chromaticity coordinate)
+    /// - tf:     Transfer function. Invalid if type is XYB. Possible values:
+    ///           - srgb
+    ///           - bt709
+    ///           - dci
+    ///           - pq
+    ///           - hlg
+    ///           - linear
+    ///           - (gamma value)
+    /// - intent: Rendering intent. Possible values:
+    ///           - relative
+    ///           - perceptual
+    ///           - saturation
+    ///           - absolute
+    ///
+    /// Presets define a set of parameters commonly used together. Possible presets:
+    /// - srgb:       type=rgb;gamut=srgb;wp=d65;tf=srgb;intent=relative
+    /// - display_p3: type=rgb;gamut=p3;wp=d65;tf=srgb;intent=relative
+    /// - rec2020:    type=rgb;gamut=bt2100;wp=d65;tf=bt709;intent=relative
+    /// - rec2100:    type=rgb;gamut=bt2100;wp=d65;intent=relative
+    ///               Transfer function is not set for this preset; one should be provided, e.g. rec2100;tf=pq
+    #[arg(long, value_parser = parse_color_encoding, verbatim_doc_comment)]
+    target_colorspace: Option<EnumColourEncoding>,
+    /// (unstable) Path to target ICC profile
+    #[arg(long)]
+    target_icc: Option<PathBuf>,
     /// Print debug information
     #[arg(short, long)]
     verbose: bool,
@@ -66,6 +163,301 @@ enum OutputFormat {
     Png16,
     /// Numpy, used for conformance test.
     Npy,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ColorspaceSpec {
+    ty: Option<ColourSpace>,
+    white_point: Option<WhitePoint>,
+    gamut: Option<Primaries>,
+    tf: Option<TransferFunction>,
+    intent: Option<RenderingIntent>,
+}
+
+#[derive(Debug)]
+struct ColorspaceSpecParseError(std::borrow::Cow<'static, str>);
+
+impl From<&'static str> for ColorspaceSpecParseError {
+    fn from(value: &'static str) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<String> for ColorspaceSpecParseError {
+    fn from(value: String) -> Self {
+        Self(value.into())
+    }
+}
+
+impl std::fmt::Display for ColorspaceSpecParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ColorspaceSpecParseError {}
+
+impl ColorspaceSpec {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn from_preset(preset: &str) -> Result<Self, ColorspaceSpecParseError> {
+        let preset_lowercase = preset.to_lowercase();
+        Ok(match &*preset_lowercase {
+            "srgb" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Srgb),
+                tf: Some(TransferFunction::Srgb),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "display_p3" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::P3),
+                tf: Some(TransferFunction::Srgb),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "rec2020" | "rec.2020" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Bt2100),
+                tf: Some(TransferFunction::Bt709),
+                intent: Some(RenderingIntent::Relative),
+            },
+            "rec2100" | "rec.2100" => ColorspaceSpec {
+                ty: Some(ColourSpace::Rgb),
+                white_point: Some(WhitePoint::D65),
+                gamut: Some(Primaries::Bt2100),
+                tf: None,
+                intent: Some(RenderingIntent::Relative),
+            },
+            _ => {
+                return Err(format!("unknown preset `{preset}`").into());
+            }
+        })
+    }
+
+    fn add_param(&mut self, param: &str) -> Result<(), ColorspaceSpecParseError> {
+        let (name, value) = param
+            .split_once('=')
+            .ok_or_else(|| format!("`{param}` is not a parameter spec"))?;
+        let name_lowercase = name.to_ascii_lowercase();
+        let value_lowercase = value.to_ascii_lowercase();
+        match &*name_lowercase {
+            "type" | "color_space" => match &*value_lowercase {
+                "rgb" => self.ty = Some(ColourSpace::Rgb),
+                "xyb" => {
+                    let mut invalid_option = None;
+                    if self.white_point.is_some() {
+                        invalid_option = Some("white point");
+                    } else if self.gamut.is_some() {
+                        invalid_option = Some("color gamut");
+                    } else if self.tf.is_some() {
+                        invalid_option = Some("transfer function");
+                    }
+                    if let Some(invalid_option) = invalid_option {
+                        return Err(format!(
+                            "cannot set {invalid_option} when color space type is XYB"
+                        )
+                        .into());
+                    }
+
+                    self.ty = Some(ColourSpace::Xyb);
+                }
+                "gray" | "grey" | "grayscale" | "greyscale" => {
+                    if self.gamut.is_some() {
+                        return Err(
+                            "cannot set color gamut when color space type is Grayscale".into()
+                        );
+                    }
+
+                    self.ty = Some(ColourSpace::Grey);
+                }
+                _ => return Err(format!("unknown color space type `{value}`").into()),
+            },
+            "white_point" | "wp" => {
+                if let Some(ColourSpace::Xyb) = self.ty {
+                    return Err("cannot set white point if color space type is XYB".into());
+                }
+
+                let wp = match &*value_lowercase {
+                    "d65" => WhitePoint::D65,
+                    "dci" => WhitePoint::Dci,
+                    "e" => WhitePoint::E,
+                    customxy => {
+                        let (x, y) = customxy
+                            .split_once(',')
+                            .ok_or_else(|| format!("invalid white point `{value}`"))?;
+                        let x = x
+                            .parse::<f32>()
+                            .map_err(|_| format!("cannot parse `{x}` as float"))?;
+                        let y = y
+                            .parse::<f32>()
+                            .map_err(|_| format!("cannot parse `{y}` as float"))?;
+                        let wp = validate_customxy(x, y)?;
+                        WhitePoint::Custom(wp)
+                    }
+                };
+                self.white_point = Some(wp);
+            }
+            "gamut" | "primaries" => {
+                if let Some(ColourSpace::Xyb) = self.ty {
+                    return Err("cannot set white point if color space type is XYB".into());
+                }
+                if let Some(ColourSpace::Grey) = self.ty {
+                    return Err("cannot set white point if color space type is Grayscale".into());
+                }
+
+                let gamut = match &*value_lowercase {
+                    "srgb" | "bt709" => Primaries::Srgb,
+                    "p3" => Primaries::P3,
+                    "2020" | "bt2020" | "bt.2020" | "rec2020" | "rec.2020" | "2100" | "bt2100"
+                    | "bt.2100" | "rec2100" | "rec.2100" => Primaries::Bt2100,
+                    customxy => {
+                        let mut values = customxy.split(',').map(|x| {
+                            x.parse::<f32>()
+                                .map_err(|_| format!("cannot parse `{x}` as float"))
+                        });
+                        let (Some(rx), Some(ry), Some(gx), Some(gy), Some(bx), Some(by), None) = (
+                            values.next(),
+                            values.next(),
+                            values.next(),
+                            values.next(),
+                            values.next(),
+                            values.next(),
+                            values.next(),
+                        ) else {
+                            return Err(format!("invalid gamut `{value}`").into());
+                        };
+
+                        let red = validate_customxy(rx?, ry?)?;
+                        let green = validate_customxy(gx?, gy?)?;
+                        let blue = validate_customxy(bx?, by?)?;
+                        Primaries::Custom { red, green, blue }
+                    }
+                };
+                self.gamut = Some(gamut);
+            }
+            "tf" | "transfer_function" | "curve" | "tone_curve" => {
+                if let Some(ColourSpace::Xyb) = self.ty {
+                    return Err("cannot set transfer function if color space type is XYB".into());
+                }
+
+                let tf = match &*value_lowercase {
+                    "srgb" => TransferFunction::Srgb,
+                    "bt709" | "bt.709" | "709" => TransferFunction::Bt709,
+                    "dci" => TransferFunction::Dci,
+                    "pq" | "perceptual_quantizer" => TransferFunction::Pq,
+                    "hlg" | "hybrid_log_gamma" => TransferFunction::Hlg,
+                    "linear" => TransferFunction::Linear,
+                    gamma => {
+                        let gamma = gamma
+                            .parse::<f32>()
+                            .map_err(|_| format!("invalid transfer function `{value}`"))?;
+                        if !gamma.is_finite() || gamma < 1f32 {
+                            return Err(format!("gamma of {gamma} is invalid").into());
+                        }
+
+                        TransferFunction::Gamma((1e7 / gamma + 0.5) as u32)
+                    }
+                };
+                self.tf = Some(tf);
+            }
+            "intent" | "rendering_intent" => {
+                let intent = match &*value_lowercase {
+                    "relative" | "rel" | "relative_colorimetric" => RenderingIntent::Relative,
+                    "perceptual" | "per" => RenderingIntent::Perceptual,
+                    "saturation" | "sat" => RenderingIntent::Saturation,
+                    "absolute" | "abs" | "absolute_colorimetric" => RenderingIntent::Absolute,
+                    _ => return Err(format!("invalid rendering intent `{value}`").into()),
+                };
+                self.intent = Some(intent);
+            }
+            _ => return Err(format!("invalid parameter `{name}`").into()),
+        }
+
+        Ok(())
+    }
+}
+
+fn validate_customxy(x: f32, y: f32) -> Result<Customxy, ColorspaceSpecParseError> {
+    if x.is_finite() && y.is_finite() {
+        Ok(Customxy {
+            x: (x * 1e6 + 0.5) as i32,
+            y: (y * 1e6 + 0.5) as i32,
+        })
+    } else {
+        Err(format!("xy-chromaticity coordinate ({x}, {y}) is invalid").into())
+    }
+}
+
+fn parse_color_encoding(val: &str) -> Result<EnumColourEncoding, ColorspaceSpecParseError> {
+    let mut params = val.split(';');
+
+    let first = params.next().ok_or("parameters are required")?;
+    let mut spec = ColorspaceSpec::from_preset(first).or_else(|preset_err| {
+        let mut spec = ColorspaceSpec::new();
+        spec.add_param(first).map(|_| spec).map_err(|param_err| {
+            if first.contains('=') {
+                param_err
+            } else {
+                preset_err
+            }
+        })
+    })?;
+
+    for param in params {
+        spec.add_param(param)?;
+    }
+
+    let ty = if let Some(ty) = spec.ty {
+        ty
+    } else if spec.white_point.is_some() && spec.gamut.is_some() && spec.tf.is_some() {
+        ColourSpace::Rgb
+    } else {
+        return Err("color space type is required".into());
+    };
+
+    Ok(match ty {
+        ColourSpace::Rgb => {
+            let white_point = spec.white_point.ok_or("white point is required")?;
+            let primaries = spec.gamut.ok_or("color gamut is required")?;
+            let tf = spec.tf.ok_or("transfer function is required")?;
+            let rendering_intent = spec.intent.ok_or("rendering intent is required")?;
+            EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point,
+                primaries,
+                tf,
+                rendering_intent,
+            }
+        }
+        ColourSpace::Grey => {
+            let white_point = spec.white_point.ok_or("white point is required")?;
+            let tf = spec.tf.ok_or("transfer function is required")?;
+            let rendering_intent = spec.intent.ok_or("rendering intent is required")?;
+            EnumColourEncoding {
+                colour_space: ColourSpace::Grey,
+                white_point,
+                primaries: Primaries::Srgb,
+                tf,
+                rendering_intent,
+            }
+        }
+        ColourSpace::Xyb => {
+            let rendering_intent = spec.intent.ok_or("rendering intent is required")?;
+            EnumColourEncoding {
+                colour_space: ColourSpace::Xyb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Srgb,
+                rendering_intent,
+            }
+        }
+        _ => unreachable!(),
+    })
 }
 
 fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
@@ -147,14 +539,37 @@ fn main() {
         tracing::warn!("Partial image");
     }
 
+    let output_png = args.output.is_some()
+        && matches!(
+            args.output_format,
+            OutputFormat::Png | OutputFormat::Png8 | OutputFormat::Png16
+        );
+    if let Some(icc_path) = &args.target_icc {
+        tracing::debug!("Setting target ICC profile");
+        let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
+        image.request_icc(icc_profile);
+    } else if let Some(encoding) = args.target_colorspace {
+        tracing::debug!(?encoding, "Setting target color space");
+        image.request_color_encoding(encoding);
+    } else if output_png && image.pixel_format().has_black() {
+        tracing::debug!("Input is CMYK; setting target color encoding to sRGB");
+        image.request_color_encoding(EnumColourEncoding::srgb(
+            jxl_oxide::color::RenderingIntent::Relative,
+        ));
+    }
+
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
     tracing::info!("Image dimension: {}x{}", image.width(), image.height());
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
 
     if let Some(icc_path) = &args.icc_output {
-        tracing::debug!("Writing ICC profile");
-        std::fs::write(icc_path, image.rendered_icc()).expect("Failed to write ICC profile");
+        if let Some(icc) = image.original_icc() {
+            tracing::debug!("Writing ICC profile");
+            std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
+        } else {
+            tracing::info!("No embedded ICC profile, skipping icc_output");
+        }
     }
 
     let crop = args.crop.and_then(|crop| {
@@ -188,6 +603,8 @@ fn main() {
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
+
+    image.set_cms(Lcms2);
 
     #[allow(unused_mut)]
     let mut rendered = false;
@@ -262,7 +679,7 @@ fn main() {
                     &image,
                     &keyframes,
                     pixel_format,
-                    Some(png::BitDepth::Eight),
+                    Some(png::BitDepth::Sixteen),
                     width,
                     height,
                 );
@@ -291,10 +708,8 @@ fn write_png<W: Write>(
 ) {
     // Color encoding information
     let source_icc = image.rendered_icc();
-    let embedded_icc = image.original_icc();
+    let cicp = image.rendered_cicp();
     let metadata = &image.image_header().metadata;
-    let colour_encoding = &metadata.colour_encoding;
-    let cicp = colour_encoding.cicp();
 
     let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let mut encoder = png::Encoder::new(output, width, height);
@@ -330,92 +745,23 @@ fn write_png<W: Write>(
             .unwrap();
     }
 
-    let mut transform = None;
-    let icc_cicp = if let Some(icc) = embedded_icc {
-        if metadata.xyb_encoded {
-            let source_profile = Profile::new_icc(&source_icc)
-                .expect("Failed to create profile from jxl-oxide ICC profile");
-
-            let target_profile = Profile::new_icc(icc);
-            match target_profile {
-                Err(err) => {
-                    tracing::warn!("Embedded ICC has error: {}", err);
-                    None
-                }
-                Ok(target_profile) => {
-                    transform = Some(match color_type {
-                        png::ColorType::Grayscale => LcmsTransform::Grayscale(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::GRAY_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::GRAY_FLT,
-                                lcms2::Intent::RelativeColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::GrayscaleAlpha => LcmsTransform::GrayscaleAlpha(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
-                                &target_profile,
-                                lcms2::PixelFormat(4390924 + 128), // GRAYA_FLT
-                                lcms2::Intent::RelativeColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::Rgb => LcmsTransform::Rgb(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::RGB_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::RGB_FLT,
-                                lcms2::Intent::RelativeColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        png::ColorType::Rgba => LcmsTransform::Rgba(
-                            lcms2::Transform::new(
-                                &source_profile,
-                                lcms2::PixelFormat::RGBA_FLT,
-                                &target_profile,
-                                lcms2::PixelFormat::RGBA_FLT,
-                                lcms2::Intent::RelativeColorimetric,
-                            )
-                            .expect("Failed to create transform"),
-                        ),
-                        _ => unreachable!(),
-                    });
-
-                    Some((icc, None))
-                }
-            }
-        } else {
-            Some((icc, None))
-        }
-    } else {
-        // TODO: emit gAMA and cHRM
-        Some((&*source_icc, cicp))
-    };
     encoder.validate_sequence(true);
 
     let mut writer = encoder.write_header().expect("failed to write header");
 
-    if let Some((icc, cicp)) = &icc_cicp {
-        tracing::debug!("Embedding ICC profile");
-        let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(icc, 7);
-        let mut iccp_chunk_data = vec![b'0', 0, 0];
-        iccp_chunk_data.extend(compressed_icc);
-        writer
-            .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
-            .expect("failed to write iCCP");
+    tracing::debug!("Embedding ICC profile");
+    let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&source_icc, 7);
+    let mut iccp_chunk_data = vec![b'0', 0, 0];
+    iccp_chunk_data.extend(compressed_icc);
+    writer
+        .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
+        .expect("failed to write iCCP");
 
-        if let Some(cicp) = *cicp {
-            tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-            writer
-                .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
-                .expect("failed to write cICP");
-        }
+    if let Some(cicp) = cicp {
+        tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
+        writer
+            .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
+            .expect("failed to write cICP");
     }
 
     tracing::debug!("Writing image data");
@@ -445,9 +791,6 @@ fn write_png<W: Write>(
             stream.channels() as usize,
         );
         stream.write_to_buffer(fb.buf_mut());
-        if let Some(transform) = &transform {
-            transform.transform_in_place(&mut fb);
-        }
 
         if sixteen_bits {
             let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];

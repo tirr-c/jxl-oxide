@@ -1,24 +1,6 @@
-use lcms2::{Profile, Transform};
-
-use jxl_oxide::{FrameBuffer, JxlImage};
+use jxl_oxide::JxlImage;
 
 mod util;
-
-enum LcmsTransform {
-    Grayscale(Transform<f32, f32, lcms2::GlobalContext, lcms2::AllowCache>),
-    Rgb(Transform<[f32; 3], [f32; 3], lcms2::GlobalContext, lcms2::AllowCache>),
-}
-
-impl LcmsTransform {
-    fn transform_in_place(&self, fb: &mut FrameBuffer) {
-        use LcmsTransform::*;
-
-        match self {
-            Grayscale(t) => t.transform_in_place(fb.buf_mut()),
-            Rgb(t) => t.transform_in_place(fb.buf_grouped_mut()),
-        }
-    }
-}
 
 fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<Vec<f32>> {
     let mut magic = [0u8; 6];
@@ -81,35 +63,10 @@ fn run_test(
 
     image.set_render_spot_colour(false);
 
-    let transform = target_icc.map(|target_icc| {
-        let source_profile =
-            Profile::new_icc(&image.rendered_icc()).expect("failed to parse ICC profile");
-        let target_profile = Profile::new_icc(&target_icc).expect("failed to parse ICC profile");
-
-        if image.image_header().metadata.grayscale() {
-            LcmsTransform::Grayscale(
-                Transform::new(
-                    &source_profile,
-                    lcms2::PixelFormat::GRAY_FLT,
-                    &target_profile,
-                    lcms2::PixelFormat::GRAY_FLT,
-                    lcms2::Intent::RelativeColorimetric,
-                )
-                .expect("failed to create transform"),
-            )
-        } else {
-            LcmsTransform::Rgb(
-                Transform::new(
-                    &source_profile,
-                    lcms2::PixelFormat::RGB_FLT,
-                    &target_profile,
-                    lcms2::PixelFormat::RGB_FLT,
-                    lcms2::Intent::RelativeColorimetric,
-                )
-                .expect("failed to create transform"),
-            )
-        }
-    });
+    image.set_cms(util::Lcms2);
+    if let Some(target_icc) = target_icc {
+        image.request_icc(target_icc);
+    }
 
     let num_keyframes = image.num_loaded_keyframes();
     for idx in 0..num_keyframes {
@@ -119,41 +76,16 @@ fn run_test(
 
         eprintln!("Testing keyframe #{keyframe_idx}");
 
-        let mut grids = render
-            .color_channels()
-            .iter()
-            .map(|x| x.clone_untracked())
-            .collect::<Vec<_>>();
-        if let Some(transform) = &transform {
-            let channels = grids.len();
+        let idx_black = render.extra_channels().iter().position(|x| x.is_black());
+        let num_color_channels = render.color_channels().len();
 
-            let mut fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), 1);
-            let width = fb.width();
-            let height = fb.height();
-            transform.transform_in_place(&mut fb);
-            let fb = fb.buf();
-            for y in 0..height {
-                for x in 0..width {
-                    for c in 0..channels {
-                        grids[c].buf_mut()[y * width + x] = fb[c + (x + y * width) * channels];
-                    }
-                }
-            }
-        }
-        grids.extend(
-            render
-                .extra_channels()
-                .iter()
-                .map(|ec| ec.grid().clone_untracked()),
-        );
+        let fb = render.image_all_channels();
+        let interleaved_buffer = fb.buf();
+        assert_eq!(expected.len(), interleaved_buffer.len());
 
-        let fb = FrameBuffer::from_grids(&grids.iter().collect::<Vec<_>>(), render.orientation());
         let width = fb.width();
         let height = fb.height();
         let channels = fb.channels();
-
-        let interleaved_buffer = fb.buf();
-        assert_eq!(expected.len(), interleaved_buffer.len());
 
         let mut sum_se = vec![0.0f32; channels];
         let mut peak_error = 0.0f32;
@@ -161,7 +93,13 @@ fn run_test(
             for x in 0..width {
                 for c in 0..channels {
                     let reference = expected[c + (x + y * width) * channels];
-                    let output = interleaved_buffer[c + (x + y * width) * channels];
+                    let mut output = interleaved_buffer[c + (x + y * width) * channels];
+                    if let Some(idx_black) = idx_black {
+                        let idx_black = idx_black + num_color_channels;
+                        if c < num_color_channels || c == idx_black {
+                            output = 1.0 - output;
+                        }
+                    }
                     let sum_se = &mut sum_se[c];
 
                     let abs_error = (output - reference).abs();
@@ -312,7 +250,7 @@ conformance_test! {
     ),
     lossless_pfm(
         "1eac3ced5c60ef8a3a602f54c6a9d28162dfee51cd85b8dd7e52f6e3212bbb52",
-        "skip",
+        "skip", // TODO: Set actual profile after implementing profile detection
         1,
         3,
         0.0,
@@ -360,7 +298,7 @@ conformance_test! {
     ),
     grayscale_jpeg(
         "c0b86989e287649b944f1734ce182d1c1ac0caebf12cec7d487d9793f51f5b8f",
-        "skip", // lcms2 clamps the samples
+        "78001f4bf342ecf417b8dac5e3c7cf8da3ee25701951bc2a7e0868bc6dc81cac",
         1,
         1,
         0.004,
@@ -371,6 +309,47 @@ conformance_test! {
         "48d006762d583f6e354a3223c0a5aeaff7f45a324e229d237d69630bcc170241",
         1,
         1,
+        0.000976562,
+        0.000976562,
+    ),
+    alpha_nonpremultiplied(
+        "cad070b944d8aff6b7865c211e44bc469b08addf5b4a19d11fdc4ef2f7494d1b",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        1,
+        4,
+        6.1035e-5,
+        6.1035e-5,
+    ),
+    #[ignore]
+    alpha_premultiplied(
+        "073c1d942ba408f94f6c0aed2fef3d442574899901c616afa060dbd8044bbdb9",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        1,
+        4,
+        3.815e-06,
+        3.815e-06,
+    ),
+    bench_oriented_brg(
+        "eac8c30907e41e53a73a0c002bc39e998e0ceb021bd523f5bff4580b455579e6",
+        "6603ae12a4ac1ac742cacd887e9b35552a12c354ff25a00cae069ad4b932e6cc",
+        1,
+        3,
+        0.004,
+        1e-5,
+    ),
+    opsin_inverse(
+        "a3142a144c112160b8e5a12eb17723fa5fe0cfeb00577e4fb59a5f6cea126a9b",
+        "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
+        1,
+        3,
+        0.004,
+        0.0001,
+    ),
+    cmyk_layers(
+        "a01913d4e4b1a89bd96e5de82a5dfb9925c7827ee6380ad60c0b1c4becb53880",
+        "4855b8fabb96bdc6495d45d089bb8c8efb1ae18389e0dc9e75a5f701a9c0b662",
+        1,
+        5,
         0.000976562,
         0.000976562,
     ),

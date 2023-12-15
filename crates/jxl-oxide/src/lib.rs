@@ -94,6 +94,7 @@ mod fb;
 
 use jxl_bitstream::ContainerDetectingReader;
 pub use jxl_color::header as color;
+pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
@@ -259,8 +260,7 @@ impl UninitializedJxlImage {
             }
         };
 
-        let embedded_icc = if image_header.metadata.colour_encoding.want_icc {
-            tracing::debug!("Image has an embedded ICC profile");
+        let embedded_icc = if image_header.metadata.colour_encoding.want_icc() {
             let icc = match jxl_color::icc::read_icc(&mut bitstream) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
@@ -270,6 +270,7 @@ impl UninitializedJxlImage {
                     return Err(e.into());
                 }
             };
+            tracing::debug!("Image has an embedded ICC profile");
             let icc = jxl_color::icc::decode_icc(&icc)?;
             Some(icc)
         } else {
@@ -313,6 +314,9 @@ impl UninitializedJxlImage {
         let render_spot_colour = !image_header.metadata.grayscale();
 
         let mut builder = RenderContext::builder().pool(self.pool.clone());
+        if let Some(icc) = embedded_icc {
+            builder = builder.embedded_icc(icc);
+        }
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
@@ -322,7 +326,6 @@ impl UninitializedJxlImage {
             pool: self.pool.clone(),
             reader: self.reader,
             image_header,
-            original_icc: embedded_icc,
             ctx,
             render_spot_colour,
             end_of_image: false,
@@ -350,7 +353,6 @@ pub struct JxlImage {
     pool: JxlThreadPool,
     reader: ContainerDetectingReader,
     image_header: Arc<ImageHeader>,
-    original_icc: Option<Vec<u8>>,
     ctx: RenderContext,
     render_spot_colour: bool,
     end_of_image: bool,
@@ -464,36 +466,67 @@ impl JxlImage {
         self.image_header.height_with_orientation()
     }
 
-    /// Returns the original ICC profile embedded in the image.
-    ///
-    /// It does *not* describe the colorspace of rendered images. Use
-    /// [`rendered_icc`][Self::rendered_icc] to do color management.
+    /// Sets color management system implementation to be used by the renderer.
+    #[inline]
+    pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
+        self.ctx.set_cms(cms);
+    }
+
+    /// Returns the *original* ICC profile embedded in the image.
     #[inline]
     pub fn original_icc(&self) -> Option<&[u8]> {
-        self.original_icc.as_deref()
+        self.ctx.embedded_icc()
     }
 
     /// Returns the ICC profile that describes rendered images.
     ///
-    /// - If the image is XYB encoded, and the ICC profile is embedded, then the profile describes
-    ///   linear sRGB or linear grayscale colorspace.
-    /// - Else, if the ICC profile is embedded, then the embedded profile is returned.
-    /// - Else, the profile describes the color encoding signalled in the image header.
+    /// The returned profile will change if different color encoding is specified using
+    /// [`request_icc`] or [`request_color_encoding`].
     pub fn rendered_icc(&self) -> Vec<u8> {
-        create_rendered_icc(&self.image_header.metadata, self.original_icc.as_deref())
+        let encoding = self.ctx.requested_color_encoding();
+        if encoding.encoding().want_icc() {
+            encoding.icc_profile().to_vec()
+        } else {
+            jxl_color::icc::colour_encoding_to_icc(encoding.encoding())
+        }
+    }
+
+    /// Returns the CICP tag of the color encoding of rendered images, if there's any.
+    #[inline]
+    pub fn rendered_cicp(&self) -> Option<[u8; 4]> {
+        let encoding = self.ctx.requested_color_encoding();
+        encoding.encoding().cicp()
     }
 
     /// Returns the pixel format of the rendered image.
     pub fn pixel_format(&self) -> PixelFormat {
-        let is_grayscale = self.image_header.metadata.grayscale();
-        let mut has_black = false;
+        use jxl_color::{ColourEncoding, ColourSpace, EnumColourEncoding};
+
+        let encoding = self.ctx.requested_color_encoding();
+        let (is_grayscale, has_black) = match encoding.encoding() {
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Grey,
+                ..
+            }) => (true, false),
+            ColourEncoding::Enum(_) => (false, false),
+            ColourEncoding::IccProfile(_) => {
+                let profile = encoding.icc_profile();
+                if profile.len() < 0x14 {
+                    (false, false)
+                } else {
+                    match &profile[0x10..0x14] {
+                        [b'G', b'R', b'A', b'Y'] => (true, false),
+                        [b'C', b'M', b'Y', b'K'] => (false, true),
+                        _ => (false, false),
+                    }
+                }
+            }
+            ColourEncoding::PcsXyz => (false, false),
+        };
         let mut has_alpha = false;
         for ec_info in &self.image_header.metadata.ec_info {
             if ec_info.is_alpha() {
                 has_alpha = true;
-            }
-            if ec_info.is_black() {
-                has_black = true;
             }
         }
 
@@ -507,6 +540,30 @@ impl JxlImage {
         }
     }
 
+    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
+    pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::with_icc(
+                jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown),
+                icc_profile,
+            ))
+    }
+
+    /// Requests the decoder to render in specific color encoding, described by
+    /// `EnumColourEncoding`.
+    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::new(
+                jxl_color::ColourEncoding::Enum(color_encoding),
+            ))
+    }
+
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_colour(&self) -> bool {
+        self.render_spot_colour
+    }
+
     /// Sets whether the spot colour channels will be rendered.
     #[inline]
     pub fn set_render_spot_colour(&mut self, render_spot_colour: bool) -> &mut Self {
@@ -516,12 +573,6 @@ impl JxlImage {
         }
         self.render_spot_colour = render_spot_colour;
         self
-    }
-
-    /// Returns whether the spot color channels will be rendered.
-    #[inline]
-    pub fn render_spot_colour(&self) -> bool {
-        self.render_spot_colour
     }
 }
 
@@ -641,11 +692,8 @@ impl JxlImage {
         &self,
         mut grids: Vec<SimpleGrid<f32>>,
     ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
-        let color_channels = if self.image_header.metadata.grayscale() {
-            1
-        } else {
-            3
-        };
+        let pixel_format = self.pixel_format();
+        let color_channels = if pixel_format.is_grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
         let extra_channels: Vec<_> = grids
             .into_iter()
@@ -655,6 +703,7 @@ impl JxlImage {
                 name: ec_info.name.clone(),
                 grid,
             })
+            .filter(|x| !x.is_black() || pixel_format.has_black()) // filter black channel
             .collect();
 
         if self.render_spot_colour {
@@ -711,6 +760,12 @@ impl PixelFormat {
             PixelFormat::Cmyk => 4,
             PixelFormat::Cmyka => 5,
         }
+    }
+
+    /// Returns whether the image is grayscale.
+    #[inline]
+    pub fn is_grayscale(self) -> bool {
+        matches!(self, Self::Gray | Self::Graya)
     }
 
     /// Returns whether the image has an alpha channel.
@@ -1057,14 +1112,4 @@ impl From<CropInfo> for jxl_render::Region {
             height: value.height,
         }
     }
-}
-
-fn create_rendered_icc(metadata: &image::ImageMetadata, embedded_icc: Option<&[u8]>) -> Vec<u8> {
-    if !metadata.xyb_encoded {
-        if let Some(icc) = embedded_icc {
-            return icc.to_vec();
-        }
-    }
-
-    jxl_color::icc::colour_encoding_to_icc(&metadata.colour_encoding)
 }

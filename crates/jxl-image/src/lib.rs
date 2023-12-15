@@ -236,7 +236,7 @@ impl ImageMetadata {
     /// Returns whether the image is grayscale.
     #[inline]
     pub fn grayscale(&self) -> bool {
-        self.colour_encoding.colour_space == ColourSpace::Grey
+        self.colour_encoding.colour_space() == ColourSpace::Grey
     }
 
     /// Returns the number of channels actually encoded in the image.
