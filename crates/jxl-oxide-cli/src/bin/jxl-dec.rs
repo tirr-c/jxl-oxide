@@ -102,7 +102,7 @@ struct Args {
     output_format: OutputFormat,
     /// (unstable) Target colorspace specification
     ///
-    /// Specification string consists of (optional) preset and a sequence of parameters delimited by semicolons.
+    /// Specification string consists of (optional) preset and a sequence of parameters delimited by commas.
     ///
     /// Parameters have a syntax of `name=value`. Possible parameter names:
     /// - type:   Color space type. Possible values:
@@ -113,12 +113,11 @@ struct Args {
     ///           - srgb
     ///           - p3
     ///           - bt2100
-    ///           - (three xy-chromaticity coordinates delimited by commas)
     /// - wp:     White point. Invalid if type is XYB. Possible values:
     ///           - d65
+    ///           - d50
     ///           - dci
     ///           - e
-    ///           - (xy-chromaticity coordinate)
     /// - tf:     Transfer function. Invalid if type is XYB. Possible values:
     ///           - srgb
     ///           - bt709
@@ -134,11 +133,11 @@ struct Args {
     ///           - absolute
     ///
     /// Presets define a set of parameters commonly used together. Possible presets:
-    /// - srgb:       type=rgb;gamut=srgb;wp=d65;tf=srgb;intent=relative
-    /// - display_p3: type=rgb;gamut=p3;wp=d65;tf=srgb;intent=relative
-    /// - rec2020:    type=rgb;gamut=bt2100;wp=d65;tf=bt709;intent=relative
-    /// - rec2100:    type=rgb;gamut=bt2100;wp=d65;intent=relative
-    ///               Transfer function is not set for this preset; one should be provided, e.g. rec2100;tf=pq
+    /// - srgb:       type=rgb,gamut=srgb,wp=d65,tf=srgb,intent=relative
+    /// - display_p3: type=rgb,gamut=p3,wp=d65,tf=srgb,intent=relative
+    /// - rec2020:    type=rgb,gamut=bt2100,wp=d65,tf=bt709,intent=relative
+    /// - rec2100:    type=rgb,gamut=bt2100,wp=d65,intent=relative
+    ///               Transfer function is not set for this preset; one should be provided, e.g. rec2100,tf=pq
     #[arg(long, value_parser = parse_color_encoding, verbatim_doc_comment)]
     target_colorspace: Option<EnumColourEncoding>,
     /// (unstable) Path to target ICC profile
@@ -286,19 +285,11 @@ impl ColorspaceSpec {
                     "d65" => WhitePoint::D65,
                     "dci" => WhitePoint::Dci,
                     "e" => WhitePoint::E,
-                    customxy => {
-                        let (x, y) = customxy
-                            .split_once(',')
-                            .ok_or_else(|| format!("invalid white point `{value}`"))?;
-                        let x = x
-                            .parse::<f32>()
-                            .map_err(|_| format!("cannot parse `{x}` as float"))?;
-                        let y = y
-                            .parse::<f32>()
-                            .map_err(|_| format!("cannot parse `{y}` as float"))?;
-                        let wp = validate_customxy(x, y)?;
-                        WhitePoint::Custom(wp)
-                    }
+                    "d50" => WhitePoint::Custom(Customxy {
+                        x: 345669,
+                        y: 358496,
+                    }),
+                    _ => return Err(format!("invalid white point `{value}`").into()),
                 };
                 self.white_point = Some(wp);
             }
@@ -312,31 +303,10 @@ impl ColorspaceSpec {
 
                 let gamut = match &*value_lowercase {
                     "srgb" | "bt709" => Primaries::Srgb,
-                    "p3" => Primaries::P3,
+                    "p3" | "dci" => Primaries::P3,
                     "2020" | "bt2020" | "bt.2020" | "rec2020" | "rec.2020" | "2100" | "bt2100"
                     | "bt.2100" | "rec2100" | "rec.2100" => Primaries::Bt2100,
-                    customxy => {
-                        let mut values = customxy.split(',').map(|x| {
-                            x.parse::<f32>()
-                                .map_err(|_| format!("cannot parse `{x}` as float"))
-                        });
-                        let (Some(rx), Some(ry), Some(gx), Some(gy), Some(bx), Some(by), None) = (
-                            values.next(),
-                            values.next(),
-                            values.next(),
-                            values.next(),
-                            values.next(),
-                            values.next(),
-                            values.next(),
-                        ) else {
-                            return Err(format!("invalid gamut `{value}`").into());
-                        };
-
-                        let red = validate_customxy(rx?, ry?)?;
-                        let green = validate_customxy(gx?, gy?)?;
-                        let blue = validate_customxy(bx?, by?)?;
-                        Primaries::Custom { red, green, blue }
-                    }
+                    _ => return Err(format!("invalid gamut `{value}`").into()),
                 };
                 self.gamut = Some(gamut);
             }
@@ -382,19 +352,8 @@ impl ColorspaceSpec {
     }
 }
 
-fn validate_customxy(x: f32, y: f32) -> Result<Customxy, ColorspaceSpecParseError> {
-    if x.is_finite() && y.is_finite() {
-        Ok(Customxy {
-            x: (x * 1e6 + 0.5) as i32,
-            y: (y * 1e6 + 0.5) as i32,
-        })
-    } else {
-        Err(format!("xy-chromaticity coordinate ({x}, {y}) is invalid").into())
-    }
-}
-
 fn parse_color_encoding(val: &str) -> Result<EnumColourEncoding, ColorspaceSpecParseError> {
-    let mut params = val.split(';');
+    let mut params = val.split(',');
 
     let first = params.next().ok_or("parameters are required")?;
     let mut spec = ColorspaceSpec::from_preset(first).or_else(|preset_err| {
