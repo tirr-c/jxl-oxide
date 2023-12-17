@@ -30,6 +30,6 @@ uses `lcms2` for the color management.)
 Dual-licensed under MIT and Apache 2.0.
 
 [^1]: jxl-oxide passes all Level 5 tests and *almost* all Level 10 tests
-[defined by the spec][conformance].
+[defined in the spec][conformance].
 
 [conformance]: https://github.com/libjxl/conformance
