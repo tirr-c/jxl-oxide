@@ -3,7 +3,7 @@
 [![docs.rs](https://docs.rs/jxl-oxide/badge.svg)](https://docs.rs/crate/jxl-oxide/)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/tirr-c/jxl-oxide/build.yml?branch=main)](https://github.com/tirr-c/jxl-oxide/actions/workflows/build.yml?query=branch%3Amain)
 
-JPEG XL decoder written in pure Rust.
+A spec-conforming[^1] JPEG XL decoder written in pure Rust.
 
 jxl-oxide consists of small library crates (`jxl-bitstream`, `jxl-coding`, ...), a blanket library
 crate `jxl-oxide`, and a binary crate `jxl-oxide-cli`. If you want to use jxl-oxide in a terminal,
@@ -28,3 +28,8 @@ uses `lcms2` for the color management.)
 ---
 
 Dual-licensed under MIT and Apache 2.0.
+
+[^1]: jxl-oxide passes all Level 5 tests and *almost* all Level 10 tests
+[defined in the spec][conformance].
+
+[conformance]: https://github.com/libjxl/conformance
