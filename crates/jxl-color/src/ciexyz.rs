@@ -36,7 +36,7 @@ pub fn matmul3vec(a: &[f32; 9], b: &[f32; 3]) -> [f32; 3] {
 }
 
 #[inline]
-fn matinv(mat: &[f32; 9]) -> [f32; 9] {
+pub fn matinv(mat: &[f32; 9]) -> [f32; 9] {
     let det = mat[0] * (mat[4] * mat[8] - mat[5] * mat[7])
         + mat[1] * (mat[5] * mat[6] - mat[3] * mat[8])
         + mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);

@@ -114,6 +114,32 @@ impl ColorTransform {
         oim: &OpsinInverseMatrix,
         intensity_target: f32,
     ) -> Self {
+        let from_parsed;
+        let from = match &from.encoding {
+            ColourEncoding::IccProfile(_) => {
+                if let Ok(encoding) = crate::icc::parse_icc(&from.icc_profile) {
+                    from_parsed = encoding;
+                    &from_parsed
+                } else {
+                    from
+                }
+            }
+            _ => from,
+        };
+
+        let to_parsed;
+        let to = match &to.encoding {
+            ColourEncoding::IccProfile(_) => {
+                if let Ok(encoding) = crate::icc::parse_icc(&to.icc_profile) {
+                    to_parsed = encoding;
+                    &to_parsed
+                } else {
+                    to
+                }
+            }
+            _ => to,
+        };
+
         let begin_channels = match &from.encoding {
             ColourEncoding::Enum(EnumColourEncoding {
                 colour_space: ColourSpace::Grey,
