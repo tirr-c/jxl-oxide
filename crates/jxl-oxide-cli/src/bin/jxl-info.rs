@@ -81,63 +81,21 @@ fn main() {
             unreachable!("ColourEncoding::CieXyzD65 cannot be embedded in image");
         }
         jxl_oxide::color::ColourEncoding::Enum(colour_encoding) => {
-            print!("    Colorspace: ");
-            match colour_encoding.colour_space {
-                jxl_oxide::color::ColourSpace::Rgb => println!("RGB"),
-                jxl_oxide::color::ColourSpace::Grey => println!("Grayscale"),
-                jxl_oxide::color::ColourSpace::Xyb => println!("XYB"),
-                jxl_oxide::color::ColourSpace::Unknown => println!("Unknown"),
-            }
-
-            print!("    White point: ");
-            match colour_encoding.white_point {
-                jxl_oxide::color::WhitePoint::D65 => println!("D65"),
-                jxl_oxide::color::WhitePoint::Custom(xy) => {
-                    println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
-                }
-                jxl_oxide::color::WhitePoint::E => println!("E"),
-                jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
-            }
-
-            print!("    Primaries: ");
-            match colour_encoding.primaries {
-                jxl_oxide::color::Primaries::Srgb => println!("sRGB"),
-                jxl_oxide::color::Primaries::Custom { red, green, blue } => {
-                    println!(
-                        "{}, {}; {}, {}; {}, {}",
-                        red.x as f64 / 10e6,
-                        red.y as f64 / 10e6,
-                        green.x as f64 / 10e6,
-                        green.y as f64 / 10e6,
-                        blue.x as f64 / 10e6,
-                        blue.y as f64 / 10e6,
-                    );
-                }
-                jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
-                jxl_oxide::color::Primaries::P3 => println!("P3"),
-            }
-
-            print!("    Transfer function: ");
-            match colour_encoding.tf {
-                jxl_oxide::color::TransferFunction::Gamma(g) => {
-                    println!("Gamma {}", g as f64 / 10e7)
-                }
-                jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
-                jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
-                jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
-                jxl_oxide::color::TransferFunction::Srgb => println!("sRGB"),
-                jxl_oxide::color::TransferFunction::Pq => println!("PQ (HDR)"),
-                jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
-                jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
-            }
+            print_colour_encoding(colour_encoding, "    ");
         }
         jxl_oxide::color::ColourEncoding::IccProfile(colour_space) => {
             let icc = image.original_icc().unwrap();
             print!("    ");
             if *colour_space == ColourSpace::Grey {
-                print!("Grayscale, embedded ICC profile ({} bytes)", icc.len());
+                println!("Grayscale, embedded ICC profile ({} bytes)", icc.len());
             } else {
                 println!("Embedded ICC profile ({} bytes)", icc.len());
+            }
+
+            if let Ok(encoding) = jxl_oxide::parse_icc(icc) {
+                if let jxl_oxide::color::ColourEncoding::Enum(encoding) = encoding.encoding() {
+                    print_colour_encoding(encoding, "      ");
+                }
             }
         }
     }
@@ -248,5 +206,57 @@ fn main() {
 
     if !image.is_loading_done() {
         println!("Partial file");
+    }
+}
+
+fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent: &str) {
+    print!("{indent}Colorspace: ");
+    match encoding.colour_space {
+        jxl_oxide::color::ColourSpace::Rgb => println!("RGB"),
+        jxl_oxide::color::ColourSpace::Grey => println!("Grayscale"),
+        jxl_oxide::color::ColourSpace::Xyb => println!("XYB"),
+        jxl_oxide::color::ColourSpace::Unknown => println!("Unknown"),
+    }
+
+    print!("{indent}White point: ");
+    match encoding.white_point {
+        jxl_oxide::color::WhitePoint::D65 => println!("D65"),
+        jxl_oxide::color::WhitePoint::Custom(xy) => {
+            println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
+        }
+        jxl_oxide::color::WhitePoint::E => println!("E"),
+        jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
+    }
+
+    print!("{indent}Primaries: ");
+    match encoding.primaries {
+        jxl_oxide::color::Primaries::Srgb => println!("sRGB"),
+        jxl_oxide::color::Primaries::Custom { red, green, blue } => {
+            println!(
+                "{}, {}; {}, {}; {}, {}",
+                red.x as f64 / 10e6,
+                red.y as f64 / 10e6,
+                green.x as f64 / 10e6,
+                green.y as f64 / 10e6,
+                blue.x as f64 / 10e6,
+                blue.y as f64 / 10e6,
+            );
+        }
+        jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
+        jxl_oxide::color::Primaries::P3 => println!("P3"),
+    }
+
+    print!("{indent}Transfer function: ");
+    match encoding.tf {
+        jxl_oxide::color::TransferFunction::Gamma(g) => {
+            println!("Gamma {}", g as f64 / 10e7)
+        }
+        jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
+        jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
+        jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
+        jxl_oxide::color::TransferFunction::Srgb => println!("sRGB"),
+        jxl_oxide::color::TransferFunction::Pq => println!("PQ (HDR)"),
+        jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
+        jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
     }
 }
