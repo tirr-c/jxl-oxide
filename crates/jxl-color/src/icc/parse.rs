@@ -1,6 +1,6 @@
 use crate::{
-    ColorEncodingWithProfile, Customxy, EnumColourEncoding, Primaries, RenderingIntent, Result,
-    TransferFunction, WhitePoint,
+    ColorEncodingWithProfile, Customxy, EnumColourEncoding, Error, Primaries, RenderingIntent,
+    Result, TransferFunction, WhitePoint,
 };
 
 #[derive(Debug)]
@@ -195,12 +195,12 @@ struct RawTag<'a> {
 
 fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
     if profile.len() < 128 {
-        panic!();
+        return Err(Error::IccParseFailure("profile is too short"));
     }
 
     let size = u32::from_be_bytes([profile[0], profile[1], profile[2], profile[3]]);
     if profile.len() != size as usize {
-        panic!();
+        return Err(Error::IccParseFailure("profile size mismatch"));
     }
 
     let color_space = [profile[0x10], profile[0x11], profile[0x12], profile[0x13]];
@@ -210,7 +210,7 @@ fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
         1 => RenderingIntent::Relative,
         2 => RenderingIntent::Saturation,
         3 => RenderingIntent::Absolute,
-        _ => panic!(),
+        _ => return Err(Error::IccParseFailure("invalid rendering intent")),
     };
 
     let header = super::IccHeader {
@@ -228,7 +228,9 @@ fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
     let tag_count =
         u32::from_be_bytes([profile[0x80], profile[0x81], profile[0x82], profile[0x83]]);
     if size < 0x84 + 12 * tag_count {
-        panic!();
+        return Err(Error::IccParseFailure(
+            "unexpected end of profile while reading tag list",
+        ));
     }
 
     let mut tags = Vec::new();
@@ -239,7 +241,9 @@ fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
         let tag_size = u32::from_be_bytes([raw_tag[8], raw_tag[9], raw_tag[10], raw_tag[11]]);
         let tag_end = offset + tag_size;
         if size < tag_end {
-            panic!();
+            return Err(Error::IccParseFailure(
+                "unexpected end of profile while reading tag data",
+            ));
         }
 
         tags.push(RawTag {
