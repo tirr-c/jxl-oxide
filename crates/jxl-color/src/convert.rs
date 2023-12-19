@@ -251,6 +251,43 @@ impl ColorTransform {
                 // primaries don't matter for grayscale
                 let mat = crate::ciexyz::primaries_to_xyz_mat(PRIMARIES_SRGB, illuminant);
                 let luminances = [mat[3], mat[4], mat[5]];
+
+                if let ColourEncoding::Enum(EnumColourEncoding {
+                    colour_space: ColourSpace::Grey,
+                    tf: to_tf,
+                    ..
+                }) = to.encoding
+                {
+                    if to_tf == tf {
+                        return Self {
+                            begin_channels,
+                            ops: Vec::new(),
+                        };
+                    } else {
+                        return Self {
+                            begin_channels,
+                            ops: vec![
+                                ColorTransformOp::TransferFunction {
+                                    tf,
+                                    hdr_params: HdrParams {
+                                        luminances,
+                                        intensity_target,
+                                    },
+                                    inverse: true,
+                                },
+                                ColorTransformOp::TransferFunction {
+                                    tf: to_tf,
+                                    hdr_params: HdrParams {
+                                        luminances,
+                                        intensity_target,
+                                    },
+                                    inverse: false,
+                                },
+                            ],
+                        };
+                    }
+                }
+
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
                     hdr_params: HdrParams {
