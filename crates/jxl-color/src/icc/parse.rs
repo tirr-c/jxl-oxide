@@ -338,6 +338,8 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                                     ]
                                 {
                                     KnownIccTrc::Srgb
+                                } else if params == [65536, 65536, 0, 65536, 0] {
+                                    KnownIccTrc::Linear
                                 } else {
                                     continue;
                                 }
@@ -512,7 +514,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn gray_d65_srgb_rel() {
         let profile = parse_icc(include_bytes!("./test-profiles/gray-d65-srgb-rel.icc")).unwrap();
         dbg!(&profile);
@@ -529,7 +530,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn gray_d65_linear_rel() {
         let profile = parse_icc(include_bytes!("./test-profiles/gray-d65-linear-rel.icc")).unwrap();
         dbg!(&profile);
