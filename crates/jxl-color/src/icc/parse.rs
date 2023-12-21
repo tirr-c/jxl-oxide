@@ -8,6 +8,7 @@ pub struct IccProfileInfo {
     color_space: [u8; 4],
     rendering_intent: RenderingIntent,
     chad: [i32; 9],
+    wtpt: [i32; 3],
     trc_k: Option<KnownIccTrc>,
     trc_rgb: Option<[KnownIccTrc; 3]>,
     xyz_rgb: Option<[[i32; 3]; 3]>,
@@ -124,6 +125,11 @@ impl IccProfileInfo {
         })
     }
 
+    #[inline]
+    fn media_white(&self) -> [f32; 3] {
+        self.wtpt.map(|v| v as f32 / 65536f32)
+    }
+
     pub fn white_point(&self) -> WhitePoint {
         const WP_TO_ENUM: [([f32; 2], WhitePoint); 3] = [
             (crate::consts::ILLUMINANT_D65, WhitePoint::D65),
@@ -132,8 +138,7 @@ impl IccProfileInfo {
         ];
 
         let chad_inv = self.chad_inv();
-        let d50_xyz = crate::ciexyz::illuminant_to_xyz(crate::consts::ILLUMINANT_D50);
-        let ill_xyz = crate::ciexyz::matmul3vec(&chad_inv, &d50_xyz);
+        let ill_xyz = crate::ciexyz::matmul3vec(&chad_inv, &self.media_white());
         let xyz_sum = ill_xyz[0] + ill_xyz[1] + ill_xyz[2];
         let illuminant = [ill_xyz[0] / xyz_sum, ill_xyz[1] / xyz_sum];
 
@@ -261,6 +266,7 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
     let color_space = profile.header.color_space;
     let rendering_intent = profile.header.rendering_intent;
 
+    let mut wtpt = [0xf6d6, 0x10000, 0xd32d]; // D50
     let mut chad: Option<[i32; 9]> = None;
     let mut trcs: [Option<KnownIccTrc>; 4] = [None; 4];
     let mut xyzs: [Option<[i32; 3]>; 3] = [None; 3];
@@ -381,6 +387,19 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                     }));
                 }
             }
+            [b'w', b't', b'p', b't'] => {
+                if &data[..4] == b"XYZ " {
+                    if data.len() < 20 {
+                        continue;
+                    }
+
+                    wtpt = [
+                        i32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+                        i32::from_be_bytes([data[12], data[13], data[14], data[15]]),
+                        i32::from_be_bytes([data[16], data[17], data[18], data[19]]),
+                    ];
+                }
+            }
             _ => {}
         }
     }
@@ -401,6 +420,7 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
         color_space,
         rendering_intent,
         chad: chad.unwrap_or([65536, 0, 0, 0, 65536, 0, 0, 0, 65536]),
+        wtpt,
         trc_k,
         trc_rgb,
         xyz_rgb,
