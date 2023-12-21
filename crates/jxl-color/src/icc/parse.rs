@@ -340,6 +340,9 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                         }
                     }
                     [b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0] => KnownIccTrc::Linear,
+                    [b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 1, a, b] => {
+                        KnownIccTrc::ParametricGamma(u32::from_be_bytes([0, *a, *b, 0]))
+                    },
                     _ => continue,
                 };
 
@@ -449,4 +452,76 @@ pub fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
             profile.to_vec(),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use super::parse_icc;
+
+    #[test]
+    fn srgb_rel() {
+        let profile = parse_icc(include_bytes!("./test-profiles/srgb-rel.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Srgb,
+                rendering_intent: RenderingIntent::Relative,
+            }),
+        ));
+    }
+
+    #[test]
+    fn srgb_bt709_per() {
+        let profile = parse_icc(include_bytes!("./test-profiles/srgb-bt709-per.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Bt709,
+                rendering_intent: RenderingIntent::Perceptual,
+            }),
+        ));
+    }
+
+    #[test]
+    #[ignore]
+    fn gray_d65_srgb_rel() {
+        let profile = parse_icc(include_bytes!("./test-profiles/gray-d65-srgb-rel.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Grey,
+                white_point: WhitePoint::D65,
+                tf: TransferFunction::Srgb,
+                rendering_intent: RenderingIntent::Relative,
+                ..
+            }),
+        ));
+    }
+
+    #[test]
+    #[ignore]
+    fn gray_d65_linear_rel() {
+        let profile = parse_icc(include_bytes!("./test-profiles/gray-d65-linear-rel.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Grey,
+                white_point: WhitePoint::D65,
+                tf: TransferFunction::Linear,
+                rendering_intent: RenderingIntent::Relative,
+                ..
+            }),
+        ));
+    }
 }
