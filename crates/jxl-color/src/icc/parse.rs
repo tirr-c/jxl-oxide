@@ -350,7 +350,7 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                     [b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0] => KnownIccTrc::Linear,
                     [b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 1, a, b] => {
                         KnownIccTrc::ParametricGamma(u32::from_be_bytes([0, *a, *b, 0]))
-                    },
+                    }
                     _ => continue,
                 };
 
@@ -478,8 +478,8 @@ pub fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
     use super::parse_icc;
+    use crate::*;
 
     #[test]
     fn srgb_rel() {
