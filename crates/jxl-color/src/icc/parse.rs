@@ -338,8 +338,14 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                                     ]
                                 {
                                     KnownIccTrc::Srgb
-                                } else if params == [65536, 65536, 0, 65536, 0] {
-                                    KnownIccTrc::Linear
+                                } else if let [gamma, 65536, 0, 65536, 0] = params {
+                                    if gamma == 65536 {
+                                        KnownIccTrc::Linear
+                                    } else if gamma == 0x0002999a {
+                                        KnownIccTrc::Dci
+                                    } else {
+                                        KnownIccTrc::ParametricGamma(gamma as u32)
+                                    }
                                 } else {
                                     continue;
                                 }
@@ -509,6 +515,38 @@ mod tests {
                 primaries: Primaries::Srgb,
                 tf: TransferFunction::Bt709,
                 rendering_intent: RenderingIntent::Perceptual,
+            }),
+        ));
+    }
+
+    #[test]
+    fn srgb_gamma22_per() {
+        let profile = parse_icc(include_bytes!("./test-profiles/srgb-gamma22-rel.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Gamma(4545355..=4545555), // error 1e-5
+                rendering_intent: RenderingIntent::Relative,
+            }),
+        ));
+    }
+
+    #[test]
+    fn srgb_linear_per() {
+        let profile = parse_icc(include_bytes!("./test-profiles/srgb-linear-rel.icc")).unwrap();
+        dbg!(&profile);
+        assert!(matches!(
+            profile.encoding(),
+            ColourEncoding::Enum(EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Srgb,
+                tf: TransferFunction::Linear,
+                rendering_intent: RenderingIntent::Relative,
             }),
         ));
     }
