@@ -171,9 +171,12 @@ enum KnownIccTrc {
 impl From<KnownIccTrc> for TransferFunction {
     fn from(value: KnownIccTrc) -> Self {
         match value {
+            // Try to correct precision errors.
             // 2.2
+            KnownIccTrc::ParametricGamma(0x23332) => TransferFunction::Gamma(4545500),
             KnownIccTrc::ParametricGamma(0x23333) => TransferFunction::Gamma(4545455),
             // 2.4
+            KnownIccTrc::ParametricGamma(0x26665) => TransferFunction::Gamma(4166700),
             KnownIccTrc::ParametricGamma(0x26666) => TransferFunction::Gamma(4166667),
             KnownIccTrc::ParametricGamma(g) => {
                 let g = g as u64;
@@ -184,6 +187,17 @@ impl From<KnownIccTrc> for TransferFunction {
             KnownIccTrc::Dci => TransferFunction::Dci,
             KnownIccTrc::Srgb => TransferFunction::Srgb,
             KnownIccTrc::Bt709 => TransferFunction::Bt709,
+        }
+    }
+}
+
+impl KnownIccTrc {
+    fn from_gamma(g_s15fixed16: i32) -> Option<Self> {
+        match g_s15fixed16 {
+            ..=65535 => None,
+            65536 => Some(Self::Linear),
+            0x29999..=0x2999c => Some(Self::Dci),
+            g => Some(Self::ParametricGamma(g as u32)),
         }
     }
 }
@@ -300,15 +314,10 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                                     bytes.copy_from_slice(&data[12 + 4 * idx..][..4]);
                                     i32::from_be_bytes(bytes)
                                 });
-                                if gamma <= 0 {
-                                    continue;
-                                }
-                                if gamma == 65536 {
-                                    KnownIccTrc::Linear
-                                } else if gamma == 0x0002999a {
-                                    KnownIccTrc::Dci
+                                if let Some(trc) = KnownIccTrc::from_gamma(gamma) {
+                                    trc
                                 } else {
-                                    KnownIccTrc::ParametricGamma(gamma as u32)
+                                    continue;
                                 }
                             }
                             3 => {
@@ -339,12 +348,10 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                                 {
                                     KnownIccTrc::Srgb
                                 } else if let [gamma, 65536, 0, 65536, 0] = params {
-                                    if gamma == 65536 {
-                                        KnownIccTrc::Linear
-                                    } else if gamma == 0x0002999a {
-                                        KnownIccTrc::Dci
+                                    if let Some(trc) = KnownIccTrc::from_gamma(gamma) {
+                                        trc
                                     } else {
-                                        KnownIccTrc::ParametricGamma(gamma as u32)
+                                        continue;
                                     }
                                 } else {
                                     continue;
