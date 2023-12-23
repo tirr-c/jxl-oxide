@@ -9,7 +9,7 @@ jxl-oxide consists of small library crates (`jxl-bitstream`, `jxl-coding`, ...),
 crate `jxl-oxide`, and a binary crate `jxl-oxide-cli`. If you want to use jxl-oxide in a terminal,
 install it using `cargo install`. Cargo will install two binaries, `jxl-dec` and `jxl-info`.
 
-Current version of `jxl-oxide-cli` is 0.3.0.
+Current version of `jxl-oxide-cli` is 0.3.1.
 
 ```
 cargo install jxl-oxide-cli
@@ -19,7 +19,7 @@ If you want to use it as a library, specify it in `Cargo.toml`:
 
 ```toml
 [dependencies]
-jxl-oxide = "0.5.1"
+jxl-oxide = "0.5.2"
 ```
 
 Note that you'll need a color management system to correctly display some JXL images. (`jxl-dec`
