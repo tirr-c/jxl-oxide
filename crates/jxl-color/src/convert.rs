@@ -114,6 +114,32 @@ impl ColorTransform {
         oim: &OpsinInverseMatrix,
         intensity_target: f32,
     ) -> Self {
+        let from_parsed;
+        let from = match &from.encoding {
+            ColourEncoding::IccProfile(_) => {
+                if let Ok(encoding) = crate::icc::parse_icc(&from.icc_profile) {
+                    from_parsed = encoding;
+                    &from_parsed
+                } else {
+                    from
+                }
+            }
+            _ => from,
+        };
+
+        let to_parsed;
+        let to = match &to.encoding {
+            ColourEncoding::IccProfile(_) => {
+                if let Ok(encoding) = crate::icc::parse_icc(&to.icc_profile) {
+                    to_parsed = encoding;
+                    &to_parsed
+                } else {
+                    to
+                }
+            }
+            _ => to,
+        };
+
         let begin_channels = match &from.encoding {
             ColourEncoding::Enum(EnumColourEncoding {
                 colour_space: ColourSpace::Grey,
@@ -225,6 +251,43 @@ impl ColorTransform {
                 // primaries don't matter for grayscale
                 let mat = crate::ciexyz::primaries_to_xyz_mat(PRIMARIES_SRGB, illuminant);
                 let luminances = [mat[3], mat[4], mat[5]];
+
+                if let ColourEncoding::Enum(EnumColourEncoding {
+                    colour_space: ColourSpace::Grey,
+                    tf: to_tf,
+                    ..
+                }) = to.encoding
+                {
+                    if to_tf == tf {
+                        return Self {
+                            begin_channels,
+                            ops: Vec::new(),
+                        };
+                    } else {
+                        return Self {
+                            begin_channels,
+                            ops: vec![
+                                ColorTransformOp::TransferFunction {
+                                    tf,
+                                    hdr_params: HdrParams {
+                                        luminances,
+                                        intensity_target,
+                                    },
+                                    inverse: true,
+                                },
+                                ColorTransformOp::TransferFunction {
+                                    tf: to_tf,
+                                    hdr_params: HdrParams {
+                                        luminances,
+                                        intensity_target,
+                                    },
+                                    inverse: false,
+                                },
+                            ],
+                        };
+                    }
+                }
+
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
                     hdr_params: HdrParams {
@@ -554,7 +617,19 @@ fn apply_transfer_function(
     hdr_params: HdrParams,
 ) {
     match tf {
-        TransferFunction::Gamma(gamma) => {
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: false,
+        } => {
+            let gamma = 1e7 / gamma as f32;
+            for ch in channels {
+                tf::apply_gamma(ch, gamma);
+            }
+        }
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: true,
+        } => {
             let gamma = gamma as f32 / 1e7;
             for ch in channels {
                 tf::apply_gamma(ch, gamma);
@@ -606,7 +681,19 @@ fn apply_inverse_transfer_function(
     hdr_params: HdrParams,
 ) {
     match tf {
-        TransferFunction::Gamma(gamma) => {
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: false,
+        } => {
+            let gamma = gamma as f32 / 1e7;
+            for ch in channels {
+                tf::apply_gamma(ch, gamma);
+            }
+        }
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: true,
+        } => {
             let gamma = 1e7 / gamma as f32;
             for ch in channels {
                 tf::apply_gamma(ch, gamma);

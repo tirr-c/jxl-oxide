@@ -250,7 +250,7 @@ conformance_test! {
     ),
     lossless_pfm(
         "1eac3ced5c60ef8a3a602f54c6a9d28162dfee51cd85b8dd7e52f6e3212bbb52",
-        "skip", // TODO: Set actual profile after implementing profile detection
+        "5e44e64c9f97515f43cfe7f4f725c6ec8983533f44c06c4c533a1b9a4c2ce6a6",
         1,
         3,
         0.0,

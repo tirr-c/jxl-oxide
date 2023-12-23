@@ -94,7 +94,7 @@ mod fb;
 
 use jxl_bitstream::ContainerDetectingReader;
 pub use jxl_color::header as color;
-pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
+pub use jxl_color::{icc::parse_icc, ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
