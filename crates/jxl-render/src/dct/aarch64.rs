@@ -104,10 +104,7 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     let output1_shifted = vextq_f32(output1, Lane::zero(), 1);
     let output1_mul = vsetq_lane_f32(std::f32::consts::SQRT_2, Lane::splat_f32(1.0), 0);
     let output1 = output1.muladd(output1_mul, output1_shifted);
-    (
-        vcombine_f32(vget_low_f32(output0), vget_low_f32(output1)),
-        vcombine_f32(vget_high_f32(output0), vget_high_f32(output1)),
-    )
+    (vzip1q_f32(output0, output1), vzip2q_f32(output0, output1))
 }
 
 unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
