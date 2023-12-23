@@ -617,7 +617,19 @@ fn apply_transfer_function(
     hdr_params: HdrParams,
 ) {
     match tf {
-        TransferFunction::Gamma(gamma) => {
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: false,
+        } => {
+            let gamma = 1e7 / gamma as f32;
+            for ch in channels {
+                tf::apply_gamma(ch, gamma);
+            }
+        }
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: true,
+        } => {
             let gamma = gamma as f32 / 1e7;
             for ch in channels {
                 tf::apply_gamma(ch, gamma);
@@ -669,7 +681,19 @@ fn apply_inverse_transfer_function(
     hdr_params: HdrParams,
 ) {
     match tf {
-        TransferFunction::Gamma(gamma) => {
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: false,
+        } => {
+            let gamma = gamma as f32 / 1e7;
+            for ch in channels {
+                tf::apply_gamma(ch, gamma);
+            }
+        }
+        TransferFunction::Gamma {
+            g: gamma,
+            inverted: true,
+        } => {
             let gamma = 1e7 / gamma as f32;
             for ch in channels {
                 tf::apply_gamma(ch, gamma);

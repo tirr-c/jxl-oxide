@@ -330,7 +330,10 @@ impl ColorspaceSpec {
                             return Err(format!("gamma of {gamma} is invalid").into());
                         }
 
-                        TransferFunction::Gamma((1e7 / gamma + 0.5) as u32)
+                        TransferFunction::Gamma {
+                            g: (gamma * 1e7 + 0.5) as u32,
+                            inverted: false,
+                        }
                     }
                 };
                 self.tf = Some(tf);

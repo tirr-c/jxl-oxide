@@ -187,7 +187,12 @@ pub fn colour_encoding_to_icc(colour_encoding: &ColourEncoding) -> Vec<u8> {
     append_tag_with_data(&mut tags, &mut data, *b"chad", &chad_data);
 
     let trc = match tf {
-        TransferFunction::Gamma(g) => {
+        TransferFunction::Gamma { g, inverted: false } => {
+            let g = g as u64;
+            let gamma = ((g * 65536 + 5000000) / 10000000) as u32;
+            create_para(0, &[gamma])
+        }
+        TransferFunction::Gamma { g, inverted: true } => {
             let g = g as u64;
             let adj = g / 2;
             let gamma = ((65536u64 * 10000000u64 + adj) / g) as u32;

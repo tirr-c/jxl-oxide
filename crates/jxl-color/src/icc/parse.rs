@@ -163,7 +163,6 @@ impl IccProfileInfo {
 enum KnownIccTrc {
     ParametricGamma(u32),
     Linear,
-    Dci,
     Srgb,
     Bt709,
 }
@@ -171,20 +170,15 @@ enum KnownIccTrc {
 impl From<KnownIccTrc> for TransferFunction {
     fn from(value: KnownIccTrc) -> Self {
         match value {
-            // Try to correct precision errors.
-            // 2.2
-            KnownIccTrc::ParametricGamma(0x23332) => TransferFunction::Gamma(4545500),
-            KnownIccTrc::ParametricGamma(0x23333) => TransferFunction::Gamma(4545455),
-            // 2.4
-            KnownIccTrc::ParametricGamma(0x26665) => TransferFunction::Gamma(4166700),
-            KnownIccTrc::ParametricGamma(0x26666) => TransferFunction::Gamma(4166667),
             KnownIccTrc::ParametricGamma(g) => {
                 let g = g as u64;
-                let g_inv = (655360000000u64 + (g / 2)) / g;
-                TransferFunction::Gamma(g_inv as u32)
+                let g_1e7 = (g * 10000000 + 32768) / 65536;
+                TransferFunction::Gamma {
+                    g: g_1e7 as u32,
+                    inverted: false,
+                }
             }
             KnownIccTrc::Linear => TransferFunction::Linear,
-            KnownIccTrc::Dci => TransferFunction::Dci,
             KnownIccTrc::Srgb => TransferFunction::Srgb,
             KnownIccTrc::Bt709 => TransferFunction::Bt709,
         }
@@ -196,7 +190,6 @@ impl KnownIccTrc {
         match g_s15fixed16 {
             ..=65535 => None,
             65536 => Some(Self::Linear),
-            0x29999..=0x2999c => Some(Self::Dci),
             g => Some(Self::ParametricGamma(g as u32)),
         }
     }
@@ -547,6 +540,7 @@ mod tests {
 
     #[test]
     fn srgb_gamma22_per() {
+        // gamma of the profile is 0x23332 (0.4545500), not 0x23333 (0.4545455)
         let profile = parse_icc(include_bytes!("./test-profiles/srgb-gamma22-rel.icc")).unwrap();
         dbg!(&profile);
         assert!(matches!(
@@ -555,7 +549,10 @@ mod tests {
                 colour_space: ColourSpace::Rgb,
                 white_point: WhitePoint::D65,
                 primaries: Primaries::Srgb,
-                tf: TransferFunction::Gamma(4545355..=4545555), // error 1e-5
+                tf: TransferFunction::Gamma {
+                    g: 21999000..=22001000,
+                    inverted: false
+                },
                 rendering_intent: RenderingIntent::Relative,
             }),
         ));

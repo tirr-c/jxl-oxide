@@ -222,7 +222,7 @@ fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent
     match encoding.white_point {
         jxl_oxide::color::WhitePoint::D65 => println!("D65"),
         jxl_oxide::color::WhitePoint::Custom(xy) => {
-            println!("{}, {}", xy.x as f64 / 10e6, xy.y as f64 / 10e6)
+            println!("{}, {}", xy.x as f64 / 1e6, xy.y as f64 / 1e6)
         }
         jxl_oxide::color::WhitePoint::E => println!("E"),
         jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
@@ -234,12 +234,12 @@ fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent
         jxl_oxide::color::Primaries::Custom { red, green, blue } => {
             println!(
                 "{}, {}; {}, {}; {}, {}",
-                red.x as f64 / 10e6,
-                red.y as f64 / 10e6,
-                green.x as f64 / 10e6,
-                green.y as f64 / 10e6,
-                blue.x as f64 / 10e6,
-                blue.y as f64 / 10e6,
+                red.x as f64 / 1e6,
+                red.y as f64 / 1e6,
+                green.x as f64 / 1e6,
+                green.y as f64 / 1e6,
+                blue.x as f64 / 1e6,
+                blue.y as f64 / 1e6,
             );
         }
         jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
@@ -248,8 +248,11 @@ fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent
 
     print!("{indent}Transfer function: ");
     match encoding.tf {
-        jxl_oxide::color::TransferFunction::Gamma(g) => {
-            println!("Gamma {}", g as f64 / 10e7)
+        jxl_oxide::color::TransferFunction::Gamma { g, inverted: false } => {
+            println!("Gamma {}", g as f64 / 1e7)
+        }
+        jxl_oxide::color::TransferFunction::Gamma { g, inverted: true } => {
+            println!("Gamma {}", 1e7 / g as f64)
         }
         jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
         jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),

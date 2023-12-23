@@ -146,7 +146,10 @@ impl EnumColourEncoding {
             colour_space: ColourSpace::Rgb,
             white_point: WhitePoint::D65,
             primaries: Primaries::Srgb,
-            tf: TransferFunction::Gamma(4545455),
+            tf: TransferFunction::Gamma {
+                g: 22000000,
+                inverted: false,
+            },
             rendering_intent,
         }
     }
@@ -176,7 +179,10 @@ impl EnumColourEncoding {
             colour_space: ColourSpace::Grey,
             white_point: WhitePoint::D65,
             primaries: Primaries::Srgb,
-            tf: TransferFunction::Gamma(4545455),
+            tf: TransferFunction::Gamma {
+                g: 22000000,
+                inverted: false,
+            },
             rendering_intent: RenderingIntent::Relative,
         }
     }
@@ -505,7 +511,10 @@ impl TryFrom<u32> for RenderingIntent {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum TransferFunction {
-    Gamma(u32) = 0,
+    Gamma {
+        g: u32,
+        inverted: bool,
+    },
     Bt709 = 1,
     Unknown = 2,
     Linear = 8,
@@ -540,7 +549,10 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
         let has_gamma = bitstream.read_bool()?;
         if has_gamma {
             let gamma = bitstream.read_bits(24)?;
-            Ok(Self::Gamma(gamma))
+            Ok(Self::Gamma {
+                g: gamma,
+                inverted: true,
+            })
         } else {
             read_bits!(bitstream, Enum(TransferFunction)).map_err(From::from)
         }
@@ -550,7 +562,7 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
 impl TransferFunction {
     pub fn cicp(&self) -> Option<u8> {
         match self {
-            TransferFunction::Gamma(_) => None,
+            TransferFunction::Gamma { .. } => None,
             TransferFunction::Bt709 => Some(1),
             TransferFunction::Unknown => None,
             TransferFunction::Linear => Some(8),
