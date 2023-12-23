@@ -2,9 +2,11 @@ on:
   push:
     branches:
       - main
+      - v*.x
   pull_request:
     branches:
       - main
+      - v*.x
 name: Continuous integration
 
 jobs:

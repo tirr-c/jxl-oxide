@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-color",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "jxl-oxide",
@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
