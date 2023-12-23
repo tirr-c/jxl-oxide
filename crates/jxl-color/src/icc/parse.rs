@@ -415,6 +415,25 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                     ];
                 }
             }
+            [b'A' | b'D', b'2', b'B', b'0'..=b'3']
+            | [b'B', b'2', b'A' | b'D', b'0'..=b'3']
+            | [b'p', b'r', b'e', b'0'..=b'2'] => {
+                return Err(Error::UnsupportedIccProfile);
+            }
+            ref x
+                if x == b"chrm"
+                    || x == b"clro"
+                    || x == b"clrt"
+                    || x == b"clot"
+                    || x == b"ciis"
+                    || x == b"lumi"
+                    || x == b"meas"
+                    || x == b"ncl2"
+                    || x == b"resp"
+                    || x == b"view" =>
+            {
+                return Err(Error::UnsupportedIccProfile);
+            }
             _ => {}
         }
     }
