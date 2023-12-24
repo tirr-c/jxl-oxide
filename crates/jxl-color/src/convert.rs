@@ -3,7 +3,7 @@ use crate::{
     consts::*,
     icc::{colour_encoding_to_icc, nciexyz_icc_profile},
     tf, ColorManagementSystem, ColourEncoding, ColourSpace, EnumColourEncoding, OpsinInverseMatrix,
-    RenderingIntent, TransferFunction,
+    RenderingIntent, ToneMapping, TransferFunction,
 };
 
 #[derive(Clone)]
@@ -112,8 +112,11 @@ impl ColorTransform {
         from: &ColorEncodingWithProfile,
         to: &ColorEncodingWithProfile,
         oim: &OpsinInverseMatrix,
-        intensity_target: f32,
+        tone_mapping: &ToneMapping,
     ) -> Self {
+        let intensity_target = tone_mapping.intensity_target;
+        let min_nits = tone_mapping.min_nits;
+
         let from_parsed;
         let from = match &from.encoding {
             ColourEncoding::IccProfile(_) => {
@@ -235,6 +238,7 @@ impl ColorTransform {
                     hdr_params: HdrParams {
                         luminances,
                         intensity_target,
+                        min_nits,
                     },
                     inverse: true,
                 });
@@ -272,6 +276,7 @@ impl ColorTransform {
                                     hdr_params: HdrParams {
                                         luminances,
                                         intensity_target,
+                                        min_nits,
                                     },
                                     inverse: true,
                                 },
@@ -280,6 +285,7 @@ impl ColorTransform {
                                     hdr_params: HdrParams {
                                         luminances,
                                         intensity_target,
+                                        min_nits,
                                     },
                                     inverse: false,
                                 },
@@ -293,6 +299,7 @@ impl ColorTransform {
                     hdr_params: HdrParams {
                         luminances,
                         intensity_target,
+                        min_nits,
                     },
                     inverse: true,
                 });
@@ -343,11 +350,24 @@ impl ColorTransform {
                     illuminant,
                 )));
                 ops.push(ColorTransformOp::Matrix(mat));
+                if intensity_target > 255.0
+                    && !matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
+                {
+                    ops.push(ColorTransformOp::ToneMapRec2408 {
+                        hdr_params: HdrParams {
+                            luminances,
+                            intensity_target,
+                            min_nits,
+                        },
+                        target_display_luminance: 255.0,
+                    });
+                }
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
                     hdr_params: HdrParams {
                         luminances,
                         intensity_target,
+                        min_nits,
                     },
                     inverse: false,
                 });
@@ -375,6 +395,7 @@ impl ColorTransform {
                     hdr_params: HdrParams {
                         luminances,
                         intensity_target,
+                        min_nits,
                     },
                     inverse: false,
                 });
@@ -407,13 +428,13 @@ impl ColorTransform {
     pub fn xyb_to_enum(
         encoding: &EnumColourEncoding,
         oim: &OpsinInverseMatrix,
-        intensity_target: f32,
+        tone_mapping: &ToneMapping,
     ) -> Self {
         Self::new(
             &ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb())),
             &ColorEncodingWithProfile::new(ColourEncoding::Enum(encoding.clone())),
             oim,
-            intensity_target,
+            tone_mapping,
         )
     }
 
@@ -441,6 +462,10 @@ enum ColorTransformOp {
         tf: TransferFunction,
         hdr_params: HdrParams,
         inverse: bool,
+    },
+    ToneMapRec2408 {
+        hdr_params: HdrParams,
+        target_display_luminance: f32,
     },
     IccToIcc {
         inputs: usize,
@@ -473,6 +498,14 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("hdr_params", hdr_params)
                 .field("inverse", inverse)
                 .finish(),
+            Self::ToneMapRec2408 {
+                hdr_params,
+                target_display_luminance,
+            } => f
+                .debug_struct("ToneMapRec2408")
+                .field("hdr_params", hdr_params)
+                .field("target_display_luminance", target_display_luminance)
+                .finish(),
             Self::IccToIcc {
                 inputs,
                 outputs,
@@ -500,6 +533,7 @@ impl ColorTransformOp {
                 ..
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
+            ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
             ColorTransformOp::ResizeChannels(_) => None,
@@ -515,6 +549,7 @@ impl ColorTransformOp {
                 ..
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
+            ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
             ColorTransformOp::ResizeChannels(outputs) => Some(outputs),
@@ -579,6 +614,34 @@ impl ColorTransformOp {
                 );
                 channels.len()
             }
+            Self::ToneMapRec2408 {
+                hdr_params,
+                target_display_luminance,
+            } => {
+                let [r, g, b, ..] = channels else {
+                    unreachable!()
+                };
+                let [lr, lg, lb] = hdr_params.luminances;
+                let intensity_target = hdr_params.intensity_target;
+                let min_nits = hdr_params.min_nits;
+                for ((r, g), b) in r.iter_mut().zip(&mut **g).zip(&mut **b) {
+                    let y = *r * lr + *g * lg + *b + lb;
+                    let mut y_pq = y;
+                    crate::tf::linear_to_pq(std::slice::from_mut(&mut y_pq), intensity_target);
+                    let mut y_mapped = crate::tf::rec2408_eetf_generic(
+                        y_pq,
+                        (min_nits, intensity_target),
+                        (0f32, *target_display_luminance),
+                    );
+                    crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
+                    let ratio = y_mapped / y;
+                    *r *= ratio;
+                    *g *= ratio;
+                    *b *= ratio;
+                    // TODO: gamut map
+                }
+                3
+            }
             Self::IccToIcc { from, to, .. } => {
                 cms.transform(from, to, RenderingIntent::Relative, channels)?
             }
@@ -604,6 +667,7 @@ impl ColorTransformOp {
 struct HdrParams {
     luminances: [f32; 3],
     intensity_target: f32,
+    min_nits: f32,
 }
 
 #[inline]

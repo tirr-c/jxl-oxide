@@ -1,3 +1,7 @@
+mod rec2408;
+
+pub(crate) use rec2408::rec2408_eetf_generic;
+
 /// Applies gamma to samples.
 pub fn apply_gamma(mut samples: &mut [f32], gamma: f32) {
     #[cfg(target_arch = "aarch64")]
