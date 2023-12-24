@@ -176,6 +176,14 @@ conformance_test! {
         0.000976562,
         0.000976562,
     ),
+    patches(
+        "7f1309014d9c30efe4342a0e0a46767967b756fdfdc393e2e702edea4b1fd0bd",
+        "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",
+        1,
+        4,
+        0.004,
+        0.0001,
+    ),
     patches_lossless(
         "806201a2c99d27a54c400134b3db7bfc57476f9bc0775e59eea802d28aba75de",
         "3a10bcd8e4c39d12053ebf66d18075c7ded4fd6cf78d26d9c47bdc0cde215115",
