@@ -1,16 +1,15 @@
-/// Assumes `intensity_target` is given as max source luminance.
 pub(crate) fn rec2408_eetf_generic(
     from_pq_sample: f32,
+    intensity_target: f32,
     from_luminance_range: (f32, f32),
     to_luminance_range: (f32, f32),
 ) -> f32 {
-    let intensity_target = from_luminance_range.1;
     // Lb, Lw, Lmin, Lmax
     let mut luminances = [
-        from_luminance_range.0,
-        from_luminance_range.1,
-        to_luminance_range.0,
-        to_luminance_range.1,
+        from_luminance_range.0 / intensity_target,
+        from_luminance_range.1 / intensity_target,
+        to_luminance_range.0 / intensity_target,
+        to_luminance_range.1 / intensity_target,
     ];
     super::linear_to_pq(&mut luminances, intensity_target);
 

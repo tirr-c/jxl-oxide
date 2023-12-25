@@ -6,6 +6,8 @@ use crate::{
     RenderingIntent, ToneMapping, TransferFunction,
 };
 
+mod tone_map;
+
 #[derive(Clone)]
 pub struct ColorEncodingWithProfile {
     encoding: ColourEncoding,
@@ -658,24 +660,7 @@ impl ColorTransformOp {
                 let [r, g, b, ..] = channels else {
                     unreachable!()
                 };
-                let [lr, lg, lb] = hdr_params.luminances;
-                let intensity_target = hdr_params.intensity_target;
-                let min_nits = hdr_params.min_nits;
-                for ((r, g), b) in r.iter_mut().zip(&mut **g).zip(&mut **b) {
-                    let y = *r * lr + *g * lg + *b + lb;
-                    let mut y_pq = y;
-                    crate::tf::linear_to_pq(std::slice::from_mut(&mut y_pq), intensity_target);
-                    let mut y_mapped = crate::tf::rec2408_eetf_generic(
-                        y_pq,
-                        (min_nits, intensity_target),
-                        (0f32, *target_display_luminance),
-                    );
-                    crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
-                    let ratio = y_mapped / y;
-                    *r *= ratio;
-                    *g *= ratio;
-                    *b *= ratio;
-                }
+                tone_map::tone_map(r, g, b, hdr_params, *target_display_luminance);
                 3
             }
             Self::GamutMap {
