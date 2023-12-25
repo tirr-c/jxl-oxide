@@ -678,7 +678,10 @@ impl ColorTransformOp {
                 }
                 3
             }
-            Self::GamutMap { luminances, saturation_factor } => {
+            Self::GamutMap {
+                luminances,
+                saturation_factor,
+            } => {
                 let [r, g, b, ..] = channels else {
                     unreachable!()
                 };
