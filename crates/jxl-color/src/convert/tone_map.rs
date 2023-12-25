@@ -62,7 +62,8 @@ fn tone_map_generic(
 fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") {
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+        {
             unsafe {
                 return detect_peak_luminance_avx2(r, g, b, luminances);
             }
@@ -83,8 +84,70 @@ fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) 
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
+#[target_feature(enable = "fma")]
 unsafe fn detect_peak_luminance_avx2(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
-    detect_peak_luminance_generic(r, g, b, luminances)
+    use std::arch::x86_64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+
+    let mut r = r.chunks_exact(8);
+    let mut g = g.chunks_exact(8);
+    let mut b = b.chunks_exact(8);
+
+    let [lr, lg, lb] = luminances;
+    let vlr = _mm256_set1_ps(lr);
+    let vlg = _mm256_set1_ps(lg);
+    let vlb = _mm256_set1_ps(lb);
+    let mut peak_luminance = _mm256_setzero_ps();
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = _mm256_loadu_ps(r.as_ptr());
+        let vg = _mm256_loadu_ps(g.as_ptr());
+        let vb = _mm256_loadu_ps(b.as_ptr());
+        let vy = _mm256_fmadd_ps(vb, vlb, _mm256_fmadd_ps(vg, vlg, _mm256_mul_ps(vr, vlr)));
+        peak_luminance = _mm256_max_ps(peak_luminance, vy);
+    }
+
+    let mut peak_luminance = _mm_max_ps(
+        _mm256_extractf128_ps::<0>(peak_luminance),
+        _mm256_extractf128_ps::<1>(peak_luminance),
+    );
+    let mut r = r.remainder();
+    let mut g = g.remainder();
+    let mut b = b.remainder();
+    if r.len() >= 4 {
+        let (vr, remainder_r) = r.split_at(4);
+        let (vg, remainder_g) = g.split_at(4);
+        let (vb, remainder_b) = b.split_at(4);
+        let vlr = _mm256_extractf128_ps::<0>(vlr);
+        let vlg = _mm256_extractf128_ps::<0>(vlg);
+        let vlb = _mm256_extractf128_ps::<0>(vlb);
+        let vr = _mm_loadu_ps(vr.as_ptr());
+        let vg = _mm_loadu_ps(vg.as_ptr());
+        let vb = _mm_loadu_ps(vb.as_ptr());
+        let vy = _mm_fmadd_ps(vb, vlb, _mm_fmadd_ps(vg, vlg, _mm_mul_ps(vr, vlr)));
+        peak_luminance = _mm_max_ps(peak_luminance, vy);
+
+        r = remainder_r;
+        g = remainder_g;
+        b = remainder_b;
+    }
+    let mut peak_luminance_arr = [0f32; 4];
+    _mm_storeu_ps(peak_luminance_arr.as_mut_ptr(), peak_luminance);
+
+    let mut peak_luminance = peak_luminance_arr
+        .into_iter()
+        .fold(0f32, |max, v| max.max(v));
+    for ((r, g), b) in r.iter().zip(g).zip(b) {
+        let y = b.mul_add(lb, g.mul_add(lg, *r * lr));
+        peak_luminance = peak_luminance.max(y);
+    }
+
+    if peak_luminance <= 0.0 {
+        1.0
+    } else {
+        peak_luminance
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
