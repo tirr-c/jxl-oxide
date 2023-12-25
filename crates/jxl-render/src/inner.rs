@@ -326,7 +326,7 @@ fn convert_color_for_record(
                 )),
                 &jxl_color::ColorEncodingWithProfile::new(metadata.colour_encoding.clone()),
                 &metadata.opsin_inverse_matrix,
-                metadata.tone_mapping.intensity_target,
+                &metadata.tone_mapping,
             );
             transform
                 .run(

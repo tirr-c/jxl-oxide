@@ -510,9 +510,9 @@ fn main() {
         tracing::debug!("Setting target ICC profile");
         let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
         image.request_icc(icc_profile);
-    } else if let Some(encoding) = args.target_colorspace {
+    } else if let Some(encoding) = &args.target_colorspace {
         tracing::debug!(?encoding, "Setting target color space");
-        image.request_color_encoding(encoding);
+        image.request_color_encoding(encoding.clone());
     } else if output_png && image.pixel_format().has_black() {
         tracing::debug!("Input is CMYK; setting target color encoding to sRGB");
         image.request_color_encoding(EnumColourEncoding::srgb(
@@ -614,12 +614,22 @@ fn main() {
         let output = std::fs::File::create(output).expect("failed to open output file");
         match args.output_format {
             OutputFormat::Png => {
+                let force_bit_depth = if let Some(encoding) = &args.target_colorspace {
+                    if encoding.is_srgb_gamut() {
+                        Some(png::BitDepth::Eight)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 write_png(
                     output,
                     &image,
                     &keyframes,
                     pixel_format,
-                    None,
+                    force_bit_depth,
                     width,
                     height,
                 );
