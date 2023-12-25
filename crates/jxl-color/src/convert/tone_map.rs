@@ -52,7 +52,11 @@ fn tone_map_generic(
             to_luminance_range,
         );
         crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
-        let ratio = y_mapped / y * scale;
+        let ratio = if y <= 1e-7 {
+            y_mapped * scale
+        } else {
+            y_mapped / y * scale
+        };
         *r *= ratio;
         *g *= ratio;
         *b *= ratio;
@@ -205,5 +209,59 @@ fn detect_peak_luminance_generic(r: &[f32], g: &[f32], b: &[f32], luminances: [f
         1.0
     } else {
         peak_luminance
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tone_map_range() {
+        let samples = [0f32, 0.1f32];
+        let mut r = samples;
+        let mut g = samples;
+        let mut b = samples;
+        tone_map_generic(
+            &mut r,
+            &mut g,
+            &mut b,
+            [0.2126, 0.7152, 0.0722],
+            10000f32,
+            (0f32, 1000f32),
+            (0f32, 255f32),
+        );
+
+        dbg!(r);
+        dbg!(g);
+        dbg!(b);
+
+        assert!((r[0] - 0.0).abs() < 2e-5);
+        assert!((g[0] - 0.0).abs() < 2e-5);
+        assert!((b[0] - 0.0).abs() < 2e-5);
+
+        assert!((r[1] - 1.0).abs() < 2e-5);
+        assert!((g[1] - 1.0).abs() < 2e-5);
+        assert!((b[1] - 1.0).abs() < 2e-5);
+    }
+
+    #[test]
+    fn detect_peak() {
+        let samples = [0f32, 0.05, 0.075, 0.1];
+        let r = samples;
+        let g = samples;
+        let b = samples;
+        let peak = detect_peak_luminance(&r, &g, &b, [0.2126, 0.7152, 0.0722]);
+        assert!((peak - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn detect_peak_zero() {
+        let samples = [0f32, 0.0];
+        let r = samples;
+        let g = samples;
+        let b = samples;
+        let peak = detect_peak_luminance(&r, &g, &b, [0.2126, 0.7152, 0.0722]);
+        assert!(peak == 1.0);
     }
 }
