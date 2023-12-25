@@ -59,12 +59,7 @@ fn tone_map_generic(
     }
 }
 
-fn detect_peak_luminance(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    luminances: [f32; 3],
-) -> f32 {
+fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if std::arch::is_x86_feature_detected!("avx2") {
@@ -88,32 +83,17 @@ fn detect_peak_luminance(
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn detect_peak_luminance_avx2(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    luminances: [f32; 3],
-) -> f32 {
+unsafe fn detect_peak_luminance_avx2(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     detect_peak_luminance_impl(r, g, b, luminances)
 }
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-unsafe fn detect_peak_luminance_neon(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    luminances: [f32; 3],
-) -> f32 {
+unsafe fn detect_peak_luminance_neon(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     detect_peak_luminance_impl(r, g, b, luminances)
 }
 
-fn detect_peak_luminance_impl(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    luminances: [f32; 3],
-) -> f32 {
+fn detect_peak_luminance_impl(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     assert_eq!(r.len(), g.len());
     assert_eq!(g.len(), b.len());
 
