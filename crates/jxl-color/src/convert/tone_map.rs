@@ -78,22 +78,52 @@ fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) 
         }
     }
 
-    detect_peak_luminance_impl(r, g, b, luminances)
+    detect_peak_luminance_generic(r, g, b, luminances)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn detect_peak_luminance_avx2(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
-    detect_peak_luminance_impl(r, g, b, luminances)
+    detect_peak_luminance_generic(r, g, b, luminances)
 }
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn detect_peak_luminance_neon(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
-    detect_peak_luminance_impl(r, g, b, luminances)
+    use std::arch::aarch64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+
+    let mut r = r.chunks_exact(4);
+    let mut g = g.chunks_exact(4);
+    let mut b = b.chunks_exact(4);
+
+    let [lr, lg, lb] = luminances;
+    let mut peak_luminance = vdupq_n_f32(0.0);
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = vld1q_f32(r.as_ptr());
+        let vg = vld1q_f32(g.as_ptr());
+        let vb = vld1q_f32(b.as_ptr());
+        let vy = vfmaq_n_f32(vfmaq_n_f32(vmulq_n_f32(vr, lr), vg, lg), vb, lb);
+        peak_luminance = vmaxq_f32(peak_luminance, vy);
+    }
+
+    let mut peak_luminance = vmaxvq_f32(peak_luminance);
+    for ((r, g), b) in r.remainder().iter().zip(g.remainder()).zip(b.remainder()) {
+        let y = b.mul_add(lb, g.mul_add(lg, *r * lr));
+        peak_luminance = peak_luminance.max(y);
+    }
+
+    if peak_luminance <= 0.0 {
+        1.0
+    } else {
+        peak_luminance
+    }
 }
 
-fn detect_peak_luminance_impl(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
+#[inline]
+fn detect_peak_luminance_generic(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
     assert_eq!(r.len(), g.len());
     assert_eq!(g.len(), b.len());
 
@@ -101,7 +131,11 @@ fn detect_peak_luminance_impl(r: &[f32], g: &[f32], b: &[f32], luminances: [f32;
     let mut peak_luminance = 0f32;
     for ((r, g), b) in r.iter().zip(g).zip(b) {
         let y = r * lr + g * lg + b * lb;
-        peak_luminance = peak_luminance.max(y);
+        peak_luminance = if peak_luminance < y {
+            y
+        } else {
+            peak_luminance
+        };
     }
 
     if peak_luminance <= 0.0 {
