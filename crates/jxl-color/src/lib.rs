@@ -12,6 +12,7 @@ pub mod consts;
 mod convert;
 mod error;
 mod fastmath;
+mod gamut;
 pub mod header;
 pub mod icc;
 mod tf;

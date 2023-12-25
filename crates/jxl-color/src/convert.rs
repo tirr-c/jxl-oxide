@@ -336,9 +336,8 @@ impl ColorTransform {
                 white_point,
                 primaries,
                 tf,
-                ..
+                rendering_intent,
             }) => {
-                // TODO: address rendering intent
                 let illuminant = white_point.as_chromaticity();
                 let mat =
                     crate::ciexyz::primaries_to_xyz_mat(primaries.as_chromaticity(), illuminant);
@@ -350,6 +349,7 @@ impl ColorTransform {
                     illuminant,
                 )));
                 ops.push(ColorTransformOp::Matrix(mat));
+
                 if intensity_target > 255.0
                     && !matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
                 {
@@ -361,7 +361,18 @@ impl ColorTransform {
                         },
                         target_display_luminance: 255.0,
                     });
+
+                    let saturation_factor = if rendering_intent == RenderingIntent::Saturation {
+                        1.0
+                    } else {
+                        0.1
+                    };
+                    ops.push(ColorTransformOp::GamutMap {
+                        luminances,
+                        saturation_factor,
+                    });
                 }
+
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
                     hdr_params: HdrParams {
@@ -389,6 +400,18 @@ impl ColorTransform {
                     illuminant,
                 )));
                 ops.push(ColorTransformOp::Matrix(mat));
+                if intensity_target > 255.0
+                    && !matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
+                {
+                    ops.push(ColorTransformOp::ToneMapRec2408 {
+                        hdr_params: HdrParams {
+                            luminances,
+                            intensity_target,
+                            min_nits,
+                        },
+                        target_display_luminance: 255.0,
+                    });
+                }
                 ops.push(ColorTransformOp::ResizeChannels(1));
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
@@ -467,6 +490,10 @@ enum ColorTransformOp {
         hdr_params: HdrParams,
         target_display_luminance: f32,
     },
+    GamutMap {
+        luminances: [f32; 3],
+        saturation_factor: f32,
+    },
     IccToIcc {
         inputs: usize,
         outputs: usize,
@@ -506,6 +533,14 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("hdr_params", hdr_params)
                 .field("target_display_luminance", target_display_luminance)
                 .finish(),
+            Self::GamutMap {
+                luminances,
+                saturation_factor,
+            } => f
+                .debug_struct("GamutMap")
+                .field("luminances", luminances)
+                .field("saturation_factor", saturation_factor)
+                .finish(),
             Self::IccToIcc {
                 inputs,
                 outputs,
@@ -534,6 +569,7 @@ impl ColorTransformOp {
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
+            ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
             ColorTransformOp::ResizeChannels(_) => None,
@@ -550,6 +586,7 @@ impl ColorTransformOp {
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
+            ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
             ColorTransformOp::ResizeChannels(outputs) => Some(outputs),
@@ -638,7 +675,22 @@ impl ColorTransformOp {
                     *r *= ratio;
                     *g *= ratio;
                     *b *= ratio;
-                    // TODO: gamut map
+                }
+                3
+            }
+            Self::GamutMap { luminances, saturation_factor } => {
+                let [r, g, b, ..] = channels else {
+                    unreachable!()
+                };
+                for ((r, g), b) in r.iter_mut().zip(&mut **g).zip(&mut **b) {
+                    let mapped = crate::gamut::map_gamut_generic(
+                        [*r, *g, *b],
+                        *luminances,
+                        *saturation_factor,
+                    );
+                    *r = mapped[0];
+                    *g = mapped[1];
+                    *b = mapped[2];
                 }
                 3
             }
