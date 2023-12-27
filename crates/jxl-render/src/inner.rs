@@ -317,6 +317,18 @@ fn convert_color_for_record(
             return;
         }
 
+        match metadata.colour_encoding.colour_space() {
+            jxl_color::ColourSpace::Xyb => return,
+            jxl_color::ColourSpace::Unknown => {
+                tracing::warn!(
+                    colour_encoding = ?metadata.colour_encoding,
+                    "Signalled color encoding is unknown",
+                );
+                return;
+            }
+            _ => {}
+        }
+
         let [x, y, b, ..] = grid else { panic!() };
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
             tracing::trace!(colour_encoding = ?metadata.colour_encoding);
@@ -327,7 +339,8 @@ fn convert_color_for_record(
                 &jxl_color::ColorEncodingWithProfile::new(metadata.colour_encoding.clone()),
                 &metadata.opsin_inverse_matrix,
                 &metadata.tone_mapping,
-            );
+            )
+            .unwrap();
             transform
                 .run(
                     &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],

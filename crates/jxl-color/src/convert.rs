@@ -1,7 +1,7 @@
 use crate::{
     ciexyz::*, consts::*, icc::colour_encoding_to_icc, tf, ColorManagementSystem, ColourEncoding,
-    ColourSpace, EnumColourEncoding, OpsinInverseMatrix, RenderingIntent, ToneMapping,
-    TransferFunction,
+    ColourSpace, EnumColourEncoding, Error, OpsinInverseMatrix, RenderingIntent, Result,
+    ToneMapping, TransferFunction,
 };
 
 mod tone_map;
@@ -65,7 +65,6 @@ impl ColorEncodingWithProfile {
 impl ColorEncodingWithProfile {
     fn is_equivalent(&self, other: &Self) -> bool {
         if self.encoding.want_icc() != other.encoding.want_icc() {
-            // TODO: parse profile and check
             return false;
         }
 
@@ -109,7 +108,7 @@ impl ColorTransform {
         to: &ColorEncodingWithProfile,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
-    ) -> Self {
+    ) -> Result<Self> {
         let intensity_target = tone_mapping.intensity_target;
         let min_nits = tone_mapping.min_nits;
 
@@ -160,23 +159,22 @@ impl ColorTransform {
         };
 
         if from.is_equivalent(to) {
-            return Self {
+            return Ok(Self {
                 begin_channels,
                 ops: Vec::new(),
-            };
+            });
         }
 
         let mut ops = Vec::new();
 
         let current_encoding = match from.encoding {
             ColourEncoding::IccProfile(_) => {
-                let rendering_intent = crate::icc::parse_icc_raw(&from.icc_profile)
-                    .unwrap()
+                let rendering_intent = crate::icc::parse_icc_raw(&from.icc_profile)?
                     .header
                     .rendering_intent;
                 match &to.encoding {
                     ColourEncoding::IccProfile(_) => {
-                        return Self {
+                        return Ok(Self {
                             begin_channels,
                             ops: vec![ColorTransformOp::IccToIcc {
                                 inputs: 0,
@@ -185,7 +183,7 @@ impl ColorTransform {
                                 to: to.icc_profile.clone(),
                                 rendering_intent,
                             }],
-                        };
+                        });
                     }
                     ColourEncoding::Enum(encoding) => {
                         let mut target_encoding = encoding.clone();
@@ -275,7 +273,9 @@ impl ColorTransform {
                 current_encoding.tf = TransferFunction::Linear;
                 current_encoding
             }
-            ColourEncoding::Enum(ref e) => todo!("Unsupported input enum colorspace {:?}", e),
+            ColourEncoding::Enum(_) => {
+                return Err(Error::UnsupportedColorEncoding);
+            }
         };
 
         let target_encoding = match &to.encoding {
@@ -288,10 +288,10 @@ impl ColorTransform {
                     to: to.icc_profile.clone(),
                     rendering_intent: current_encoding.rendering_intent,
                 });
-                return Self {
+                return Ok(Self {
                     begin_channels,
                     ops,
-                };
+                });
             }
         };
 
@@ -318,7 +318,7 @@ impl ColorTransform {
                     ops.push(ColorTransformOp::LumaToXyz { illuminant });
                 }
                 ColourSpace::Xyb | ColourSpace::Unknown => {
-                    panic!()
+                    unreachable!()
                 }
             }
 
@@ -346,7 +346,7 @@ impl ColorTransform {
                     ops.push(ColorTransformOp::XyzToLuma);
                 }
                 ColourSpace::Xyb | ColourSpace::Unknown => {
-                    panic!()
+                    return Err(Error::UnsupportedColorEncoding);
                 }
             }
         }
@@ -386,17 +386,17 @@ impl ColorTransform {
             });
         }
 
-        Self {
+        Ok(Self {
             begin_channels,
             ops,
-        }
+        })
     }
 
     pub fn xyb_to_enum(
         encoding: &EnumColourEncoding,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
-    ) -> Self {
+    ) -> Result<Self> {
         Self::new(
             &ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb())),
             &ColorEncodingWithProfile::new(ColourEncoding::Enum(encoding.clone())),
@@ -409,7 +409,7 @@ impl ColorTransform {
         &self,
         channels: &mut [&mut [f32]],
         cms: &Cms,
-    ) -> Result<usize, crate::Error> {
+    ) -> Result<usize> {
         let mut num_channels = self.begin_channels;
         for op in &self.ops {
             num_channels = op.run(channels, num_channels, cms)?;
@@ -554,7 +554,7 @@ impl ColorTransformOp {
         channels: &mut [&mut [f32]],
         num_input_channels: usize,
         cms: &Cms,
-    ) -> Result<usize, crate::Error> {
+    ) -> Result<usize> {
         let channel_count = channels.len();
         if let Some(inputs) = self.inputs() {
             assert!(channel_count >= inputs);
