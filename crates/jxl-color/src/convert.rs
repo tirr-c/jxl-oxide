@@ -662,9 +662,7 @@ impl ColorTransformOp {
                 hdr_params,
                 target_display_luminance,
             } => {
-                let [y, ..] = channels else {
-                    unreachable!()
-                };
+                let [y, ..] = channels else { unreachable!() };
                 tone_map::tone_map_luma(y, hdr_params, *target_display_luminance);
                 1
             }
