@@ -484,10 +484,11 @@ impl JxlImage {
     /// [`request_icc`] or [`request_color_encoding`].
     pub fn rendered_icc(&self) -> Vec<u8> {
         let encoding = self.ctx.requested_color_encoding();
-        if encoding.encoding().want_icc() {
-            encoding.icc_profile().to_vec()
-        } else {
-            jxl_color::icc::colour_encoding_to_icc(encoding.encoding())
+        match encoding.encoding() {
+            jxl_color::ColourEncoding::Enum(encoding) => {
+                jxl_color::icc::colour_encoding_to_icc(encoding)
+            }
+            jxl_color::ColourEncoding::IccProfile(_) => encoding.icc_profile().to_vec(),
         }
     }
 
@@ -521,7 +522,6 @@ impl JxlImage {
                     }
                 }
             }
-            ColourEncoding::PcsXyz => (false, false),
         };
         let mut has_alpha = false;
         for ec_info in &self.image_header.metadata.ec_info {

@@ -77,9 +77,6 @@ fn main() {
         println!("  Color encoding:");
     }
     match &image_meta.colour_encoding {
-        jxl_oxide::color::ColourEncoding::PcsXyz => {
-            unreachable!("ColourEncoding::CieXyzD65 cannot be embedded in image");
-        }
         jxl_oxide::color::ColourEncoding::Enum(colour_encoding) => {
             print_colour_encoding(colour_encoding, "    ");
         }

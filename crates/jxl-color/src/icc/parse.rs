@@ -195,8 +195,8 @@ impl KnownIccTrc {
     }
 }
 
-struct IccProfile<'a> {
-    header: super::IccHeader,
+pub(crate) struct IccProfile<'a> {
+    pub(crate) header: super::IccHeader,
     tags: Vec<RawTag<'a>>,
 }
 
@@ -205,7 +205,7 @@ struct RawTag<'a> {
     data: &'a [u8],
 }
 
-fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
+pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
     if profile.len() < 128 {
         return Err(Error::IccParseFailure("profile is too short"));
     }

@@ -10,8 +10,8 @@ mod synthesize;
 
 pub use decode::{decode_icc, read_icc};
 pub use parse::parse_icc;
+pub(crate) use parse::parse_icc_raw;
 pub use synthesize::colour_encoding_to_icc;
-pub(crate) use synthesize::nciexyz_icc_profile;
 
 #[derive(Debug)]
 #[non_exhaustive]
