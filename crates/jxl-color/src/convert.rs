@@ -365,16 +365,23 @@ impl ColorTransform {
         };
 
         if intensity_target > 255.0 && !target_encoding.is_hdr() {
-            ops.push(ColorTransformOp::ToneMapRec2408 {
-                hdr_params,
-                target_display_luminance: 255.0,
-            });
-
-            if current_encoding.rendering_intent == RenderingIntent::Perceptual {
-                ops.push(ColorTransformOp::GamutMap {
-                    luminances,
-                    saturation_factor: 0.1,
+            if target_encoding.colour_space == ColourSpace::Grey {
+                ops.push(ColorTransformOp::ToneMapLumaRec2408 {
+                    hdr_params,
+                    target_display_luminance: 255.0,
                 });
+            } else {
+                ops.push(ColorTransformOp::ToneMapRec2408 {
+                    hdr_params,
+                    target_display_luminance: 255.0,
+                });
+
+                if current_encoding.rendering_intent == RenderingIntent::Perceptual {
+                    ops.push(ColorTransformOp::GamutMap {
+                        luminances,
+                        saturation_factor: 0.1,
+                    });
+                }
             }
         }
 
@@ -438,6 +445,10 @@ enum ColorTransformOp {
         hdr_params: HdrParams,
         target_display_luminance: f32,
     },
+    ToneMapLumaRec2408 {
+        hdr_params: HdrParams,
+        target_display_luminance: f32,
+    },
     GamutMap {
         luminances: [f32; 3],
         saturation_factor: f32,
@@ -486,6 +497,14 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("hdr_params", hdr_params)
                 .field("target_display_luminance", target_display_luminance)
                 .finish(),
+            Self::ToneMapLumaRec2408 {
+                hdr_params,
+                target_display_luminance,
+            } => f
+                .debug_struct("ToneMapLumaRec2408")
+                .field("hdr_params", hdr_params)
+                .field("target_display_luminance", target_display_luminance)
+                .finish(),
             Self::GamutMap {
                 luminances,
                 saturation_factor,
@@ -525,6 +544,7 @@ impl ColorTransformOp {
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
+            ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
@@ -543,6 +563,7 @@ impl ColorTransformOp {
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
+            ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
@@ -636,6 +657,16 @@ impl ColorTransformOp {
                 };
                 tone_map::tone_map(r, g, b, hdr_params, *target_display_luminance);
                 3
+            }
+            Self::ToneMapLumaRec2408 {
+                hdr_params,
+                target_display_luminance,
+            } => {
+                let [y, ..] = channels else {
+                    unreachable!()
+                };
+                tone_map::tone_map_luma(y, hdr_params, *target_display_luminance);
+                1
             }
             Self::GamutMap {
                 luminances,
