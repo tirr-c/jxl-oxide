@@ -680,7 +680,7 @@ impl RenderContext {
                     &self.requested_color_encoding,
                     &metadata.opsin_inverse_matrix,
                     &metadata.tone_mapping,
-                );
+                )?;
 
                 let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
                 let mut channels = color_channels

@@ -27,6 +27,31 @@ pub(super) fn tone_map(
     );
 }
 
+pub(super) fn tone_map_luma(
+    luma: &mut [f32],
+    hdr_params: &HdrParams,
+    target_display_luminance: f32,
+) {
+    let intensity_target = hdr_params.intensity_target;
+    let min_nits = hdr_params.min_nits;
+    let detected_peak_luminance = {
+        let max_luma = luma.iter().copied().fold(0f32, |max, v| max.max(v));
+        if max_luma == 0.0 {
+            1.0
+        } else {
+            max_luma
+        }
+    } * intensity_target;
+    let peak_luminance = intensity_target.min(detected_peak_luminance);
+
+    tone_map_luma_generic(
+        luma,
+        intensity_target,
+        (min_nits, peak_luminance),
+        (0.0, target_display_luminance),
+    );
+}
+
 fn tone_map_generic(
     r: &mut [f32],
     g: &mut [f32],
@@ -60,6 +85,28 @@ fn tone_map_generic(
         *r *= ratio;
         *g *= ratio;
         *b *= ratio;
+    }
+}
+
+fn tone_map_luma_generic(
+    luma: &mut [f32],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    let scale = intensity_target / to_luminance_range.1;
+
+    for y in luma {
+        let mut y_pq = *y;
+        crate::tf::linear_to_pq(std::slice::from_mut(&mut y_pq), intensity_target);
+        let mut y_mapped = crate::tf::rec2408_eetf_generic(
+            y_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
+        *y = y_mapped * scale;
     }
 }
 

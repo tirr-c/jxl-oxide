@@ -7,11 +7,6 @@ use crate::consts::*;
 pub enum ColourEncoding {
     Enum(EnumColourEncoding),
     IccProfile(ColourSpace),
-    /// PCSXYZ color encoding.
-    ///
-    /// PCSXYZ color encoding is not specified in JPEG XL spec. This is for users who want to
-    /// request XYZ encoded framebuffer for further processing.
-    PcsXyz,
 }
 
 impl Default for ColourEncoding {
@@ -63,7 +58,6 @@ impl ColourEncoding {
         match self {
             Self::Enum(e) => e.colour_space,
             Self::IccProfile(x) => *x,
-            Self::PcsXyz => ColourSpace::Unknown,
         }
     }
 
