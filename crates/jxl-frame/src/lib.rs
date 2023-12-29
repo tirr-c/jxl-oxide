@@ -247,7 +247,7 @@ impl Frame {
 impl Frame {
     pub fn try_parse_lf_global(&self) -> Option<Result<LfGlobal>> {
         Some(if self.toc.is_single_entry() {
-            let group = self.data.get(0)?;
+            let group = self.data.first()?;
             let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = LfGlobal::parse(
                 &mut bitstream,
@@ -295,7 +295,7 @@ impl Frame {
                 return None;
             }
 
-            let group = self.data.get(0)?;
+            let group = self.data.first()?;
             let mut bitstream = Bitstream::new(&group.bytes);
             let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
             if offset == 0 {
@@ -364,7 +364,7 @@ impl Frame {
         let is_modular = self.header.encoding == header::Encoding::Modular;
 
         if self.toc.is_single_entry() {
-            let group = self.data.get(0)?;
+            let group = self.data.first()?;
             let mut bitstream = Bitstream::new(&group.bytes);
             let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
             let lf_global = if cached_lf_global.is_none() && (offset == 0 || !is_modular) {
@@ -472,7 +472,7 @@ impl Frame {
                 return None;
             }
 
-            let group = self.data.get(0)?;
+            let group = self.data.first()?;
             let mut bitstream = Bitstream::new(&group.bytes);
             let mut offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
             if offset == 0 {

@@ -36,7 +36,7 @@ pub(crate) fn render_modular(
 
     let bit_depth = metadata.bit_depth;
     let mut fb_xyb =
-        ImageWithRegion::from_region_and_tracker(channels, region, frame.alloc_tracker())?;
+        ImageWithRegion::from_region_and_tracker(channels, region, false, frame.alloc_tracker())?;
 
     let modular_image = gmodular.modular.image_mut().unwrap();
     let groups = modular_image.prepare_groups(frame.pass_shifts())?;

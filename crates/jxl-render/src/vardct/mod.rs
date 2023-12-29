@@ -115,7 +115,7 @@ pub(crate) fn render_vardct(
                 height_rounded as u32 / 8,
             ));
 
-    let mut fb_xyb = ImageWithRegion::from_region_and_tracker(3, modular_region, tracker)?;
+    let mut fb_xyb = ImageWithRegion::from_region_and_tracker(3, modular_region, false, tracker)?;
 
     let mut modular_image = gmodular.modular.image_mut();
     let groups = modular_image
@@ -152,13 +152,14 @@ pub(crate) fn render_vardct(
                     ImageWithRegion::from_region_and_tracker(
                         2,
                         modular_lf_region.downsample(3),
+                        false,
                         tracker,
                     )
                 })
                 .transpose()?;
 
             let mut lf_xyb =
-                ImageWithRegion::from_region_and_tracker(3, modular_lf_region, tracker)?;
+                ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
 
             if let Some(x) = lf_frame {
                 let lf_frame = x.image.run_with_image(image_region)?;

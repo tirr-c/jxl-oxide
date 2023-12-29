@@ -46,7 +46,7 @@ pub fn apply_epf(
     tracing::debug!("Preparing sigma grid");
     let sigma_region = region.downsample(3);
     let mut sigma_image =
-        ImageWithRegion::from_region_and_tracker(1, sigma_region, tracker.as_ref())?;
+        ImageWithRegion::from_region_and_tracker(1, sigma_region, false, tracker.as_ref())?;
     let sigma_grid = &mut sigma_image.buffer_mut()[0];
     let mut need_sigma_init = true;
 

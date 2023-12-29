@@ -24,3 +24,8 @@ path = "../jxl-coding"
 [dependencies.jxl-grid]
 version = "0.2.0"
 path = "../jxl-grid"
+
+[dependencies.tracing]
+version = "0.1.37"
+default_features = false
+features = ["std"]
