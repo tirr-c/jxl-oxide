@@ -1,11 +1,10 @@
 mod bt709;
-mod pq;
-mod rec2408;
+pub(crate) mod pq;
+pub(crate) mod rec2408;
 mod srgb;
 
 pub use bt709::*;
 pub use pq::*;
-pub(crate) use rec2408::rec2408_eetf_generic;
 pub use srgb::*;
 
 /// Applies gamma to samples.

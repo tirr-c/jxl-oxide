@@ -1,3 +1,6 @@
+#[cfg(target_arch = "aarch64")]
+use std::arch::is_aarch64_feature_detected;
+
 use super::HdrParams;
 
 pub(super) fn tone_map(
@@ -15,6 +18,22 @@ pub(super) fn tone_map(
     let min_nits = hdr_params.min_nits;
     let detected_peak_luminance = detect_peak_luminance(r, g, b, luminances) * intensity_target;
     let peak_luminance = intensity_target.min(detected_peak_luminance);
+
+    #[cfg(target_arch = "aarch64")]
+    if is_aarch64_feature_detected!("neon") {
+        // SAFETY: features are checked above.
+        unsafe {
+            return tone_map_aarch64_neon(
+                r,
+                g,
+                b,
+                luminances,
+                intensity_target,
+                (min_nits, peak_luminance),
+                (0.0, target_display_luminance),
+            );
+        }
+    }
 
     tone_map_generic(
         r,
@@ -44,6 +63,19 @@ pub(super) fn tone_map_luma(
     } * intensity_target;
     let peak_luminance = intensity_target.min(detected_peak_luminance);
 
+    #[cfg(target_arch = "aarch64")]
+    if is_aarch64_feature_detected!("neon") {
+        // SAFETY: features are checked above.
+        unsafe {
+            return tone_map_luma_aarch64_neon(
+                luma,
+                intensity_target,
+                (min_nits, peak_luminance),
+                (0.0, target_display_luminance),
+            );
+        }
+    }
+
     tone_map_luma_generic(
         luma,
         intensity_target,
@@ -68,15 +100,14 @@ fn tone_map_generic(
     let [lr, lg, lb] = luminances;
     for ((r, g), b) in r.iter_mut().zip(g).zip(b) {
         let y = *r * lr + *g * lg + *b * lb;
-        let mut y_pq = y;
-        crate::tf::linear_to_pq(std::slice::from_mut(&mut y_pq), intensity_target);
-        let mut y_mapped = crate::tf::rec2408_eetf_generic(
+        let y_pq = crate::tf::pq::linear_to_pq_generic(y, intensity_target);
+        let y_mapped = crate::tf::rec2408::rec2408_eetf_generic(
             y_pq,
             intensity_target,
             from_luminance_range,
             to_luminance_range,
         );
-        crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
+        let y_mapped = crate::tf::pq::pq_to_linear_generic(y_mapped, intensity_target);
         let ratio = if y <= 1e-7 {
             y_mapped * scale
         } else {
@@ -88,6 +119,61 @@ fn tone_map_generic(
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn tone_map_aarch64_neon(
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
+    luminances: [f32; 3],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::aarch64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+    let scale = intensity_target / to_luminance_range.1;
+
+    let [lr, lg, lb] = luminances;
+    let mut r = r.chunks_exact_mut(4);
+    let mut g = g.chunks_exact_mut(4);
+    let mut b = b.chunks_exact_mut(4);
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = vld1q_f32(r.as_ptr());
+        let vg = vld1q_f32(g.as_ptr());
+        let vb = vld1q_f32(b.as_ptr());
+        let vy = vfmaq_n_f32(vfmaq_n_f32(vmulq_n_f32(vr, lr), vg, lg), vb, lb);
+        let vy_pq = crate::tf::pq::linear_to_pq_aarch64_neon(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_aarch64_neon(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_aarch64_neon(vy_mapped, intensity_target);
+
+        let is_small = vcleq_f32(vy, vdupq_n_f32(1e-7));
+        let vy = vbslq_f32(is_small, vdupq_n_f32(1.0), vy);
+        let ratio = vdivq_f32(vmulq_n_f32(vy_mapped, scale), vy);
+
+        vst1q_f32(r.as_mut_ptr(), vmulq_f32(vr, ratio));
+        vst1q_f32(g.as_mut_ptr(), vmulq_f32(vg, ratio));
+        vst1q_f32(b.as_mut_ptr(), vmulq_f32(vb, ratio));
+    }
+
+    tone_map_generic(
+        r.into_remainder(),
+        g.into_remainder(),
+        b.into_remainder(),
+        luminances,
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
+}
+
 fn tone_map_luma_generic(
     luma: &mut [f32],
     intensity_target: f32,
@@ -97,15 +183,14 @@ fn tone_map_luma_generic(
     let scale = intensity_target / to_luminance_range.1;
 
     for y in luma {
-        let mut y_pq = *y;
-        crate::tf::linear_to_pq(std::slice::from_mut(&mut y_pq), intensity_target);
-        let mut y_mapped = crate::tf::rec2408_eetf_generic(
+        let y_pq = crate::tf::pq::linear_to_pq_generic(*y, intensity_target);
+        let y_mapped = crate::tf::rec2408::rec2408_eetf_generic(
             y_pq,
             intensity_target,
             from_luminance_range,
             to_luminance_range,
         );
-        crate::tf::pq_to_linear(std::slice::from_mut(&mut y_mapped), intensity_target);
+        let y_mapped = crate::tf::pq::pq_to_linear_generic(y_mapped, intensity_target);
         *y = y_mapped * scale;
     }
 }
@@ -131,6 +216,40 @@ fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) 
     }
 
     detect_peak_luminance_generic(r, g, b, luminances)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn tone_map_luma_aarch64_neon(
+    luma: &mut [f32],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::aarch64::*;
+
+    let scale = intensity_target / to_luminance_range.1;
+
+    let mut luma = luma.chunks_exact_mut(4);
+    for y in &mut luma {
+        let vy = vld1q_f32(y.as_ptr());
+        let vy_pq = crate::tf::pq::linear_to_pq_aarch64_neon(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_aarch64_neon(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_aarch64_neon(vy_mapped, intensity_target);
+        vst1q_f32(y.as_mut_ptr(), vmulq_n_f32(vy_mapped, scale));
+    }
+
+    tone_map_luma_generic(
+        luma.into_remainder(),
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -269,15 +388,13 @@ mod tests {
         let mut r = samples;
         let mut g = samples;
         let mut b = samples;
-        tone_map_generic(
-            &mut r,
-            &mut g,
-            &mut b,
-            [0.2126, 0.7152, 0.0722],
-            10000f32,
-            (0f32, 1000f32),
-            (0f32, 255f32),
-        );
+
+        let hdr_params = HdrParams {
+            luminances: [0.2126, 0.7152, 0.0722],
+            intensity_target: 10000.0,
+            min_nits: 0.0,
+        };
+        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0);
 
         dbg!(r);
         dbg!(g);
