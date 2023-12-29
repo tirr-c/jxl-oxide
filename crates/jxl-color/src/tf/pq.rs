@@ -1,3 +1,5 @@
+//! Approximation of perceptual quantizer transfer functions, ported from libjxl.
+
 #[cfg(target_arch = "aarch64")]
 use std::arch::is_aarch64_feature_detected;
 #[cfg(target_arch = "x86_64")]
