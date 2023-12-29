@@ -1,8 +1,11 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::is_aarch64_feature_detected;
+#[cfg(target_arch = "x86_64")]
+use std::arch::is_x86_feature_detected;
 
 use super::HdrParams;
 
+#[allow(unreachable_code)]
 pub(super) fn tone_map(
     r: &mut [f32],
     g: &mut [f32],
@@ -19,6 +22,50 @@ pub(super) fn tone_map(
     let detected_peak_luminance = detect_peak_luminance(r, g, b, luminances) * intensity_target;
     let peak_luminance = intensity_target.min(detected_peak_luminance);
 
+    let from_luminance_range = (min_nits, peak_luminance);
+    let to_luminance_range = (0.0, target_display_luminance);
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                return tone_map_x86_64_avx2(
+                    r,
+                    g,
+                    b,
+                    luminances,
+                    intensity_target,
+                    from_luminance_range,
+                    to_luminance_range,
+                );
+            }
+        } else {
+            unsafe {
+                return tone_map_x86_64_fma(
+                    r,
+                    g,
+                    b,
+                    luminances,
+                    intensity_target,
+                    from_luminance_range,
+                    to_luminance_range,
+                );
+            }
+        }
+    } else {
+        unsafe {
+            return tone_map_x86_64_sse2(
+                r,
+                g,
+                b,
+                luminances,
+                intensity_target,
+                from_luminance_range,
+                to_luminance_range,
+            );
+        }
+    }
+
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: features are checked above.
@@ -29,8 +76,8 @@ pub(super) fn tone_map(
                 b,
                 luminances,
                 intensity_target,
-                (min_nits, peak_luminance),
-                (0.0, target_display_luminance),
+                from_luminance_range,
+                to_luminance_range,
             );
         }
     }
@@ -46,6 +93,7 @@ pub(super) fn tone_map(
     );
 }
 
+#[allow(unreachable_code)]
 pub(super) fn tone_map_luma(
     luma: &mut [f32],
     hdr_params: &HdrParams,
@@ -63,6 +111,41 @@ pub(super) fn tone_map_luma(
     } * intensity_target;
     let peak_luminance = intensity_target.min(detected_peak_luminance);
 
+    let from_luminance_range = (min_nits, peak_luminance);
+    let to_luminance_range = (0.0, target_display_luminance);
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                return tone_map_luma_x86_64_avx2(
+                    luma,
+                    intensity_target,
+                    from_luminance_range,
+                    to_luminance_range,
+                );
+            }
+        } else {
+            unsafe {
+                return tone_map_luma_x86_64_fma(
+                    luma,
+                    intensity_target,
+                    from_luminance_range,
+                    to_luminance_range,
+                );
+            }
+        }
+    } else {
+        unsafe {
+            return tone_map_luma_x86_64_sse2(
+                luma,
+                intensity_target,
+                from_luminance_range,
+                to_luminance_range,
+            );
+        }
+    }
+
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: features are checked above.
@@ -70,8 +153,8 @@ pub(super) fn tone_map_luma(
             return tone_map_luma_aarch64_neon(
                 luma,
                 intensity_target,
-                (min_nits, peak_luminance),
-                (0.0, target_display_luminance),
+                from_luminance_range,
+                to_luminance_range,
             );
         }
     }
@@ -79,8 +162,8 @@ pub(super) fn tone_map_luma(
     tone_map_luma_generic(
         luma,
         intensity_target,
-        (min_nits, peak_luminance),
-        (0.0, target_display_luminance),
+        from_luminance_range,
+        to_luminance_range,
     );
 }
 
@@ -117,6 +200,184 @@ fn tone_map_generic(
         *g *= ratio;
         *b *= ratio;
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "fma")]
+unsafe fn tone_map_x86_64_avx2(
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
+    luminances: [f32; 3],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm256_set1_ps(scale);
+
+    let [lr, lg, lb] = luminances;
+    let vlr = _mm256_set1_ps(lr);
+    let vlg = _mm256_set1_ps(lg);
+    let vlb = _mm256_set1_ps(lb);
+    let mut r = r.chunks_exact_mut(8);
+    let mut g = g.chunks_exact_mut(8);
+    let mut b = b.chunks_exact_mut(8);
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = _mm256_loadu_ps(r.as_ptr());
+        let vg = _mm256_loadu_ps(g.as_ptr());
+        let vb = _mm256_loadu_ps(b.as_ptr());
+        let vy = _mm256_fmadd_ps(vb, vlb, _mm256_fmadd_ps(vg, vlg, _mm256_mul_ps(vr, vlr)));
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_avx2(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_avx2(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_avx2(vy_mapped, intensity_target);
+        let is_small = _mm256_cmp_ps::<_CMP_LT_OQ>(vy, _mm256_set1_ps(1e-7));
+        let vy = _mm256_blendv_ps(vy, _mm256_set1_ps(1.0), is_small);
+        let ratio = _mm256_div_ps(_mm256_mul_ps(vy_mapped, vscale), vy);
+        _mm256_storeu_ps(r.as_mut_ptr(), _mm256_mul_ps(vr, ratio));
+        _mm256_storeu_ps(g.as_mut_ptr(), _mm256_mul_ps(vg, ratio));
+        _mm256_storeu_ps(b.as_mut_ptr(), _mm256_mul_ps(vb, ratio));
+    }
+
+    tone_map_x86_64_fma(
+        r.into_remainder(),
+        g.into_remainder(),
+        b.into_remainder(),
+        luminances,
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "fma")]
+unsafe fn tone_map_x86_64_fma(
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
+    luminances: [f32; 3],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm_set1_ps(scale);
+
+    let [lr, lg, lb] = luminances;
+    let vlr = _mm_set1_ps(lr);
+    let vlg = _mm_set1_ps(lg);
+    let vlb = _mm_set1_ps(lb);
+    let mut r = r.chunks_exact_mut(4);
+    let mut g = g.chunks_exact_mut(4);
+    let mut b = b.chunks_exact_mut(4);
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = _mm_loadu_ps(r.as_ptr());
+        let vg = _mm_loadu_ps(g.as_ptr());
+        let vb = _mm_loadu_ps(b.as_ptr());
+        let vy = _mm_fmadd_ps(vb, vlb, _mm_fmadd_ps(vg, vlg, _mm_mul_ps(vr, vlr)));
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_fma(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_fma(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_fma(vy_mapped, intensity_target);
+        let is_small = _mm_cmplt_ps(vy, _mm_set1_ps(1e-7));
+        let vy = _mm_blendv_ps(vy, _mm_set1_ps(1.0), is_small);
+        let ratio = _mm_div_ps(_mm_mul_ps(vy_mapped, vscale), vy);
+        _mm_storeu_ps(r.as_mut_ptr(), _mm_mul_ps(vr, ratio));
+        _mm_storeu_ps(g.as_mut_ptr(), _mm_mul_ps(vg, ratio));
+        _mm_storeu_ps(b.as_mut_ptr(), _mm_mul_ps(vb, ratio));
+    }
+
+    tone_map_generic(
+        r.into_remainder(),
+        g.into_remainder(),
+        b.into_remainder(),
+        luminances,
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn tone_map_x86_64_sse2(
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
+    luminances: [f32; 3],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    assert_eq!(r.len(), g.len());
+    assert_eq!(g.len(), b.len());
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm_set1_ps(scale);
+
+    let [lr, lg, lb] = luminances;
+    let vlr = _mm_set1_ps(lr);
+    let vlg = _mm_set1_ps(lg);
+    let vlb = _mm_set1_ps(lb);
+    let mut r = r.chunks_exact_mut(4);
+    let mut g = g.chunks_exact_mut(4);
+    let mut b = b.chunks_exact_mut(4);
+    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+        let vr = _mm_loadu_ps(r.as_ptr());
+        let vg = _mm_loadu_ps(g.as_ptr());
+        let vb = _mm_loadu_ps(b.as_ptr());
+        let vy = _mm_mul_ps(vr, vlr);
+        let vy = _mm_add_ps(vy, _mm_mul_ps(vg, vlg));
+        let vy = _mm_add_ps(vy, _mm_mul_ps(vb, vlb));
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_sse2(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_sse2(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_sse2(vy_mapped, intensity_target);
+        let is_small = _mm_cmplt_ps(vy, _mm_set1_ps(1e-7));
+        let vy = _mm_or_ps(
+            _mm_andnot_ps(is_small, vy),
+            _mm_and_ps(is_small, _mm_set1_ps(1.0)),
+        );
+        let ratio = _mm_div_ps(_mm_mul_ps(vy_mapped, vscale), vy);
+        _mm_storeu_ps(r.as_mut_ptr(), _mm_mul_ps(vr, ratio));
+        _mm_storeu_ps(g.as_mut_ptr(), _mm_mul_ps(vg, ratio));
+        _mm_storeu_ps(b.as_mut_ptr(), _mm_mul_ps(vb, ratio));
+    }
+
+    tone_map_generic(
+        r.into_remainder(),
+        g.into_remainder(),
+        b.into_remainder(),
+        luminances,
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -195,27 +456,111 @@ fn tone_map_luma_generic(
     }
 }
 
-fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
-        {
-            unsafe {
-                return detect_peak_luminance_avx2(r, g, b, luminances);
-            }
-        }
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "fma")]
+unsafe fn tone_map_luma_x86_64_avx2(
+    luma: &mut [f32],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm256_set1_ps(scale);
+
+    let mut luma = luma.chunks_exact_mut(8);
+    for y in &mut luma {
+        let vy = _mm256_loadu_ps(y.as_ptr());
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_avx2(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_avx2(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_avx2(vy_mapped, intensity_target);
+        _mm256_storeu_ps(y.as_mut_ptr(), _mm256_mul_ps(vy_mapped, vscale));
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if std::arch::is_aarch64_feature_detected!("neon") {
-            unsafe {
-                return detect_peak_luminance_neon(r, g, b, luminances);
-            }
-        }
+    tone_map_luma_x86_64_fma(
+        luma.into_remainder(),
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "fma")]
+unsafe fn tone_map_luma_x86_64_fma(
+    luma: &mut [f32],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm_set1_ps(scale);
+
+    let mut luma = luma.chunks_exact_mut(4);
+    for y in &mut luma {
+        let vy = _mm_loadu_ps(y.as_ptr());
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_fma(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_fma(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_fma(vy_mapped, intensity_target);
+        _mm_storeu_ps(y.as_mut_ptr(), _mm_mul_ps(vy_mapped, vscale));
     }
 
-    detect_peak_luminance_generic(r, g, b, luminances)
+    tone_map_luma_generic(
+        luma.into_remainder(),
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn tone_map_luma_x86_64_sse2(
+    luma: &mut [f32],
+    intensity_target: f32,
+    from_luminance_range: (f32, f32),
+    to_luminance_range: (f32, f32),
+) {
+    use std::arch::x86_64::*;
+
+    let scale = intensity_target / to_luminance_range.1;
+    let vscale = _mm_set1_ps(scale);
+
+    let mut luma = luma.chunks_exact_mut(4);
+    for y in &mut luma {
+        let vy = _mm_loadu_ps(y.as_ptr());
+        let vy_pq = crate::tf::pq::linear_to_pq_x86_64_sse2(vy, intensity_target);
+        let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_sse2(
+            vy_pq,
+            intensity_target,
+            from_luminance_range,
+            to_luminance_range,
+        );
+        let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_sse2(vy_mapped, intensity_target);
+        _mm_storeu_ps(y.as_mut_ptr(), _mm_mul_ps(vy_mapped, vscale));
+    }
+
+    tone_map_luma_generic(
+        luma.into_remainder(),
+        intensity_target,
+        from_luminance_range,
+        to_luminance_range,
+    );
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -250,6 +595,28 @@ unsafe fn tone_map_luma_aarch64_neon(
         from_luminance_range,
         to_luminance_range,
     );
+}
+
+fn detect_peak_luminance(r: &[f32], g: &[f32], b: &[f32], luminances: [f32; 3]) -> f32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            unsafe {
+                return detect_peak_luminance_avx2(r, g, b, luminances);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if is_aarch64_feature_detected!("neon") {
+            unsafe {
+                return detect_peak_luminance_neon(r, g, b, luminances);
+            }
+        }
+    }
+
+    detect_peak_luminance_generic(r, g, b, luminances)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -384,7 +751,10 @@ mod tests {
 
     #[test]
     fn tone_map_range() {
-        let samples = [0f32, 0.1f32];
+        let mut samples = [0f32; 10];
+        for (idx, v) in samples.iter_mut().enumerate() {
+            *v = (idx / 5) as f32 * 0.1;
+        }
         let mut r = samples;
         let mut g = samples;
         let mut b = samples;
@@ -400,13 +770,12 @@ mod tests {
         dbg!(g);
         dbg!(b);
 
-        assert!((r[0] - 0.0).abs() < 2e-5);
-        assert!((g[0] - 0.0).abs() < 2e-5);
-        assert!((b[0] - 0.0).abs() < 2e-5);
-
-        assert!((r[1] - 1.0).abs() < 2e-5);
-        assert!((g[1] - 1.0).abs() < 2e-5);
-        assert!((b[1] - 1.0).abs() < 2e-5);
+        for (idx, ((r, g), b)) in r.into_iter().zip(b).zip(b).enumerate() {
+            let expected = (idx / 5) as f32;
+            assert!((r - expected).abs() < 2e-5);
+            assert!((g - expected).abs() < 2e-5);
+            assert!((b - expected).abs() < 2e-5);
+        }
     }
 
     #[test]
