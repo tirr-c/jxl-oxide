@@ -138,14 +138,22 @@ pub(crate) fn render_frame(
         frame_visibility.1,
     )?;
 
-    if !frame_header.save_before_ct {
-        convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
+    if !frame_header.save_before_ct && !frame_header.is_last {
+        let ct_done =
+            convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
+        fb.set_ct_done(ct_done);
     }
 
     Ok(
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
             fb
         } else {
+            if !frame_header.save_before_ct && !fb.ct_done() {
+                let ct_done =
+                    convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
+                fb.set_ct_done(ct_done);
+            }
+
             blend::blend(
                 frame.image_header(),
                 image_region,
@@ -163,6 +171,7 @@ fn upsample_color_channels(
     frame_header: &FrameHeader,
     original_region: Region,
 ) -> Result<()> {
+    let ct_done = fb.ct_done();
     let upsample_factor = frame_header.upsampling.ilog2();
     let upsampled_region = fb.region().upsample(upsample_factor);
     let upsampled_buffer = if upsample_factor == 0 {
@@ -185,11 +194,13 @@ fn upsample_color_channels(
         upsampled_buffer,
         upsampled_region.left,
         upsampled_region.top,
+        ct_done,
     );
     tracing::trace_span!("Copy upsampled color channels").in_scope(|| -> Result<_> {
         *fb = ImageWithRegion::from_region_and_tracker(
             upsampled_fb.channels(),
             original_region,
+            fb.ct_done(),
             fb.alloc_tracker(),
         )?;
         for (channel_idx, output) in fb.buffer_mut().iter_mut().enumerate() {
@@ -240,8 +251,12 @@ fn append_extra_channels(
 
         let upsampled_region = region.upsample(upsample_factor);
         features::upsample(&mut out, image_header, frame_header, idx + 3)?;
-        let out =
-            ImageWithRegion::from_buffer(vec![out], upsampled_region.left, upsampled_region.top);
+        let out = ImageWithRegion::from_buffer(
+            vec![out],
+            upsampled_region.left,
+            upsampled_region.top,
+            false,
+        );
         let cropped = fb.add_channel()?;
         out.clone_region_channel(fb_region, 0, cropped);
     }
@@ -302,7 +317,7 @@ fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
     grid: &mut [SimpleGrid<f32>],
-) {
+) -> bool {
     // save_before_ct = false
 
     let metadata = &image_header.metadata;
@@ -314,17 +329,17 @@ fn convert_color_for_record(
         // want_icc = false || is_last = true
         // in any case, blending does not occur when want_icc = true
         if metadata.colour_encoding.want_icc() {
-            return;
+            return false;
         }
 
         match metadata.colour_encoding.colour_space() {
-            jxl_color::ColourSpace::Xyb => return,
+            jxl_color::ColourSpace::Xyb => return false,
             jxl_color::ColourSpace::Unknown => {
                 tracing::warn!(
                     colour_encoding = ?metadata.colour_encoding,
                     "Signalled color encoding is unknown",
                 );
-                return;
+                return false;
             }
             _ => {}
         }
@@ -349,4 +364,7 @@ fn convert_color_for_record(
                 .unwrap();
         });
     }
+
+    // color transform is done
+    true
 }

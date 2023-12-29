@@ -149,8 +149,12 @@ pub(crate) fn blend(
     let header = new_frame.header();
     let channels = 3 + image_header.metadata.ec_info.len();
     let tracker = new_frame.alloc_tracker();
-    let mut output_grid =
-        ImageWithRegion::from_region_and_tracker(channels, new_grid.region(), tracker)?;
+    let mut output_grid = ImageWithRegion::from_region_and_tracker(
+        channels,
+        new_grid.region(),
+        new_grid.ct_done(),
+        tracker,
+    )?;
     let output_image_region = new_grid.region().translate(header.x0, header.y0);
 
     let mut used_as_alpha = vec![false; 3 + image_header.metadata.ec_info.len()];
@@ -188,8 +192,12 @@ pub(crate) fn blend(
                 clone_empty = true;
             }
             if clone_empty {
-                let empty_image =
-                    ImageWithRegion::from_region_and_tracker(channels, Region::empty(), tracker)?;
+                let empty_image = ImageWithRegion::from_region_and_tracker(
+                    channels,
+                    Region::empty(),
+                    output_grid.ct_done(),
+                    tracker,
+                )?;
                 empty_image.clone_region_channel(
                     Region::empty(),
                     idx,

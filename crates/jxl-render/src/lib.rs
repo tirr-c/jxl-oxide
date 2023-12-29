@@ -27,9 +27,8 @@ pub use error::{Error, Result};
 pub use features::render_spot_color;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 use jxl_threadpool::JxlThreadPool;
-pub use region::Region;
+pub use region::{ImageWithRegion, Region};
 
-use region::ImageWithRegion;
 use state::*;
 
 /// Render context that tracks loaded and rendered frames.
@@ -637,6 +636,7 @@ impl RenderContext {
             let mut new_grid = ImageWithRegion::from_region_and_tracker(
                 grid.channels(),
                 frame_region,
+                grid.ct_done(),
                 self.tracker.as_ref(),
             )?;
             for (ch, g) in new_grid.buffer_mut().iter_mut().enumerate() {
@@ -652,9 +652,7 @@ impl RenderContext {
             || -> Result<()> {
                 let header_color_encoding = &metadata.colour_encoding;
                 let want_icc = header_color_encoding.want_icc();
-                let frame_color_encoding = if (frame_header.save_before_ct || want_icc)
-                    && metadata.xyb_encoded
-                {
+                let frame_color_encoding = if !grid.ct_done() && metadata.xyb_encoded {
                     ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
                 } else if want_icc {
                     ColorEncodingWithProfile::with_icc(
@@ -668,7 +666,7 @@ impl RenderContext {
                 tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
                 tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-                if frame_header.save_before_ct && frame_header.do_ycbcr {
+                if !grid.ct_done() && frame_header.do_ycbcr {
                     let [cb, y, cr, ..] = grid.buffer_mut() else {
                         panic!()
                     };
@@ -709,6 +707,7 @@ impl RenderContext {
                 if output_channels < 3 {
                     grid.remove_channels(output_channels..3);
                 }
+                grid.set_ct_done(true);
                 Ok(())
             },
         )?;
@@ -812,6 +811,7 @@ fn upsample_lf(
     let mut new_image = ImageWithRegion::from_region_and_tracker(
         image.channels(),
         new_region,
+        image.ct_done(),
         frame.alloc_tracker(),
     )?;
     for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {

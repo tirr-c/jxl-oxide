@@ -183,13 +183,15 @@ impl Region {
 pub struct ImageWithRegion {
     region: Region,
     buffer: Vec<SimpleGrid<f32>>,
+    ct_done: bool,
     tracker: Option<AllocTracker>,
 }
 
 impl ImageWithRegion {
-    pub fn from_region_and_tracker(
+    pub(crate) fn from_region_and_tracker(
         channels: usize,
         region: Region,
+        ct_done: bool,
         tracker: Option<&AllocTracker>,
     ) -> Result<Self> {
         let width = region.width as usize;
@@ -203,11 +205,17 @@ impl ImageWithRegion {
         Ok(Self {
             region,
             buffer,
+            ct_done,
             tracker,
         })
     }
 
-    pub fn from_buffer(buffer: Vec<SimpleGrid<f32>>, left: i32, top: i32) -> Self {
+    pub(crate) fn from_buffer(
+        buffer: Vec<SimpleGrid<f32>>,
+        left: i32,
+        top: i32,
+        ct_done: bool,
+    ) -> Self {
         let channels = buffer.len();
         if channels == 0 {
             Self {
@@ -218,6 +226,7 @@ impl ImageWithRegion {
                     height: 0,
                 },
                 buffer,
+                ct_done,
                 tracker: None,
             }
         } else {
@@ -238,12 +247,13 @@ impl ImageWithRegion {
                     height: height as u32,
                 },
                 buffer,
+                ct_done,
                 tracker,
             }
         }
     }
 
-    pub fn try_clone(&self) -> Result<Self> {
+    pub(crate) fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             region: self.region,
             buffer: self
@@ -251,12 +261,13 @@ impl ImageWithRegion {
                 .iter()
                 .map(|x| x.try_clone())
                 .collect::<std::result::Result<_, _>>()?,
+            ct_done: self.ct_done,
             tracker: self.tracker.clone(),
         })
     }
 
     #[inline]
-    pub fn alloc_tracker(&self) -> Option<&AllocTracker> {
+    pub(crate) fn alloc_tracker(&self) -> Option<&AllocTracker> {
         self.tracker.as_ref()
     }
 
@@ -286,7 +297,17 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub fn add_channel(&mut self) -> Result<&mut SimpleGrid<f32>> {
+    pub(crate) fn ct_done(&self) -> bool {
+        self.ct_done
+    }
+
+    #[inline]
+    pub(crate) fn set_ct_done(&mut self, ct_done: bool) {
+        self.ct_done = ct_done;
+    }
+
+    #[inline]
+    pub(crate) fn add_channel(&mut self) -> Result<&mut SimpleGrid<f32>> {
         self.buffer.push(SimpleGrid::with_alloc_tracker(
             self.region.width as usize,
             self.region.height as usize,
@@ -296,16 +317,20 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub fn remove_channels(&mut self, range: impl std::ops::RangeBounds<usize>) {
+    pub(crate) fn remove_channels(&mut self, range: impl std::ops::RangeBounds<usize>) {
         self.buffer.drain(range);
     }
 
-    pub fn clone_intersection(&self, new_region: Region) -> Result<Self> {
+    pub(crate) fn clone_intersection(&self, new_region: Region) -> Result<Self> {
         let intersection = self.region.intersection(new_region);
         let begin_x = intersection.left.abs_diff(self.region.left) as usize;
         let begin_y = intersection.top.abs_diff(self.region.top) as usize;
-        let mut out =
-            Self::from_region_and_tracker(self.channels(), intersection, self.tracker.as_ref())?;
+        let mut out = Self::from_region_and_tracker(
+            self.channels(),
+            intersection,
+            self.ct_done,
+            self.tracker.as_ref(),
+        )?;
 
         for (input, output) in self.buffer.iter().zip(out.buffer.iter_mut()) {
             let input_stride = input.width();
