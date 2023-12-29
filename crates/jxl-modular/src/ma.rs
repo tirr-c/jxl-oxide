@@ -278,7 +278,7 @@ impl FlatMaTree {
 
     #[inline]
     pub(crate) fn single_node(&self) -> Option<&MaTreeLeafClustered> {
-        match self.nodes.get(0) {
+        match self.nodes.first() {
             Some(FlatMaTreeNode::Leaf(node)) => Some(node),
             _ => None,
         }
