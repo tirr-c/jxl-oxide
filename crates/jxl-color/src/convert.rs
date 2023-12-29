@@ -417,8 +417,11 @@ impl ColorTransform {
         channels: &mut [&mut [f32]],
         cms: &Cms,
     ) -> Result<usize> {
+        let _gurad = tracing::trace_span!("Run color transform ops").entered();
+
         let mut num_channels = self.begin_channels;
         for op in &self.ops {
+            tracing::trace!(?op);
             num_channels = op.run(channels, num_channels, cms)?;
         }
         Ok(num_channels)
