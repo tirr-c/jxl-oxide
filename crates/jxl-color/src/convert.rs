@@ -394,10 +394,12 @@ impl ColorTransform {
             });
         }
 
-        Ok(Self {
+        let mut ret = Self {
             begin_channels,
             ops,
-        })
+        };
+        ret.optimize();
+        Ok(ret)
     }
 
     pub fn xyb_to_enum(
@@ -435,6 +437,7 @@ impl ColorTransform {
         pool: &jxl_threadpool::JxlThreadPool,
     ) -> Result<usize> {
         let _gurad = tracing::trace_span!("Run color transform ops").entered();
+        tracing::trace!(ops = ?self.ops);
 
         let mut chunks = Vec::new();
         let mut it = channels
@@ -469,6 +472,37 @@ impl ColorTransform {
             *ret.lock().unwrap() = Ok(num_channels);
         });
         ret.into_inner().unwrap()
+    }
+
+    fn optimize(&mut self) {
+        let mut matrix_op_from = None;
+        let mut matrix = [0f32; 9];
+        let mut idx = 0usize;
+        let mut len = self.ops.len();
+        while idx < len {
+            let op = &self.ops[idx];
+            if let ColorTransformOp::Matrix(mat) = op {
+                if matrix_op_from.is_none() {
+                    matrix_op_from = Some(idx);
+                    matrix = *mat;
+                } else {
+                    matrix = matmul3(mat, &matrix);
+                }
+            } else if let Some(from) = matrix_op_from {
+                self.ops[from] = ColorTransformOp::Matrix(matrix);
+                self.ops.drain((from + 1)..idx);
+                matrix_op_from = None;
+                idx = from + 1;
+                len = self.ops.len();
+                continue;
+            }
+            idx += 1;
+        }
+
+        if let Some(from) = matrix_op_from {
+            self.ops[from] = ColorTransformOp::Matrix(matrix);
+            self.ops.drain((from + 1)..len);
+        }
     }
 }
 
