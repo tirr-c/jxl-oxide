@@ -424,7 +424,6 @@ impl ColorTransform {
 
         let mut num_channels = self.begin_channels;
         for op in &self.ops {
-            tracing::trace!(?op);
             num_channels = op.run(channels, num_channels, cms)?;
         }
         Ok(num_channels)
@@ -437,7 +436,6 @@ impl ColorTransform {
         pool: &jxl_threadpool::JxlThreadPool,
     ) -> Result<usize> {
         let _gurad = tracing::trace_span!("Run color transform ops").entered();
-        tracing::trace!(ops = ?self.ops);
 
         let mut chunks = Vec::new();
         let mut it = channels
