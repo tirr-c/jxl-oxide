@@ -38,34 +38,63 @@ const INV_EOTF_Q_SMALL: [f32; 5] = [3.371868e1, 1.477719e3, 1.608477e4, -4.38988
 #[allow(unused_mut)]
 pub fn linear_to_pq(mut samples: &mut [f32], intensity_target: f32) {
     #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    #[target_feature(enable = "fma")]
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn run_avx2(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(8);
+        for s in &mut it {
+            let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
+            std::arch::x86_64::_mm256_storeu_ps(
+                s.as_mut_ptr(),
+                linear_to_pq_x86_64_avx2(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "fma")]
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn run_fma(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(4);
+        for s in &mut it {
+            let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
+            std::arch::x86_64::_mm_storeu_ps(
+                s.as_mut_ptr(),
+                linear_to_pq_x86_64_fma(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    unsafe fn run_neon(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(4);
+        for s in &mut it {
+            let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
+            std::arch::aarch64::vst1q_f32(
+                s.as_mut_ptr(),
+                linear_to_pq_aarch64_neon(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
         if is_x86_feature_detected!("avx2") {
-            let mut it = samples.chunks_exact_mut(8);
             // SAFETY: feature is checked above.
             unsafe {
-                for s in &mut it {
-                    let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
-                    std::arch::x86_64::_mm256_storeu_ps(
-                        s.as_mut_ptr(),
-                        linear_to_pq_x86_64_avx2(v, intensity_target),
-                    );
-                }
+                samples = run_avx2(samples, intensity_target);
             }
-            samples = it.into_remainder();
         }
 
-        let mut it = samples.chunks_exact_mut(4);
         // SAFETY: feature is checked above.
         unsafe {
-            for s in &mut it {
-                let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
-                std::arch::x86_64::_mm_storeu_ps(
-                    s.as_mut_ptr(),
-                    linear_to_pq_x86_64_fma(v, intensity_target),
-                );
-            }
+            samples = run_fma(samples, intensity_target);
         }
-        samples = it.into_remainder();
     } else {
         let mut it = samples.chunks_exact_mut(4);
         // SAFETY: x86_64 implies SSE2.
@@ -83,18 +112,10 @@ pub fn linear_to_pq(mut samples: &mut [f32], intensity_target: f32) {
 
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
-        let mut it = samples.chunks_exact_mut(4);
         // SAFETY: feature is checked above.
         unsafe {
-            for s in &mut it {
-                let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
-                std::arch::aarch64::vst1q_f32(
-                    s.as_mut_ptr(),
-                    linear_to_pq_aarch64_neon(v, intensity_target),
-                );
-            }
+            samples = run_neon(samples, intensity_target);
         }
-        samples = it.into_remainder();
     }
 
     for s in samples {
@@ -227,34 +248,63 @@ pub(crate) unsafe fn linear_to_pq_aarch64_neon(
 #[allow(unused_mut)]
 pub fn pq_to_linear(mut samples: &mut [f32], intensity_target: f32) {
     #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    #[target_feature(enable = "fma")]
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn run_avx2(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(8);
+        for s in &mut it {
+            let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
+            std::arch::x86_64::_mm256_storeu_ps(
+                s.as_mut_ptr(),
+                pq_to_linear_x86_64_avx2(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "fma")]
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn run_fma(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(4);
+        for s in &mut it {
+            let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
+            std::arch::x86_64::_mm_storeu_ps(
+                s.as_mut_ptr(),
+                pq_to_linear_x86_64_fma(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    unsafe fn run_neon(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
+        let mut it = samples.chunks_exact_mut(4);
+        for s in &mut it {
+            let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
+            std::arch::aarch64::vst1q_f32(
+                s.as_mut_ptr(),
+                pq_to_linear_aarch64_neon(v, intensity_target),
+            );
+        }
+        it.into_remainder()
+    }
+
+    #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
         if is_x86_feature_detected!("avx2") {
-            let mut it = samples.chunks_exact_mut(8);
             // SAFETY: feature is checked above.
             unsafe {
-                for s in &mut it {
-                    let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
-                    std::arch::x86_64::_mm256_storeu_ps(
-                        s.as_mut_ptr(),
-                        pq_to_linear_x86_64_avx2(v, intensity_target),
-                    );
-                }
+                samples = run_avx2(samples, intensity_target);
             }
-            samples = it.into_remainder();
         }
 
-        let mut it = samples.chunks_exact_mut(4);
         // SAFETY: feature is checked above.
         unsafe {
-            for s in &mut it {
-                let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
-                std::arch::x86_64::_mm_storeu_ps(
-                    s.as_mut_ptr(),
-                    pq_to_linear_x86_64_fma(v, intensity_target),
-                );
-            }
+            samples = run_fma(samples, intensity_target);
         }
-        samples = it.into_remainder();
     } else {
         let mut it = samples.chunks_exact_mut(4);
         // SAFETY: x86_64 implies SSE2.
@@ -272,18 +322,10 @@ pub fn pq_to_linear(mut samples: &mut [f32], intensity_target: f32) {
 
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
-        let mut it = samples.chunks_exact_mut(4);
         // SAFETY: feature is checked above.
         unsafe {
-            for s in &mut it {
-                let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
-                std::arch::aarch64::vst1q_f32(
-                    s.as_mut_ptr(),
-                    pq_to_linear_aarch64_neon(v, intensity_target),
-                );
-            }
+            samples = run_neon(samples, intensity_target);
         }
-        samples = it.into_remainder();
     }
 
     for s in samples {

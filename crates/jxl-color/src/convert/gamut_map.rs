@@ -59,26 +59,7 @@ pub(super) fn gamut_map(
         // NEON
         // SAFETY: features are checked above.
         unsafe {
-            let mut r_it = r.chunks_exact_mut(4);
-            let mut g_it = g.chunks_exact_mut(4);
-            let mut b_it = b.chunks_exact_mut(4);
-
-            for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
-                let rgb = [
-                    std::arch::aarch64::vld1q_f32(r.as_ptr()),
-                    std::arch::aarch64::vld1q_f32(g.as_ptr()),
-                    std::arch::aarch64::vld1q_f32(b.as_ptr()),
-                ];
-                let [vr, vg, vb] =
-                    crate::gamut::map_gamut_aarch64_neon(rgb, luminances, saturation_factor);
-                std::arch::aarch64::vst1q_f32(r.as_mut_ptr(), vr);
-                std::arch::aarch64::vst1q_f32(g.as_mut_ptr(), vg);
-                std::arch::aarch64::vst1q_f32(b.as_mut_ptr(), vb);
-            }
-
-            r = r_it.into_remainder();
-            g = g_it.into_remainder();
-            b = b_it.into_remainder();
+            (r, g, b) = gamut_map_aarch64_neon(r, g, b, luminances, saturation_factor);
         }
     }
 
@@ -149,6 +130,38 @@ pub(super) unsafe fn gamut_map_x86_64_fma<'r, 'g, 'b>(
         std::arch::x86_64::_mm_storeu_ps(r.as_mut_ptr(), vr);
         std::arch::x86_64::_mm_storeu_ps(g.as_mut_ptr(), vg);
         std::arch::x86_64::_mm_storeu_ps(b.as_mut_ptr(), vb);
+    }
+
+    (
+        r_it.into_remainder(),
+        g_it.into_remainder(),
+        b_it.into_remainder(),
+    )
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub(super) unsafe fn gamut_map_aarch64_neon<'r, 'g, 'b>(
+    r: &'r mut [f32],
+    g: &'g mut [f32],
+    b: &'b mut [f32],
+    luminances: [f32; 3],
+    saturation_factor: f32,
+) -> (&'r mut [f32], &'g mut [f32], &'b mut [f32]) {
+    let mut r_it = r.chunks_exact_mut(4);
+    let mut g_it = g.chunks_exact_mut(4);
+    let mut b_it = b.chunks_exact_mut(4);
+
+    for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
+        let rgb = [
+            std::arch::aarch64::vld1q_f32(r.as_ptr()),
+            std::arch::aarch64::vld1q_f32(g.as_ptr()),
+            std::arch::aarch64::vld1q_f32(b.as_ptr()),
+        ];
+        let [vr, vg, vb] = crate::gamut::map_gamut_aarch64_neon(rgb, luminances, saturation_factor);
+        std::arch::aarch64::vst1q_f32(r.as_mut_ptr(), vr);
+        std::arch::aarch64::vst1q_f32(g.as_mut_ptr(), vg);
+        std::arch::aarch64::vst1q_f32(b.as_mut_ptr(), vb);
     }
 
     (
