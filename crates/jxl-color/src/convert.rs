@@ -4,6 +4,7 @@ use crate::{
     ToneMapping, TransferFunction,
 };
 
+mod gamut_map;
 mod tone_map;
 
 #[derive(Clone)]
@@ -676,16 +677,7 @@ impl ColorTransformOp {
                 let [r, g, b, ..] = channels else {
                     unreachable!()
                 };
-                for ((r, g), b) in r.iter_mut().zip(&mut **g).zip(&mut **b) {
-                    let mapped = crate::gamut::map_gamut_generic(
-                        [*r, *g, *b],
-                        *luminances,
-                        *saturation_factor,
-                    );
-                    *r = mapped[0];
-                    *g = mapped[1];
-                    *b = mapped[2];
-                }
+                gamut_map::gamut_map(r, g, b, *luminances, *saturation_factor);
                 3
             }
             Self::IccToIcc { from, to, .. } => {
