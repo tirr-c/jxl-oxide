@@ -454,24 +454,18 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
     })
 }
 
-pub fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
+pub(crate) fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
     let info = detect_profile_info(profile)?;
     let rendering_intent = info.rendering_intent();
 
-    Ok(if info.is_cmyk() {
-        ColorEncodingWithProfile::with_icc(
-            crate::ColourEncoding::IccProfile(crate::ColourSpace::Rgb),
-            profile.to_vec(),
-        )
+    if info.is_cmyk() {
+        ColorEncodingWithProfile::with_icc(profile)
     } else if info.is_grayscale() {
         let Some(tf) = info.trc_gray() else {
-            return Ok(ColorEncodingWithProfile::with_icc(
-                crate::ColourEncoding::IccProfile(crate::ColourSpace::Grey),
-                profile.to_vec(),
-            ));
+            return ColorEncodingWithProfile::with_icc(profile);
         };
         let wp = info.white_point();
-        ColorEncodingWithProfile::new(crate::ColourEncoding::Enum(EnumColourEncoding {
+        Ok(ColorEncodingWithProfile::new(EnumColourEncoding {
             colour_space: crate::ColourSpace::Grey,
             white_point: wp,
             primaries: Primaries::Srgb,
@@ -480,13 +474,10 @@ pub fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
         }))
     } else if info.is_rgb() {
         let (Some(tf), Some(primaries)) = (info.trc_color(), info.primaries()) else {
-            return Ok(ColorEncodingWithProfile::with_icc(
-                crate::ColourEncoding::IccProfile(crate::ColourSpace::Rgb),
-                profile.to_vec(),
-            ));
+            return ColorEncodingWithProfile::with_icc(profile);
         };
         let wp = info.white_point();
-        ColorEncodingWithProfile::new(crate::ColourEncoding::Enum(EnumColourEncoding {
+        Ok(ColorEncodingWithProfile::new(EnumColourEncoding {
             colour_space: crate::ColourSpace::Rgb,
             white_point: wp,
             primaries,
@@ -494,11 +485,8 @@ pub fn parse_icc(profile: &[u8]) -> Result<ColorEncodingWithProfile> {
             rendering_intent,
         }))
     } else {
-        ColorEncodingWithProfile::with_icc(
-            crate::ColourEncoding::IccProfile(crate::ColourSpace::Unknown),
-            profile.to_vec(),
-        )
-    })
+        ColorEncodingWithProfile::with_icc(profile)
+    }
 }
 
 #[cfg(test)]

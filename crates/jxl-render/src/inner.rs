@@ -333,11 +333,11 @@ fn convert_color_for_record(
     } else if metadata.xyb_encoded {
         // want_icc = false || is_last = true
         // in any case, blending does not occur when want_icc = true
-        if metadata.colour_encoding.want_icc() {
+        let ColourEncoding::Enum(encoding) = &metadata.colour_encoding else {
             return false;
-        }
+        };
 
-        match metadata.colour_encoding.colour_space() {
+        match encoding.colour_space {
             jxl_color::ColourSpace::Xyb => return false,
             jxl_color::ColourSpace::Unknown => {
                 tracing::warn!(
@@ -351,12 +351,12 @@ fn convert_color_for_record(
 
         let [x, y, b, ..] = grid else { panic!() };
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
-            tracing::trace!(colour_encoding = ?metadata.colour_encoding);
+            tracing::trace!(colour_encoding = ?encoding);
             let transform = jxl_color::ColorTransform::new(
-                &jxl_color::ColorEncodingWithProfile::new(ColourEncoding::Enum(
-                    EnumColourEncoding::xyb(),
+                &jxl_color::ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
+                    jxl_color::RenderingIntent::Perceptual,
                 )),
-                &jxl_color::ColorEncodingWithProfile::new(metadata.colour_encoding.clone()),
+                &jxl_color::ColorEncodingWithProfile::new(encoding.clone()),
                 &metadata.opsin_inverse_matrix,
                 &metadata.tone_mapping,
             )

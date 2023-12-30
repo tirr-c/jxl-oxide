@@ -94,7 +94,7 @@ mod fb;
 
 use jxl_bitstream::ContainerDetectingReader;
 pub use jxl_color::header as color;
-pub use jxl_color::{icc::parse_icc, ColorEncodingWithProfile, ColorManagementSystem};
+pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
 pub use jxl_frame::header as frame;
 use jxl_frame::FrameContext;
 pub use jxl_image as image;
@@ -481,7 +481,8 @@ impl JxlImage {
     /// Returns the ICC profile that describes rendered images.
     ///
     /// The returned profile will change if different color encoding is specified using
-    /// [`request_icc`] or [`request_color_encoding`].
+    /// [`request_icc`][Self::request_icc] or
+    /// [`request_color_encoding`][Self::request_color_encoding].
     pub fn rendered_icc(&self) -> Vec<u8> {
         let encoding = self.ctx.requested_color_encoding();
         match encoding.encoding() {
@@ -541,21 +542,20 @@ impl JxlImage {
     }
 
     /// Requests the decoder to render in specific color encoding, described by an ICC profile.
-    pub fn request_icc(&mut self, icc_profile: Vec<u8>) {
+    ///
+    /// # Errors
+    /// This function will return an error if it cannot parse the ICC profile.
+    pub fn request_icc(&mut self, icc_profile: &[u8]) -> Result<()> {
         self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::with_icc(
-                jxl_color::ColourEncoding::IccProfile(jxl_color::ColourSpace::Unknown),
-                icc_profile,
-            ))
+            .request_color_encoding(ColorEncodingWithProfile::with_icc(icc_profile)?);
+        Ok(())
     }
 
     /// Requests the decoder to render in specific color encoding, described by
     /// `EnumColourEncoding`.
     pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
         self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::new(
-                jxl_color::ColourEncoding::Enum(color_encoding),
-            ))
+            .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
     }
 
     /// Returns whether the spot color channels will be rendered.

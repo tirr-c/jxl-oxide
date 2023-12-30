@@ -88,19 +88,23 @@ impl RenderContextBuilder {
     }
 
     pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
-        let requested_color_encoding = if image_header.metadata.colour_encoding.want_icc() {
-            if image_header.metadata.xyb_encoded {
-                ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::srgb(
-                    jxl_color::RenderingIntent::Relative,
-                )))
-            } else {
-                ColorEncodingWithProfile::with_icc(
-                    image_header.metadata.colour_encoding.clone(),
-                    self.embedded_icc.clone(),
-                )
-            }
+        let color_encoding = &image_header.metadata.colour_encoding;
+        let requested_color_encoding = if let ColourEncoding::Enum(encoding) = color_encoding {
+            ColorEncodingWithProfile::new(encoding.clone())
+        } else if image_header.metadata.xyb_encoded {
+            ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
+                jxl_color::RenderingIntent::Relative,
+            ))
         } else {
-            ColorEncodingWithProfile::new(image_header.metadata.colour_encoding.clone())
+            match ColorEncodingWithProfile::with_icc(&self.embedded_icc) {
+                Ok(x) => x,
+                Err(e) => {
+                    tracing::warn!(%e, "Malformed embedded ICC profile");
+                    ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
+                        jxl_color::RenderingIntent::Relative,
+                    ))
+                }
+            }
         };
 
         RenderContext {
@@ -651,16 +655,14 @@ impl RenderContext {
         tracing::trace_span!("Transform to requested color encoding").in_scope(
             || -> Result<()> {
                 let header_color_encoding = &metadata.colour_encoding;
-                let want_icc = header_color_encoding.want_icc();
                 let frame_color_encoding = if !grid.ct_done() && metadata.xyb_encoded {
-                    ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb()))
-                } else if want_icc {
-                    ColorEncodingWithProfile::with_icc(
-                        header_color_encoding.clone(),
-                        self.embedded_icc.clone(),
-                    )
+                    ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
+                        jxl_color::RenderingIntent::Perceptual,
+                    ))
+                } else if let ColourEncoding::Enum(encoding) = header_color_encoding {
+                    ColorEncodingWithProfile::new(encoding.clone())
                 } else {
-                    ColorEncodingWithProfile::new(header_color_encoding.clone())
+                    ColorEncodingWithProfile::with_icc(&self.embedded_icc)?
                 };
                 tracing::trace!(?frame_color_encoding);
                 tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);

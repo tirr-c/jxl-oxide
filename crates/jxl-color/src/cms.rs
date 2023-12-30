@@ -1,6 +1,8 @@
 use crate::RenderingIntent;
 
 /// Color management system that handles ICCv4 profiles.
+///
+/// Implementors can implement `transform_impl` to integrate into external color management system.
 pub trait ColorManagementSystem {
     fn transform_impl(
         &self,
@@ -10,6 +12,10 @@ pub trait ColorManagementSystem {
         channels: &mut [&mut [f32]],
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
+    /// Performs color transformation between two ICC profiles.
+    ///
+    /// # Errors
+    /// This function will return an error if the internal CMS implementation returned an error.
     fn transform(
         &self,
         from: &[u8],
