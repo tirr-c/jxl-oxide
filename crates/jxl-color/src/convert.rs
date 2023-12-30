@@ -4,6 +4,7 @@ use crate::{
     ToneMapping, TransferFunction,
 };
 
+mod gamut_map;
 mod tone_map;
 
 #[derive(Clone)]
@@ -393,10 +394,12 @@ impl ColorTransform {
             });
         }
 
-        Ok(Self {
+        let mut ret = Self {
             begin_channels,
             ops,
-        })
+        };
+        ret.optimize();
+        Ok(ret)
     }
 
     pub fn xyb_to_enum(
@@ -421,10 +424,83 @@ impl ColorTransform {
 
         let mut num_channels = self.begin_channels;
         for op in &self.ops {
-            tracing::trace!(?op);
             num_channels = op.run(channels, num_channels, cms)?;
         }
         Ok(num_channels)
+    }
+
+    pub fn run_with_threads<Cms: ColorManagementSystem + Sync + ?Sized>(
+        &self,
+        channels: &mut [&mut [f32]],
+        cms: &Cms,
+        pool: &jxl_threadpool::JxlThreadPool,
+    ) -> Result<usize> {
+        let _gurad = tracing::trace_span!("Run color transform ops").entered();
+
+        let mut chunks = Vec::new();
+        let mut it = channels
+            .iter_mut()
+            .map(|ch| ch.chunks_mut(65536))
+            .collect::<Vec<_>>();
+        loop {
+            let Some(chunk) = it
+                .iter_mut()
+                .map(|it| it.next())
+                .collect::<Option<Vec<_>>>()
+            else {
+                break;
+            };
+            chunks.push(chunk);
+        }
+
+        let ret = std::sync::Mutex::new(Ok(self.begin_channels));
+        pool.for_each_vec(chunks, |mut channels| {
+            let mut num_channels = self.begin_channels;
+            for op in &self.ops {
+                match op.run(&mut channels, num_channels, cms) {
+                    Ok(x) => {
+                        num_channels = x;
+                    }
+                    err => {
+                        *ret.lock().unwrap() = err;
+                        return;
+                    }
+                }
+            }
+            *ret.lock().unwrap() = Ok(num_channels);
+        });
+        ret.into_inner().unwrap()
+    }
+
+    fn optimize(&mut self) {
+        let mut matrix_op_from = None;
+        let mut matrix = [0f32; 9];
+        let mut idx = 0usize;
+        let mut len = self.ops.len();
+        while idx < len {
+            let op = &self.ops[idx];
+            if let ColorTransformOp::Matrix(mat) = op {
+                if matrix_op_from.is_none() {
+                    matrix_op_from = Some(idx);
+                    matrix = *mat;
+                } else {
+                    matrix = matmul3(mat, &matrix);
+                }
+            } else if let Some(from) = matrix_op_from {
+                self.ops[from] = ColorTransformOp::Matrix(matrix);
+                self.ops.drain((from + 1)..idx);
+                matrix_op_from = None;
+                idx = from + 1;
+                len = self.ops.len();
+                continue;
+            }
+            idx += 1;
+        }
+
+        if let Some(from) = matrix_op_from {
+            self.ops[from] = ColorTransformOp::Matrix(matrix);
+            self.ops.drain((from + 1)..len);
+        }
     }
 }
 
@@ -676,16 +752,7 @@ impl ColorTransformOp {
                 let [r, g, b, ..] = channels else {
                     unreachable!()
                 };
-                for ((r, g), b) in r.iter_mut().zip(&mut **g).zip(&mut **b) {
-                    let mapped = crate::gamut::map_gamut_generic(
-                        [*r, *g, *b],
-                        *luminances,
-                        *saturation_factor,
-                    );
-                    *r = mapped[0];
-                    *g = mapped[1];
-                    *b = mapped[2];
-                }
+                gamut_map::gamut_map(r, g, b, *luminances, *saturation_factor);
                 3
             }
             Self::IccToIcc { from, to, .. } => {

@@ -596,6 +596,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
+ "jxl-threadpool",
  "tracing",
 ]
 
