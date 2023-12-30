@@ -427,6 +427,49 @@ impl ColorTransform {
         }
         Ok(num_channels)
     }
+
+    pub fn run_with_threads<Cms: ColorManagementSystem + Sync + ?Sized>(
+        &self,
+        channels: &mut [&mut [f32]],
+        cms: &Cms,
+        pool: &jxl_threadpool::JxlThreadPool,
+    ) -> Result<usize> {
+        let _gurad = tracing::trace_span!("Run color transform ops").entered();
+
+        let mut chunks = Vec::new();
+        let mut it = channels
+            .iter_mut()
+            .map(|ch| ch.chunks_mut(65536))
+            .collect::<Vec<_>>();
+        loop {
+            let Some(chunk) = it
+                .iter_mut()
+                .map(|it| it.next())
+                .collect::<Option<Vec<_>>>()
+            else {
+                break;
+            };
+            chunks.push(chunk);
+        }
+
+        let ret = std::sync::Mutex::new(Ok(self.begin_channels));
+        pool.for_each_vec(chunks, |mut channels| {
+            let mut num_channels = self.begin_channels;
+            for op in &self.ops {
+                match op.run(&mut channels, num_channels, cms) {
+                    Ok(x) => {
+                        num_channels = x;
+                    }
+                    err => {
+                        *ret.lock().unwrap() = err;
+                        return;
+                    }
+                }
+            }
+            *ret.lock().unwrap() = Ok(num_channels);
+        });
+        ret.into_inner().unwrap()
+    }
 }
 
 #[derive(Clone)]

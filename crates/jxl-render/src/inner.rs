@@ -140,7 +140,7 @@ pub(crate) fn render_frame(
 
     if !frame_header.save_before_ct && !frame_header.is_last {
         let ct_done =
-            convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
+            convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut(), &pool);
         fb.set_ct_done(ct_done);
     }
 
@@ -149,8 +149,12 @@ pub(crate) fn render_frame(
             fb
         } else {
             if !frame_header.save_before_ct && !fb.ct_done() {
-                let ct_done =
-                    convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut());
+                let ct_done = convert_color_for_record(
+                    image_header,
+                    frame_header.do_ycbcr,
+                    fb.buffer_mut(),
+                    &pool,
+                );
                 fb.set_ct_done(ct_done);
             }
 
@@ -317,6 +321,7 @@ fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
     grid: &mut [SimpleGrid<f32>],
+    pool: &JxlThreadPool,
 ) -> bool {
     // save_before_ct = false
 
@@ -357,9 +362,10 @@ fn convert_color_for_record(
             )
             .unwrap();
             transform
-                .run(
+                .run_with_threads(
                     &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
                     &jxl_color::NullCms,
+                    pool,
                 )
                 .unwrap();
         });
