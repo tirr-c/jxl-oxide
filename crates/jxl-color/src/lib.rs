@@ -1,6 +1,10 @@
 //! This crate provides a set of functions related to color encodings defined by the JPEG XL
-//! specification. Especially, these functions can perform conversion from the XYB colorspace to
-//! all of the "enum colorspaces" which can be signalled in the JPEG XL image header.
+//! specification.
+//!
+//! # Color transformation
+//! jxl-color can handle the transformation between "well-known" color encodings without any
+//! external color management system, since it is required by the specification. Such
+//! transformations can be done by creating a [`ColorTransform`].
 //!
 //! # Modules
 //! - [`consts`] defines constants used by the various colorspaces.

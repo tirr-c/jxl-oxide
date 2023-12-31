@@ -509,7 +509,12 @@ fn main() {
     if let Some(icc_path) = &args.target_icc {
         tracing::debug!("Setting target ICC profile");
         let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
-        image.request_icc(icc_profile);
+        match image.request_icc(&icc_profile) {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!(%e, "Target ICC profile is malformed");
+            }
+        }
     } else if let Some(encoding) = &args.target_colorspace {
         tracing::debug!(?encoding, "Setting target color space");
         image.request_color_encoding(encoding.clone());

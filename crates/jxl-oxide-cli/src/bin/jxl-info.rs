@@ -89,7 +89,7 @@ fn main() {
                 println!("Embedded ICC profile ({} bytes)", icc.len());
             }
 
-            if let Ok(encoding) = jxl_oxide::parse_icc(icc) {
+            if let Ok(encoding) = jxl_oxide::ColorEncodingWithProfile::with_icc(icc) {
                 if let jxl_oxide::color::ColourEncoding::Enum(encoding) = encoding.encoding() {
                     print_colour_encoding(encoding, "      ");
                 }

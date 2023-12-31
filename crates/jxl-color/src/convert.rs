@@ -7,6 +7,7 @@ use crate::{
 mod gamut_map;
 mod tone_map;
 
+/// Color encoding represented by either enum values or an ICC profile.
 #[derive(Clone)]
 pub struct ColorEncodingWithProfile {
     encoding: ColourEncoding,
@@ -26,39 +27,50 @@ impl std::fmt::Debug for ColorEncodingWithProfile {
 }
 
 impl ColorEncodingWithProfile {
-    pub fn new(encoding: ColourEncoding) -> Self {
-        assert!(!matches!(encoding, ColourEncoding::IccProfile(_)));
+    /// Creates a color encoding from enum values.
+    pub fn new(encoding: EnumColourEncoding) -> Self {
         Self {
-            encoding,
+            encoding: ColourEncoding::Enum(encoding),
             icc_profile: Vec::new(),
         }
     }
 
-    pub fn with_icc(encoding: ColourEncoding, icc_profile: Vec<u8>) -> Self {
-        assert!(matches!(encoding, ColourEncoding::IccProfile(_)));
-        Self {
-            encoding,
-            icc_profile,
+    /// Creates a color encoding from ICC profile.
+    ///
+    /// # Errors
+    /// This function will return an error if it cannot parse the ICC profile.
+    pub fn with_icc(icc_profile: &[u8]) -> Result<Self> {
+        match crate::icc::parse_icc(icc_profile) {
+            Ok(encoding) => Ok(Self::new(encoding)),
+            Err(Error::UnsupportedIccProfile) => {
+                let raw = crate::icc::parse_icc_raw(icc_profile)?;
+                Ok(Self {
+                    encoding: ColourEncoding::IccProfile(raw.color_space()),
+                    icc_profile: icc_profile.to_vec(),
+                })
+            }
+            Err(e) => Err(e),
         }
     }
 
+    /// Returns the color encoding representation.
     #[inline]
     pub fn encoding(&self) -> &ColourEncoding {
         &self.encoding
     }
 
+    /// Returns the associated ICC profile.
     #[inline]
     pub fn icc_profile(&self) -> &[u8] {
         &self.icc_profile
     }
 
+    /// Returns whether the color encoding describes a grayscale color space.
     #[inline]
     pub fn is_grayscale(&self) -> bool {
         match &self.encoding {
             ColourEncoding::Enum(encoding) => encoding.colour_space == ColourSpace::Grey,
-            ColourEncoding::IccProfile(_) => {
-                self.icc_profile.len() > 0x14 && self.icc_profile[0x10..0x14] == *b"GRAY"
-            }
+            ColourEncoding::IccProfile(color_space) => *color_space == ColourSpace::Grey,
         }
     }
 }
@@ -97,6 +109,7 @@ impl ColorEncodingWithProfile {
     }
 }
 
+/// Color transformation from a color encoding to another.
 #[derive(Debug, Clone)]
 pub struct ColorTransform {
     begin_channels: usize,
@@ -104,6 +117,10 @@ pub struct ColorTransform {
 }
 
 impl ColorTransform {
+    /// Prepares a color transformation.
+    ///
+    /// # Errors
+    /// This function will return an error if it cannot prepare such color transformation.
     pub fn new(
         from: &ColorEncodingWithProfile,
         to: &ColorEncodingWithProfile,
@@ -112,32 +129,6 @@ impl ColorTransform {
     ) -> Result<Self> {
         let intensity_target = tone_mapping.intensity_target;
         let min_nits = tone_mapping.min_nits;
-
-        let from_parsed;
-        let from = match &from.encoding {
-            ColourEncoding::IccProfile(_) => {
-                if let Ok(encoding) = crate::icc::parse_icc(&from.icc_profile) {
-                    from_parsed = encoding;
-                    &from_parsed
-                } else {
-                    from
-                }
-            }
-            _ => from,
-        };
-
-        let to_parsed;
-        let to = match &to.encoding {
-            ColourEncoding::IccProfile(_) => {
-                if let Ok(encoding) = crate::icc::parse_icc(&to.icc_profile) {
-                    to_parsed = encoding;
-                    &to_parsed
-                } else {
-                    to
-                }
-            }
-            _ => to,
-        };
 
         let begin_channels = match &from.encoding {
             ColourEncoding::Enum(EnumColourEncoding {
@@ -402,19 +393,33 @@ impl ColorTransform {
         Ok(ret)
     }
 
+    /// Prepares a color transformation from XYB color encoding.
+    ///
+    /// # Errors
+    /// This function will return an error if it cannot prepare such color transformation.
     pub fn xyb_to_enum(
+        xyb_rendering_intent: RenderingIntent,
         encoding: &EnumColourEncoding,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
     ) -> Result<Self> {
         Self::new(
-            &ColorEncodingWithProfile::new(ColourEncoding::Enum(EnumColourEncoding::xyb())),
-            &ColorEncodingWithProfile::new(ColourEncoding::Enum(encoding.clone())),
+            &ColorEncodingWithProfile::new(EnumColourEncoding::xyb(xyb_rendering_intent)),
+            &ColorEncodingWithProfile::new(encoding.clone()),
             oim,
             tone_mapping,
         )
     }
 
+    /// Performs the prepared color transformation on the samples.
+    ///
+    /// Returns the number of final channels after transformation.
+    ///
+    /// `channels` are planar sample data, all having the same length.
+    ///
+    /// # Errors
+    /// This function will return an error if it encountered ICC to ICC operation and the provided
+    /// CMS cannot handle it.
     pub fn run<Cms: ColorManagementSystem + ?Sized>(
         &self,
         channels: &mut [&mut [f32]],
@@ -429,6 +434,15 @@ impl ColorTransform {
         Ok(num_channels)
     }
 
+    /// Performs the prepared color transformation on the samples with the thread pool.
+    ///
+    /// Returns the number of final channels after transformation.
+    ///
+    /// `channels` are planar sample data, all having the same length.
+    ///
+    /// # Errors
+    /// This function will return an error if it encountered ICC to ICC operation and the provided
+    /// CMS cannot handle it.
     pub fn run_with_threads<Cms: ColorManagementSystem + Sync + ?Sized>(
         &self,
         channels: &mut [&mut [f32]],

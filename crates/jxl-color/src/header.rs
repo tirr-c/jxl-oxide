@@ -1,11 +1,16 @@
+//! Types related to color encoding.
+
 #![allow(clippy::excessive_precision)]
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Error, Result};
 
 use crate::consts::*;
 
+/// Color encoding, either represented by enum values, or a signal of existence of ICC profile.
 #[derive(Debug, Clone)]
 pub enum ColourEncoding {
+    /// Color encoding is represented by enum values.
     Enum(EnumColourEncoding),
+    /// Color encoding is described by embedded (external) ICC profile.
     IccProfile(ColourSpace),
 }
 
@@ -104,6 +109,7 @@ impl ColourEncoding {
     }
 }
 
+/// "Enum color encoding" represented by JPEG XL enum values.
 #[derive(Debug, Clone, Default)]
 pub struct EnumColourEncoding {
     pub colour_space: ColourSpace,
@@ -114,17 +120,19 @@ pub struct EnumColourEncoding {
 }
 
 impl EnumColourEncoding {
-    pub fn xyb() -> Self {
+    /// Creates an XYB color encoding.
+    pub fn xyb(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Xyb,
+            rendering_intent,
             // Below are ignored for XYB color encoding
             white_point: WhitePoint::D65,
             primaries: Primaries::Srgb,
             tf: TransferFunction::Linear,
-            rendering_intent: RenderingIntent::Perceptual,
         }
     }
 
+    /// Creates an sRGB color encoding.
     pub fn srgb(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -135,6 +143,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates an sRGB color encoding with gamma of 2.2 (instead of sRGB transfer curve).
     pub fn srgb_gamma22(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -158,17 +167,19 @@ impl EnumColourEncoding {
         }
     }
 
-    pub fn gray_srgb() -> Self {
+    /// Creates a grayscale color encoding with white point of D65 and sRGB transfer curve.
+    pub fn gray_srgb(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Grey,
             white_point: WhitePoint::D65,
             primaries: Primaries::Srgb,
             tf: TransferFunction::Srgb,
-            rendering_intent: RenderingIntent::Relative,
+            rendering_intent,
         }
     }
 
-    pub fn gray_gamma22() -> Self {
+    /// Creates a grayscale color encoding with white point of D65 and gamma of 2.2.
+    pub fn gray_gamma22(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Grey,
             white_point: WhitePoint::D65,
@@ -177,10 +188,11 @@ impl EnumColourEncoding {
                 g: 22000000,
                 inverted: false,
             },
-            rendering_intent: RenderingIntent::Relative,
+            rendering_intent,
         }
     }
 
+    /// Creates a BT.709 color encoding.
     pub fn bt709(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -191,6 +203,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates a DCI-P3 color encoding.
     pub fn dci_p3(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -201,6 +214,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates a Display P3 color encoding.
     pub fn display_p3(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -211,6 +225,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates a Display P3 color encoding with PQ transfer function.
     pub fn display_p3_pq(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -221,6 +236,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates a BT.2100 color encoding with PQ transfer function.
     pub fn bt2100_pq(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -231,6 +247,7 @@ impl EnumColourEncoding {
         }
     }
 
+    /// Creates a BT.2100 color encoding with hybrid log-gamma transfer function.
     pub fn bt2100_hlg(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
@@ -243,7 +260,7 @@ impl EnumColourEncoding {
 }
 
 impl EnumColourEncoding {
-    /// Returns whether this `ColourEncoding` represents the sRGB colorspace.
+    /// Returns whether the color encoding represents the sRGB colorspace.
     #[inline]
     pub fn is_srgb(&self) -> bool {
         matches!(
@@ -258,6 +275,8 @@ impl EnumColourEncoding {
         )
     }
 
+    /// Returns whether color gamut of the color encoding equals to sRGB (BT.709), and white point
+    /// equals to D65.
     #[inline]
     pub fn is_srgb_gamut(&self) -> bool {
         matches!(
@@ -271,12 +290,13 @@ impl EnumColourEncoding {
         )
     }
 
+    /// Returns whether transfer function of the color encoding is capable of encoding HDR signals.
     #[inline]
     pub fn is_hdr(&self) -> bool {
         matches!(self.tf, TransferFunction::Pq | TransferFunction::Hlg)
     }
 
-    /// Returns the CICP tag which represents this `ColourEncoding`.
+    /// Returns the CICP tag which represents this color encoding.
     pub fn cicp(&self) -> Option<[u8; 4]> {
         let primaries_cicp = self.primaries.cicp();
         let tf_cicp = self.tf.cicp();
@@ -289,12 +309,16 @@ impl EnumColourEncoding {
 }
 
 define_bundle! {
+    /// Custom xy-chromaticity coordinate.
+    ///
+    /// Coordinate values are scaled by `1e6` (`1_000_000`).
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Customxy {
         pub x: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
         pub y: ty(U32(u(19), 524288 + u(19), 1048576 + u(20), 2097152 + u(21)); UnpackSigned),
     }
 
+    /// HDR tone mapping metadata.
     #[derive(Debug)]
     pub struct ToneMapping {
         all_default: ty(Bool) default(true),
@@ -306,19 +330,28 @@ define_bundle! {
 }
 
 impl Customxy {
+    /// Returns the xy-chromaticity coordinate as floating point values.
     #[inline]
     pub fn as_float(self) -> [f32; 2] {
         [self.x as f32 / 1e6, self.y as f32 / 1e6]
     }
 }
 
+/// Color space type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum ColourSpace {
+    /// Tristimulus RGB.
+    ///
+    /// This includes CMYK; in that case, there is an extra channel of type `Black`, ICC profile is
+    /// embedded in the image, and the profile describes an CMYK color space.
     #[default]
     Rgb = 0,
+    /// Grayscale; luminance only.
     Grey = 1,
+    /// XYB, an absolute color space.
     Xyb = 2,
+    /// Unknown color space.
     Unknown = 3,
 }
 
@@ -359,13 +392,18 @@ impl TryFrom<u32> for WhitePointDiscriminator {
     }
 }
 
+/// White point.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum WhitePoint {
+    /// CIE Standard Illuminant D65.
     #[default]
     D65 = 1,
+    /// Custom white point.
     Custom(Customxy) = 2,
+    /// CIE Standard Illuminant E.
     E = 10,
+    /// DCI-P3 white point (SMPTE ST 428-1).
     Dci = 11,
 }
 
@@ -387,6 +425,7 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
 }
 
 impl WhitePoint {
+    /// Returns the xy-chromaticity coordinate of the white point as floating point values.
     #[inline]
     pub fn as_chromaticity(self) -> [f32; 2] {
         match self {
@@ -422,17 +461,22 @@ impl TryFrom<u32> for PrimariesDiscriminator {
     }
 }
 
+/// RGB primaries.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum Primaries {
+    /// sRGB primaries (same as BT.709).
     #[default]
     Srgb = 1,
+    /// Custom RGB primaries.
     Custom {
         red: Customxy,
         green: Customxy,
         blue: Customxy,
     } = 2,
+    /// BT.2100 primaries (same as BT.2020).
     Bt2100 = 9,
+    /// DCI-P3 primaries.
     P3 = 11,
 }
 
@@ -456,6 +500,7 @@ impl<Ctx> Bundle<Ctx> for Primaries {
 }
 
 impl Primaries {
+    /// Returns the xy-chromaticity coordinates of the primaries as floating point values.
     #[inline]
     pub fn as_chromaticity(self) -> [[f32; 2]; 3] {
         match self {
@@ -468,6 +513,7 @@ impl Primaries {
         }
     }
 
+    /// Returns the CICP value of the primaries, if there is any.
     pub fn cicp(&self) -> Option<u8> {
         match self {
             Primaries::Srgb => Some(1),
@@ -478,13 +524,18 @@ impl Primaries {
     }
 }
 
+/// Rendering intent, defined by ICC specification.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum RenderingIntent {
+    /// Perceptual; vendor-specific.
     Perceptual = 0,
+    /// Media-relative; colorimetric.
     #[default]
     Relative = 1,
+    /// Saturation; vendor-specific.
     Saturation = 2,
+    /// ICC-absolute; colorimetric.
     Absolute = 3,
 }
 
@@ -502,20 +553,33 @@ impl TryFrom<u32> for RenderingIntent {
     }
 }
 
+/// Transfer function (tone curve).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum TransferFunction {
+    /// Pure gamma curve.
     Gamma {
+        /// Gamma value, scaled by `1e7` (`10_000_000`).
         g: u32,
+        /// Whether the gamma value is inverted.
+        ///
+        /// If `true`, `g <= 10_000_000`.
         inverted: bool,
     },
+    /// BT.709 transfer function.
     Bt709 = 1,
+    /// Unknown transfer function.
     Unknown = 2,
+    /// Linear (gamma of 1).
     Linear = 8,
+    /// sRGB transfer function.
     #[default]
     Srgb = 13,
+    /// Perceptual quantizer (HDR).
     Pq = 16,
+    /// DCI transfer function (gamma of 2.6).
     Dci = 17,
+    /// Hybrid log-gamma (HDR).
     Hlg = 18,
 }
 
@@ -554,6 +618,7 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
 }
 
 impl TransferFunction {
+    /// Returns the CICP value of transfer function, if there is any.
     pub fn cicp(&self) -> Option<u8> {
         match self {
             TransferFunction::Gamma { .. } => None,
@@ -569,6 +634,7 @@ impl TransferFunction {
 }
 
 define_bundle! {
+    /// Opsin inverse metadata.
     #[derive(Debug)]
     pub struct OpsinInverseMatrix {
         all_default: ty(Bool) default(true),
