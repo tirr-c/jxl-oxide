@@ -40,7 +40,17 @@ impl ColorEncodingWithProfile {
     /// # Errors
     /// This function will return an error if it cannot parse the ICC profile.
     pub fn with_icc(icc_profile: &[u8]) -> Result<Self> {
-        crate::icc::parse_icc(icc_profile)
+        match crate::icc::parse_icc(icc_profile) {
+            Ok(encoding) => Ok(Self::new(encoding)),
+            Err(Error::UnsupportedIccProfile) => {
+                let raw = crate::icc::parse_icc_raw(icc_profile)?;
+                Ok(Self {
+                    encoding: ColourEncoding::IccProfile(raw.color_space()),
+                    icc_profile: icc_profile.to_vec(),
+                })
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Returns the color encoding representation.
@@ -119,32 +129,6 @@ impl ColorTransform {
     ) -> Result<Self> {
         let intensity_target = tone_mapping.intensity_target;
         let min_nits = tone_mapping.min_nits;
-
-        let from_parsed;
-        let from = match &from.encoding {
-            ColourEncoding::IccProfile(_) => {
-                if let Ok(encoding) = crate::icc::parse_icc(&from.icc_profile) {
-                    from_parsed = encoding;
-                    &from_parsed
-                } else {
-                    from
-                }
-            }
-            _ => from,
-        };
-
-        let to_parsed;
-        let to = match &to.encoding {
-            ColourEncoding::IccProfile(_) => {
-                if let Ok(encoding) = crate::icc::parse_icc(&to.icc_profile) {
-                    to_parsed = encoding;
-                    &to_parsed
-                } else {
-                    to
-                }
-            }
-            _ => to,
-        };
 
         let begin_channels = match &from.encoding {
             ColourEncoding::Enum(EnumColourEncoding {
