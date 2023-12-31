@@ -51,10 +51,14 @@ features = ["std"]
 [features]
 default = ["rayon"]
 rayon = ["jxl-threadpool/rayon"]
+lcms2 = ["jxl-color/lcms2"]
 
 [dev-dependencies]
-lcms2 = "6.0.0"
 zstd = "0.13.0"
+
+[dev-dependencies.jxl-color]
+path = "../jxl-color"
+features = ["lcms2"]
 
 [dev-dependencies.rand]
 version = "0.8.5"

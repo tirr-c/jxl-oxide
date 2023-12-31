@@ -597,6 +597,7 @@ dependencies = [
  "jxl-coding",
  "jxl-grid",
  "jxl-threadpool",
+ "lcms2",
  "tracing",
 ]
 
@@ -653,7 +654,6 @@ dependencies = [
  "jxl-image",
  "jxl-render",
  "jxl-threadpool",
- "lcms2",
  "rand",
  "reqwest",
  "tracing",

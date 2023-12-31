@@ -87,27 +87,58 @@
 //! # }
 //! ```
 //!
-//! You might need to use [`JxlImage::rendered_icc`] to do color management correctly.
+//! # Color management
+//! jxl-oxide has basic color management support, which enables color transformation between
+//! well-known color encodings and parsing simple, matrix-based ICC profiles. However, jxl-oxide
+//! alone does not support conversion to and from arbitrary ICC profiles, notably CMYK profiles.
+//! In that case, external CMS need to be set using [`JxlImage::set_cms`]. jxl-oxide provides
+//! Little CMS 2 integration if `lcms2` feature is enabled.
+//!
+//! ```no_run
+//! # #[cfg(feature = "lcms2")]
+//! # use jxl_oxide::Lcms2;
+//! # #[cfg(not(feature = "lcms2"))]
+//! # type Lcms2 = jxl_oxide::NullCms;
+//! # use jxl_oxide::JxlImage;
+//! # let reader = std::io::empty();
+//! let mut image = JxlImage::builder().read(reader).expect("Failed to read image header");
+//! image.set_cms(Lcms2);
+//! ```
+//!
+//! Use [`JxlImage::request_color_encoding`] or [`JxlImage::request_icc`] to set color encoding of
+//! rendered images.
+//!
+//! ```no_run
+//! # use jxl_oxide::{EnumColourEncoding, JxlImage, RenderingIntent};
+//! # let reader = std::io::empty();
+//! let mut image = JxlImage::builder().read(reader).expect("Failed to read image header");
+//! let color_encoding = EnumColourEncoding::display_p3(RenderingIntent::Perceptual);
+//! image.request_color_encoding(color_encoding);
+//! ```
 use std::sync::Arc;
+
+use jxl_bitstream::ContainerDetectingReader;
+use jxl_bitstream::Name;
+use jxl_bitstream::{Bitstream, Bundle};
+use jxl_frame::FrameContext;
+use jxl_render::{IndexedFrame, RenderContext};
+
+pub use jxl_color::header as color;
+#[cfg(feature = "lcms2")]
+pub use jxl_color::Lcms2;
+pub use jxl_color::{
+    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms, RenderingIntent,
+};
+pub use jxl_frame::header as frame;
+pub use jxl_frame::{Frame, FrameHeader};
+pub use jxl_grid::{AllocTracker, SimpleGrid};
+pub use jxl_image as image;
+pub use jxl_image::{ExtraChannelType, ImageHeader};
+pub use jxl_threadpool::JxlThreadPool;
 
 mod fb;
 
-use jxl_bitstream::ContainerDetectingReader;
-pub use jxl_color::header as color;
-pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
-pub use jxl_frame::header as frame;
-use jxl_frame::FrameContext;
-pub use jxl_image as image;
-
-use jxl_bitstream::Name;
-use jxl_bitstream::{Bitstream, Bundle};
-pub use jxl_frame::{Frame, FrameHeader};
-pub use jxl_grid::{AllocTracker, SimpleGrid};
-pub use jxl_image::{ExtraChannelType, ImageHeader};
-use jxl_render::{IndexedFrame, RenderContext};
-
 pub use fb::FrameBuffer;
-pub use jxl_threadpool::JxlThreadPool;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -502,7 +533,7 @@ impl JxlImage {
 
     /// Returns the pixel format of the rendered image.
     pub fn pixel_format(&self) -> PixelFormat {
-        use jxl_color::{ColourEncoding, ColourSpace, EnumColourEncoding};
+        use jxl_color::{ColourEncoding, ColourSpace};
 
         let encoding = self.ctx.requested_color_encoding();
         let (is_grayscale, has_black) = match encoding.encoding() {
@@ -553,7 +584,7 @@ impl JxlImage {
 
     /// Requests the decoder to render in specific color encoding, described by
     /// `EnumColourEncoding`.
-    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
+    pub fn request_color_encoding(&mut self, color_encoding: EnumColourEncoding) {
         self.ctx
             .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
     }

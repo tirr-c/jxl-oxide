@@ -14,7 +14,7 @@ fn run_test(buf: &[u8], name: &str) {
     let mut image = JxlImage::builder()
         .read(Cursor::new(buf))
         .expect("Failed to open file");
-    image.set_cms(util::Lcms2);
+    image.set_cms(jxl_oxide::Lcms2);
 
     let width = image.width();
     let height = image.height();
@@ -24,7 +24,7 @@ fn run_test(buf: &[u8], name: &str) {
     let mut tester_image = JxlImage::builder()
         .read(Cursor::new(buf))
         .expect("Failed to open file");
-    tester_image.set_cms(util::Lcms2);
+    tester_image.set_cms(jxl_oxide::Lcms2);
 
     for _ in 0..4 {
         let crop_width = width_dist.sample(&mut rng);
