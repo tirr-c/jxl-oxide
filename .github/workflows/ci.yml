@@ -42,7 +42,7 @@ jobs:
       - name: Install cross
         run: cargo install cross --version 0.2.5
       - name: Run tests
-        run: cross test --release --target ${{ matrix.target }}
+        run: cross test --release --all-features --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v3
         if: failure()
         with:
@@ -90,7 +90,7 @@ jobs:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
       - name: Run tests
-        run: cross test --no-fail-fast --target ${{ matrix.target }}
+        run: cross test --no-fail-fast --all-features --target ${{ matrix.target }}
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
@@ -132,4 +132,4 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - run: cargo fmt --all --check
-      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --all --all-features -- -D warnings

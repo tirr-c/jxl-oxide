@@ -29,15 +29,7 @@ path = "../jxl-grid"
 version = "0.1.0"
 path = "../jxl-threadpool"
 
-[dependencies.lcms2]
-version = "6.0.0"
-optional = true
-
 [dependencies.tracing]
 version = "0.1.37"
 default_features = false
 features = ["std"]
-
-[features]
-default = []
-lcms2 = ["dep:lcms2"]

@@ -6,7 +6,7 @@ use jxl_oxide::{
         ColourSpace, Customxy, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction,
         WhitePoint,
     },
-    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, Lcms2, PixelFormat, Render,
+    AllocTracker, CropInfo, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat, Render,
 };
 
 /// Decodes JPEG XL image.
@@ -500,8 +500,6 @@ fn main() {
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
-
-    image.set_cms(Lcms2);
 
     #[allow(unused_mut)]
     let mut rendered = false;

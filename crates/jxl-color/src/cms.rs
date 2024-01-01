@@ -1,11 +1,5 @@
 use crate::RenderingIntent;
 
-#[cfg(feature = "lcms2")]
-mod lcms2;
-
-#[cfg(feature = "lcms2")]
-pub use self::lcms2::Lcms2;
-
 /// Color management system that handles ICCv4 profiles.
 ///
 /// Implementors can implement `transform_impl` to integrate into external color management system.

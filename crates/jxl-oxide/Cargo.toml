@@ -43,6 +43,10 @@ path = "../jxl-render"
 version = "0.1.0"
 path = "../jxl-threadpool"
 
+[dependencies.lcms2]
+version = "6.0.0"
+optional = true
+
 [dependencies.tracing]
 version = "0.1.37"
 default_features = false
@@ -51,14 +55,10 @@ features = ["std"]
 [features]
 default = ["rayon"]
 rayon = ["jxl-threadpool/rayon"]
-lcms2 = ["jxl-color/lcms2"]
+lcms2 = ["dep:lcms2"]
 
 [dev-dependencies]
 zstd = "0.13.0"
-
-[dev-dependencies.jxl-color]
-path = "../jxl-color"
-features = ["lcms2"]
 
 [dev-dependencies.rand]
 version = "0.8.5"
@@ -69,3 +69,7 @@ features = ["getrandom", "small_rng"]
 version = "0.11.20"
 default_features = false
 features = ["blocking", "rustls-tls"]
+
+[[test]]
+name = "conformance"
+required-features = ["lcms2"]
