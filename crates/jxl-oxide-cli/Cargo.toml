@@ -24,6 +24,7 @@ features = ["derive"]
 version = "0.5.1"
 path = "../jxl-oxide"
 default_features = false
+features = ["lcms2"]
 
 [dependencies.rayon]
 version = "1.8.0"

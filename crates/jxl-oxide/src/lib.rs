@@ -87,27 +87,83 @@
 //! # }
 //! ```
 //!
-//! You might need to use [`JxlImage::rendered_icc`] to do color management correctly.
+//! # Color management
+//! jxl-oxide has basic color management support, which enables color transformation between
+//! well-known color encodings and parsing simple, matrix-based ICC profiles. However, jxl-oxide
+//! alone does not support conversion to and from arbitrary ICC profiles, notably CMYK profiles.
+//! This includes converting from embedded ICC profiles.
+//!
+//! Use [`JxlImage::request_color_encoding`] or [`JxlImage::request_icc`] to set color encoding of
+//! rendered images. Conversion to and/or from ICC profiles may occur if you do this; in that case,
+//! external CMS need to be set using [`JxlImage::set_cms`].
+//!
+//! ```no_run
+//! # use jxl_oxide::{EnumColourEncoding, JxlImage, RenderingIntent};
+//! # use jxl_oxide::NullCms as MyCustomCms;
+//! # let reader = std::io::empty();
+//! let mut image = JxlImage::builder().read(reader).expect("Failed to read image header");
+//! image.set_cms(MyCustomCms);
+//!
+//! let color_encoding = EnumColourEncoding::display_p3(RenderingIntent::Perceptual);
+//! image.request_color_encoding(color_encoding);
+//! ```
+//!
+//! External CMS is set to Little CMS 2 by default if `lcms2` feature is enabled. You can
+//! explicitly disable this by setting CMS to [`NullCms`].
+//!
+//! ```no_run
+//! # use jxl_oxide::{JxlImage, NullCms};
+//! # let reader = std::io::empty();
+//! let mut image = JxlImage::builder().read(reader).expect("Failed to read image header");
+//! image.set_cms(NullCms);
+//! ```
+//!
+//! ## Not using `set_cms` for color management
+//! If implementing `ColorManagementSystem` is difficult for your use case, color management can be
+//! done separately using ICC profile of rendered images. [`JxlImage::rendered_icc`] returns ICC
+//! profile for further processing.
+//!
+//! ```no_run
+//! # use jxl_oxide::Render;
+//! use jxl_oxide::{JxlImage, RenderResult};
+//!
+//! # fn present_image_with_cms(_: Render, _: &[u8]) {}
+//! # fn main() -> jxl_oxide::Result<()> {
+//! # let image = JxlImage::builder().open("input.jxl").unwrap();
+//! let icc_profile = image.rendered_icc();
+//! for keyframe_idx in 0..image.num_loaded_keyframes() {
+//!     let render = image.render_frame(keyframe_idx)?;
+//!     present_image_with_cms(render, &icc_profile);
+//! }
+//! # Ok(())
+//! # }
+//! ```
 use std::sync::Arc;
 
-mod fb;
-
 use jxl_bitstream::ContainerDetectingReader;
-pub use jxl_color::header as color;
-pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem};
-pub use jxl_frame::header as frame;
-use jxl_frame::FrameContext;
-pub use jxl_image as image;
-
 use jxl_bitstream::Name;
 use jxl_bitstream::{Bitstream, Bundle};
-pub use jxl_frame::{Frame, FrameHeader};
-pub use jxl_grid::{AllocTracker, SimpleGrid};
-pub use jxl_image::{ExtraChannelType, ImageHeader};
+use jxl_frame::FrameContext;
 use jxl_render::{IndexedFrame, RenderContext};
 
-pub use fb::FrameBuffer;
+pub use jxl_color::header as color;
+pub use jxl_color::{
+    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms, RenderingIntent,
+};
+pub use jxl_frame::header as frame;
+pub use jxl_frame::{Frame, FrameHeader};
+pub use jxl_grid::{AllocTracker, SimpleGrid};
+pub use jxl_image as image;
+pub use jxl_image::{ExtraChannelType, ImageHeader};
 pub use jxl_threadpool::JxlThreadPool;
+
+mod fb;
+#[cfg(feature = "lcms2")]
+mod lcms2;
+
+#[cfg(feature = "lcms2")]
+pub use self::lcms2::Lcms2;
+pub use fb::FrameBuffer;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -320,7 +376,9 @@ impl UninitializedJxlImage {
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
-        let ctx = builder.build(image_header.clone());
+        let mut ctx = builder.build(image_header.clone());
+        #[cfg(feature = "lcms2")]
+        ctx.set_cms(Lcms2);
 
         let mut image = JxlImage {
             pool: self.pool.clone(),
@@ -502,7 +560,7 @@ impl JxlImage {
 
     /// Returns the pixel format of the rendered image.
     pub fn pixel_format(&self) -> PixelFormat {
-        use jxl_color::{ColourEncoding, ColourSpace, EnumColourEncoding};
+        use jxl_color::{ColourEncoding, ColourSpace};
 
         let encoding = self.ctx.requested_color_encoding();
         let (is_grayscale, has_black) = match encoding.encoding() {
@@ -553,7 +611,7 @@ impl JxlImage {
 
     /// Requests the decoder to render in specific color encoding, described by
     /// `EnumColourEncoding`.
-    pub fn request_color_encoding(&mut self, color_encoding: color::EnumColourEncoding) {
+    pub fn request_color_encoding(&mut self, color_encoding: EnumColourEncoding) {
         self.ctx
             .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
     }

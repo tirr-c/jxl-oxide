@@ -11,20 +11,18 @@ fn run_test(buf: &[u8], name: &str) {
         .unwrap_or(false);
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
-    let mut image = JxlImage::builder()
+    let image = JxlImage::builder()
         .read(Cursor::new(buf))
         .expect("Failed to open file");
-    image.set_cms(util::Lcms2);
 
     let width = image.width();
     let height = image.height();
     let width_dist = rand::distributions::Uniform::new_inclusive(128, (width / 2).max(128));
     let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
 
-    let mut tester_image = JxlImage::builder()
+    let tester_image = JxlImage::builder()
         .read(Cursor::new(buf))
         .expect("Failed to open file");
-    tester_image.set_cms(util::Lcms2);
 
     for _ in 0..4 {
         let crop_width = width_dist.sample(&mut rng);

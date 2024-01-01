@@ -63,7 +63,6 @@ fn run_test(
 
     image.set_render_spot_colour(false);
 
-    image.set_cms(util::Lcms2);
     if let Some(target_icc) = target_icc {
         image.request_icc(&target_icc).unwrap();
     }
