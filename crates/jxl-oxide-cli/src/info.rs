@@ -1,43 +1,9 @@
-use std::path::PathBuf;
+use jxl_oxide::{color::*, frame::*, ColorEncodingWithProfile, JxlImage};
 
-use clap::Parser;
-use jxl_oxide::{color::ColourSpace, JxlImage};
+use crate::commands::info::*;
 
-/// Prints information about JPEG XL image.
-#[derive(Debug, Parser)]
-#[command(version)]
-struct Args {
-    /// Input file
-    input: PathBuf,
-    /// Output information of all frames in addition to keyframes
-    #[arg(long)]
-    all_frames: bool,
-    /// Output group sizes and offsets
-    #[arg(long)]
-    with_offset: bool,
-    /// Print debug information
-    #[arg(short, long)]
-    verbose: bool,
-}
-
-fn main() {
-    let args = Args::parse();
-
-    let filter = if args.verbose {
-        tracing::level_filters::LevelFilter::DEBUG
-    } else {
-        tracing::level_filters::LevelFilter::INFO
-    };
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(filter.into())
-        .from_env_lossy();
-    tracing_subscriber::fmt()
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
-        .with_env_filter(env_filter)
-        .init();
-
-    let span = tracing::span!(tracing::Level::TRACE, "jxl-info");
-    let _guard = span.enter();
+pub fn handle_info(args: InfoArgs) {
+    let _guard = tracing::trace_span!("Handle info subcommand").entered();
 
     let image = JxlImage::builder()
         .open(&args.input)
@@ -77,10 +43,10 @@ fn main() {
         println!("  Color encoding:");
     }
     match &image_meta.colour_encoding {
-        jxl_oxide::color::ColourEncoding::Enum(colour_encoding) => {
+        ColourEncoding::Enum(colour_encoding) => {
             print_colour_encoding(colour_encoding, "    ");
         }
-        jxl_oxide::color::ColourEncoding::IccProfile(colour_space) => {
+        ColourEncoding::IccProfile(colour_space) => {
             let icc = image.original_icc().unwrap();
             print!("    ");
             if *colour_space == ColourSpace::Grey {
@@ -89,8 +55,8 @@ fn main() {
                 println!("Embedded ICC profile ({} bytes)", icc.len());
             }
 
-            if let Ok(encoding) = jxl_oxide::ColorEncodingWithProfile::with_icc(icc) {
-                if let jxl_oxide::color::ColourEncoding::Enum(encoding) = encoding.encoding() {
+            if let Ok(encoding) = ColorEncodingWithProfile::with_icc(icc) {
+                if let ColourEncoding::Enum(encoding) = encoding.encoding() {
                     print_colour_encoding(encoding, "      ");
                 }
             }
@@ -128,21 +94,21 @@ fn main() {
             println!("  Name: {}", &*frame_header.name);
         }
         match frame_header.encoding {
-            jxl_oxide::frame::Encoding::VarDct => println!("  VarDCT (lossy)"),
-            jxl_oxide::frame::Encoding::Modular => println!("  Modular (maybe lossless)"),
+            Encoding::VarDct => println!("  VarDCT (lossy)"),
+            Encoding::Modular => println!("  Modular (maybe lossless)"),
         }
         print!("  Frame type: ");
         match frame_header.frame_type {
-            jxl_oxide::frame::FrameType::RegularFrame => print!("Regular"),
-            jxl_oxide::frame::FrameType::LfFrame => print!(
+            FrameType::RegularFrame => print!("Regular"),
+            FrameType::LfFrame => print!(
                 "LF, level {} ({}x downsampled)",
                 frame_header.lf_level,
                 1 << (frame_header.lf_level * 3)
             ),
-            jxl_oxide::frame::FrameType::ReferenceOnly => {
+            FrameType::ReferenceOnly => {
                 print!("Reference only, slot {}", frame_header.save_as_reference)
             }
-            jxl_oxide::frame::FrameType::SkipProgressive => {
+            FrameType::SkipProgressive => {
                 print!("Regular (skip progressive rendering)")
             }
         }
@@ -206,29 +172,29 @@ fn main() {
     }
 }
 
-fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent: &str) {
+fn print_colour_encoding(encoding: &EnumColourEncoding, indent: &str) {
     print!("{indent}Colorspace: ");
     match encoding.colour_space {
-        jxl_oxide::color::ColourSpace::Rgb => println!("RGB"),
-        jxl_oxide::color::ColourSpace::Grey => println!("Grayscale"),
-        jxl_oxide::color::ColourSpace::Xyb => println!("XYB"),
-        jxl_oxide::color::ColourSpace::Unknown => println!("Unknown"),
+        ColourSpace::Rgb => println!("RGB"),
+        ColourSpace::Grey => println!("Grayscale"),
+        ColourSpace::Xyb => println!("XYB"),
+        ColourSpace::Unknown => println!("Unknown"),
     }
 
     print!("{indent}White point: ");
     match encoding.white_point {
-        jxl_oxide::color::WhitePoint::D65 => println!("D65"),
-        jxl_oxide::color::WhitePoint::Custom(xy) => {
+        WhitePoint::D65 => println!("D65"),
+        WhitePoint::Custom(xy) => {
             println!("{}, {}", xy.x as f64 / 1e6, xy.y as f64 / 1e6)
         }
-        jxl_oxide::color::WhitePoint::E => println!("E"),
-        jxl_oxide::color::WhitePoint::Dci => println!("DCI"),
+        WhitePoint::E => println!("E"),
+        WhitePoint::Dci => println!("DCI"),
     }
 
     print!("{indent}Primaries: ");
     match encoding.primaries {
-        jxl_oxide::color::Primaries::Srgb => println!("sRGB"),
-        jxl_oxide::color::Primaries::Custom { red, green, blue } => {
+        Primaries::Srgb => println!("sRGB"),
+        Primaries::Custom { red, green, blue } => {
             println!(
                 "{}, {}; {}, {}; {}, {}",
                 red.x as f64 / 1e6,
@@ -239,24 +205,24 @@ fn print_colour_encoding(encoding: &jxl_oxide::color::EnumColourEncoding, indent
                 blue.y as f64 / 1e6,
             );
         }
-        jxl_oxide::color::Primaries::Bt2100 => println!("BT.2100"),
-        jxl_oxide::color::Primaries::P3 => println!("P3"),
+        Primaries::Bt2100 => println!("BT.2100"),
+        Primaries::P3 => println!("P3"),
     }
 
     print!("{indent}Transfer function: ");
     match encoding.tf {
-        jxl_oxide::color::TransferFunction::Gamma { g, inverted: false } => {
+        TransferFunction::Gamma { g, inverted: false } => {
             println!("Gamma {}", g as f64 / 1e7)
         }
-        jxl_oxide::color::TransferFunction::Gamma { g, inverted: true } => {
+        TransferFunction::Gamma { g, inverted: true } => {
             println!("Gamma {}", 1e7 / g as f64)
         }
-        jxl_oxide::color::TransferFunction::Bt709 => println!("BT.709"),
-        jxl_oxide::color::TransferFunction::Unknown => println!("Unknown"),
-        jxl_oxide::color::TransferFunction::Linear => println!("Linear"),
-        jxl_oxide::color::TransferFunction::Srgb => println!("sRGB"),
-        jxl_oxide::color::TransferFunction::Pq => println!("PQ (HDR)"),
-        jxl_oxide::color::TransferFunction::Dci => println!("DCI"),
-        jxl_oxide::color::TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
+        TransferFunction::Bt709 => println!("BT.709"),
+        TransferFunction::Unknown => println!("Unknown"),
+        TransferFunction::Linear => println!("Linear"),
+        TransferFunction::Srgb => println!("sRGB"),
+        TransferFunction::Pq => println!("PQ (HDR)"),
+        TransferFunction::Dci => println!("DCI"),
+        TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
     }
 }

@@ -11,6 +11,8 @@ license = "MIT OR Apache-2.0"
 version = "0.3.1"
 edition = "2021"
 
+default-run = "jxl-oxide"
+
 [dependencies]
 lcms2 = "6.0.0"
 miniz_oxide = "0.7.1"
@@ -42,3 +44,8 @@ features = ["env-filter"]
 [features]
 default = ["rayon"]
 rayon = ["dep:rayon", "jxl-oxide/rayon"]
+__devtools = []
+
+[[bin]]
+name = "jxl-oxide"
+path = "src/main.rs"
