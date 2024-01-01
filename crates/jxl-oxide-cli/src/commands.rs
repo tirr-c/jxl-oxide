@@ -25,7 +25,7 @@ pub struct Args {
 #[non_exhaustive]
 pub struct GlobalArgs {
     /// Print debug information
-    #[arg(short, long)]
+    #[arg(short, long, global(true))]
     pub verbose: bool,
 }
 
