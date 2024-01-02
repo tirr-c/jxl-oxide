@@ -5,6 +5,7 @@ fn main() {
     let Args {
         subcommand,
         globals,
+        decode,
     } = Args::parse();
 
     let filter = if globals.verbose {
@@ -21,14 +22,17 @@ fn main() {
         .init();
 
     match subcommand {
-        Subcommands::Decode(args) => {
+        Some(Subcommands::Decode(args)) => {
             jxl_oxide_cli::decode::handle_decode(args);
         }
-        Subcommands::Info(args) => {
+        None => {
+            jxl_oxide_cli::decode::handle_decode(decode);
+        }
+        Some(Subcommands::Info(args)) => {
             jxl_oxide_cli::info::handle_info(args);
         }
         #[cfg(feature = "__devtools")]
-        Subcommands::GenerateFixture(args) => {
+        Some(Subcommands::GenerateFixture(args)) => {
             jxl_oxide_cli::generate_fixture::handle_generate_fixture(args);
         }
     }

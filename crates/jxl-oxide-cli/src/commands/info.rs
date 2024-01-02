@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Prints information about JPEG XL image.
+/// Print information about JPEG XL image.
 #[derive(Debug, Parser)]
 #[non_exhaustive]
 pub struct InfoArgs {

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use clap::Parser;
 use jxl_oxide::{CropInfo, EnumColourEncoding};
 
-/// Decodes JPEG XL image.
 #[derive(Debug, Parser)]
 #[non_exhaustive]
 pub struct DecodeArgs {

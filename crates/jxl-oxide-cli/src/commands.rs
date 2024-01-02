@@ -1,5 +1,3 @@
-use clap::{Parser, Subcommand};
-
 pub mod color_encoding;
 pub mod decode;
 #[cfg(feature = "__devtools")]
@@ -14,16 +12,19 @@ pub use decode::DecodeArgs;
 pub use generate_fixture::GenerateFixtureArgs;
 pub use info::InfoArgs;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, clap::Parser)]
 #[command(version)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 pub struct Args {
     #[command(subcommand)]
-    pub subcommand: Subcommands,
+    pub subcommand: Option<Subcommands>,
+    #[command(flatten)]
+    pub decode: DecodeArgs,
     #[command(flatten)]
     pub globals: GlobalArgs,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, clap::Args)]
 #[non_exhaustive]
 pub struct GlobalArgs {
     /// Print debug information
@@ -31,11 +32,13 @@ pub struct GlobalArgs {
     pub verbose: bool,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Subcommands {
-    /// Decodes JPEG XL image.
+    /// Decode JPEG XL image (assumed if no subcommand is specified).
+    #[command(short_flag = 'd')]
     Decode(DecodeArgs),
-    /// Prints information about JPEG XL image.
+    /// Print information about JPEG XL image.
+    #[command(short_flag = 'I')]
     Info(InfoArgs),
     /// (devtools) Generate fixture to use for testing.
     #[cfg(feature = "__devtools")]
