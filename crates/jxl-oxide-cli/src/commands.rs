@@ -5,6 +5,8 @@ pub mod decode;
 #[cfg(feature = "__devtools")]
 pub mod generate_fixture;
 pub mod info;
+#[cfg(test)]
+pub mod tests;
 
 pub use color_encoding::parse_color_encoding;
 pub use decode::DecodeArgs;
