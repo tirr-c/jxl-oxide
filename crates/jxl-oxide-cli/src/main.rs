@@ -26,7 +26,7 @@ fn main() {
             jxl_oxide_cli::decode::handle_decode(args);
         }
         None => {
-            jxl_oxide_cli::decode::handle_decode(decode);
+            jxl_oxide_cli::decode::handle_decode(decode.unwrap());
         }
         Some(Subcommands::Info(args)) => {
             jxl_oxide_cli::info::handle_info(args);

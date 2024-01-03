@@ -14,12 +14,12 @@ pub use info::InfoArgs;
 
 #[derive(Debug, clap::Parser)]
 #[command(version)]
-#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
     #[command(subcommand)]
     pub subcommand: Option<Subcommands>,
     #[command(flatten)]
-    pub decode: DecodeArgs,
+    pub decode: Option<DecodeArgs>,
     #[command(flatten)]
     pub globals: GlobalArgs,
 }
