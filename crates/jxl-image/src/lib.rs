@@ -201,34 +201,29 @@ define_bundle! {
 #[derive(Debug, Default)]
 #[allow(unused)]
 pub struct Extensions {
-    extensions: u64,
-    extension_bits: Vec<u64>,
+    extension_bits: u64,
 }
 
 impl<Ctx> Bundle<Ctx> for Extensions {
     type Error = jxl_bitstream::Error;
 
     fn parse(bitstream: &mut Bitstream, _: Ctx) -> jxl_bitstream::Result<Self> {
-        let extensions = bitstream.read_u64()?;
-        if extensions > 64 {
-            return Err(jxl_bitstream::Error::ValidationFailed(
-                "too many extensions",
-            ));
+        let extension_bits = bitstream.read_u64()?;
+        let mut bits = extension_bits;
+        let mut extension_data_bitlen = Vec::with_capacity(extension_bits.count_ones() as usize);
+        for extension_idx in 0..64 {
+            if bits & 1 != 0 {
+                tracing::warn!(extension_idx, "Unknown extension");
+                extension_data_bitlen.push(bitstream.read_u64()?);
+            }
+            bits >>= 1;
         }
 
-        let extension_bits = if extensions == 0 {
-            Vec::new()
-        } else {
-            let num_items = (extensions + 7) / 8;
-            std::iter::repeat_with(|| bitstream.read_u64())
-                .take(num_items as usize)
-                .collect::<jxl_bitstream::Result<Vec<_>>>()?
-        };
+        for len in extension_data_bitlen {
+            bitstream.skip_bits(len as usize)?;
+        }
 
-        Ok(Self {
-            extensions,
-            extension_bits,
-        })
+        Ok(Self { extension_bits })
     }
 }
 
