@@ -99,14 +99,20 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 10)?;
         decoder.begin(bitstream)?;
 
-        let num_patches = decoder.read_varint(bitstream, 0)?;
-        let max_num_patches =
-            (1 << 24).min((frame_header.width as u64 * frame_header.height as u64 / 16) as u32);
-        if num_patches > max_num_patches {
-            tracing::error!(num_patches, max_num_patches, "Too many patches");
+        let frame_width = frame_header.width;
+        let frame_height = frame_header.height;
+        let max_num_patch_refs =
+            (1 << 24).min((frame_width as u64 * frame_height as u64 / 16) as u32);
+        let max_num_patches = max_num_patch_refs * 4; // from libjxl limits
+
+        let num_patch_refs = decoder.read_varint(bitstream, 0)?;
+        tracing::trace!(num_patch_refs, "Patch ref");
+        if num_patch_refs > max_num_patch_refs {
+            tracing::error!(num_patch_refs, max_num_patch_refs, "Too many patches");
             return Err(jxl_bitstream::Error::ProfileConformance("too many patches").into());
         }
 
+        let mut total_patches = 0u32;
         let patches = std::iter::repeat_with(|| -> Result<_> {
             let ref_idx = decoder.read_varint(bitstream, 1)?;
             let x0 = decoder.read_varint(bitstream, 3)?;
@@ -114,6 +120,13 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
             let width = decoder.read_varint(bitstream, 2)? + 1;
             let height = decoder.read_varint(bitstream, 2)? + 1;
             let count = decoder.read_varint(bitstream, 7)? + 1;
+            tracing::trace!(ref_idx, x0, y0, width, height, count, "Patch target");
+
+            total_patches += count;
+            if total_patches > max_num_patches {
+                tracing::error!(total_patches, max_num_patches, "Too many patches");
+                return Err(jxl_bitstream::Error::ProfileConformance("too many patches").into());
+            }
 
             let mut prev_xy = None;
             let patch_targets = std::iter::repeat_with(|| -> Result<_> {
@@ -176,7 +189,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                 patch_targets,
             })
         })
-        .take(num_patches as usize)
+        .take(num_patch_refs as usize)
         .collect::<Result<Vec<_>>>()?;
 
         decoder.finalize()?;
