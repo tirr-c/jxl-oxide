@@ -8,6 +8,7 @@ use crate::{Error, Result};
 /// Reads the encoded ICC profile stream from the given bitstream.
 pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
     let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
+    tracing::trace!(enc_size);
 
     if enc_size > (1 << 28) {
         // Avoids allocating too much memory (>256MiB)
@@ -19,11 +20,51 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
 
     let mut decoder = jxl_coding::Decoder::parse(bitstream, 41)?;
 
-    let mut encoded_icc = vec![0u8; enc_size as usize];
+    let max_size_header_len = enc_size.min(18) as usize;
+    let mut encoded_icc = vec![0u8; max_size_header_len];
     let mut b1 = 0u8;
     let mut b2 = 0u8;
     decoder.begin(bitstream)?;
     for (idx, b) in encoded_icc.iter_mut().enumerate() {
+        let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))?;
+        if sym >= 256 {
+            return Err(Error::InvalidIccStream("decoded value out of range"));
+        }
+        *b = sym as u8;
+
+        b2 = b1;
+        b1 = *b;
+    }
+
+    let mut tmp_cursor = Cursor::new(&*encoded_icc);
+    let output_size = varint(&mut tmp_cursor)?;
+    let commands_size = varint(&mut tmp_cursor)?;
+    let stream_offset = tmp_cursor.position();
+    tracing::trace!(
+        enc_size,
+        output_size,
+        commands_size,
+        stream_offset,
+        "Quick ICC validity check",
+    );
+
+    if stream_offset + commands_size > enc_size {
+        return Err(Error::InvalidIccStream("invalid commands_size"));
+    }
+
+    if output_size > (1 << 28) {
+        return Err(jxl_bitstream::Error::ProfileConformance("ICC output_size too large").into());
+    }
+
+    if output_size + 65536 < enc_size {
+        return Err(Error::InvalidIccStream(
+            "reported output_size is far smaller than enc_size",
+        ));
+    }
+
+    // Read remaining data
+    encoded_icc.resize(enc_size as usize, 0);
+    for (idx, b) in encoded_icc.iter_mut().enumerate().skip(max_size_header_len) {
         let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))?;
         if sym >= 256 {
             return Err(Error::InvalidIccStream("decoded value out of range"));
