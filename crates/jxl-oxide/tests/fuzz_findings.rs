@@ -46,4 +46,5 @@ test_by_include!(
     permutation_overflow,
     patch_coord_overflow,
     spline_add_one_overflow,
+    patch_target_limit,
 );
