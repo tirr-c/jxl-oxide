@@ -1,3 +1,72 @@
+mod clap {
+    use std::path::Path;
+
+    use clap::Parser;
+
+    use super::super::{Args, Subcommands};
+
+    #[test]
+    fn basic_decode() {
+        let args =
+            Args::try_parse_from(["jxl-oxide", "decode", "input.jxl", "-o", "output.png"]).unwrap();
+        let Some(Subcommands::Decode(decode_args)) = args.subcommand else {
+            panic!();
+        };
+        assert!(args.decode.is_none());
+        assert!(!args.globals.verbose);
+        assert_eq!(decode_args.input, Path::new("input.jxl"));
+        assert_eq!(decode_args.output.as_deref(), Some(Path::new("output.png")));
+    }
+
+    #[test]
+    fn basic_info() {
+        let args = Args::try_parse_from(["jxl-oxide", "info", "input.jxl"]).unwrap();
+        let Some(Subcommands::Info(info_args)) = args.subcommand else {
+            panic!();
+        };
+        assert!(args.decode.is_none());
+        assert!(!args.globals.verbose);
+        assert_eq!(info_args.input, Path::new("input.jxl"));
+    }
+
+    #[test]
+    fn default_decode() {
+        let args = Args::try_parse_from(["jxl-oxide", "input.jxl", "-o", "output.png"]).unwrap();
+        let Some(decode_args) = args.decode else {
+            panic!();
+        };
+        assert!(args.subcommand.is_none());
+        assert!(!args.globals.verbose);
+        assert_eq!(decode_args.input, Path::new("input.jxl"));
+        assert_eq!(decode_args.output.as_deref(), Some(Path::new("output.png")));
+    }
+
+    #[test]
+    fn flag_style_info() {
+        let args = Args::try_parse_from(["jxl-oxide", "-I", "input.jxl"]).unwrap();
+        let Some(Subcommands::Info(info_args)) = args.subcommand else {
+            panic!();
+        };
+        assert!(args.decode.is_none());
+        assert!(!args.globals.verbose);
+        assert_eq!(info_args.input, Path::new("input.jxl"));
+    }
+
+    #[test]
+    fn verbose() {
+        let args = Args::try_parse_from(["jxl-oxide", "input.jxl", "-v"]).unwrap();
+        assert!(args.globals.verbose);
+
+        let args = Args::try_parse_from(["jxl-oxide", "--verbose", "input.jxl"]).unwrap();
+        assert!(args.globals.verbose);
+
+        assert!(Args::try_parse_from(["jxl-oxide", "-v"]).is_err());
+
+        let args = Args::try_parse_from(["jxl-oxide", "-Iv", "input.jxl"]).unwrap();
+        assert!(args.globals.verbose);
+    }
+}
+
 mod color_encoding {
     use super::super::*;
     use jxl_oxide::{
