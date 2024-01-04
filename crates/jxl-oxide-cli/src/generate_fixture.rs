@@ -1,9 +1,10 @@
 use std::io::prelude::*;
 
-fn main() {
-    let stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout().lock();
-    let image = jxl_oxide::JxlImage::builder().read(stdin).unwrap();
+use crate::commands::generate_fixture::*;
+
+pub fn handle_generate_fixture(args: GenerateFixtureArgs) {
+    let image = jxl_oxide::JxlImage::builder().open(args.input).unwrap();
+    let mut output = std::fs::File::create(args.output).unwrap();
 
     let mut header = [0u8; 12];
     let image_header = image.image_header();
@@ -16,11 +17,11 @@ fn main() {
     };
     let channels = color_channels + image_header.metadata.ec_info.len() as u32;
     header[8..12].copy_from_slice(&channels.to_le_bytes());
-    stdout.write_all(&header).unwrap();
+    output.write_all(&header).unwrap();
 
     for idx in 0..image.num_loaded_keyframes() {
         let frame = image.render_frame(idx).unwrap();
-        stdout.write_all(&[0]).unwrap();
+        output.write_all(&[0]).unwrap();
 
         let color_channels = frame.color_channels();
         let extra_channels = frame.extra_channels();
@@ -34,8 +35,8 @@ fn main() {
                 let sample = (sample_float * 65535.0 + 0.5) as u16;
                 output.copy_from_slice(&sample.to_le_bytes());
             }
-            stdout.write_all(&output_buf).unwrap();
+            output.write_all(&output_buf).unwrap();
         }
     }
-    stdout.write_all(&[0xff]).unwrap();
+    output.write_all(&[0xff]).unwrap();
 }
