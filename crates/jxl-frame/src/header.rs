@@ -50,13 +50,14 @@ define_bundle! {
             ctx((
                 !headers.metadata.ec_info.is_empty(),
                 None,
-                Self::resets_canvas(
-                    None,
+                CanvasSizeParams {
                     have_crop,
-                    x0, y0,
-                    width, height,
-                    &headers.size,
-                ),
+                    x0,
+                    y0,
+                    width,
+                    height,
+                    size: &headers.size,
+                },
             ))
             cond(!all_default && frame_type.is_normal_frame()),
         pub ec_blending_info:
@@ -64,13 +65,14 @@ define_bundle! {
             ctx((
                 !headers.metadata.ec_info.is_empty(),
                 Some(blending_info.mode),
-                Self::resets_canvas(
-                    Some(blending_info.mode),
+                CanvasSizeParams {
                     have_crop,
-                    x0, y0,
-                    width, height,
-                    &headers.size,
-                ),
+                    x0,
+                    y0,
+                    width,
+                    height,
+                    size: &headers.size,
+                },
             ))
             cond(!all_default && frame_type.is_normal_frame()),
         pub duration:
@@ -93,11 +95,15 @@ define_bundle! {
             ty(Bool)
             cond(false)
             default(Self::resets_canvas(
-                Some(blending_info.mode),
-                have_crop,
-                x0, y0,
-                width, height,
-                &headers.size,
+                blending_info.mode,
+                CanvasSizeParams {
+                    have_crop,
+                    x0,
+                    y0,
+                    width,
+                    height,
+                    size: &headers.size,
+                },
             )),
         pub save_before_ct:
             ty(Bool)
@@ -126,7 +132,7 @@ define_bundle! {
     }
 
     #[derive(Debug)]
-    pub struct BlendingInfo ctx(context: (bool, Option<BlendMode>, bool)) error(crate::Error) {
+    pub struct BlendingInfo ctx(context: (bool, Option<BlendMode>, CanvasSizeParams<'_>)) error(crate::Error) {
         pub mode: ty(Bundle(BlendMode)),
         pub alpha_channel:
             ty(U32(0, 1, 2, 3 + u(3)))
@@ -134,11 +140,11 @@ define_bundle! {
             default(0),
         pub clamp:
             ty(Bool)
-            cond(context.0 && (mode == BlendMode::Blend || mode == BlendMode::MulAdd || mode == BlendMode::Mul))
+            cond((context.0 && (mode == BlendMode::Blend || mode == BlendMode::MulAdd)) || mode == BlendMode::Mul)
             default(false),
         pub source:
             ty(u(2))
-            cond(context.1.unwrap_or(mode) != BlendMode::Replace || !context.2)
+            cond(!FrameHeader::resets_canvas(context.1.unwrap_or(mode), context.2))
             default(0),
     }
 
@@ -151,8 +157,27 @@ define_bundle! {
     }
 }
 
+#[derive(Copy, Clone)]
+struct CanvasSizeParams<'a> {
+    have_crop: bool,
+    x0: i32,
+    y0: i32,
+    width: u32,
+    height: u32,
+    size: &'a SizeHeader,
+}
+
 impl FrameHeader {
-    fn test_full_image(x0: i32, y0: i32, width: u32, height: u32, size: &SizeHeader) -> bool {
+    fn test_full_image(canvas_size: CanvasSizeParams) -> bool {
+        let CanvasSizeParams {
+            x0,
+            y0,
+            width,
+            height,
+            size,
+            ..
+        } = canvas_size;
+
         if x0 > 0 || y0 > 0 {
             return false;
         }
@@ -162,19 +187,9 @@ impl FrameHeader {
         (right >= size.width as i64) && (bottom >= size.height as i64)
     }
 
-    fn resets_canvas(
-        blending_mode: Option<BlendMode>,
-        have_crop: bool,
-        x0: i32,
-        y0: i32,
-        width: u32,
-        height: u32,
-        size: &SizeHeader,
-    ) -> bool {
-        blending_mode
-            .map(|mode| mode == BlendMode::Replace)
-            .unwrap_or(true)
-            && (!have_crop || Self::test_full_image(x0, y0, width, height, size))
+    fn resets_canvas(blending_mode: BlendMode, canvas_size: CanvasSizeParams) -> bool {
+        blending_mode == BlendMode::Replace
+            && (!canvas_size.have_crop || Self::test_full_image(canvas_size))
     }
 
     fn compute_default_xqms(encoding: Encoding, xyb_encoded: bool) -> u32 {
