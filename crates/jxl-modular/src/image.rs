@@ -362,7 +362,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                 .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
                 .clone()
         } else {
-            bitstream.read_bundle::<crate::MaConfig>()?
+            bitstream.read_bundle_with_ctx(tracker)?
         };
 
         let mut image = RecursiveModularImage {

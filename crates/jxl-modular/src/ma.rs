@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
 use jxl_coding::Decoder;
+use jxl_grid::{AllocHandle, AllocTracker};
 
 use super::predictor::{Predictor, Properties};
 use crate::Result;
@@ -16,7 +17,7 @@ use crate::Result;
 pub struct MaConfig {
     num_tree_nodes: usize,
     tree_depth: usize,
-    tree: Arc<MaTreeNode>,
+    tree: Arc<(MaTreeNode, Option<AllocHandle>)>,
     decoder: Decoder,
 }
 
@@ -34,7 +35,7 @@ impl MaConfig {
     /// The method will evaluate the tree with the given information and prune branches which are
     /// always not taken.
     pub fn make_flat_tree(&self, channel: u32, stream_idx: u32) -> FlatMaTree {
-        let nodes = self.tree.flatten(channel, stream_idx);
+        let nodes = self.tree.0.flatten(channel, stream_idx);
         FlatMaTree::new(nodes)
     }
 }
@@ -53,10 +54,10 @@ impl MaConfig {
     }
 }
 
-impl<Ctx> Bundle<Ctx> for MaConfig {
+impl Bundle<Option<&'_ AllocTracker>> for MaConfig {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, _: Ctx) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, tracker: Option<&AllocTracker>) -> crate::Result<Self> {
         struct FoldingTreeLeaf {
             ctx: u32,
             predictor: super::predictor::Predictor,
@@ -70,12 +71,39 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
         }
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
+        if is_infinite_tree_dist(&tree_decoder) {
+            tracing::error!("Infinite MA tree");
+            return Err(crate::Error::InvalidMaTree);
+        }
+
         let mut ctx = 0u32;
         let mut nodes_left = 1usize;
-        let mut nodes = Vec::new();
+        let mut tmp_alloc_handle = tracker
+            .map(|tracker| tracker.alloc::<FoldingTree>(16))
+            .transpose()?;
+        let mut nodes = Vec::with_capacity(16);
+        let mut max_depth = 1usize;
 
         tree_decoder.begin(bitstream)?;
         while nodes_left > 0 {
+            if nodes.len() == nodes.capacity() && tmp_alloc_handle.is_some() {
+                let tracker = tracker.unwrap();
+                let current_len = nodes.len();
+                if current_len <= 16 {
+                    drop(tmp_alloc_handle);
+                    tmp_alloc_handle = Some(tracker.alloc::<FoldingTree>(256)?);
+                    nodes.reserve(256 - current_len);
+                } else if current_len <= 256 {
+                    drop(tmp_alloc_handle);
+                    tmp_alloc_handle = Some(tracker.alloc::<FoldingTree>(1024)?);
+                    nodes.reserve(1024 - current_len);
+                } else {
+                    drop(tmp_alloc_handle);
+                    tmp_alloc_handle = Some(tracker.alloc::<FoldingTree>(current_len * 2)?);
+                    nodes.reserve(current_len);
+                }
+            }
+
             if nodes.len() >= (1 << 26) {
                 return Err(crate::Error::InvalidMaTree);
             }
@@ -110,27 +138,29 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
                 node
             };
             nodes.push(node);
+            max_depth = max_depth.max(nodes_left);
         }
         tree_decoder.finalize()?;
         let num_tree_nodes = nodes.len();
         let decoder = Decoder::parse(bitstream, ctx)?;
         let cluster_map = decoder.cluster_map();
 
-        let mut tmp = VecDeque::<(_, usize)>::new();
+        let tree_alloc_handle = tracker
+            .map(|tracker| tracker.alloc::<FoldingTree>(nodes.len()))
+            .transpose()?;
+        let mut tmp = VecDeque::<(_, usize)>::with_capacity(max_depth);
         for node in nodes.into_iter().rev() {
             match node {
                 FoldingTree::Decision(property, value) => {
                     let (right, dr) = tmp.pop_front().unwrap();
                     let (left, dl) = tmp.pop_front().unwrap();
-                    tmp.push_back((
-                        MaTreeNode::Decision {
-                            property,
-                            value,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                        dr.max(dl) + 1,
-                    ));
+                    let node = Box::new(MaTreeNode::Decision {
+                        property,
+                        value,
+                        left,
+                        right,
+                    });
+                    tmp.push_back((node, dr.max(dl) + 1));
                 }
                 FoldingTree::Leaf(FoldingTreeLeaf {
                     ctx,
@@ -145,20 +175,34 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
                         offset,
                         multiplier,
                     };
-                    tmp.push_back((MaTreeNode::Leaf(leaf), 0usize));
+                    let node = Box::new(MaTreeNode::Leaf(leaf));
+                    tmp.push_back((node, 0));
                 }
             }
         }
         assert_eq!(tmp.len(), 1);
         let (tree, tree_depth) = tmp.pop_front().unwrap();
+        let tree = *tree;
 
         Ok(Self {
             num_tree_nodes,
             tree_depth,
-            tree: Arc::new(tree),
+            tree: Arc::new((tree, tree_alloc_handle)),
             decoder,
         })
     }
+}
+
+fn is_infinite_tree_dist(decoder: &Decoder) -> bool {
+    let cluster_map = decoder.cluster_map();
+
+    // Distribution #1 decides whether it's decision node or leaf node; if it reads 0 it's a leaf
+    // node. Therefore, the tree is infinitely large if the dist always reads token other than 0.
+    let cluster = cluster_map[1];
+    let Some(token) = decoder.single_token(cluster) else {
+        return false;
+    };
+    token != 0
 }
 
 /// A "flat" meta-adaptive tree suitable for decoding samples.
