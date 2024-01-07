@@ -192,6 +192,14 @@ pub fn write_hf_coeff(
                     if non_zeros == 0 {
                         break;
                     }
+                    let hf_left_in_varblock = size - num_blocks - idx as u32;
+                    if non_zeros > hf_left_in_varblock {
+                        tracing::error!("too many zeros in varblock HF coefficient");
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "too many zeros in varblock HF coefficient",
+                        )
+                        .into());
+                    }
 
                     let coeff_ctx = {
                         let prev = is_prev_coeff_nonzero as u32;
