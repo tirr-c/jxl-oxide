@@ -48,4 +48,5 @@ test_by_include!(
     spline_add_one_overflow,
     patch_target_limit,
     hf_coeff_out_of_zeros,
+    dequant_matrix_band,
 );
