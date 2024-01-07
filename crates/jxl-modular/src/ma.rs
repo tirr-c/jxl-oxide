@@ -70,6 +70,11 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
         }
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
+        if is_infinite_tree_dist(&tree_decoder) {
+            tracing::error!("Infinite MA tree");
+            return Err(crate::Error::InvalidMaTree);
+        }
+
         let mut ctx = 0u32;
         let mut nodes_left = 1usize;
         let mut nodes = Vec::new();
@@ -159,6 +164,18 @@ impl<Ctx> Bundle<Ctx> for MaConfig {
             decoder,
         })
     }
+}
+
+fn is_infinite_tree_dist(decoder: &Decoder) -> bool {
+    let cluster_map = decoder.cluster_map();
+
+    // Distribution #1 decides whether it's decision node or leaf node; if it reads 0 it's a leaf
+    // node. Therefore, the tree is infinitely large if the dist always reads token other than 0.
+    let cluster = cluster_map[1];
+    let Some(token) = decoder.single_token(cluster) else {
+        return false;
+    };
+    token != 0
 }
 
 /// A "flat" meta-adaptive tree suitable for decoding samples.
