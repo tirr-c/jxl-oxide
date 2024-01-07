@@ -49,4 +49,5 @@ test_by_include!(
     patch_target_limit,
     hf_coeff_out_of_zeros,
     dequant_matrix_band,
+    icc_parse_oob,
 );

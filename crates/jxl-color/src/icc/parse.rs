@@ -313,8 +313,15 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                             continue;
                         }
                         let curve_type = u16::from_be_bytes([data[8], data[9]]);
+                        let parameters = (data.len() - 12) / 4;
                         match curve_type {
                             0 => {
+                                if parameters != 1 {
+                                    return Err(Error::IccParseFailure(
+                                        "invalid parametricCurveType",
+                                    ));
+                                }
+
                                 let [gamma]: [i32; 1] = std::array::from_fn(|idx| {
                                     let mut bytes = [0u8; 4];
                                     bytes.copy_from_slice(&data[12 + 4 * idx..][..4]);
@@ -327,6 +334,12 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                                 }
                             }
                             3 => {
+                                if parameters != 5 {
+                                    return Err(Error::IccParseFailure(
+                                        "invalid parametricCurveType",
+                                    ));
+                                }
+
                                 let params: [i32; 5] = std::array::from_fn(|idx| {
                                     let mut bytes = [0u8; 4];
                                     bytes.copy_from_slice(&data[12 + 4 * idx..][..4]);
@@ -383,43 +396,42 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                     _ => continue,
                 };
 
-                let xyz = if &data[..4] == b"XYZ " {
-                    if data.len() < 20 {
-                        continue;
-                    }
+                if &data[..4] != b"XYZ " || data.len() < 20 {
+                    return Err(Error::IccParseFailure("invalid colorant tag"));
+                }
 
-                    [
-                        i32::from_be_bytes([data[8], data[9], data[10], data[11]]),
-                        i32::from_be_bytes([data[12], data[13], data[14], data[15]]),
-                        i32::from_be_bytes([data[16], data[17], data[18], data[19]]),
-                    ]
-                } else {
-                    continue;
-                };
-
+                let xyz = [
+                    i32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+                    i32::from_be_bytes([data[12], data[13], data[14], data[15]]),
+                    i32::from_be_bytes([data[16], data[17], data[18], data[19]]),
+                ];
+                validate_xyz(xyz)?;
                 xyzs[index] = Some(xyz);
             }
             [b'c', b'h', b'a', b'd'] => {
-                if &data[..4] == b"sf32" {
-                    chad = Some(std::array::from_fn(|idx| {
-                        let mut bytes = [0u8; 4];
-                        bytes.copy_from_slice(&data[8 + 4 * idx..][..4]);
-                        i32::from_be_bytes(bytes)
-                    }));
+                if &data[..4] != b"sf32" || data.len() < 44 {
+                    return Err(Error::IccParseFailure("invalid chad tag"));
                 }
+
+                let mat = std::array::from_fn(|idx| {
+                    let mut bytes = [0u8; 4];
+                    bytes.copy_from_slice(&data[8 + 4 * idx..][..4]);
+                    i32::from_be_bytes(bytes)
+                });
+                validate_chad(mat)?;
+                chad = Some(mat);
             }
             [b'w', b't', b'p', b't'] => {
-                if &data[..4] == b"XYZ " {
-                    if data.len() < 20 {
-                        continue;
-                    }
-
-                    wtpt = [
-                        i32::from_be_bytes([data[8], data[9], data[10], data[11]]),
-                        i32::from_be_bytes([data[12], data[13], data[14], data[15]]),
-                        i32::from_be_bytes([data[16], data[17], data[18], data[19]]),
-                    ];
+                if &data[..4] != b"XYZ " || data.len() < 20 {
+                    return Err(Error::IccParseFailure("invalid wtpt tag"));
                 }
+
+                wtpt = [
+                    i32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+                    i32::from_be_bytes([data[12], data[13], data[14], data[15]]),
+                    i32::from_be_bytes([data[16], data[17], data[18], data[19]]),
+                ];
+                validate_xyz(wtpt)?;
             }
             [b'A' | b'D', b'2', b'B', b'0'..=b'3']
             | [b'B', b'2', b'A' | b'D', b'0'..=b'3']
@@ -465,6 +477,28 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
         trc_rgb,
         xyz_rgb,
     })
+}
+
+fn validate_xyz(xyz_s15fixed16: [i32; 3]) -> Result<()> {
+    let flt = xyz_s15fixed16.map(|v| v as f32 / 65536.0);
+    let sum = flt[0] + flt[1] + flt[2];
+    for v in flt {
+        if !(v / sum).is_finite() {
+            return Err(Error::IccParseFailure("invalid XYZType"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_chad(chad_s15fixed16: [i32; 9]) -> Result<()> {
+    let mat_float = chad_s15fixed16.map(|v| v as f32 / 65536.0);
+    let chad_inv = crate::ciexyz::matinv(&mat_float);
+    for v in chad_inv {
+        if !v.is_finite() {
+            return Err(Error::IccParseFailure("invalid chad tag"));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_icc(profile: &[u8]) -> Result<EnumColourEncoding> {
