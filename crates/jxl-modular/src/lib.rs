@@ -114,7 +114,7 @@ impl Bundle<ModularParams<'_, '_>> for ModularData {
                 .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
                 .clone()
         } else {
-            read_bits!(bitstream, Bundle(ma::MaConfig))?
+            bitstream.read_bundle_with_ctx(params.tracker)?
         };
         if ma_ctx.tree_depth() > 2048 {
             tracing::error!(

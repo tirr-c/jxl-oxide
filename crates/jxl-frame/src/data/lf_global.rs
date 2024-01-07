@@ -164,7 +164,7 @@ impl Bundle<LfGlobalParams<'_, '_>> for GlobalModular {
 
         let ma_config = bitstream
             .read_bool()?
-            .then(|| read_bits!(bitstream, Bundle(MaConfig)))
+            .then(|| bitstream.read_bundle_with_ctx::<MaConfig, _>(params.tracker))
             .transpose()?;
 
         let mut shifts = Vec::new();
