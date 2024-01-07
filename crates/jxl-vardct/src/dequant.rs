@@ -155,7 +155,7 @@ impl DequantMatrixParams {
         }
     }
 
-    fn into_matrix(self) -> [Vec<f32>; 3] {
+    fn into_matrix(self) -> Result<[Vec<f32>; 3]> {
         use DequantMatrixParamsEncoding::*;
 
         fn interpolate(pos: f32, max: f32, bands: &[f32]) -> f32 {
@@ -185,13 +185,19 @@ impl DequantMatrixParams {
             }
         }
 
-        fn dct_quant_weights(params: &[f32], width: u32, height: u32) -> Vec<f32> {
+        fn dct_quant_weights(params: &[f32], width: u32, height: u32) -> Result<Vec<f32>> {
             let mut bands = Vec::with_capacity(params.len());
             let mut last_band = params[0];
             bands.push(last_band);
             for &val in &params[1..] {
                 let band = last_band * mult(val);
-                // TODO: test band > 0.0
+                if band <= 0.0 {
+                    tracing::error!(band, "DCT dequant matrix: band <= 0");
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "DCT dequant matrix: band <= 0",
+                    )
+                    .into());
+                }
                 bands.push(band);
                 last_band = band;
             }
@@ -207,7 +213,7 @@ impl DequantMatrixParams {
                 }
             }
 
-            ret
+            Ok(ret)
         }
 
         let dct_select = self.dct_select;
@@ -215,7 +221,11 @@ impl DequantMatrixParams {
         let mut weights = match self.encoding {
             Dct(dct_params) => {
                 let (width, height) = dct_select.dequant_matrix_size();
-                dct_params.map(|params| dct_quant_weights(&params, width, height))
+                [
+                    dct_quant_weights(&dct_params[0], width, height)?,
+                    dct_quant_weights(&dct_params[1], width, height)?,
+                    dct_quant_weights(&dct_params[2], width, height)?,
+                ]
             }
             Hornuss(params) => params.map(|params| {
                 let mut ret = vec![params[0]; 64];
@@ -252,7 +262,7 @@ impl DequantMatrixParams {
                 for (ret, (params, dct_params)) in
                     ret.iter_mut().zip(params.into_iter().zip(dct_params))
                 {
-                    let mat = dct_quant_weights(&dct_params, 4, 4);
+                    let mat = dct_quant_weights(&dct_params, 4, 4)?;
                     *ret = vec![0.0f32; 64];
                     for y in 0..4 {
                         for x in 0..4 {
@@ -273,7 +283,7 @@ impl DequantMatrixParams {
                 for (ret, (params, dct_params)) in
                     ret.iter_mut().zip(params.into_iter().zip(dct_params))
                 {
-                    let mat = dct_quant_weights(&dct_params, 8, 4);
+                    let mat = dct_quant_weights(&dct_params, 8, 4)?;
                     *ret = mat
                         .chunks_exact(8)
                         .flat_map(|v| [v, v])
@@ -301,8 +311,8 @@ impl DequantMatrixParams {
                     .iter_mut()
                     .zip(params.into_iter().zip(dct_params).zip(dct4x4_params))
                 {
-                    let weights_4x8 = dct_quant_weights(&dct_params, 8, 4);
-                    let weights_4x4 = dct_quant_weights(&dct4x4_params, 4, 4);
+                    let weights_4x8 = dct_quant_weights(&dct_params, 8, 4)?;
+                    let weights_4x4 = dct_quant_weights(&dct4x4_params, 4, 4)?;
                     let mut bands = [params[5], 0.0, 0.0, 0.0];
                     let mut prev_band = bands[0];
                     for (band, &param) in bands[1..].iter_mut().zip(&params[6..]) {
@@ -379,7 +389,7 @@ impl DequantMatrixParams {
             }
         }
 
-        weights
+        Ok(weights)
     }
 }
 
@@ -597,7 +607,7 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
         let matrices: Vec<_> = param_list
             .into_iter()
             .map(|params| params.into_matrix())
-            .collect();
+            .collect::<Result<_>>()?;
         let matrices_tr = matrices
             .iter()
             .zip(DCT_SELECT_LIST)
