@@ -132,6 +132,12 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                     let dct_select = TransformType::try_from(dct_select as u8)?;
                     let mul = *block_info_raw.get(data_idx, 1).unwrap();
                     let hf_mul = mul + 1;
+                    if hf_mul <= 0 {
+                        tracing::error!(lf_group_idx, x, y, hf_mul, "non-positive HfMul");
+                        return Err(
+                            jxl_bitstream::Error::ValidationFailed("non-positive HfMul").into()
+                        );
+                    }
                     let (dw, dh) = dct_select.dct_select_size();
 
                     let epf =

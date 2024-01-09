@@ -50,4 +50,5 @@ test_by_include!(
     hf_coeff_out_of_zeros,
     dequant_matrix_band,
     icc_parse_oob,
+    hfmul_non_positive,
 );
