@@ -1,7 +1,9 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
-use jxl_modular::{ChannelShift, MaConfig, Modular, ModularChannelParams, ModularParams};
+use jxl_modular::{
+    ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams,
+};
 use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
 use crate::{header::Encoding, FrameHeader, Result};
@@ -162,9 +164,18 @@ impl Bundle<LfGlobalParams<'_, '_>> for GlobalModular {
         let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
         let _guard = span.enter();
 
+        let num_channels = (image_header.metadata.encoded_color_channels()
+            + image_header.metadata.ec_info.len()) as u64;
+        let max_global_ma_nodes =
+            1024 + header.width as u64 * header.height as u64 * num_channels / 16;
+        let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
+        let ma_config_params = MaConfigParams {
+            tracker: params.tracker,
+            node_limit: max_global_ma_nodes,
+        };
         let ma_config = bitstream
             .read_bool()?
-            .then(|| bitstream.read_bundle_with_ctx::<MaConfig, _>(params.tracker))
+            .then(|| bitstream.read_bundle_with_ctx::<MaConfig, _>(ma_config_params))
             .transpose()?;
 
         let mut shifts = Vec::new();
@@ -209,26 +220,6 @@ impl Bundle<LfGlobalParams<'_, '_>> for GlobalModular {
             let height = header.sample_height(ec_upsampling);
             let shift = ChannelShift::from_shift(ec_info.dim_shift);
             shifts.push(ModularChannelParams::with_shift(width, height, shift));
-        }
-
-        if let Some(ma_config) = &ma_config {
-            let num_channels = (image_header.metadata.encoded_color_channels()
-                + image_header.metadata.ec_info.len()) as u64;
-            let max_global_ma_nodes =
-                1024 + header.width as u64 * header.height as u64 * num_channels / 16;
-            let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
-            let global_ma_nodes = ma_config.num_tree_nodes();
-            if global_ma_nodes > max_global_ma_nodes {
-                tracing::error!(
-                    global_ma_nodes,
-                    max_global_ma_nodes,
-                    "Too many global MA tree nodes"
-                );
-                return Err(jxl_bitstream::Error::ProfileConformance(
-                    "too many global MA tree nodes",
-                )
-                .into());
-            }
         }
 
         let group_dim = header.group_dim();

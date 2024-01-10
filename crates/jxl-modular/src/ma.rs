@@ -54,10 +54,16 @@ impl MaConfig {
     }
 }
 
-impl Bundle<Option<&'_ AllocTracker>> for MaConfig {
+#[derive(Debug, Copy, Clone)]
+pub struct MaConfigParams<'a> {
+    pub tracker: Option<&'a AllocTracker>,
+    pub node_limit: usize,
+}
+
+impl Bundle<MaConfigParams<'_>> for MaConfig {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, tracker: Option<&AllocTracker>) -> crate::Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: MaConfigParams) -> crate::Result<Self> {
         struct FoldingTreeLeaf {
             ctx: u32,
             predictor: super::predictor::Predictor,
@@ -69,6 +75,11 @@ impl Bundle<Option<&'_ AllocTracker>> for MaConfig {
             Decision(u32, i32),
             Leaf(FoldingTreeLeaf),
         }
+
+        let MaConfigParams {
+            tracker,
+            node_limit,
+        } = params;
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
         if is_infinite_tree_dist(&tree_decoder) {
@@ -86,6 +97,16 @@ impl Bundle<Option<&'_ AllocTracker>> for MaConfig {
 
         tree_decoder.begin(bitstream)?;
         while nodes_left > 0 {
+            if nodes.len() >= (1 << 26) {
+                return Err(crate::Error::InvalidMaTree);
+            }
+            if nodes.len() > node_limit {
+                tracing::error!(node_limit, "MA tree limit exceeded");
+                return Err(
+                    jxl_bitstream::Error::ProfileConformance("MA tree limit exceeded").into(),
+                );
+            }
+
             if nodes.len() == nodes.capacity() && tmp_alloc_handle.is_some() {
                 let tracker = tracker.unwrap();
                 let current_len = nodes.len();
@@ -102,10 +123,6 @@ impl Bundle<Option<&'_ AllocTracker>> for MaConfig {
                     tmp_alloc_handle = Some(tracker.alloc::<FoldingTree>(current_len * 2)?);
                     nodes.reserve(current_len);
                 }
-            }
-
-            if nodes.len() >= (1 << 26) {
-                return Err(crate::Error::InvalidMaTree);
             }
 
             nodes_left -= 1;
