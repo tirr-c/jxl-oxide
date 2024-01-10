@@ -51,4 +51,10 @@ test_by_include!(
     dequant_matrix_band,
     icc_parse_oob,
     hfmul_non_positive,
+    ma_tree_multiple_frames_0,
+    ma_tree_multiple_frames_1,
+    ma_tree_multiple_frames_2,
+    ma_tree_multiple_frames_3,
+    ma_tree_multiple_frames_4,
+    ma_tree_multiple_frames_5,
 );
