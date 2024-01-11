@@ -356,23 +356,22 @@ impl<'dest> TransformedModularSubimage<'dest> {
         global_ma_config: Option<&MaConfig>,
         tracker: Option<&AllocTracker>,
     ) -> Result<RecursiveModularImage<'dest>> {
-        let header = bitstream.read_bundle::<crate::ModularHeader>()?;
-        let ma_ctx = if header.use_global_tree {
-            global_ma_config
-                .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
-                .clone()
-        } else {
-            bitstream.read_bundle_with_ctx(tracker)?
+        let channels = crate::ModularChannels {
+            info: self.channel_info,
+            nb_meta_channels: 0,
         };
+        let (header, ma_ctx) = crate::read_and_validate_local_modular_header(
+            bitstream,
+            &channels,
+            global_ma_config,
+            tracker,
+        )?;
 
         let mut image = RecursiveModularImage {
             header,
             ma_ctx,
             bit_depth: self.bit_depth,
-            channels: ModularChannels {
-                info: self.channel_info,
-                nb_meta_channels: 0,
-            },
+            channels,
             meta_channels: Vec::new(),
             image_channels: self.grid,
         };

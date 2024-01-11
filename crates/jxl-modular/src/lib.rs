@@ -12,7 +12,8 @@ mod param;
 mod predictor;
 mod transform;
 pub use error::{Error, Result};
-pub use ma::MaConfig;
+use jxl_grid::AllocTracker;
+pub use ma::{MaConfig, MaConfigParams};
 pub use param::*;
 
 /// A Modular encoded image.
@@ -99,68 +100,13 @@ impl Bundle<ModularParams<'_, '_>> for ModularData {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
-        let mut header = read_bits!(bitstream, Bundle(ModularHeader))?;
-        if header.nb_transforms > 512 {
-            tracing::error!(
-                nb_transforms = header.nb_transforms,
-                "nb_transforms too large"
-            );
-            return Err(jxl_bitstream::Error::ProfileConformance("nb_transforms too large").into());
-        }
-
-        let ma_ctx = if header.use_global_tree {
-            params
-                .ma_config
-                .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
-                .clone()
-        } else {
-            bitstream.read_bundle_with_ctx(params.tracker)?
-        };
-        if ma_ctx.tree_depth() > 2048 {
-            tracing::error!(
-                tree_depth = ma_ctx.tree_depth(),
-                "Decoded MA tree is too deep"
-            );
-            return Err(
-                jxl_bitstream::Error::ProfileConformance("decoded MA tree is too deep").into(),
-            );
-        }
-
         let channels = ModularChannels::from_params(&params);
-        let mut tr_channels = channels.clone();
-        for tr in &mut header.transform {
-            tr.prepare_transform_info(&mut tr_channels)?;
-        }
-
-        let nb_channels_tr = tr_channels.info.len();
-        if nb_channels_tr > (1 << 16) {
-            tracing::error!(nb_channels_tr, "nb_channels_tr too large");
-            return Err(
-                jxl_bitstream::Error::ProfileConformance("nb_channels_tr too large").into(),
-            );
-        }
-
-        if !header.use_global_tree {
-            let num_local_samples: u64 = channels
-                .info
-                .iter()
-                .map(|ch| (ch.width as u64 * ch.height as u64))
-                .sum();
-            let local_ma_nodes = ma_ctx.num_tree_nodes();
-            let max_local_ma_nodes = (1 << 20).min(1024 + num_local_samples) as usize;
-            if ma_ctx.num_tree_nodes() > max_local_ma_nodes {
-                tracing::error!(
-                    local_ma_nodes,
-                    max_local_ma_nodes,
-                    "Too many local MA tree nodes"
-                );
-                return Err(jxl_bitstream::Error::ProfileConformance(
-                    "too many local MA tree nodes",
-                )
-                .into());
-            }
-        }
-
+        let (header, ma_ctx) = read_and_validate_local_modular_header(
+            bitstream,
+            &channels,
+            params.ma_config,
+            params.tracker,
+        )?;
         Ok(Self {
             image: image::ModularImageDestination::new(
                 header,
@@ -231,4 +177,56 @@ impl ModularChannelInfo {
             vshift,
         }
     }
+}
+
+fn read_and_validate_local_modular_header(
+    bitstream: &mut Bitstream,
+    channels: &ModularChannels,
+    global_ma_config: Option<&MaConfig>,
+    tracker: Option<&AllocTracker>,
+) -> Result<(ModularHeader, MaConfig)> {
+    let mut header = bitstream.read_bundle::<ModularHeader>()?;
+    if header.nb_transforms > 512 {
+        tracing::error!(
+            nb_transforms = header.nb_transforms,
+            "nb_transforms too large"
+        );
+        return Err(jxl_bitstream::Error::ProfileConformance("nb_transforms too large").into());
+    }
+
+    let mut tr_channels = channels.clone();
+    for tr in &mut header.transform {
+        tr.prepare_transform_info(&mut tr_channels)?;
+    }
+
+    let nb_channels_tr = tr_channels.info.len();
+    if nb_channels_tr > (1 << 16) {
+        tracing::error!(nb_channels_tr, "nb_channels_tr too large");
+        return Err(jxl_bitstream::Error::ProfileConformance("nb_channels_tr too large").into());
+    }
+
+    let ma_ctx = if header.use_global_tree {
+        global_ma_config
+            .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
+            .clone()
+    } else {
+        let local_samples = tr_channels
+            .info
+            .iter()
+            .fold(0u64, |acc, ch| acc + (ch.width as u64 * ch.height as u64));
+        let params = MaConfigParams {
+            tracker,
+            node_limit: (1024 + local_samples).min(1 << 20) as usize,
+        };
+        bitstream.read_bundle_with_ctx(params)?
+    };
+    if ma_ctx.tree_depth() > 2048 {
+        tracing::error!(
+            tree_depth = ma_ctx.tree_depth(),
+            "Decoded MA tree is too deep"
+        );
+        return Err(jxl_bitstream::Error::ProfileConformance("decoded MA tree is too deep").into());
+    }
+
+    Ok((header, ma_ctx))
 }
