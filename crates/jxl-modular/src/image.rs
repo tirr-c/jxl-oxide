@@ -3,7 +3,7 @@ use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
 use crate::{
-    ma::{FlatMaTree, MaConfigParams, MaTreeLeafClustered},
+    ma::{FlatMaTree, MaTreeLeafClustered},
     predictor::{Predictor, PredictorState},
     MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
 };
@@ -356,64 +356,22 @@ impl<'dest> TransformedModularSubimage<'dest> {
         global_ma_config: Option<&MaConfig>,
         tracker: Option<&AllocTracker>,
     ) -> Result<RecursiveModularImage<'dest>> {
-        // TODO: merge with ModularData::parse.
-        let mut header = bitstream.read_bundle::<crate::ModularHeader>()?;
-        if header.nb_transforms > 512 {
-            tracing::error!(
-                nb_transforms = header.nb_transforms,
-                "nb_transforms too large"
-            );
-            return Err(jxl_bitstream::Error::ProfileConformance("nb_transforms too large").into());
-        }
-
-        let mut tr_channels = crate::ModularChannels {
-            info: self.channel_info.clone(),
+        let channels = crate::ModularChannels {
+            info: self.channel_info,
             nb_meta_channels: 0,
         };
-        for tr in &mut header.transform {
-            tr.prepare_transform_info(&mut tr_channels)?;
-        }
-
-        let nb_channels_tr = tr_channels.info.len();
-        if nb_channels_tr > (1 << 16) {
-            tracing::error!(nb_channels_tr, "nb_channels_tr too large");
-            return Err(
-                jxl_bitstream::Error::ProfileConformance("nb_channels_tr too large").into(),
-            );
-        }
-
-        let ma_ctx = if header.use_global_tree {
-            global_ma_config
-                .ok_or(crate::Error::GlobalMaTreeNotAvailable)?
-                .clone()
-        } else {
-            let local_samples = tr_channels.info.iter().fold(0usize, |acc, ch| {
-                acc + (ch.width as usize * ch.height as usize)
-            });
-            let params = MaConfigParams {
-                tracker,
-                node_limit: (1024 + local_samples).min(1 << 20),
-            };
-            bitstream.read_bundle_with_ctx(params)?
-        };
-        if ma_ctx.tree_depth() > 2048 {
-            tracing::error!(
-                tree_depth = ma_ctx.tree_depth(),
-                "Decoded MA tree is too deep"
-            );
-            return Err(
-                jxl_bitstream::Error::ProfileConformance("decoded MA tree is too deep").into(),
-            );
-        }
+        let (header, ma_ctx) = crate::read_and_validate_local_modular_header(
+            bitstream,
+            &channels,
+            global_ma_config,
+            tracker,
+        )?;
 
         let mut image = RecursiveModularImage {
             header,
             ma_ctx,
             bit_depth: self.bit_depth,
-            channels: ModularChannels {
-                info: self.channel_info,
-                nb_meta_channels: 0,
-            },
+            channels,
             meta_channels: Vec::new(),
             image_channels: self.grid,
         };
