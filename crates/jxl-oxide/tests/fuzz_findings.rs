@@ -57,4 +57,5 @@ test_by_include!(
     ma_tree_multiple_frames_3,
     ma_tree_multiple_frames_4,
     ma_tree_multiple_frames_5,
+    container_small_jxlp,
 );
