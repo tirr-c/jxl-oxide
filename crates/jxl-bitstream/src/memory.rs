@@ -110,20 +110,23 @@ impl Bitstream<'_> {
 
     #[inline(never)]
     pub fn skip_bits(&mut self, mut n: usize) -> Result<()> {
-        self.num_read_bits += n;
         if let Some(next_remaining_bits) = self.remaining_buf_bits.checked_sub(n) {
+            self.num_read_bits += n;
             self.remaining_buf_bits = next_remaining_bits;
             self.buf >>= n;
             return Ok(());
         }
 
         n -= self.remaining_buf_bits;
+        self.num_read_bits += self.remaining_buf_bits;
         self.buf = 0;
         self.remaining_buf_bits = 0;
         if n > self.bytes.len() * 8 {
+            self.num_read_bits += self.bytes.len() * 8;
             return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
         }
 
+        self.num_read_bits += n;
         self.bytes = &self.bytes[n / 8..];
         n %= 8;
         self.refill();
