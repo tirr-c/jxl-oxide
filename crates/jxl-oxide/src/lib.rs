@@ -376,6 +376,7 @@ impl UninitializedJxlImage {
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
+        #[cfg_attr(not(feature = "lcms2"), allow(unused_mut))]
         let mut ctx = builder.build(image_header.clone());
         #[cfg(feature = "lcms2")]
         ctx.set_cms(Lcms2);

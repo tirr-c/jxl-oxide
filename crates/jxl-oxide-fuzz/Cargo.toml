@@ -4,14 +4,6 @@ version = "0.0.0"
 publish = false
 edition = "2021"
 
-[dependencies]
-jxl-oxide = { path = "../jxl-oxide" }
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-honggfuzz = "0.5.55"
-
-[[bin]]
-name = "fuzz_decode"
-path = "fuzz_targets/decode.rs"
-test = true
-doc = false
+[dependencies.jxl-oxide]
+path = "../jxl-oxide"
+default-features = false
