@@ -485,7 +485,9 @@ impl<'dest> TransformedModularSubimage<'dest> {
                 if predictor == Predictor::Zero {
                     if let Some(token) = no_lz77_decoder.single_token(cluster) {
                         tracing::trace!("Single token in cluster: hyper fast path");
-                        let value = unpack_signed(token) * multiplier as i32 + offset;
+                        let value = unpack_signed(token)
+                            .wrapping_mul(multiplier as i32)
+                            .wrapping_add(offset);
                         for y in 0..height {
                             for x in 0..width {
                                 *grid.get_mut(x, y) = value;
@@ -497,7 +499,9 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             for x in 0..width {
                                 let token =
                                     no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                                let value = unpack_signed(token) * multiplier as i32 + offset;
+                                let value = unpack_signed(token)
+                                    .wrapping_mul(multiplier as i32)
+                                    .wrapping_add(offset);
                                 *grid.get_mut(x, y) = value;
                             }
                         }
@@ -581,7 +585,9 @@ impl<'dest> TransformedModularSubimage<'dest> {
                                 cluster,
                                 dist_multiplier,
                             )?;
-                            let value = unpack_signed(token) * multiplier as i32 + offset;
+                            let value = unpack_signed(token)
+                                .wrapping_mul(multiplier as i32)
+                                .wrapping_add(offset);
                             *grid.get_mut(x, y) = value;
                         }
                     }
@@ -677,7 +683,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                     for y in 0..height {
                         for x in 0..width {
                             let token = next(cluster)?;
-                            let value = (token * multiplier as i32) + offset;
+                            let value = token.wrapping_mul(multiplier as i32).wrapping_add(offset);
                             *grid.get_mut(x, y) = value;
                         }
                     }

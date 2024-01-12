@@ -60,4 +60,5 @@ test_by_include!(
     modular_jpeg_upsampling,
     container_small_jxlp,
     patchref_idx,
+    modular_multiply_overflow,
 );
