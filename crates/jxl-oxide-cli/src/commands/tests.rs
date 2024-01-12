@@ -13,7 +13,7 @@ mod clap {
             panic!();
         };
         assert!(args.decode.is_none());
-        assert!(!args.globals.verbose);
+        assert_eq!(args.globals.verbose, 0);
         assert_eq!(decode_args.input, Path::new("input.jxl"));
         assert_eq!(decode_args.output.as_deref(), Some(Path::new("output.png")));
     }
@@ -25,7 +25,7 @@ mod clap {
             panic!();
         };
         assert!(args.decode.is_none());
-        assert!(!args.globals.verbose);
+        assert_eq!(args.globals.verbose, 0);
         assert_eq!(info_args.input, Path::new("input.jxl"));
     }
 
@@ -36,7 +36,7 @@ mod clap {
             panic!();
         };
         assert!(args.subcommand.is_none());
-        assert!(!args.globals.verbose);
+        assert_eq!(args.globals.verbose, 0);
         assert_eq!(decode_args.input, Path::new("input.jxl"));
         assert_eq!(decode_args.output.as_deref(), Some(Path::new("output.png")));
     }
@@ -48,22 +48,50 @@ mod clap {
             panic!();
         };
         assert!(args.decode.is_none());
-        assert!(!args.globals.verbose);
+        assert_eq!(args.globals.verbose, 0);
         assert_eq!(info_args.input, Path::new("input.jxl"));
     }
 
     #[test]
     fn verbose() {
         let args = Args::try_parse_from(["jxl-oxide", "input.jxl", "-v"]).unwrap();
-        assert!(args.globals.verbose);
+        assert_eq!(args.globals.verbose, 1);
 
         let args = Args::try_parse_from(["jxl-oxide", "--verbose", "input.jxl"]).unwrap();
-        assert!(args.globals.verbose);
+        assert_eq!(args.globals.verbose, 1);
 
         assert!(Args::try_parse_from(["jxl-oxide", "-v"]).is_err());
 
         let args = Args::try_parse_from(["jxl-oxide", "-Iv", "input.jxl"]).unwrap();
-        assert!(args.globals.verbose);
+        assert_eq!(args.globals.verbose, 1);
+
+        let args = Args::try_parse_from(["jxl-oxide", "-vv", "input.jxl"]).unwrap();
+        assert_eq!(args.globals.verbose, 2);
+
+        let args = Args::try_parse_from(["jxl-oxide", "-v", "-v", "input.jxl"]).unwrap();
+        assert_eq!(args.globals.verbose, 2);
+    }
+
+    #[test]
+    fn quiet() {
+        let args = Args::try_parse_from(["jxl-oxide", "input.jxl", "-q"]).unwrap();
+        assert!(args.globals.quiet);
+
+        let args = Args::try_parse_from(["jxl-oxide", "--quiet", "input.jxl"]).unwrap();
+        assert!(args.globals.quiet);
+
+        assert!(Args::try_parse_from(["jxl-oxide", "-q"]).is_err());
+
+        let args = Args::try_parse_from(["jxl-oxide", "-Iq", "input.jxl"]).unwrap();
+        assert!(args.globals.quiet);
+    }
+
+    #[test]
+    fn verbose_quiet_conflicts() {
+        assert!(Args::try_parse_from(["jxl-oxide", "input.jxl", "-q", "-v"]).is_err());
+        assert!(Args::try_parse_from(["jxl-oxide", "-v", "-q", "input.jxl"]).is_err());
+        assert!(Args::try_parse_from(["jxl-oxide", "--verbose", "-q", "input.jxl"]).is_err());
+        assert!(Args::try_parse_from(["jxl-oxide", "-Ivvq", "input.jxl"]).is_err());
     }
 }
 
