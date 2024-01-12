@@ -321,7 +321,9 @@ impl FlatMaTree {
             leaf.cluster,
             dist_multiplier,
         )?;
-        let diff = unpack_signed(diff) * leaf.multiplier as i32 + leaf.offset;
+        let diff = unpack_signed(diff)
+            .wrapping_mul(leaf.multiplier as i32)
+            .wrapping_add(leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
@@ -333,7 +335,9 @@ impl FlatMaTree {
     ) -> Result<(i32, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = next(leaf.cluster)?;
-        let diff = diff * leaf.multiplier as i32 + leaf.offset;
+        let diff = diff
+            .wrapping_mul(leaf.multiplier as i32)
+            .wrapping_add(leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
