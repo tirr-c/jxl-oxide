@@ -8,13 +8,13 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 
 [dependencies]
 
 [dependencies.jxl-bitstream]
-version = "0.3.0"
+version = "0.3.1"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-coding]
@@ -22,11 +22,11 @@ version = "0.3.0"
 path = "../jxl-coding"
 
 [dependencies.jxl-grid]
-version = "0.2.0"
+version = "0.3.0"
 path = "../jxl-grid"
 
 [dependencies.jxl-modular]
-version = "0.4.0"
+version = "0.5.0"
 path = "../jxl-modular"
 
 [dependencies.jxl-threadpool]
@@ -35,5 +35,5 @@ path = "../jxl-threadpool"
 
 [dependencies.tracing]
 version = "0.1.37"
-default_features = false
+default-features = false
 features = ["std"]
