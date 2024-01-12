@@ -27,9 +27,12 @@ pub struct Args {
 #[derive(Debug, clap::Args)]
 #[non_exhaustive]
 pub struct GlobalArgs {
-    /// Print debug information
-    #[arg(short, long, global(true))]
-    pub verbose: bool,
+    /// Print debug information; can be repeated.
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+    /// Do not print logs to console.
+    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    pub quiet: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
