@@ -115,6 +115,12 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
         let mut total_patches = 0u32;
         let patches = std::iter::repeat_with(|| -> Result<_> {
             let ref_idx = decoder.read_varint(bitstream, 1)?;
+            if ref_idx >= 4 {
+                tracing::error!(ref_idx, "PatchRef index out of bounds");
+                return Err(
+                    jxl_bitstream::Error::ValidationFailed("PatchRef index out of bounds").into(),
+                );
+            }
             let x0 = decoder.read_varint(bitstream, 3)?;
             let y0 = decoder.read_varint(bitstream, 3)?;
             let width = decoder.read_varint(bitstream, 2)? + 1;
