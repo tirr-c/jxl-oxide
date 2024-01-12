@@ -6,8 +6,9 @@ use jxl_oxide::{
 };
 
 use crate::commands::decode::*;
+use crate::{Error, Result};
 
-pub fn handle_decode(args: DecodeArgs) {
+pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle decode subcommand").entered();
 
     #[cfg(feature = "rayon")]
@@ -20,9 +21,7 @@ pub fn handle_decode(args: DecodeArgs) {
         let tracker = AllocTracker::with_limit(args.approx_memory_limit);
         image_builder = image_builder.alloc_tracker(tracker);
     }
-    let mut image = image_builder
-        .open(&args.input)
-        .expect("Failed to open file");
+    let mut image = image_builder.open(&args.input).map_err(Error::ReadJxl)?;
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }
@@ -34,7 +33,7 @@ pub fn handle_decode(args: DecodeArgs) {
         );
     if let Some(icc_path) = &args.target_icc {
         tracing::debug!("Setting target ICC profile");
-        let icc_profile = std::fs::read(icc_path).expect("Failed to read ICC profile");
+        let icc_profile = std::fs::read(icc_path).map_err(Error::ReadIcc)?;
         match image.request_icc(&icc_profile) {
             Ok(_) => {}
             Err(e) => {
@@ -59,7 +58,7 @@ pub fn handle_decode(args: DecodeArgs) {
     if let Some(icc_path) = &args.icc_output {
         if let Some(icc) = image.original_icc() {
             tracing::debug!("Writing ICC profile");
-            std::fs::write(icc_path, icc).expect("Failed to write ICC profile");
+            std::fs::write(icc_path, icc).map_err(Error::WriteIcc)?;
         } else {
             tracing::info!("No embedded ICC profile, skipping icc_output");
         }
@@ -108,9 +107,9 @@ pub fn handle_decode(args: DecodeArgs) {
                 (0..image.num_loaded_keyframes())
                     .into_par_iter()
                     .map(|idx| image.render_frame_cropped(idx, crop))
-                    .collect::<Result<Vec<_>, _>>()
+                    .collect::<std::result::Result<Vec<_>, _>>()
             })
-            .expect("rendering frames failed");
+            .map_err(Error::Render)?;
         rendered = true;
     }
 
@@ -135,12 +134,12 @@ pub fn handle_decode(args: DecodeArgs) {
     if let Some(output) = &args.output {
         if keyframes.is_empty() {
             tracing::warn!("No keyframes are decoded");
-            return;
+            return Ok(());
         }
 
         tracing::debug!(output_format = format_args!("{:?}", args.output_format));
         let pixel_format = image.pixel_format();
-        let output = std::fs::File::create(output).expect("failed to open output file");
+        let output = std::fs::File::create(output).map_err(Error::WriteImage)?;
         match args.output_format {
             OutputFormat::Png => {
                 let force_bit_depth = if let Some(encoding) = &args.target_colorspace {
@@ -161,7 +160,8 @@ pub fn handle_decode(args: DecodeArgs) {
                     force_bit_depth,
                     width,
                     height,
-                );
+                )
+                .map_err(Error::WriteImage)?;
             }
             OutputFormat::Png8 => {
                 write_png(
@@ -172,7 +172,8 @@ pub fn handle_decode(args: DecodeArgs) {
                     Some(png::BitDepth::Eight),
                     width,
                     height,
-                );
+                )
+                .map_err(Error::WriteImage)?;
             }
             OutputFormat::Png16 => {
                 write_png(
@@ -183,19 +184,22 @@ pub fn handle_decode(args: DecodeArgs) {
                     Some(png::BitDepth::Sixteen),
                     width,
                     height,
-                );
+                )
+                .map_err(Error::WriteImage)?;
             }
             OutputFormat::Npy => {
                 if args.icc_output.is_none() {
                     tracing::warn!("--icc-output is not set. Numpy buffer alone cannot be used to display image as its colorspace is unknown.");
                 }
 
-                write_npy(output, &image, &keyframes, width, height);
+                write_npy(output, &image, &keyframes, width, height).map_err(Error::WriteImage)?;
             }
         }
     } else {
         tracing::info!("No output path specified, skipping output encoding");
     };
+
+    Ok(())
 }
 
 fn write_png<W: Write>(
@@ -206,7 +210,7 @@ fn write_png<W: Write>(
     force_bit_depth: Option<png::BitDepth>,
     width: u32,
     height: u32,
-) {
+) -> std::io::Result<()> {
     // Color encoding information
     let source_icc = image.rendered_icc();
     let cicp = image.rendered_cicp();
@@ -248,21 +252,17 @@ fn write_png<W: Write>(
 
     encoder.validate_sequence(true);
 
-    let mut writer = encoder.write_header().expect("failed to write header");
+    let mut writer = encoder.write_header()?;
 
     tracing::debug!("Embedding ICC profile");
     let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&source_icc, 7);
     let mut iccp_chunk_data = vec![b'0', 0, 0];
     iccp_chunk_data.extend(compressed_icc);
-    writer
-        .write_chunk(png::chunk::iCCP, &iccp_chunk_data)
-        .expect("failed to write iCCP");
+    writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data)?;
 
     if let Some(cicp) = cicp {
         tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-        writer
-            .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
-            .expect("failed to write cICP");
+        writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)?;
     }
 
     tracing::debug!("Writing image data");
@@ -301,24 +301,27 @@ fn write_png<W: Write>(
                 b[0] = b0;
                 b[1] = b1;
             }
-            writer
-                .write_image_data(&buf)
-                .expect("failed to write frame");
+            writer.write_image_data(&buf)?;
         } else {
             let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels()];
             for (b, s) in buf.iter_mut().zip(fb.buf()) {
                 *b = (*s * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
-            writer
-                .write_image_data(&buf)
-                .expect("failed to write frame");
+            writer.write_image_data(&buf)?;
         }
     }
 
-    writer.finish().expect("failed to finish writing png");
+    writer.finish()?;
+    Ok(())
 }
 
-fn write_npy<W: Write>(output: W, image: &JxlImage, keyframes: &[Render], width: u32, height: u32) {
+fn write_npy<W: Write>(
+    output: W,
+    image: &JxlImage,
+    keyframes: &[Render],
+    width: u32,
+    height: u32,
+) -> std::io::Result<()> {
     let metadata = &image.image_header().metadata;
     let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let channels = {
@@ -335,18 +338,17 @@ fn write_npy<W: Write>(output: W, image: &JxlImage, keyframes: &[Render], width:
         width,
         channels,
     );
-    output
-        .write_all(&(header.len() as u16).to_le_bytes())
-        .unwrap();
-    output.write_all(header.as_bytes()).unwrap();
+    output.write_all(&(header.len() as u16).to_le_bytes())?;
+    output.write_all(header.as_bytes())?;
 
     tracing::debug!("Writing image data");
     for keyframe in keyframes {
         let fb = keyframe.image_all_channels();
         for sample in fb.buf() {
-            output.write_all(&sample.to_bits().to_le_bytes()).unwrap();
+            output.write_all(&sample.to_bits().to_le_bytes())?;
         }
     }
 
-    output.flush().unwrap();
+    output.flush()?;
+    Ok(())
 }

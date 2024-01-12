@@ -1,7 +1,7 @@
 use clap::Parser;
 use jxl_oxide_cli::{Args, Subcommands};
 
-fn main() {
+fn main() -> std::process::ExitCode {
     let Args {
         subcommand,
         globals,
@@ -21,19 +21,21 @@ fn main() {
         .with_env_filter(env_filter)
         .init();
 
-    match subcommand {
-        Some(Subcommands::Decode(args)) => {
-            jxl_oxide_cli::decode::handle_decode(args);
-        }
-        None => {
-            jxl_oxide_cli::decode::handle_decode(decode.unwrap());
-        }
-        Some(Subcommands::Info(args)) => {
-            jxl_oxide_cli::info::handle_info(args);
-        }
+    let result = match subcommand {
+        Some(Subcommands::Decode(args)) => jxl_oxide_cli::decode::handle_decode(args),
+        None => jxl_oxide_cli::decode::handle_decode(decode.unwrap()),
+        Some(Subcommands::Info(args)) => jxl_oxide_cli::info::handle_info(args),
         #[cfg(feature = "__devtools")]
         Some(Subcommands::GenerateFixture(args)) => {
             jxl_oxide_cli::generate_fixture::handle_generate_fixture(args);
+            Ok(())
         }
+    };
+
+    if let Err(e) = result {
+        tracing::error!("{e}");
+        std::process::ExitCode::FAILURE
+    } else {
+        std::process::ExitCode::SUCCESS
     }
 }

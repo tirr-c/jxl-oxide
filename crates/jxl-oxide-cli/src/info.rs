@@ -1,13 +1,13 @@
 use jxl_oxide::{color::*, frame::*, ColorEncodingWithProfile, JxlImage};
 
-use crate::commands::info::*;
+use crate::{commands::info::*, Error, Result};
 
-pub fn handle_info(args: InfoArgs) {
+pub fn handle_info(args: InfoArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle info subcommand").entered();
 
     let image = JxlImage::builder()
         .open(&args.input)
-        .expect("Failed to open file");
+        .map_err(Error::ReadJxl)?;
     let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
     let image_reader = image.reader();
@@ -170,6 +170,8 @@ pub fn handle_info(args: InfoArgs) {
     if !image.is_loading_done() {
         println!("Partial file");
     }
+
+    Ok(())
 }
 
 fn print_colour_encoding(encoding: &EnumColourEncoding, indent: &str) {
