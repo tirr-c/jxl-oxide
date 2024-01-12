@@ -223,8 +223,8 @@ pub fn copy_modular_groups(
         width: rwidth,
         height: rheight,
     } = region;
-    assert_eq!(rwidth as usize, buffer.width());
-    assert_eq!(rheight as usize, buffer.height());
+    assert!(buffer.width() >= rwidth as usize);
+    assert!(buffer.height() >= rheight as usize);
 
     let width = g.width();
     let height = g.height();
