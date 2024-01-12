@@ -8,18 +8,20 @@ fn main() -> std::process::ExitCode {
         decode,
     } = Args::parse();
 
-    let filter = if globals.verbose {
-        tracing::level_filters::LevelFilter::DEBUG
-    } else {
-        tracing::level_filters::LevelFilter::INFO
-    };
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(filter.into())
-        .from_env_lossy();
-    tracing_subscriber::fmt()
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
-        .with_env_filter(env_filter)
-        .init();
+    if !globals.quiet {
+        let filter = match globals.verbose {
+            0 => tracing::level_filters::LevelFilter::INFO,
+            1 => tracing::level_filters::LevelFilter::DEBUG,
+            2.. => tracing::level_filters::LevelFilter::TRACE,
+        };
+        let env_filter = tracing_subscriber::EnvFilter::builder()
+            .with_default_directive(filter.into())
+            .from_env_lossy();
+        tracing_subscriber::fmt()
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
+            .with_env_filter(env_filter)
+            .init();
+    }
 
     let result = match subcommand {
         Some(Subcommands::Decode(args)) => jxl_oxide_cli::decode::handle_decode(args),
