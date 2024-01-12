@@ -127,6 +127,15 @@ impl ContainerDetectingReader {
                                 bytes_left: header.size().map(|x| x as usize),
                             };
                         } else if tbox == ContainerBoxType::PARTIAL_CODESTREAM {
+                            if let Some(box_size) = header.size() {
+                                if box_size < 4 {
+                                    return Err(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        "jxlp box too small",
+                                    ));
+                                }
+                            }
+
                             if self.next_jxlp_index == u32::MAX {
                                 tracing::error!("jxlp box found after jxlc box");
                                 return Err(std::io::Error::new(

@@ -58,4 +58,5 @@ test_by_include!(
     ma_tree_multiple_frames_4,
     ma_tree_multiple_frames_5,
     modular_jpeg_upsampling,
+    container_small_jxlp,
 );
