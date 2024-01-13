@@ -49,3 +49,4 @@ __devtools = []
 [[bin]]
 name = "jxl-oxide"
 path = "src/main.rs"
+doc = false
