@@ -237,6 +237,7 @@ impl DequantMatrixParams {
             }),
             Dct2(params) => params.map(|params| {
                 let mut ret = vec![0.0f32; 64];
+                ret[0] = 1.0;
                 for (idx, val) in params.into_iter().enumerate() {
                     let shift = idx / 2;
                     let dim = 1usize << shift;
@@ -386,6 +387,16 @@ impl DequantMatrixParams {
         if need_recip {
             for w in weights.iter_mut().flatten() {
                 *w = 1.0 / *w;
+            }
+        }
+
+        for w in weights.iter().flatten() {
+            if !w.is_finite() || *w <= 0.0 {
+                tracing::error!(w, "Dequant matrix has infinite or non-positive element");
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "Dequant matrix has infinite or non-positive element",
+                )
+                .into());
             }
         }
 
