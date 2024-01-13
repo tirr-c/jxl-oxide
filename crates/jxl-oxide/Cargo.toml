@@ -69,7 +69,3 @@ features = ["getrandom", "small_rng"]
 version = "0.11.20"
 default-features = false
 features = ["blocking", "rustls-tls"]
-
-[[test]]
-name = "conformance"
-required-features = ["lcms2"]
