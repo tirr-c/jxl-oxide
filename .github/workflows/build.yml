@@ -39,10 +39,8 @@ jobs:
         with:
           name: jxl-oxide-cli-${{ steps.detect-host.outputs.host }}
           path: |
-            target/release/jxl-dec
-            target/release/jxl-dec.exe
-            target/release/jxl-info
-            target/release/jxl-info.exe
+            target/release/jxl-oxide
+            target/release/jxl-oxide.exe
   cross:
     name: Cross-compile
     runs-on: ubuntu-latest
@@ -78,5 +76,4 @@ jobs:
         with:
           name: jxl-oxide-cli-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/jxl-dec
-            target/${{ matrix.target }}/release/jxl-info
+            target/${{ matrix.target }}/release/jxl-oxide
