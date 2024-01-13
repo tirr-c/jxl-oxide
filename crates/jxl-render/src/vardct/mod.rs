@@ -462,8 +462,8 @@ pub fn copy_lf_dequant(
 ) {
     debug_assert!(extra_precision < 4);
     let precision_scale = 1i32 << (9 - extra_precision);
-    let scale_inv = quantizer.global_scale * quantizer.quant_lf;
-    let scale = m_lf * precision_scale as f32 / scale_inv as f32;
+    let scale_inv = quantizer.global_scale as u64 * quantizer.quant_lf as u64;
+    let scale = (m_lf as f64 * precision_scale as f64 / scale_inv as f64) as f32;
 
     let width = channel_data.width();
     let height = channel_data.height();
@@ -485,10 +485,10 @@ pub fn adaptive_lf_smoothing(
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
 ) -> Result<()> {
-    let scale_inv = quantizer.global_scale * quantizer.quant_lf;
-    let lf_x = 512.0 * lf_dequant.m_x_lf / scale_inv as f32;
-    let lf_y = 512.0 * lf_dequant.m_y_lf / scale_inv as f32;
-    let lf_b = 512.0 * lf_dequant.m_b_lf / scale_inv as f32;
+    let scale_inv = quantizer.global_scale as u64 * quantizer.quant_lf as u64;
+    let lf_x = (512.0 * lf_dequant.m_x_lf as f64 / scale_inv as f64) as f32;
+    let lf_y = (512.0 * lf_dequant.m_y_lf as f64 / scale_inv as f64) as f32;
+    let lf_b = (512.0 * lf_dequant.m_b_lf as f64 / scale_inv as f64) as f32;
 
     let [in_x, in_y, in_b] = lf_image else {
         panic!("lf_image should be three-channel image")
@@ -587,7 +587,7 @@ pub fn dequant_hf_varblock_grouped(
 
                 let need_transpose = dct_select.need_transpose();
                 let mul =
-                    65536.0 / (quantizer.global_scale as i32 * hf_mul) as f32 * qm_scale[channel];
+                    65536.0 / (quantizer.global_scale as f32 * hf_mul as f32) * qm_scale[channel];
 
                 let matrix = if need_transpose {
                     dequant_matrices.get_transposed(channel, dct_select)
