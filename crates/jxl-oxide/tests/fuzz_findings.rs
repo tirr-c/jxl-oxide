@@ -61,4 +61,5 @@ test_by_include!(
     container_small_jxlp,
     patchref_idx,
     modular_multiply_overflow,
+    dequant_matrix_zero,
 );
