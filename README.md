@@ -7,7 +7,7 @@ A spec-conforming JPEG XL decoder written in pure Rust[^1].
 
 jxl-oxide consists of small library crates (`jxl-bitstream`, `jxl-coding`, ...), a blanket library
 crate `jxl-oxide`, and a binary crate `jxl-oxide-cli`. If you want to use jxl-oxide in a terminal,
-install it using `cargo install`. Cargo will install two binaries, `jxl-dec` and `jxl-info`.
+install `jxl-oxie-cli` using `cargo install`. Cargo will install a binary named `jxl-oxide`.
 
 ```
 cargo install jxl-oxide-cli
