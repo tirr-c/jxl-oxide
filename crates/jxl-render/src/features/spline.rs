@@ -42,18 +42,15 @@ impl Spline {
         quant_spline: &QuantSpline,
         quant_adjust: i32,
         base_correlations_xb: Option<(f32, f32)>,
-        estimated_area: &mut u64,
     ) -> Self {
         let points: Vec<_> = quant_spline
             .quant_points
             .iter()
             .map(|&(x, y)| Point::new(x as f32, y as f32))
             .collect();
-        let manhattan_distance = quant_spline.manhattan_distance;
 
         let mut xyb_dct = [[0f32; 32]; 3];
         let mut sigma_dct = [0f32; 32];
-        let mut width_estimate = 0u64;
 
         let quant_adjust = quant_adjust as f32;
         let inverted_qa = if quant_adjust >= 0.0 {
@@ -76,35 +73,9 @@ impl Spline {
             xyb_dct[2][i] += corr_b * xyb_dct[1][i];
         }
 
-        // This block is only needed to check conformance with the levels
-        let log_color = {
-            let mut color_xyb = [0u64; 3];
-            for (color_xyb, xyb_dct) in color_xyb.iter_mut().zip(quant_spline.xyb_dct) {
-                *color_xyb = xyb_dct
-                    .into_iter()
-                    .map(|xyb_dct| (xyb_dct.abs() as f32 * inverted_qa).ceil() as u64)
-                    .sum();
-            }
-
-            color_xyb[0] += corr_x.abs().ceil() as u64 * color_xyb[1];
-            color_xyb[2] += corr_b.abs().ceil() as u64 * color_xyb[1];
-            u64::max(
-                1u64,
-                log2_ceil(1u64 + color_xyb.into_iter().max().unwrap()) as u64,
-            )
-        };
-
         for (sigma_dct, quant_sigma_dct) in sigma_dct.iter_mut().zip(quant_spline.sigma_dct) {
             *sigma_dct = quant_sigma_dct as f32 * CHANNEL_WEIGHTS[3] * inverted_qa;
-
-            let weight = u64::max(
-                1u64,
-                (quant_sigma_dct.abs() as f32 * inverted_qa).ceil() as u64,
-            );
-            width_estimate += weight * weight * log_color;
         }
-
-        *estimated_area += width_estimate * manhattan_distance;
 
         Spline {
             points,
@@ -212,36 +183,8 @@ pub fn render_spline(
 ) -> crate::Result<()> {
     let region = base_grid.region();
 
-    let mut estimated_area = 0u64;
-    let image_size = (frame_header.width * frame_header.height) as u64;
-
     for quant_spline in &splines.quant_splines {
-        let spline = Spline::dequant(
-            quant_spline,
-            splines.quant_adjust,
-            base_correlations_xb,
-            &mut estimated_area,
-        );
-        // Maximum total_estimated_area_reached for Level 10
-        let max_estimated_area = (1u64 << 42).min(1024 * image_size + (1u64 << 32));
-        if estimated_area > max_estimated_area {
-            tracing::error!(
-                estimated_area,
-                max_estimated_area,
-                "Too large estimated area for splines"
-            );
-            return Err(jxl_bitstream::Error::ProfileConformance(
-                "too large estimated area for splines",
-            )
-            .into());
-        }
-        // Maximum total_estimated_area_reached for Level 5
-        if estimated_area > (1u64 << 30).min(8 * image_size + (1u64 << 25)) {
-            tracing::warn!(
-                "Large estimated_area of splines, expect slower decoding: {}",
-                estimated_area
-            );
-        }
+        let spline = Spline::dequant(quant_spline, splines.quant_adjust, base_correlations_xb);
         tracing::trace!("{}", spline);
 
         let all_samples = spline.get_samples();
@@ -387,8 +330,4 @@ fn erf(x: f32) -> f32 {
     } else {
         result
     }
-}
-
-fn log2_ceil(x: u64) -> u32 {
-    x.next_power_of_two().trailing_zeros()
 }

@@ -62,4 +62,5 @@ test_by_include!(
     patchref_idx,
     modular_multiply_overflow,
     dequant_matrix_zero,
+    spline_coordinate,
 );
