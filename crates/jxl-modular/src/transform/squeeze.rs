@@ -1,18 +1,24 @@
 use jxl_grid::CutGrid;
 
-pub fn inverse_h(merged: &mut CutGrid<'_, i32>) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::arch::is_x86_feature_detected!("avx2") {
-            unsafe {
-                let mut remainder = inverse_h_avx2(merged);
-                inverse_h_base(&mut remainder);
-                return;
+use crate::Sample;
+
+pub fn inverse_h<S: Sample>(merged: &mut CutGrid<'_, S>) {
+    if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
+        todo!()
+    } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if std::arch::is_x86_feature_detected!("avx2") {
+                unsafe {
+                    let mut remainder = inverse_h_avx2(merged);
+                    inverse_h_base(&mut remainder);
+                    return;
+                }
             }
         }
-    }
 
-    inverse_h_base(merged)
+        inverse_h_base(merged)
+    }
 }
 
 fn inverse_h_base(merged: &mut CutGrid<'_, i32>) {
@@ -100,19 +106,23 @@ unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
     merged.split_vertical(h8 * 8).1
 }
 
-pub fn inverse_v(merged: &mut CutGrid<'_, i32>) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::arch::is_x86_feature_detected!("avx2") {
-            unsafe {
-                let mut remainder = inverse_v_avx2(merged);
-                inverse_v_base(&mut remainder);
-                return;
+pub fn inverse_v<S: Sample>(merged: &mut CutGrid<'_, S>) {
+    if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
+        todo!()
+    } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if std::arch::is_x86_feature_detected!("avx2") {
+                unsafe {
+                    let mut remainder = inverse_v_avx2(merged);
+                    inverse_v_base(&mut remainder);
+                    return;
+                }
             }
         }
-    }
 
-    inverse_v_base(merged)
+        inverse_v_base(merged)
+    }
 }
 
 fn inverse_v_base(merged: &mut CutGrid<'_, i32>) {

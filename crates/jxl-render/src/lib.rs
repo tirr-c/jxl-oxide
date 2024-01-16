@@ -25,7 +25,7 @@ mod state;
 mod vardct;
 pub use error::{Error, Result};
 pub use features::render_spot_color;
-use jxl_modular::{image::TransformedModularSubimage, MaConfig};
+use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
 use jxl_threadpool::JxlThreadPool;
 pub use region::{ImageWithRegion, Region};
 
@@ -37,7 +37,8 @@ pub struct RenderContext {
     pool: JxlThreadPool,
     tracker: Option<AllocTracker>,
     pub(crate) frames: Vec<Arc<IndexedFrame>>,
-    pub(crate) renders: Vec<Arc<FrameRenderHandle>>,
+    pub(crate) renders_wide: Vec<Arc<FrameRenderHandle<i32>>>,
+    pub(crate) renders_narrow: Vec<Arc<FrameRenderHandle<i16>>>,
     pub(crate) keyframes: Vec<usize>,
     pub(crate) keyframe_in_progress: Option<usize>,
     pub(crate) refcounts: Vec<usize>,
@@ -45,7 +46,8 @@ pub struct RenderContext {
     pub(crate) lf_frame: [usize; 4],
     pub(crate) reference: [usize; 4],
     pub(crate) loading_frame: Option<IndexedFrame>,
-    pub(crate) loading_render_cache: Option<RenderCache>,
+    pub(crate) loading_render_cache_wide: Option<RenderCache<i32>>,
+    pub(crate) loading_render_cache_narrow: Option<RenderCache<i16>>,
     pub(crate) loading_region: Option<Region>,
     embedded_icc: Vec<u8>,
     requested_color_encoding: ColorEncodingWithProfile,
@@ -112,7 +114,8 @@ impl RenderContextBuilder {
             tracker: self.tracker,
             pool: self.pool.unwrap_or_else(JxlThreadPool::none),
             frames: Vec::new(),
-            renders: Vec::new(),
+            renders_wide: Vec::new(),
+            renders_narrow: Vec::new(),
             keyframes: Vec::new(),
             keyframe_in_progress: None,
             refcounts: Vec::new(),
@@ -120,7 +123,8 @@ impl RenderContextBuilder {
             lf_frame: [usize::MAX; 4],
             reference: [usize::MAX; 4],
             loading_frame: None,
-            loading_render_cache: None,
+            loading_render_cache_wide: None,
+            loading_render_cache_narrow: None,
             loading_region: None,
             embedded_icc: self.embedded_icc,
             requested_color_encoding,
@@ -189,6 +193,11 @@ impl RenderContext {
         &self.image_header.metadata
     }
 
+    #[inline]
+    fn narrow_modular(&self) -> bool {
+        self.image_header.metadata.modular_16bit_buffers
+    }
+
     fn preserve_current_frame(&mut self) {
         let Some(frame) = self.loading_frame.take() else {
             return;
@@ -239,17 +248,28 @@ impl RenderContext {
         }
 
         let frame = Arc::new(frame);
-        let render_op = self.render_op(Arc::clone(&frame), deps);
-        let handle = if let Some(cache) = self.loading_render_cache.take() {
-            let region = self.loading_region.take().unwrap();
-            FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
+        if self.narrow_modular() {
+            let render_op = self.render_op_narrow(Arc::clone(&frame), deps);
+            let handle = if let Some(cache) = self.loading_render_cache_narrow.take() {
+                let region = self.loading_region.take().unwrap();
+                FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
+            } else {
+                FrameRenderHandle::new(Arc::clone(&frame), render_op)
+            };
+            self.renders_narrow.push(Arc::new(handle));
         } else {
-            FrameRenderHandle::new(Arc::clone(&frame), render_op)
-        };
+            let render_op = self.render_op_wide(Arc::clone(&frame), deps);
+            let handle = if let Some(cache) = self.loading_render_cache_wide.take() {
+                let region = self.loading_region.take().unwrap();
+                FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
+            } else {
+                FrameRenderHandle::new(Arc::clone(&frame), render_op)
+            };
+            self.renders_wide.push(Arc::new(handle));
+        }
 
         self.frames.push(Arc::clone(&frame));
         self.frame_deps.push(deps);
-        self.renders.push(Arc::new(handle));
     }
 
     fn loading_frame(&self) -> Option<&IndexedFrame> {
@@ -346,20 +366,40 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_op(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp {
-        let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
+    fn render_op_narrow(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i16> {
         let reference_frames = ReferenceFrames {
             lf: (deps.lf != usize::MAX).then(|| Reference {
                 frame: Arc::clone(&self.frames[deps.lf]),
-                image: Arc::clone(&self.renders[deps.lf]),
+                image: Arc::clone(&self.renders_narrow[deps.lf]),
             }),
             refs: deps.ref_slots.map(|r| {
                 (r != usize::MAX).then(|| Reference {
                     frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders[r]),
+                    image: Arc::clone(&self.renders_narrow[r]),
                 })
             }),
         };
+        self.render_op(frame, reference_frames)
+    }
+
+    fn render_op_wide(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i32> {
+        let reference_frames = ReferenceFrames {
+            lf: (deps.lf != usize::MAX).then(|| Reference {
+                frame: Arc::clone(&self.frames[deps.lf]),
+                image: Arc::clone(&self.renders_wide[deps.lf]),
+            }),
+            refs: deps.ref_slots.map(|r| {
+                (r != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[r]),
+                    image: Arc::clone(&self.renders_wide[r]),
+                })
+            }),
+        };
+        self.render_op(frame, reference_frames)
+    }
+
+    fn render_op<S: Sample>(&self, frame: Arc<IndexedFrame>, reference_frames: ReferenceFrames<S>) -> RenderOp<S> {
+        let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
 
         let pool = self.pool.clone();
         Arc::new(move |mut state, image_region| {
@@ -473,10 +513,17 @@ fn image_region_to_frame(
 
 impl RenderContext {
     fn spawn_renderer(&self, index: usize, image_region: Option<Region>) {
-        let render_handle = Arc::clone(&self.renders[index]);
-        self.pool.spawn(move || {
-            render_handle.run(image_region);
-        });
+        if self.narrow_modular() {
+            let render_handle = Arc::clone(&self.renders_narrow[index]);
+            self.pool.spawn(move || {
+                render_handle.run(image_region);
+            });
+        } else {
+            let render_handle = Arc::clone(&self.renders_wide[index]);
+            self.pool.spawn(move || {
+                render_handle.run(image_region);
+            });
+        }
     }
 
     fn render_by_index(
@@ -501,7 +548,11 @@ impl RenderContext {
             }
         }
 
-        self.renders[index].run_with_image(image_region)
+        if self.narrow_modular() {
+            self.renders_narrow[index].run_with_image(image_region)
+        } else {
+            self.renders_wide[index].run_with_image(image_region)
+        }
     }
 
     /// Renders the first keyframe.
@@ -571,7 +622,12 @@ impl RenderContext {
 
         let frame = self.loading_frame().unwrap();
         let header = frame.header();
-        if frame.try_parse_lf_global().is_none() {
+        let lf_global_failed = if self.narrow_modular() {
+            frame.try_parse_lf_global::<i16>().is_none()
+        } else {
+            frame.try_parse_lf_global::<i32>().is_none()
+        };
+        if lf_global_failed {
             return Err(Error::IncompleteFrame);
         }
 
@@ -586,41 +642,79 @@ impl RenderContext {
         }
 
         tracing::debug!(?image_region, ?frame_region, "Rendering loading frame");
-        let mut cache = self.loading_render_cache.take().unwrap_or_else(|| {
+        let image = if self.narrow_modular() {
+            let mut cache = self.loading_render_cache_narrow.take().unwrap_or_else(|| {
+                let frame = self.loading_frame().unwrap();
+                RenderCache::new(frame)
+            });
+
+            let reference_frames = ReferenceFrames {
+                lf: (lf_frame_idx != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[lf_frame_idx]),
+                    image: Arc::clone(&self.renders_narrow[lf_frame_idx]),
+                }),
+                refs: self.reference.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_narrow[r]),
+                    })
+                }),
+            };
+
             let frame = self.loading_frame().unwrap();
-            RenderCache::new(frame)
-        });
+            let image_result = inner::render_frame(
+                frame,
+                reference_frames,
+                &mut cache,
+                image_region,
+                self.pool.clone(),
+                self.get_previous_frames_visibility(frame),
+            );
+            match image_result {
+                Ok(image) => image,
+                Err(e) => {
+                    self.loading_render_cache_narrow = Some(cache);
+                    return Err(e);
+                }
+            }
+        } else {
+            let mut cache = self.loading_render_cache_wide.take().unwrap_or_else(|| {
+                let frame = self.loading_frame().unwrap();
+                RenderCache::new(frame)
+            });
 
-        let reference_frames = ReferenceFrames {
-            lf: (lf_frame_idx != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.frames[lf_frame_idx]),
-                image: Arc::clone(&self.renders[lf_frame_idx]),
-            }),
-            refs: self.reference.map(|r| {
-                (r != usize::MAX).then(|| Reference {
-                    frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders[r]),
-                })
-            }),
-        };
+            let reference_frames = ReferenceFrames {
+                lf: (lf_frame_idx != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[lf_frame_idx]),
+                    image: Arc::clone(&self.renders_wide[lf_frame_idx]),
+                }),
+                refs: self.reference.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_wide[r]),
+                    })
+                }),
+            };
 
-        let frame = self.loading_frame().unwrap();
-        let image_result = inner::render_frame(
-            frame,
-            reference_frames,
-            &mut cache,
-            image_region,
-            self.pool.clone(),
-            self.get_previous_frames_visibility(frame),
-        );
-        let image = match image_result {
-            Ok(image) => image,
-            Err(e) => {
-                self.loading_render_cache = Some(cache);
-                return Err(e);
+            let frame = self.loading_frame().unwrap();
+            let image_result = inner::render_frame(
+                frame,
+                reference_frames,
+                &mut cache,
+                image_region,
+                self.pool.clone(),
+                self.get_previous_frames_visibility(frame),
+            );
+            match image_result {
+                Ok(image) => image,
+                Err(e) => {
+                    self.loading_render_cache_wide = Some(cache);
+                    return Err(e);
+                }
             }
         };
 
+        let frame = self.loading_frame().unwrap();
         if frame.header().lf_level > 0 {
             let frame_region = image_region_to_frame(frame, image_region, true);
             Ok(upsample_lf(&image, frame, frame_region)?)
@@ -719,20 +813,20 @@ impl RenderContext {
     }
 }
 
-fn load_lf_groups(
+fn load_lf_groups<S: Sample>(
     frame: &IndexedFrame,
     lf_global_vardct: Option<&LfGlobalVarDct>,
-    lf_groups: &mut std::collections::HashMap<u32, LfGroup>,
+    lf_groups: &mut std::collections::HashMap<u32, LfGroup<S>>,
     global_ma_config: Option<&MaConfig>,
-    mlf_groups: Vec<TransformedModularSubimage>,
+    mlf_groups: Vec<TransformedModularSubimage<S>>,
     lf_region: Region,
     pool: &JxlThreadPool,
 ) -> Result<()> {
     #[derive(Default)]
-    struct LfGroupJob<'modular> {
+    struct LfGroupJob<'modular, S: Sample> {
         idx: u32,
-        lf_group: Option<LfGroup>,
-        modular: Option<TransformedModularSubimage<'modular>>,
+        lf_group: Option<LfGroup<S>>,
+        modular: Option<TransformedModularSubimage<'modular, S>>,
     }
 
     let frame_header = frame.header();
@@ -888,13 +982,13 @@ impl FrameDependence {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ReferenceFrames {
-    pub(crate) lf: Option<Reference>,
-    pub(crate) refs: [Option<Reference>; 4],
+struct ReferenceFrames<S: Sample> {
+    pub(crate) lf: Option<Reference<S>>,
+    pub(crate) refs: [Option<Reference<S>>; 4],
 }
 
 #[derive(Debug, Clone)]
-struct Reference {
+struct Reference<S: Sample> {
     pub(crate) frame: Arc<IndexedFrame>,
-    pub(crate) image: Arc<FrameRenderHandle>,
+    pub(crate) image: Arc<FrameRenderHandle<S>>,
 }

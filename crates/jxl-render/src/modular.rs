@@ -1,16 +1,16 @@
 use jxl_frame::{data::GlobalModular, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift};
+use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 
 use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, RenderCache, Result};
 
-pub(crate) fn render_modular(
+pub(crate) fn render_modular<S: Sample>(
     frame: &IndexedFrame,
-    cache: &mut RenderCache,
+    cache: &mut RenderCache<S>,
     region: Region,
     pool: &jxl_threadpool::JxlThreadPool,
-) -> Result<(ImageWithRegion, GlobalModular)> {
+) -> Result<(ImageWithRegion, GlobalModular<S>)> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
     let tracker = frame.alloc_tracker();
@@ -62,10 +62,10 @@ pub(crate) fn render_modular(
                 }
             });
 
-            struct PassGroupJob<'modular> {
+            struct PassGroupJob<'modular, S: Sample> {
                 pass_idx: u32,
                 group_idx: u32,
-                modular: TransformedModularSubimage<'modular>,
+                modular: TransformedModularSubimage<'modular, S>,
             }
 
             let group_dim = frame_header.group_dim();
@@ -189,9 +189,9 @@ pub(crate) fn render_modular(
 }
 
 #[inline]
-pub fn compute_modular_region(
+pub fn compute_modular_region<S: Sample>(
     frame_header: &FrameHeader,
-    gmodular: &GlobalModular,
+    gmodular: &GlobalModular<S>,
     region: Region,
     is_lf: bool,
 ) -> Region {
@@ -210,8 +210,8 @@ pub fn compute_modular_region(
     }
 }
 
-pub fn copy_modular_groups(
-    g: &SimpleGrid<i32>,
+pub fn copy_modular_groups<S: Sample>(
+    g: &SimpleGrid<S>,
     buffer: &mut SimpleGrid<f32>,
     region: Region,
     bit_depth: BitDepth,
@@ -273,11 +273,11 @@ pub fn copy_modular_groups(
         let buffer_row = &mut buffer_row[col_begin..col_end];
         if xyb_encoded {
             for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = s as f32;
+                *v = s.to_i32() as f32;
             }
         } else {
             for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = bit_depth.parse_integer_sample(s);
+                *v = bit_depth.parse_integer_sample(s.to_i32());
             }
         }
     }

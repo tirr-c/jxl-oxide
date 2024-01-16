@@ -1,6 +1,6 @@
 use jxl_bitstream::Bitstream;
 use jxl_grid::{AllocTracker, CutGrid};
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift, MaConfig};
+use jxl_modular::{image::TransformedModularSubimage, ChannelShift, MaConfig, Sample};
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{write_hf_coeff, HfCoeffParams};
 
@@ -8,13 +8,13 @@ use super::{HfGlobal, LfGlobalVarDct, LfGroup};
 use crate::{FrameHeader, Result};
 
 #[derive(Debug)]
-pub struct PassGroupParams<'frame, 'buf, 'g, 'tracker> {
+pub struct PassGroupParams<'frame, 'buf, 'g, 'tracker, S: Sample> {
     pub frame_header: &'frame FrameHeader,
-    pub lf_group: &'frame LfGroup,
+    pub lf_group: &'frame LfGroup<S>,
     pub pass_idx: u32,
     pub group_idx: u32,
     pub global_ma_config: Option<&'frame MaConfig>,
-    pub modular: Option<TransformedModularSubimage<'g>>,
+    pub modular: Option<TransformedModularSubimage<'g, S>>,
     pub vardct: Option<PassGroupParamsVardct<'frame, 'buf, 'g>>,
     pub allow_partial: bool,
     pub tracker: Option<&'tracker AllocTracker>,
@@ -28,7 +28,7 @@ pub struct PassGroupParamsVardct<'frame, 'buf, 'g> {
     pub hf_coeff_output: &'buf mut [CutGrid<'g, f32>; 3],
 }
 
-pub fn decode_pass_group(bitstream: &mut Bitstream, params: PassGroupParams) -> Result<()> {
+pub fn decode_pass_group<S: Sample>(bitstream: &mut Bitstream, params: PassGroupParams<S>) -> Result<()> {
     let PassGroupParams {
         frame_header,
         lf_group,
@@ -133,13 +133,13 @@ pub fn decode_pass_group(bitstream: &mut Bitstream, params: PassGroupParams) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn decode_pass_group_modular(
+pub fn decode_pass_group_modular<S: Sample>(
     bitstream: &mut Bitstream,
     frame_header: &FrameHeader,
     global_ma_config: Option<&MaConfig>,
     pass_idx: u32,
     group_idx: u32,
-    modular: TransformedModularSubimage,
+    modular: TransformedModularSubimage<S>,
     allow_partial: bool,
     tracker: Option<&AllocTracker>,
     pool: &JxlThreadPool,

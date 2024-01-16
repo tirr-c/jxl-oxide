@@ -1,16 +1,16 @@
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_grid::AllocTracker;
-use jxl_modular::{image::TransformedModularSubimage, MaConfig};
+use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
 use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
 use crate::{filter::EdgePreservingFilter, header::Encoding, FrameHeader, Result};
 
 #[derive(Debug)]
-pub struct LfGroupParams<'a, 'dest, 'tracker> {
+pub struct LfGroupParams<'a, 'dest, 'tracker, S: Sample> {
     pub frame_header: &'a FrameHeader,
     pub quantizer: Option<&'a Quantizer>,
     pub global_ma_config: Option<&'a MaConfig>,
-    pub mlf_group: Option<TransformedModularSubimage<'dest>>,
+    pub mlf_group: Option<TransformedModularSubimage<'dest, S>>,
     pub lf_group_idx: u32,
     pub allow_partial: bool,
     pub tracker: Option<&'tracker AllocTracker>,
@@ -18,16 +18,16 @@ pub struct LfGroupParams<'a, 'dest, 'tracker> {
 }
 
 #[derive(Debug)]
-pub struct LfGroup {
-    pub lf_coeff: Option<LfCoeff>,
+pub struct LfGroup<S: Sample> {
+    pub lf_coeff: Option<LfCoeff<S>>,
     pub hf_meta: Option<HfMetadata>,
     pub partial: bool,
 }
 
-impl Bundle<LfGroupParams<'_, '_, '_>> for LfGroup {
+impl<S: Sample> Bundle<LfGroupParams<'_, '_, '_, S>> for LfGroup<S> {
     type Error = crate::Error;
 
-    fn parse(bitstream: &mut Bitstream, params: LfGroupParams) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, params: LfGroupParams<S>) -> Result<Self> {
         let LfGroupParams {
             frame_header,
             global_ma_config,

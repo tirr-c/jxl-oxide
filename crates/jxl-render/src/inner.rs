@@ -7,6 +7,7 @@ use jxl_frame::{
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
+use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
@@ -16,10 +17,10 @@ use crate::{
     vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };
 
-pub(crate) fn render_frame(
+pub(crate) fn render_frame<S: Sample>(
     frame: &IndexedFrame,
-    reference_frames: ReferenceFrames,
-    cache: &mut RenderCache,
+    reference_frames: ReferenceFrames<S>,
+    cache: &mut RenderCache<S>,
     image_region: Option<Region>,
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
@@ -214,10 +215,10 @@ fn upsample_color_channels(
     })
 }
 
-fn append_extra_channels(
+fn append_extra_channels<S: Sample>(
     frame: &IndexedFrame,
     fb: &mut ImageWithRegion,
-    gmodular: GlobalModular,
+    gmodular: GlobalModular<S>,
     original_region: Region,
 ) -> Result<()> {
     let fb_region = fb.region();
@@ -268,12 +269,12 @@ fn append_extra_channels(
     Ok(())
 }
 
-fn render_features(
+fn render_features<S: Sample>(
     frame: &IndexedFrame,
     image_region: Option<Region>,
     grid: &mut ImageWithRegion,
-    reference_grids: [Option<Reference>; 4],
-    cache: &mut RenderCache,
+    reference_grids: [Option<Reference<S>>; 4],
+    cache: &mut RenderCache<S>,
     visible_frames_num: usize,
     invisible_frames_num: usize,
 ) -> Result<()> {

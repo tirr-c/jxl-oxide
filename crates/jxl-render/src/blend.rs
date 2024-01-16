@@ -5,6 +5,7 @@ use jxl_frame::{
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
+use jxl_modular::Sample;
 
 use crate::{
     region::{ImageWithRegion, Region},
@@ -139,10 +140,10 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
     (source, alpha)
 }
 
-pub(crate) fn blend(
+pub(crate) fn blend<S: Sample>(
     image_header: &ImageHeader,
     image_region: Option<Region>,
-    reference_grids: [Option<Reference>; 4],
+    reference_grids: [Option<Reference<S>>; 4],
     new_frame: &Frame,
     new_grid: &ImageWithRegion,
 ) -> Result<ImageWithRegion> {

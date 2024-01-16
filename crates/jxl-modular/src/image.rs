@@ -5,26 +5,26 @@ use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 use crate::{
     ma::{FlatMaTree, MaTreeLeafClustered},
     predictor::{Predictor, PredictorState},
-    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
+    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result, sample::Sample,
 };
 
 #[derive(Debug)]
-pub enum TransformedGrid<'dest> {
-    Single(CutGrid<'dest, i32>),
+pub enum TransformedGrid<'dest, S: Sample> {
+    Single(CutGrid<'dest, S>),
     Merged {
-        leader: CutGrid<'dest, i32>,
-        members: Vec<TransformedGrid<'dest>>,
+        leader: CutGrid<'dest, S>,
+        members: Vec<TransformedGrid<'dest, S>>,
     },
 }
 
-impl<'dest> From<CutGrid<'dest, i32>> for TransformedGrid<'dest> {
-    fn from(value: CutGrid<'dest, i32>) -> Self {
+impl<'dest, S: Sample> From<CutGrid<'dest, S>> for TransformedGrid<'dest, S> {
+    fn from(value: CutGrid<'dest, S>) -> Self {
         Self::Single(value)
     }
 }
 
-impl TransformedGrid<'_> {
-    fn reborrow(&mut self) -> TransformedGrid {
+impl<S: Sample> TransformedGrid<'_, S> {
+    fn reborrow(&mut self) -> TransformedGrid<S> {
         match self {
             TransformedGrid::Single(g) => TransformedGrid::Single(g.split_horizontal(0).1),
             TransformedGrid::Merged { leader, .. } => {
@@ -34,22 +34,22 @@ impl TransformedGrid<'_> {
     }
 }
 
-impl<'dest> TransformedGrid<'dest> {
-    pub(crate) fn grid(&self) -> &CutGrid<'dest, i32> {
+impl<'dest, S: Sample> TransformedGrid<'dest, S> {
+    pub(crate) fn grid(&self) -> &CutGrid<'dest, S> {
         match self {
             Self::Single(g) => g,
             Self::Merged { leader, .. } => leader,
         }
     }
 
-    pub(crate) fn grid_mut(&mut self) -> &mut CutGrid<'dest, i32> {
+    pub(crate) fn grid_mut(&mut self) -> &mut CutGrid<'dest, S> {
         match self {
             Self::Single(g) => g,
             Self::Merged { leader, .. } => leader,
         }
     }
 
-    pub(crate) fn merge(&mut self, members: Vec<TransformedGrid<'dest>>) {
+    pub(crate) fn merge(&mut self, members: Vec<TransformedGrid<'dest, S>>) {
         if members.is_empty() {
             return;
         }
@@ -69,7 +69,7 @@ impl<'dest> TransformedGrid<'dest> {
         }
     }
 
-    pub(crate) fn unmerge(&mut self, count: usize) -> Vec<TransformedGrid<'dest>> {
+    pub(crate) fn unmerge(&mut self, count: usize) -> Vec<TransformedGrid<'dest, S>> {
         if count == 0 {
             return Vec::new();
         }
@@ -91,17 +91,17 @@ impl<'dest> TransformedGrid<'dest> {
 }
 
 #[derive(Debug)]
-pub struct ModularImageDestination {
+pub struct ModularImageDestination<S: Sample> {
     header: ModularHeader,
     ma_ctx: MaConfig,
     group_dim: u32,
     bit_depth: u32,
     channels: ModularChannels,
-    meta_channels: Vec<SimpleGrid<i32>>,
-    image_channels: Vec<SimpleGrid<i32>>,
+    meta_channels: Vec<SimpleGrid<S>>,
+    image_channels: Vec<SimpleGrid<S>>,
 }
 
-impl ModularImageDestination {
+impl<S: Sample> ModularImageDestination<S> {
     pub(crate) fn new(
         header: ModularHeader,
         ma_ctx: MaConfig,
@@ -154,11 +154,11 @@ impl ModularImageDestination {
         })
     }
 
-    pub fn image_channels(&self) -> &[SimpleGrid<i32>] {
+    pub fn image_channels(&self) -> &[SimpleGrid<S>] {
         &self.image_channels
     }
 
-    pub fn into_image_channels(self) -> Vec<SimpleGrid<i32>> {
+    pub fn into_image_channels(self) -> Vec<SimpleGrid<S>> {
         self.image_channels
     }
 
@@ -171,8 +171,8 @@ impl ModularImageDestination {
     }
 }
 
-impl ModularImageDestination {
-    pub fn prepare_gmodular(&mut self) -> Result<TransformedModularSubimage> {
+impl<S: Sample> ModularImageDestination<S> {
+    pub fn prepare_gmodular(&mut self) -> Result<TransformedModularSubimage<S>> {
         assert_ne!(self.group_dim, 0);
 
         let group_dim = self.group_dim;
@@ -200,7 +200,7 @@ impl ModularImageDestination {
     pub fn prepare_groups(
         &mut self,
         pass_shifts: &std::collections::BTreeMap<u32, (i32, i32)>,
-    ) -> Result<TransformedGlobalModular> {
+    ) -> Result<TransformedGlobalModular<S>> {
         assert_ne!(self.group_dim, 0);
 
         let num_passes = *pass_shifts.last_key_value().unwrap().0 as usize + 1;
@@ -277,7 +277,7 @@ impl ModularImageDestination {
         })
     }
 
-    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<S>> {
         let mut channels = self.channels.clone();
         let mut meta_channel_grids = self
             .meta_channels
@@ -317,24 +317,24 @@ impl ModularImageDestination {
 }
 
 #[derive(Debug)]
-pub struct TransformedGlobalModular<'dest> {
-    pub lf_groups: Vec<TransformedModularSubimage<'dest>>,
-    pub pass_groups: Vec<Vec<TransformedModularSubimage<'dest>>>,
+pub struct TransformedGlobalModular<'dest, S: Sample> {
+    pub lf_groups: Vec<TransformedModularSubimage<'dest, S>>,
+    pub pass_groups: Vec<Vec<TransformedModularSubimage<'dest, S>>>,
 }
 
 #[derive(Debug)]
-pub struct TransformedModularSubimage<'dest> {
+pub struct TransformedModularSubimage<'dest, S: Sample> {
     header: ModularHeader,
     ma_ctx: MaConfig,
     bit_depth: u32,
     nb_meta_channels: usize,
     channel_info: Vec<ModularChannelInfo>,
     channel_indices: Vec<usize>,
-    grid: Vec<TransformedGrid<'dest>>,
+    grid: Vec<TransformedGrid<'dest, S>>,
     partial: bool,
 }
 
-impl<'dest> TransformedModularSubimage<'dest> {
+impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
     fn empty(header: &ModularHeader, ma_ctx: &MaConfig, bit_depth: u32) -> Self {
         Self {
             header: header.clone(),
@@ -349,13 +349,13 @@ impl<'dest> TransformedModularSubimage<'dest> {
     }
 }
 
-impl<'dest> TransformedModularSubimage<'dest> {
+impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
     pub fn recursive(
         self,
         bitstream: &mut Bitstream,
         global_ma_config: Option<&MaConfig>,
         tracker: Option<&AllocTracker>,
-    ) -> Result<RecursiveModularImage<'dest>> {
+    ) -> Result<RecursiveModularImage<'dest, S>> {
         let channels = crate::ModularChannels {
             info: self.channel_info,
             nb_meta_channels: 0,
@@ -389,20 +389,20 @@ impl<'dest> TransformedModularSubimage<'dest> {
     }
 }
 
-impl<'dest> TransformedModularSubimage<'dest> {
+impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
     fn decode_channel_loop(
         &mut self,
         stream_index: u32,
         mut loop_fn: impl FnMut(
             usize,
-            &mut CutGrid<i32>,
-            &[&CutGrid<i32>],
+            &mut CutGrid<S>,
+            &[&CutGrid<S>],
             FlatMaTree,
             &crate::predictor::WpHeader,
         ) -> Result<()>,
     ) -> Result<()> {
         let wp_header = &self.header.wp_params;
-        let mut prev: Vec<(&ModularChannelInfo, &CutGrid<'dest, i32>)> = Vec::new();
+        let mut prev: Vec<(&ModularChannelInfo, &CutGrid<'dest, S>)> = Vec::new();
         for (i, (info, grid)) in self.channel_info.iter().zip(&mut self.grid).enumerate() {
             if info.width == 0 || info.height == 0 {
                 continue;
@@ -490,7 +490,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             .wrapping_add(offset);
                         for y in 0..height {
                             for x in 0..width {
-                                *grid.get_mut(x, y) = value;
+                                *grid.get_mut(x, y) = S::from_i32(value);
                             }
                         }
                     } else {
@@ -502,7 +502,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                                 let value = unpack_signed(token)
                                     .wrapping_mul(multiplier as i32)
                                     .wrapping_add(offset);
-                                *grid.get_mut(x, y) = value;
+                                *grid.get_mut(x, y) = S::from_i32(value);
                             }
                         }
                     }
@@ -521,7 +521,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             let token =
                                 no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = value;
+                            *grid.get_mut(x, y) = S::from_i32(value);
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -588,7 +588,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                             let value = unpack_signed(token)
                                 .wrapping_mul(multiplier as i32)
                                 .wrapping_add(offset);
-                            *grid.get_mut(x, y) = value;
+                            *grid.get_mut(x, y) = S::from_i32(value);
                         }
                     }
                     return Ok(());
@@ -609,7 +609,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                                 dist_multiplier,
                             )?;
                             let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = value;
+                            *grid.get_mut(x, y) = S::from_i32(value);
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -684,7 +684,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
                         for x in 0..width {
                             let token = next(cluster)?;
                             let value = token.wrapping_mul(multiplier as i32).wrapping_add(offset);
-                            *grid.get_mut(x, y) = value;
+                            *grid.get_mut(x, y) = S::from_i32(value);
                         }
                     }
                     return Ok(());
@@ -701,7 +701,7 @@ impl<'dest> TransformedModularSubimage<'dest> {
 
                             let token = next(cluster)?;
                             let value = ((token as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = value;
+                            *grid.get_mut(x, y) = S::from_i32(value);
                             *prev = value;
                             nw = n;
                             w = value as i64;
@@ -724,12 +724,12 @@ impl<'dest> TransformedModularSubimage<'dest> {
     }
 }
 
-fn decode_channel_slow(
+fn decode_channel_slow<S: Sample>(
     next: &mut impl FnMut(u8) -> Result<i32>,
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState,
-    grid: &mut CutGrid<i32>,
-    prev_rev: &[&CutGrid<i32>],
+    grid: &mut CutGrid<S>,
+    prev_rev: &[&CutGrid<S>],
 ) -> Result<()> {
     let width = grid.width();
     let height = grid.height();
@@ -739,14 +739,14 @@ fn decode_channel_slow(
     for y in 0..height {
         for x in 0..width {
             for (grid, sample) in prev_rev.iter().zip(&mut prev_channel_samples_rev) {
-                *sample = grid.get(x, y);
+                *sample = grid.get(x, y).to_i32();
             }
 
             let properties = predictor.properties(&prev_channel_samples_rev);
             let (diff, predictor) = ma_tree.decode_sample_rle(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
             let true_value = (diff as i64 + sample_prediction) as i32;
-            *grid.get_mut(x, y) = true_value;
+            *grid.get_mut(x, y) = S::from_i32(true_value);
             properties.record(true_value);
         }
     }
@@ -755,17 +755,17 @@ fn decode_channel_slow(
 }
 
 #[derive(Debug)]
-pub struct RecursiveModularImage<'dest> {
+pub struct RecursiveModularImage<'dest, S: Sample> {
     header: ModularHeader,
     ma_ctx: MaConfig,
     bit_depth: u32,
     channels: ModularChannels,
-    meta_channels: Vec<SimpleGrid<i32>>,
-    image_channels: Vec<TransformedGrid<'dest>>,
+    meta_channels: Vec<SimpleGrid<S>>,
+    image_channels: Vec<TransformedGrid<'dest, S>>,
 }
 
-impl<'dest> RecursiveModularImage<'dest> {
-    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage> {
+impl<'dest, S: Sample> RecursiveModularImage<'dest, S> {
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<S>> {
         let mut channels = self.channels.clone();
         let mut meta_channel_grids = self
             .meta_channels
