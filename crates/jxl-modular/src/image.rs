@@ -1,4 +1,4 @@
-use jxl_bitstream::{unpack_signed, Bitstream};
+use jxl_bitstream::Bitstream;
 use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
@@ -485,12 +485,10 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 if predictor == Predictor::Zero {
                     if let Some(token) = no_lz77_decoder.single_token(cluster) {
                         tracing::trace!("Single token in cluster: hyper fast path");
-                        let value = unpack_signed(token)
-                            .wrapping_mul(multiplier as i32)
-                            .wrapping_add(offset);
+                        let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
                         for y in 0..height {
                             for x in 0..width {
-                                *grid.get_mut(x, y) = S::from_i32(value);
+                                *grid.get_mut(x, y) = value;
                             }
                         }
                     } else {
@@ -499,10 +497,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                             for x in 0..width {
                                 let token =
                                     no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                                let value = unpack_signed(token)
-                                    .wrapping_mul(multiplier as i32)
-                                    .wrapping_add(offset);
-                                *grid.get_mut(x, y) = S::from_i32(value);
+                                let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                                *grid.get_mut(x, y) = value;
                             }
                         }
                     }
@@ -510,21 +506,21 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("Quite fast path");
-                    let mut prev_row = vec![0i32; width];
+                    let mut prev_row = vec![S::default(); width];
                     for y in 0..height {
-                        let mut w = prev_row[0] as i64;
+                        let mut w = prev_row[0].to_i64();
                         let mut nw = w;
                         for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { *prev as i64 };
+                            let n = if y == 0 { w } else { prev.to_i64() };
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
                             let token =
                                 no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                            let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = S::from_i32(value);
+                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
-                            w = value as i64;
+                            w = value.to_i64();
                         }
                     }
                     return Ok(());
@@ -539,9 +535,9 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 prev_rev.len(),
                 wp_header,
             );
-            let mut next = |cluster: u8| -> Result<i32> {
+            let mut next = |cluster: u8| -> Result<S> {
                 let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                Ok(unpack_signed(token))
+                Ok(S::unpack_signed_u32(token))
             };
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
         })?;
@@ -585,22 +581,20 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 cluster,
                                 dist_multiplier,
                             )?;
-                            let value = unpack_signed(token)
-                                .wrapping_mul(multiplier as i32)
-                                .wrapping_add(offset);
-                            *grid.get_mut(x, y) = S::from_i32(value);
+                            let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                            *grid.get_mut(x, y) = value;
                         }
                     }
                     return Ok(());
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("Quite fast path");
-                    let mut prev_row = vec![0i32; width];
+                    let mut prev_row = vec![S::default(); width];
                     for y in 0..height {
-                        let mut w = prev_row[0] as i64;
+                        let mut w = prev_row[0].to_i64();
                         let mut nw = w;
                         for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { *prev as i64 };
+                            let n = if y == 0 { w } else { prev.to_i64() };
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
                             let token = decoder.read_varint_with_multiplier_clustered(
@@ -608,11 +602,11 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 cluster,
                                 dist_multiplier,
                             )?;
-                            let value = ((unpack_signed(token) as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = S::from_i32(value);
+                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
-                            w = value as i64;
+                            w = value.to_i64();
                         }
                     }
                     return Ok(());
@@ -627,13 +621,13 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 prev_rev.len(),
                 wp_header,
             );
-            let mut next = |cluster: u8| -> Result<i32> {
+            let mut next = |cluster: u8| -> Result<S> {
                 let token = decoder.read_varint_with_multiplier_clustered(
                     bitstream,
                     cluster,
                     dist_multiplier,
                 )?;
-                Ok(unpack_signed(token))
+                Ok(S::unpack_signed_u32(token))
             };
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
         })
@@ -645,26 +639,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         stream_index: u32,
         mut decoder: DecoderRleMode<'_>,
     ) -> Result<()> {
-        let mut rle_value = 0i32;
+        let mut rle_value = S::default();
         let mut rle_left = 0u32;
-
-        let mut next = |cluster: u8| -> Result<i32> {
-            Ok(if rle_left > 0 {
-                rle_left -= 1;
-                rle_value
-            } else {
-                match decoder.read_varint_clustered(bitstream, cluster)? {
-                    RleToken::Value(v) => {
-                        rle_value = unpack_signed(v);
-                        rle_value
-                    }
-                    RleToken::Repeat(len) => {
-                        rle_left = len - 1;
-                        rle_value
-                    }
-                }
-            })
-        };
 
         self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
@@ -682,34 +658,80 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                     tracing::trace!("Quite fast path");
                     for y in 0..height {
                         for x in 0..width {
-                            let token = next(cluster)?;
-                            let value = token.wrapping_mul(multiplier as i32).wrapping_add(offset);
-                            *grid.get_mut(x, y) = S::from_i32(value);
+                            let token = if rle_left > 0 {
+                                rle_left -= 1;
+                                rle_value
+                            } else {
+                                match decoder.read_varint_clustered(bitstream, cluster)? {
+                                    RleToken::Value(v) => {
+                                        rle_value = S::unpack_signed_u32(v);
+                                        rle_value
+                                    }
+                                    RleToken::Repeat(len) => {
+                                        rle_left = len - 1;
+                                        rle_value
+                                    }
+                                }
+                            };
+                            let value = token.wrapping_muladd_i32(multiplier as i32, offset);
+                            *grid.get_mut(x, y) = value;
                         }
                     }
                     return Ok(());
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("libjxl fast-lossless: quite fast path");
-                    let mut prev_row = vec![0i32; width];
+                    let mut prev_row = vec![S::default(); width];
                     for y in 0..height {
-                        let mut w = prev_row[0] as i64;
+                        let mut w = prev_row[0].to_i64();
                         let mut nw = w;
                         for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { *prev as i64 };
+                            let n = if y == 0 { w } else { prev.to_i64() };
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
-                            let token = next(cluster)?;
-                            let value = ((token as i64) + pred) as i32;
-                            *grid.get_mut(x, y) = S::from_i32(value);
+                            let token = if rle_left > 0 {
+                                rle_left -= 1;
+                                rle_value
+                            } else {
+                                match decoder.read_varint_clustered(bitstream, cluster)? {
+                                    RleToken::Value(v) => {
+                                        rle_value = S::unpack_signed_u32(v);
+                                        rle_value
+                                    }
+                                    RleToken::Repeat(len) => {
+                                        rle_left = len - 1;
+                                        rle_value
+                                    }
+                                }
+                            };
+                            let value = token + S::from_i32(pred as i32);
+                            *grid.get_mut(x, y) = value;
                             *prev = value;
                             nw = n;
-                            w = value as i64;
+                            w = value.to_i64();
                         }
                     }
                     return Ok(());
                 }
             }
+
+            let mut next = |cluster: u8| -> Result<S> {
+                Ok(if rle_left > 0 {
+                    rle_left -= 1;
+                    rle_value
+                } else {
+                    match decoder.read_varint_clustered(bitstream, cluster)? {
+                        RleToken::Value(v) => {
+                            rle_value = S::unpack_signed_u32(v);
+                            rle_value
+                        }
+                        RleToken::Repeat(len) => {
+                            rle_left = len - 1;
+                            rle_value
+                        }
+                    }
+                })
+            };
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
             let mut predictor = PredictorState::new(
@@ -725,7 +747,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 fn decode_channel_slow<S: Sample>(
-    next: &mut impl FnMut(u8) -> Result<i32>,
+    next: &mut impl FnMut(u8) -> Result<S>,
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState,
     grid: &mut CutGrid<S>,
@@ -745,9 +767,9 @@ fn decode_channel_slow<S: Sample>(
             let properties = predictor.properties(&prev_channel_samples_rev);
             let (diff, predictor) = ma_tree.decode_sample_rle(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
-            let true_value = (diff as i64 + sample_prediction) as i32;
-            *grid.get_mut(x, y) = S::from_i32(true_value);
-            properties.record(true_value);
+            let true_value = diff.add(S::from_i32(sample_prediction as i32));
+            *grid.get_mut(x, y) = true_value;
+            properties.record(true_value.to_i32());
         }
     }
 

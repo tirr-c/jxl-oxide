@@ -6,7 +6,7 @@ use jxl_coding::Decoder;
 use jxl_grid::{AllocHandle, AllocTracker};
 
 use super::predictor::{Predictor, Properties};
-use crate::Result;
+use crate::{Result, Sample};
 
 /// Meta-adaptive tree configuration.
 ///
@@ -308,36 +308,32 @@ impl FlatMaTree {
     }
 
     /// Decode a sample with the given state.
-    pub fn decode_sample(
+    pub fn decode_sample<S: Sample>(
         &self,
         bitstream: &mut Bitstream,
         decoder: &mut Decoder,
         properties: &Properties,
         dist_multiplier: u32,
-    ) -> Result<(i32, super::predictor::Predictor)> {
+    ) -> Result<(S, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = decoder.read_varint_with_multiplier_clustered(
             bitstream,
             leaf.cluster,
             dist_multiplier,
         )?;
-        let diff = unpack_signed(diff)
-            .wrapping_mul(leaf.multiplier as i32)
-            .wrapping_add(leaf.offset);
+        let diff = S::unpack_signed_u32(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
     #[inline]
-    pub(crate) fn decode_sample_rle(
+    pub(crate) fn decode_sample_rle<S: Sample>(
         &self,
-        next: &mut impl FnMut(u8) -> Result<i32>,
+        next: &mut impl FnMut(u8) -> Result<S>,
         properties: &Properties,
-    ) -> Result<(i32, super::predictor::Predictor)> {
+    ) -> Result<(S, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = next(leaf.cluster)?;
-        let diff = diff
-            .wrapping_mul(leaf.multiplier as i32)
-            .wrapping_add(leaf.offset);
+        let diff = diff.wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
