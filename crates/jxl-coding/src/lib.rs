@@ -202,16 +202,18 @@ impl DecoderRleMode<'_> {
         self.inner
             .code
             .read_symbol(bitstream, cluster)
-            .and_then(|token| {
+            .map(|token| {
                 let token = token as u32;
                 if let Some(token) = token.checked_sub(self.min_symbol) {
-                    self.inner
-                        .read_uint(bitstream, &self.len_config, token)
-                        .map(|v| RleToken::Repeat(v + self.min_length))
+                    RleToken::Repeat(
+                        self.inner.read_uint(bitstream, &self.len_config, token) + self.min_length,
+                    )
                 } else {
-                    self.inner
-                        .read_uint(bitstream, &self.inner.configs[cluster as usize], token)
-                        .map(RleToken::Value)
+                    RleToken::Value(self.inner.read_uint(
+                        bitstream,
+                        &self.inner.configs[cluster as usize],
+                        token,
+                    ))
                 }
             })
     }
@@ -426,7 +428,7 @@ impl DecoderInner {
         cluster: u8,
     ) -> Result<u32> {
         let token = self.code.read_symbol(bitstream, cluster)?;
-        self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)
+        Ok(self.read_uint(bitstream, &self.configs[cluster as usize], token as u32))
     }
 
     fn read_varint_with_multiplier_clustered_lz77(
@@ -465,14 +467,14 @@ impl DecoderInner {
                 let lz_dist_cluster = self.lz_dist_cluster();
 
                 state.num_to_copy =
-                    self.read_uint(bitstream, &state.lz_len_conf, (token - min_symbol) as u32)?
+                    self.read_uint(bitstream, &state.lz_len_conf, (token - min_symbol) as u32)
                         + min_length;
                 let token = self.code.read_symbol(bitstream, lz_dist_cluster)?;
                 let distance = self.read_uint(
                     bitstream,
                     &self.configs[lz_dist_cluster as usize],
                     token as u32,
-                )?;
+                );
                 let distance = if dist_multiplier == 0 {
                     distance + 1
                 } else if distance < 120 {
@@ -490,7 +492,7 @@ impl DecoderInner {
                 state.copy_pos += 1;
                 state.num_to_copy -= 1;
             } else {
-                r = self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)?;
+                r = self.read_uint(bitstream, &self.configs[cluster as usize], token as u32);
             }
         }
         let offset = (state.num_decoded & 0xfffff) as usize;
@@ -504,12 +506,7 @@ impl DecoderInner {
     }
 
     #[inline]
-    fn read_uint(
-        &self,
-        bitstream: &mut Bitstream,
-        config: &IntegerConfig,
-        token: u32,
-    ) -> Result<u32> {
+    fn read_uint(&self, bitstream: &mut Bitstream, config: &IntegerConfig, token: u32) -> u32 {
         let &IntegerConfig {
             split_exponent,
             split,
@@ -518,33 +515,25 @@ impl DecoderInner {
             ..
         } = config;
         if token < split {
-            return Ok(token);
+            return token;
         }
 
         let n = split_exponent - (msb_in_token + lsb_in_token)
             + ((token - split) >> (msb_in_token + lsb_in_token));
-        if n >= 32 {
-            return Err(Error::InvalidIntegerConfig);
-        }
+        // n < 32.
+        let n = n & 31;
+        let rest_bits = bitstream.peek_bits(n as usize) as u64;
+        bitstream.consume_bits(n as usize).ok();
 
         let low_bits = token & ((1 << lsb_in_token) - 1);
+        let low_bits = low_bits as u64;
         let token = token >> lsb_in_token;
         let token = token & ((1 << msb_in_token) - 1);
         let token = token | (1 << msb_in_token);
-        bitstream
-            .read_bits(n as usize)
-            .map_err(From::from)
-            .and_then(|rest_bits| {
-                let rest_bits = rest_bits as u64;
-                let token = token as u64;
-                let low_bits = low_bits as u64;
-                let result = (((token << n) | rest_bits) << lsb_in_token) | low_bits;
-                if result >= (1 << 32) {
-                    Err(Error::InvalidIntegerConfig)
-                } else {
-                    Ok(result as u32)
-                }
-            })
+        let token = token as u64;
+        let result = (((token << n) | rest_bits) << lsb_in_token) | low_bits;
+        // result fits in u32.
+        result as u32
     }
 
     #[inline]
