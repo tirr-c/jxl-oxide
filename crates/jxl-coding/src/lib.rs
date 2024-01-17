@@ -309,12 +309,10 @@ impl std::fmt::Debug for Lz77State {
 }
 
 impl Lz77State {
-    const WINDOW_LEN: usize = 1 << 20;
-
     fn new(lz_len_conf: IntegerConfig) -> Self {
         Self {
             lz_len_conf,
-            window: vec![0u32; Self::WINDOW_LEN],
+            window: Vec::new(),
             num_to_copy: 0,
             copy_pos: 0,
             num_decoded: 0,
@@ -495,7 +493,12 @@ impl DecoderInner {
                 r = self.read_uint(bitstream, &self.configs[cluster as usize], token as u32)?;
             }
         }
-        state.window[(state.num_decoded & 0xfffff) as usize] = r;
+        let offset = (state.num_decoded & 0xfffff) as usize;
+        if state.window.len() <= offset {
+            state.window.push(r);
+        } else {
+            state.window[offset] = r;
+        }
         state.num_decoded += 1;
         Ok(r)
     }
