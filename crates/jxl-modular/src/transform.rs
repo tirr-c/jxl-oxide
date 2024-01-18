@@ -1,7 +1,6 @@
-use std::num::Wrapping;
-
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
+use jxl_threadpool::JxlThreadPool;
 
 use super::{
     predictor::{Predictor, PredictorState, WpHeader},
@@ -9,6 +8,7 @@ use super::{
 };
 use crate::{image::TransformedGrid, Error, Result, Sample};
 
+mod rct;
 mod squeeze;
 
 #[derive(Debug, Clone)]
@@ -70,10 +70,10 @@ impl TransformInfo {
         &self,
         grids: &mut Vec<TransformedGrid<'_, S>>,
         bit_depth: u32,
-        pool: &jxl_threadpool::JxlThreadPool,
+        pool: &JxlThreadPool,
     ) {
         match self {
-            Self::Rct(rct) => rct.inverse(grids),
+            Self::Rct(rct) => rct.inverse(grids, pool),
             Self::Palette(pal) => pal.inverse(grids, bit_depth),
             Self::Squeeze(sq) => sq.inverse(grids, pool),
         }
@@ -182,8 +182,8 @@ impl Rct {
         Ok(())
     }
 
-    fn inverse<S: Sample>(&self, grids: &mut [TransformedGrid<'_, S>]) {
-        let permutation = (self.rct_type / 7) as usize;
+    fn inverse<S: Sample>(&self, grids: &mut [TransformedGrid<'_, S>], pool: &JxlThreadPool) {
+        let permutation = self.rct_type / 7;
         let ty = self.rct_type % 7;
 
         let begin_c = self.begin_c as usize;
@@ -192,78 +192,25 @@ impl Rct {
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
 
-        let width = a.width();
-        let height = a.height();
-        assert_eq!(width, b.width());
-        assert_eq!(width, c.width());
-        assert_eq!(height, b.height());
-        assert_eq!(height, c.height());
-
-        if let (Some(a), Some(b), Some(c)) = (S::try_as_i16_cut_grid_mut(a), S::try_as_i16_cut_grid_mut(b), S::try_as_i16_cut_grid_mut(c)) {
-            for y in 0..height {
-                for x in 0..width {
-                    let samples = [a.get_mut(x, y), b.get_mut(x, y), c.get_mut(x, y)];
-
-                    let a = Wrapping(*samples[0]);
-                    let b = Wrapping(*samples[1]);
-                    let c = Wrapping(*samples[2]);
-                    let d;
-                    let e;
-                    let f;
-                    if ty == 6 {
-                        let tmp = a - (c >> 1);
-                        e = c + tmp;
-                        f = tmp - (b >> 1);
-                        d = f + b;
-                    } else {
-                        d = a;
-                        f = if ty & 1 != 0 { c + a } else { c };
-                        e = if (ty >> 1) == 1 {
-                            b + a
-                        } else if (ty >> 1) == 2 {
-                            b + ((a + f) >> 1)
-                        } else {
-                            b
-                        };
-                    }
-                    *samples[permutation % 3] = d.0;
-                    *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
-                    *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
-                }
-            }
-        } else if let (Some(a), Some(b), Some(c)) = (S::try_as_i32_cut_grid_mut(a), S::try_as_i32_cut_grid_mut(b), S::try_as_i32_cut_grid_mut(c)) {
-            for y in 0..height {
-                for x in 0..width {
-                    let samples = [a.get_mut(x, y), b.get_mut(x, y), c.get_mut(x, y)];
-
-                    let a = Wrapping(*samples[0]);
-                    let b = Wrapping(*samples[1]);
-                    let c = Wrapping(*samples[2]);
-                    let d;
-                    let e;
-                    let f;
-                    if ty == 6 {
-                        let tmp = a - (c >> 1);
-                        e = c + tmp;
-                        f = tmp - (b >> 1);
-                        d = f + b;
-                    } else {
-                        d = a;
-                        f = if ty & 1 != 0 { c + a } else { c };
-                        e = if (ty >> 1) == 1 {
-                            b + a
-                        } else if (ty >> 1) == 2 {
-                            b + ((a + f) >> 1)
-                        } else {
-                            b
-                        };
-                    }
-                    *samples[permutation % 3] = d.0;
-                    *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
-                    *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
-                }
-            }
-        }
+        let a = {
+            let g = a.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let b = {
+            let g = b.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let c = {
+            let g = c.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let groups = a.into_iter().zip(b).zip(c).map(|((a, b), c)| (a, b, c)).collect::<Vec<_>>();
+        pool.for_each_vec(groups, |(mut a, mut b, mut c)| {
+            rct::inverse_rct(permutation, ty, [&mut a, &mut b, &mut c]);
+        })
     }
 }
 
@@ -597,7 +544,7 @@ impl Squeeze {
         Ok(())
     }
 
-    fn inverse<S: Sample>(&self, grids: &mut Vec<TransformedGrid<'_, S>>, pool: &jxl_threadpool::JxlThreadPool) {
+    fn inverse<S: Sample>(&self, grids: &mut Vec<TransformedGrid<'_, S>>, pool: &JxlThreadPool) {
         for sp in self.sp.iter().rev() {
             let begin = sp.begin_c as usize;
             let channel_count = sp.num_c as usize;
