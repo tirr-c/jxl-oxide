@@ -3,33 +3,21 @@ use jxl_bitstream::{read_bits, Bitstream};
 
 use crate::{Error, Result};
 
+const MAX_TOPLEVEL_BITS: usize = 10;
+
 #[derive(Debug)]
 pub struct Histogram {
     toplevel_bits: usize,
+    toplevel_mask: u32,
     toplevel_entries: Vec<Entry>,
     second_level_entries: Vec<Entry>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 struct Entry {
-    consume_bits: u8,
-    symbol_or_offset: SymbolOrOffset,
-}
-
-impl Default for Entry {
-    fn default() -> Self {
-        Self {
-            consume_bits: 0,
-            symbol_or_offset: SymbolOrOffset::Symbol(0),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-enum SymbolOrOffset {
-    Symbol(u16),
-    Offset(u32),
+    nested: bool,
+    bits_or_mask: u8,
+    symbol_or_offset: u16,
 }
 
 impl Histogram {
@@ -45,16 +33,18 @@ impl Histogram {
             }
         }
 
-        let toplevel_bits = syms_for_length.len().min(10);
+        let toplevel_bits = syms_for_length.len().min(MAX_TOPLEVEL_BITS);
         let mut entries = vec![Entry::default(); 1 << toplevel_bits];
         let mut current_bits = 0u16;
         for (idx, syms) in syms_for_length.iter().enumerate().take(toplevel_bits) {
             let shifts = toplevel_bits - 1 - idx;
             for &sym in syms {
-                entries[current_bits as usize..][..(1 << shifts)].fill(Entry {
-                    consume_bits: (idx + 1) as u8,
-                    symbol_or_offset: SymbolOrOffset::Symbol(sym),
-                });
+                let entry = Entry {
+                    nested: false,
+                    bits_or_mask: (idx + 1) as u8,
+                    symbol_or_offset: sym,
+                };
+                entries[current_bits as usize..][..(1 << shifts)].fill(entry);
                 current_bits += 1u16 << shifts;
             }
         }
@@ -80,16 +70,17 @@ impl Histogram {
                     }
                 }
                 for &sym in syms {
-                    chunk.push(Entry {
-                        consume_bits: (idx + 1) as u8,
-                        symbol_or_offset: SymbolOrOffset::Symbol(sym),
-                    });
+                    let entry = Entry {
+                        nested: false,
+                        bits_or_mask: (idx + 1) as u8,
+                        symbol_or_offset: sym,
+                    };
+                    chunk.push(entry);
                     if chunk.len() == chunk_size {
                         entries[current_bits as usize] = Entry {
-                            consume_bits: chunk_size_bits as u8,
-                            symbol_or_offset: SymbolOrOffset::Offset(
-                                second_level_entries.len() as u32
-                            ),
+                            nested: true,
+                            bits_or_mask: (chunk_size - 1) as u8,
+                            symbol_or_offset: second_level_entries.len() as u16,
                         };
                         vec_reverse_bits(&chunk, &mut second_level_entries);
                         current_bits += 1;
@@ -110,6 +101,7 @@ impl Histogram {
             vec_reverse_bits(&entries, &mut toplevel_entries);
             Ok(Self {
                 toplevel_bits,
+                toplevel_mask: (1 << toplevel_bits) - 1,
                 toplevel_entries,
                 second_level_entries,
             })
@@ -120,11 +112,13 @@ impl Histogram {
 
     fn with_single_symbol(symbol: u16) -> Self {
         let entry = Entry {
-            consume_bits: 0,
-            symbol_or_offset: SymbolOrOffset::Symbol(symbol),
+            nested: false,
+            bits_or_mask: 0,
+            symbol_or_offset: symbol,
         };
         Self {
             toplevel_bits: 0,
+            toplevel_mask: 0,
             toplevel_entries: vec![entry],
             second_level_entries: Vec::new(),
         }
@@ -328,38 +322,32 @@ impl Histogram {
     pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u16> {
         let Self {
             toplevel_bits,
+            toplevel_mask,
             ref toplevel_entries,
             ref second_level_entries,
         } = *self;
         let mut peeked = bitstream.peek_bits(15);
-        let toplevel_offset = peeked & ((1 << toplevel_bits) - 1);
+        let toplevel_offset = peeked & toplevel_mask;
         let toplevel_entry = toplevel_entries[toplevel_offset as usize];
         peeked >>= toplevel_bits;
-        match toplevel_entry.symbol_or_offset {
-            SymbolOrOffset::Symbol(symbol) => {
-                bitstream.consume_bits(toplevel_entry.consume_bits as usize)?;
-                Ok(symbol)
-            }
-            SymbolOrOffset::Offset(second_level_offset) => {
-                let second_level_offset =
-                    second_level_offset + (peeked & ((1 << toplevel_entry.consume_bits) - 1));
-                let second_level_entry = second_level_entries[second_level_offset as usize];
-                Ok(match second_level_entry.symbol_or_offset {
-                    SymbolOrOffset::Symbol(symbol) => {
-                        bitstream.consume_bits(second_level_entry.consume_bits as usize)?;
-                        symbol
-                    }
-                    SymbolOrOffset::Offset(_) => unreachable!(),
-                })
-            }
+        if toplevel_entry.nested {
+            let chunk_offset = peeked & (toplevel_entry.bits_or_mask as u32);
+            let second_level_offset = toplevel_entry.symbol_or_offset as u32 + chunk_offset;
+            let second_level_entry = second_level_entries[second_level_offset as usize];
+            bitstream.consume_bits(second_level_entry.bits_or_mask as usize)?;
+            Ok(second_level_entry.symbol_or_offset)
+        } else {
+            bitstream.consume_bits(toplevel_entry.bits_or_mask as usize)?;
+            Ok(toplevel_entry.symbol_or_offset)
         }
     }
 
     #[inline]
     pub fn single_symbol(&self) -> Option<u16> {
         if let &[Entry {
-            consume_bits: 0,
-            symbol_or_offset: SymbolOrOffset::Symbol(symbol),
+            nested: false,
+            bits_or_mask: 0,
+            symbol_or_offset: symbol,
         }] = &*self.toplevel_entries
         {
             Some(symbol)
@@ -378,5 +366,13 @@ fn vec_reverse_bits(v: &[Entry], out: &mut Vec<Entry>) {
         let rev_idx = idx.reverse_bits() >> shift;
         let entry = v[rev_idx];
         out.push(entry);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn type_size() {
+        assert_eq!(std::mem::size_of::<super::Entry>(), 4);
     }
 }
