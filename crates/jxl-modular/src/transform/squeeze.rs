@@ -4,24 +4,32 @@ use crate::Sample;
 
 pub fn inverse_h<S: Sample>(merged: &mut CutGrid<'_, S>) {
     if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
-        todo!()
+        inverse_h_i16(merged)
     } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                unsafe {
-                    let mut remainder = inverse_h_avx2(merged);
-                    inverse_h_base(&mut remainder);
-                    return;
-                }
-            }
-        }
-
-        inverse_h_base(merged)
+        inverse_h_i32(merged)
     }
 }
 
-fn inverse_h_base(merged: &mut CutGrid<'_, i32>) {
+fn inverse_h_i32(merged: &mut CutGrid<i32>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx2") {
+            unsafe {
+                let mut remainder = inverse_h_i32_avx2(merged);
+                inverse_h_i32_base(&mut remainder);
+                return;
+            }
+        }
+    }
+
+    inverse_h_i32_base(merged)
+}
+
+fn inverse_h_i16(merged: &mut CutGrid<i16>) {
+    inverse_h_i16_base(merged)
+}
+
+fn inverse_h_i32_base(merged: &mut CutGrid<'_, i32>) {
     let height = merged.height();
     let width = merged.width();
     let width_iters = width / 2;
@@ -36,7 +44,32 @@ fn inverse_h_base(merged: &mut CutGrid<'_, i32>) {
             } else {
                 avg
             };
-            let diff = residu + tendency(left, avg, next_avg);
+            let diff = residu + tendency_i32(left, avg, next_avg);
+            let first = avg + diff / 2;
+            *merged.get_mut(x, y) = first;
+            *merged.get_mut(x + 1, y) = first - diff;
+            avg = next_avg;
+            left = first - diff;
+        }
+    }
+}
+
+fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
+    let height = merged.height();
+    let width = merged.width();
+    let width_iters = width / 2;
+    for y in 0..height {
+        let mut avg = merged.get(0, y);
+        let mut left = avg;
+        for x2 in 0..width_iters {
+            let x = x2 * 2;
+            let residu = merged.get(x + 1, y);
+            let next_avg = if x + 2 < width {
+                merged.get(x + 2, y)
+            } else {
+                avg
+            };
+            let diff = residu + tendency_i16(left, avg, next_avg);
             let first = avg + diff / 2;
             *merged.get_mut(x, y) = first;
             *merged.get_mut(x + 1, y) = first - diff;
@@ -49,7 +82,7 @@ fn inverse_h_base(merged: &mut CutGrid<'_, i32>) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline(never)]
-unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i32> {
+unsafe fn inverse_h_i32_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i32> {
     use std::arch::x86_64::*;
 
     let height = merged.height();
@@ -74,7 +107,7 @@ unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
             } else {
                 avg
             };
-            let diff = _mm256_add_epi32(residu, tendency_avx2(left, avg, next_avg));
+            let diff = _mm256_add_epi32(residu, tendency_i32_avx2(left, avg, next_avg));
             let first = _mm256_add_epi32(
                 avg,
                 _mm256_srai_epi32::<1>(_mm256_add_epi32(diff, _mm256_srli_epi32::<31>(diff))),
@@ -108,24 +141,32 @@ unsafe fn inverse_h_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
 
 pub fn inverse_v<S: Sample>(merged: &mut CutGrid<'_, S>) {
     if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
-        todo!()
+        inverse_v_i16(merged)
     } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                unsafe {
-                    let mut remainder = inverse_v_avx2(merged);
-                    inverse_v_base(&mut remainder);
-                    return;
-                }
-            }
-        }
-
-        inverse_v_base(merged)
+        inverse_v_i32(merged)
     }
 }
 
-fn inverse_v_base(merged: &mut CutGrid<'_, i32>) {
+fn inverse_v_i32(merged: &mut CutGrid<i32>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx2") {
+            unsafe {
+                let mut remainder = inverse_v_i32_avx2(merged);
+                inverse_v_i32_base(&mut remainder);
+                return;
+            }
+        }
+    }
+
+    inverse_v_i32_base(merged)
+}
+
+fn inverse_v_i16(merged: &mut CutGrid<i16>) {
+    inverse_v_i16_base(merged)
+}
+
+fn inverse_v_i32_base(merged: &mut CutGrid<'_, i32>) {
     let width = merged.width();
     let height = merged.height();
     let height_iters = height / 2;
@@ -140,7 +181,30 @@ fn inverse_v_base(merged: &mut CutGrid<'_, i32>) {
                 avg
             };
             let top = if y > 0 { merged.get(x, y - 1) } else { avg };
-            let diff = residu + tendency(top, avg, next_avg);
+            let diff = residu + tendency_i32(top, avg, next_avg);
+            let first = avg + diff / 2;
+            *merged.get_mut(x, y) = first;
+            *merged.get_mut(x, y + 1) = first - diff;
+        }
+    }
+}
+
+fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
+    let width = merged.width();
+    let height = merged.height();
+    let height_iters = height / 2;
+    for y2 in 0..height_iters {
+        let y = y2 * 2;
+        for x in 0..width {
+            let avg = merged.get(x, y);
+            let residu = merged.get(x, y + 1);
+            let next_avg = if y + 2 < height {
+                merged.get(x, y + 2)
+            } else {
+                avg
+            };
+            let top = if y > 0 { merged.get(x, y - 1) } else { avg };
+            let diff = residu + tendency_i16(top, avg, next_avg);
             let first = avg + diff / 2;
             *merged.get_mut(x, y) = first;
             *merged.get_mut(x, y + 1) = first - diff;
@@ -151,7 +215,7 @@ fn inverse_v_base(merged: &mut CutGrid<'_, i32>) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline(never)]
-unsafe fn inverse_v_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i32> {
+unsafe fn inverse_v_i32_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i32> {
     use std::arch::x86_64::*;
 
     let width = merged.width();
@@ -180,7 +244,7 @@ unsafe fn inverse_v_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
                 avg
             };
 
-            let diff = _mm256_add_epi32(residu, tendency_avx2(top, avg, next_avg));
+            let diff = _mm256_add_epi32(residu, tendency_i32_avx2(top, avg, next_avg));
             let first = _mm256_add_epi32(
                 avg,
                 _mm256_srai_epi32::<1>(_mm256_add_epi32(diff, _mm256_srli_epi32::<31>(diff))),
@@ -209,7 +273,31 @@ unsafe fn inverse_v_avx2<'g>(merged: &'g mut CutGrid<'_, i32>) -> CutGrid<'g, i3
     merged.split_horizontal(w8 * 8).1
 }
 
-fn tendency(a: i32, b: i32, c: i32) -> i32 {
+fn tendency_i32(a: i32, b: i32, c: i32) -> i32 {
+    if a >= b && b >= c {
+        let mut x = (4 * a - 3 * c - b + 6) / 12;
+        if x - (x & 1) > 2 * (a - b) {
+            x = 2 * (a - b) + 1;
+        }
+        if x + (x & 1) > 2 * (b - c) {
+            x = 2 * (b - c);
+        }
+        x
+    } else if a <= b && b <= c {
+        let mut x = (4 * a - 3 * c - b - 6) / 12;
+        if x + (x & 1) < 2 * (a - b) {
+            x = 2 * (a - b) - 1;
+        }
+        if x - (x & 1) < 2 * (b - c) {
+            x = 2 * (b - c);
+        }
+        x
+    } else {
+        0
+    }
+}
+
+fn tendency_i16(a: i16, b: i16, c: i16) -> i16 {
     if a >= b && b >= c {
         let mut x = (4 * a - 3 * c - b + 6) / 12;
         if x - (x & 1) > 2 * (a - b) {
@@ -235,7 +323,7 @@ fn tendency(a: i32, b: i32, c: i32) -> i32 {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn tendency_avx2(
+unsafe fn tendency_i32_avx2(
     a: std::arch::x86_64::__m256i,
     b: std::arch::x86_64::__m256i,
     c: std::arch::x86_64::__m256i,
