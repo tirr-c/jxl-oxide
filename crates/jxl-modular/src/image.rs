@@ -5,7 +5,8 @@ use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 use crate::{
     ma::{FlatMaTree, MaTreeLeafClustered},
     predictor::{Predictor, PredictorState},
-    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result, sample::Sample,
+    sample::Sample,
+    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
 };
 
 #[derive(Debug)]
@@ -485,7 +486,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 if predictor == Predictor::Zero {
                     if let Some(token) = no_lz77_decoder.single_token(cluster) {
                         tracing::trace!("Single token in cluster: hyper fast path");
-                        let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                        let value = S::unpack_signed_u32(token)
+                            .wrapping_muladd_i32(multiplier as i32, offset);
                         for y in 0..height {
                             for x in 0..width {
                                 *grid.get_mut(x, y) = value;
@@ -497,7 +499,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                             for x in 0..width {
                                 let token =
                                     no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                                let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                                let value = S::unpack_signed_u32(token)
+                                    .wrapping_muladd_i32(multiplier as i32, offset);
                                 *grid.get_mut(x, y) = value;
                             }
                         }
@@ -581,7 +584,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 cluster,
                                 dist_multiplier,
                             )?;
-                            let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                            let value = S::unpack_signed_u32(token)
+                                .wrapping_muladd_i32(multiplier as i32, offset);
                             *grid.get_mut(x, y) = value;
                         }
                     }

@@ -321,7 +321,8 @@ impl FlatMaTree {
             leaf.cluster,
             dist_multiplier,
         )?;
-        let diff = S::unpack_signed_u32(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
+        let diff =
+            S::unpack_signed_u32(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
         Ok((diff, leaf.predictor))
     }
 

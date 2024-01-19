@@ -25,7 +25,9 @@ impl TransformInfo {
     ) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
-            Self::Palette(pal) => pal.transform_channel_info::<i16>(channels, &mut Vec::new(), None),
+            Self::Palette(pal) => {
+                pal.transform_channel_info::<i16>(channels, &mut Vec::new(), None)
+            }
             Self::Squeeze(sq) => {
                 sq.set_default_params(channels);
                 sq.transform_channel_info::<i16>(channels, None)
@@ -207,7 +209,12 @@ impl Rct {
             let width = g.width();
             g.into_groups(width, 8)
         };
-        let groups = a.into_iter().zip(b).zip(c).map(|((a, b), c)| (a, b, c)).collect::<Vec<_>>();
+        let groups = a
+            .into_iter()
+            .zip(b)
+            .zip(c)
+            .map(|((a, b), c)| (a, b, c))
+            .collect::<Vec<_>>();
         pool.for_each_vec(groups, |(mut a, mut b, mut c)| {
             rct::inverse_rct(permutation, ty, [&mut a, &mut b, &mut c]);
         })
@@ -298,7 +305,8 @@ impl Palette {
                     indices.get(x, y)
                 } else {
                     grid.get(x, y)
-                }.to_i32();
+                }
+                .to_i32();
                 let sample = grid.get_mut(x, y);
                 if index < nb_deltas {
                     need_delta.push((x, y));
@@ -311,7 +319,7 @@ impl Palette {
                     if index < 64 {
                         *sample = S::from_i32(
                             ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
-                            + (1i32 << bit_depth.saturating_sub(3))
+                                + (1i32 << bit_depth.saturating_sub(3)),
                         );
                     } else {
                         let mut index = index - 64;

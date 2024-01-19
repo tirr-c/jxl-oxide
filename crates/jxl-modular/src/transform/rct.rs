@@ -6,9 +6,17 @@ use crate::Sample;
 
 pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
     let [a, b, c] = grids;
-    if let (Some(a), Some(b), Some(c)) = (S::try_as_i16_cut_grid_mut(a), S::try_as_i16_cut_grid_mut(b), S::try_as_i16_cut_grid_mut(c)) {
+    if let (Some(a), Some(b), Some(c)) = (
+        S::try_as_i16_cut_grid_mut(a),
+        S::try_as_i16_cut_grid_mut(b),
+        S::try_as_i16_cut_grid_mut(c),
+    ) {
         do_i16(permutation, ty, [a, b, c]);
-    } else if let (Some(a), Some(b), Some(c)) = (S::try_as_i32_cut_grid_mut(a), S::try_as_i32_cut_grid_mut(b), S::try_as_i32_cut_grid_mut(c)) {
+    } else if let (Some(a), Some(b), Some(c)) = (
+        S::try_as_i32_cut_grid_mut(a),
+        S::try_as_i32_cut_grid_mut(b),
+        S::try_as_i32_cut_grid_mut(c),
+    ) {
         do_i32(permutation, ty, [a, b, c]);
     }
 }

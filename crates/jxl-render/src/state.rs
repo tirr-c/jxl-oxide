@@ -8,7 +8,8 @@ use jxl_modular::{ChannelShift, Sample};
 
 use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, Result};
 
-pub type RenderOp<S> = Arc<dyn Fn(FrameRender<S>, Option<Region>) -> FrameRender<S> + Send + Sync + 'static>;
+pub type RenderOp<S> =
+    Arc<dyn Fn(FrameRender<S>, Option<Region>) -> FrameRender<S> + Send + Sync + 'static>;
 
 #[derive(Debug)]
 pub struct RenderCache<S: Sample> {

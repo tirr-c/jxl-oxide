@@ -398,7 +398,11 @@ impl RenderContext {
         self.render_op(frame, reference_frames)
     }
 
-    fn render_op<S: Sample>(&self, frame: Arc<IndexedFrame>, reference_frames: ReferenceFrames<S>) -> RenderOp<S> {
+    fn render_op<S: Sample>(
+        &self,
+        frame: Arc<IndexedFrame>,
+        reference_frames: ReferenceFrames<S>,
+    ) -> RenderOp<S> {
         let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
 
         let pool = self.pool.clone();
