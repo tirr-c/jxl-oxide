@@ -317,6 +317,13 @@ impl ImageWithRegion {
     }
 
     #[inline]
+    pub(crate) fn push_channel(&mut self, g: SimpleGrid<f32>) {
+        assert_eq!(self.region.width as usize, g.width());
+        assert_eq!(self.region.height as usize, g.height());
+        self.buffer.push(g);
+    }
+
+    #[inline]
     pub(crate) fn remove_channels(&mut self, range: impl std::ops::RangeBounds<usize>) {
         self.buffer.drain(range);
     }

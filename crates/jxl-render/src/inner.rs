@@ -221,6 +221,8 @@ fn append_extra_channels<S: Sample>(
     gmodular: GlobalModular<S>,
     original_region: Region,
 ) -> Result<()> {
+    let _guard = tracing::trace_span!("Append extra channels").entered();
+
     let fb_region = fb.region();
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -253,17 +255,21 @@ fn append_extra_channels<S: Sample>(
         let height = region.height as usize;
         let mut out = SimpleGrid::with_alloc_tracker(width, height, tracker)?;
         modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
+        features::upsample(&mut out, image_header, frame_header, idx + 3)?;
 
         let upsampled_region = region.upsample(upsample_factor);
-        features::upsample(&mut out, image_header, frame_header, idx + 3)?;
-        let out = ImageWithRegion::from_buffer(
-            vec![out],
-            upsampled_region.left,
-            upsampled_region.top,
-            false,
-        );
-        let cropped = fb.add_channel()?;
-        out.clone_region_channel(fb_region, 0, cropped);
+        if upsampled_region == fb_region {
+            fb.push_channel(out);
+        } else {
+            let out = ImageWithRegion::from_buffer(
+                vec![out],
+                upsampled_region.left,
+                upsampled_region.top,
+                false,
+            );
+            let fb_out = fb.add_channel()?;
+            out.clone_region_channel(fb_region, 0, fb_out);
+        }
     }
 
     Ok(())
