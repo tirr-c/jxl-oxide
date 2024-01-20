@@ -6,7 +6,7 @@ use crate::Sample;
 
 pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
     let [a, b, c] = grids;
-    if a.step() != 0 || b.step() != 0 || c.step() != 0 {
+    if a.step() != 1 || b.step() != 1 || c.step() != 1 {
         do_slow(permutation, ty, [a, b, c]);
         return;
     }
