@@ -26,7 +26,7 @@ pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>
     }
 }
 
-#[inline]
+#[inline(never)]
 fn do_i16(permutation: u32, ty: u32, grids: [&mut CutGrid<i16>; 3]) {
     let permutation = permutation as usize;
 
@@ -78,7 +78,7 @@ fn do_i16(permutation: u32, ty: u32, grids: [&mut CutGrid<i16>; 3]) {
     }
 }
 
-#[inline]
+#[inline(never)]
 fn do_i32(permutation: u32, ty: u32, grids: [&mut CutGrid<i32>; 3]) {
     let permutation = permutation as usize;
 
@@ -130,6 +130,7 @@ fn do_i32(permutation: u32, ty: u32, grids: [&mut CutGrid<i32>; 3]) {
     }
 }
 
+#[inline(never)]
 fn do_slow<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
     let permutation = permutation as usize;
 
