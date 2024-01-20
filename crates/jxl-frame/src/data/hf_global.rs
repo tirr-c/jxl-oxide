@@ -1,7 +1,7 @@
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_grid::AllocTracker;
 use jxl_image::ImageMetadata;
-use jxl_modular::MaConfig;
+use jxl_modular::{MaConfig, Sample};
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{DequantMatrixSet, DequantMatrixSetParams, HfBlockContext, HfPass, HfPassParams};
 
@@ -19,10 +19,10 @@ pub struct HfGlobalParams<'a, 'b> {
 }
 
 impl<'a, 'b> HfGlobalParams<'a, 'b> {
-    pub fn new(
+    pub fn new<S: Sample>(
         metadata: &'a ImageMetadata,
         frame_header: &'a FrameHeader,
-        lf_global: &'a LfGlobal,
+        lf_global: &'a LfGlobal<S>,
         tracker: Option<&'b AllocTracker>,
         pool: &'a JxlThreadPool,
     ) -> Self {

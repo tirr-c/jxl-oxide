@@ -6,7 +6,7 @@ use jxl_frame::{
 };
 use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_image::ImageHeader;
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift};
+use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_vardct::{
     BlockInfo, LfChannelCorrelation, LfChannelDequantization, Quantizer, TransformType,
 };
@@ -33,14 +33,14 @@ mod generic;
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 use generic as impls;
 
-pub(crate) fn render_vardct(
+pub(crate) fn render_vardct<S: Sample>(
     frame: &IndexedFrame,
-    lf_frame: Option<&Reference>,
-    cache: &mut RenderCache,
+    lf_frame: Option<&Reference<S>>,
+    cache: &mut RenderCache<S>,
     region: Region,
     image_region: Option<Region>,
     pool: &jxl_threadpool::JxlThreadPool,
-) -> Result<(ImageWithRegion, GlobalModular)> {
+) -> Result<(ImageWithRegion, GlobalModular<S>)> {
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
 
@@ -288,11 +288,11 @@ pub(crate) fn render_vardct(
     };
 
     tracing::trace_span!("Decode and transform").in_scope(|| -> Result<_> {
-        struct PassGroupJob<'g, 'modular, 'lf> {
+        struct PassGroupJob<'g, 'modular, 'lf, S: Sample> {
             group_idx: u32,
             grid_xyb: [CutGrid<'g, f32>; 3],
-            pass_modular: HashMap<u32, TransformedModularSubimage<'modular>>,
-            lf_group: &'lf LfGroup,
+            pass_modular: HashMap<u32, TransformedModularSubimage<'modular, S>>,
+            lf_group: &'lf LfGroup<S>,
         }
 
         let num_passes = frame_header.passes.num_passes;
@@ -451,13 +451,13 @@ pub(crate) fn render_vardct(
     Ok((fb_xyb, gmodular))
 }
 
-pub fn copy_lf_dequant(
+pub fn copy_lf_dequant<S: Sample>(
     out: &mut SimpleGrid<f32>,
     left: usize,
     top: usize,
     quantizer: &Quantizer,
     m_lf: f32,
-    channel_data: &SimpleGrid<i32>,
+    channel_data: &SimpleGrid<S>,
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
@@ -475,7 +475,7 @@ pub fn copy_lf_dequant(
         let row = grid.get_row_mut(y);
         let quant = &buf[y * width..][..width];
         for (out, &q) in row.iter_mut().zip(quant) {
-            *out = q as f32 * scale;
+            *out = q.to_i32() as f32 * scale;
         }
     }
 }
@@ -510,13 +510,13 @@ pub fn adaptive_lf_smoothing(
     )
 }
 
-pub fn dequant_hf_varblock_grouped(
+pub fn dequant_hf_varblock_grouped<S: Sample>(
     out: &mut [CutGrid<'_, f32>; 3],
     group_idx: u32,
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
-    lf_global: &LfGlobal,
-    lf_groups: &HashMap<u32, LfGroup>,
+    lf_global: &LfGlobal<S>,
+    lf_groups: &HashMap<u32, LfGroup<S>>,
     hf_global: &HfGlobal,
 ) {
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
@@ -693,12 +693,12 @@ pub fn chroma_from_luma_hf_grouped(
     }
 }
 
-pub fn transform_with_lf_grouped(
+pub fn transform_with_lf_grouped<S: Sample>(
     lf: &ImageWithRegion,
     coeff_out: &mut [CutGrid<'_, f32>; 3],
     group_idx: u32,
     frame_header: &FrameHeader,
-    lf_groups: &HashMap<u32, LfGroup>,
+    lf_groups: &HashMap<u32, LfGroup<S>>,
 ) {
     use TransformType::*;
 

@@ -9,6 +9,7 @@ pub struct ModularParams<'a, 'b> {
     pub channels: Vec<ModularChannelParams>,
     pub ma_config: Option<&'a MaConfig>,
     pub tracker: Option<&'b AllocTracker>,
+    pub narrow_buffer: bool,
 }
 
 impl<'a, 'b> ModularParams<'a, 'b> {
@@ -45,6 +46,7 @@ impl<'a, 'b> ModularParams<'a, 'b> {
             channels,
             ma_config,
             tracker,
+            narrow_buffer: false,
         }
     }
 }

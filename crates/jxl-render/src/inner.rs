@@ -7,6 +7,7 @@ use jxl_frame::{
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
+use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
@@ -16,10 +17,10 @@ use crate::{
     vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };
 
-pub(crate) fn render_frame(
+pub(crate) fn render_frame<S: Sample>(
     frame: &IndexedFrame,
-    reference_frames: ReferenceFrames,
-    cache: &mut RenderCache,
+    reference_frames: ReferenceFrames<S>,
+    cache: &mut RenderCache<S>,
     image_region: Option<Region>,
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
@@ -214,12 +215,14 @@ fn upsample_color_channels(
     })
 }
 
-fn append_extra_channels(
+fn append_extra_channels<S: Sample>(
     frame: &IndexedFrame,
     fb: &mut ImageWithRegion,
-    gmodular: GlobalModular,
+    gmodular: GlobalModular<S>,
     original_region: Region,
 ) -> Result<()> {
+    let _guard = tracing::trace_span!("Append extra channels").entered();
+
     let fb_region = fb.region();
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -252,28 +255,32 @@ fn append_extra_channels(
         let height = region.height as usize;
         let mut out = SimpleGrid::with_alloc_tracker(width, height, tracker)?;
         modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
+        features::upsample(&mut out, image_header, frame_header, idx + 3)?;
 
         let upsampled_region = region.upsample(upsample_factor);
-        features::upsample(&mut out, image_header, frame_header, idx + 3)?;
-        let out = ImageWithRegion::from_buffer(
-            vec![out],
-            upsampled_region.left,
-            upsampled_region.top,
-            false,
-        );
-        let cropped = fb.add_channel()?;
-        out.clone_region_channel(fb_region, 0, cropped);
+        if upsampled_region == fb_region {
+            fb.push_channel(out);
+        } else {
+            let out = ImageWithRegion::from_buffer(
+                vec![out],
+                upsampled_region.left,
+                upsampled_region.top,
+                false,
+            );
+            let fb_out = fb.add_channel()?;
+            out.clone_region_channel(fb_region, 0, fb_out);
+        }
     }
 
     Ok(())
 }
 
-fn render_features(
+fn render_features<S: Sample>(
     frame: &IndexedFrame,
     image_region: Option<Region>,
     grid: &mut ImageWithRegion,
-    reference_grids: [Option<Reference>; 4],
-    cache: &mut RenderCache,
+    reference_grids: [Option<Reference<S>>; 4],
+    cache: &mut RenderCache<S>,
     visible_frames_num: usize,
     invisible_frames_num: usize,
 ) -> Result<()> {

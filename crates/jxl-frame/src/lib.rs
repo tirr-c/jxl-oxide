@@ -31,6 +31,7 @@ pub mod header;
 
 pub use error::{Error, Result};
 pub use header::FrameHeader;
+use jxl_modular::Sample;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig};
 use jxl_threadpool::JxlThreadPool;
 
@@ -245,7 +246,7 @@ impl Frame {
 }
 
 impl Frame {
-    pub fn try_parse_lf_global(&self) -> Option<Result<LfGlobal>> {
+    pub fn try_parse_lf_global<S: Sample>(&self) -> Option<Result<LfGlobal<S>>> {
         Some(if self.toc.is_single_entry() {
             let group = self.data.first()?;
             let mut bitstream = Bitstream::new(&group.bytes);
@@ -283,13 +284,13 @@ impl Frame {
         })
     }
 
-    pub fn try_parse_lf_group(
+    pub fn try_parse_lf_group<S: Sample>(
         &self,
         lf_global_vardct: Option<&LfGlobalVarDct>,
         global_ma_config: Option<&MaConfig>,
-        mlf_group: Option<TransformedModularSubimage>,
+        mlf_group: Option<TransformedModularSubimage<S>>,
         lf_group_idx: u32,
-    ) -> Option<Result<LfGroup>> {
+    ) -> Option<Result<LfGroup<S>>> {
         if self.toc.is_single_entry() {
             if lf_group_idx != 0 {
                 return None;
@@ -299,7 +300,7 @@ impl Frame {
             let mut bitstream = Bitstream::new(&group.bytes);
             let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
             if offset == 0 {
-                let lf_global = self.try_parse_lf_global().unwrap();
+                let lf_global = self.try_parse_lf_global::<S>().unwrap();
                 if let Err(e) = lf_global {
                     return Some(Err(e));
                 }
@@ -357,9 +358,9 @@ impl Frame {
         }
     }
 
-    pub fn try_parse_hf_global(
+    pub fn try_parse_hf_global<S: Sample>(
         &self,
-        cached_lf_global: Option<&LfGlobal>,
+        cached_lf_global: Option<&LfGlobal<S>>,
     ) -> Option<Result<HfGlobal>> {
         let is_modular = self.header.encoding == header::Encoding::Modular;
 
@@ -476,7 +477,7 @@ impl Frame {
             let mut bitstream = Bitstream::new(&group.bytes);
             let mut offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
             if offset == 0 {
-                let hf_global = self.try_parse_hf_global(None)?;
+                let hf_global = self.try_parse_hf_global::<i32>(None)?;
                 if let Err(e) = hf_global {
                     return Some(Err(e));
                 }

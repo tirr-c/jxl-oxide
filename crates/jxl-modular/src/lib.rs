@@ -10,11 +10,13 @@ pub mod image;
 mod ma;
 mod param;
 mod predictor;
+mod sample;
 mod transform;
 pub use error::{Error, Result};
 use jxl_grid::AllocTracker;
 pub use ma::{MaConfig, MaConfigParams};
 pub use param::*;
+pub use sample::Sample;
 
 /// A Modular encoded image.
 ///
@@ -25,29 +27,29 @@ pub use param::*;
 ///      [self.make_subimage_params_pass_group].
 /// 2. Decode pixels by calling [self.decode_image] or [self.decode_image_gmodular].
 #[derive(Debug, Default)]
-pub struct Modular {
-    inner: Option<ModularData>,
+pub struct Modular<S: Sample> {
+    inner: Option<ModularData<S>>,
 }
 
 #[derive(Debug)]
-struct ModularData {
-    image: image::ModularImageDestination,
+struct ModularData<S: Sample> {
+    image: image::ModularImageDestination<S>,
 }
 
-impl Bundle<ModularParams<'_, '_>> for Modular {
+impl<S: Sample> Bundle<ModularParams<'_, '_>> for Modular<S> {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {
         let inner = if params.channels.is_empty() {
             None
         } else {
-            Some(read_bits!(bitstream, Bundle(ModularData), params)?)
+            Some(read_bits!(bitstream, Bundle(ModularData::<S>), params)?)
         };
         Ok(Self { inner })
     }
 }
 
-impl Modular {
+impl<S: Sample> Modular<S> {
     /// Creates an empty Modular image.
     pub fn empty() -> Self {
         Self::default()
@@ -66,7 +68,7 @@ impl Modular {
     }
 }
 
-impl Modular {
+impl<S: Sample> Modular<S> {
     pub fn has_palette(&self) -> bool {
         let Some(image) = &self.inner else {
             return false;
@@ -82,21 +84,21 @@ impl Modular {
     }
 }
 
-impl Modular {
-    pub fn image(&self) -> Option<&image::ModularImageDestination> {
+impl<S: Sample> Modular<S> {
+    pub fn image(&self) -> Option<&image::ModularImageDestination<S>> {
         self.inner.as_ref().map(|x| &x.image)
     }
 
-    pub fn image_mut(&mut self) -> Option<&mut image::ModularImageDestination> {
+    pub fn image_mut(&mut self) -> Option<&mut image::ModularImageDestination<S>> {
         self.inner.as_mut().map(|x| &mut x.image)
     }
 
-    pub fn into_image(self) -> Option<image::ModularImageDestination> {
+    pub fn into_image(self) -> Option<image::ModularImageDestination<S>> {
         self.inner.map(|x| x.image)
     }
 }
 
-impl Bundle<ModularParams<'_, '_>> for ModularData {
+impl<S: Sample> Bundle<ModularParams<'_, '_>> for ModularData<S> {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: ModularParams) -> Result<Self> {

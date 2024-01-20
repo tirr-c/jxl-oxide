@@ -1,6 +1,6 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::AllocTracker;
-use jxl_modular::{ChannelShift, MaConfig, Modular, ModularParams};
+use jxl_modular::{ChannelShift, MaConfig, Modular, ModularParams, Sample};
 
 use crate::Result;
 
@@ -130,13 +130,13 @@ pub struct LfCoeffParams<'ma, 'pool, 'tracker> {
 
 /// Quantized LF image.
 #[derive(Debug)]
-pub struct LfCoeff {
+pub struct LfCoeff<S: Sample> {
     pub extra_precision: u8,
-    pub lf_quant: Modular,
+    pub lf_quant: Modular<S>,
     pub partial: bool,
 }
 
-impl Bundle<LfCoeffParams<'_, '_, '_>> for LfCoeff {
+impl<S: Sample> Bundle<LfCoeffParams<'_, '_, '_>> for LfCoeff<S> {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfCoeffParams) -> Result<Self> {

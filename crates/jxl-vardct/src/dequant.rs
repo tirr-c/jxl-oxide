@@ -30,7 +30,7 @@ enum DequantMatrixParamsEncoding {
     Dct([Vec<f32>; 3]),
     Raw {
         denominator: f32,
-        params: Modular,
+        params: Modular<i32>,
     },
 }
 

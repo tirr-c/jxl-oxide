@@ -1,25 +1,25 @@
 use jxl_bitstream::Bitstream;
 use jxl_grid::{AllocTracker, CutGrid, SharedSubgrid, SimpleGrid};
-use jxl_modular::ChannelShift;
+use jxl_modular::{ChannelShift, Sample};
 
 use crate::{BlockInfo, HfBlockContext, HfPass, Result};
 
 /// Parameters for decoding `HfCoeff`.
 #[derive(Debug)]
-pub struct HfCoeffParams<'a, 'b> {
+pub struct HfCoeffParams<'a, 'b, S: Sample> {
     pub num_hf_presets: u32,
     pub hf_block_ctx: &'a HfBlockContext,
     pub block_info: SharedSubgrid<'a, BlockInfo>,
     pub jpeg_upsampling: [u32; 3],
-    pub lf_quant: Option<[SharedSubgrid<'a, i32>; 3]>,
+    pub lf_quant: Option<[SharedSubgrid<'a, S>; 3]>,
     pub hf_pass: &'a HfPass,
     pub coeff_shift: u32,
     pub tracker: Option<&'b AllocTracker>,
 }
 
-pub fn write_hf_coeff(
+pub fn write_hf_coeff<S: Sample>(
     bitstream: &mut Bitstream,
-    params: HfCoeffParams,
+    params: HfCoeffParams<S>,
     hf_coeff_output: &mut [CutGrid<'_, f32>; 3],
 ) -> Result<()> {
     const COEFF_FREQ_CONTEXT: [u32; 63] = [
@@ -118,7 +118,7 @@ pub fn write_hf_coeff(
                     let y = y >> vshifts[c];
                     let q = *lf_quant[c].get(x, y);
                     for &threshold in lf_thresholds {
-                        if q > threshold {
+                        if q.to_i32() > threshold {
                             idx += 1;
                         }
                     }

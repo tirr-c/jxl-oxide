@@ -1,14 +1,14 @@
-use std::num::Wrapping;
-
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
+use jxl_threadpool::JxlThreadPool;
 
 use super::{
     predictor::{Predictor, PredictorState, WpHeader},
     ModularChannelInfo,
 };
-use crate::{image::TransformedGrid, Error, Result};
+use crate::{image::TransformedGrid, Error, Result, Sample};
 
+mod rct;
 mod squeeze;
 
 #[derive(Debug, Clone)]
@@ -25,17 +25,19 @@ impl TransformInfo {
     ) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
-            Self::Palette(pal) => pal.transform_channel_info(channels, &mut Vec::new(), None),
+            Self::Palette(pal) => {
+                pal.transform_channel_info::<i16>(channels, &mut Vec::new(), None)
+            }
             Self::Squeeze(sq) => {
                 sq.set_default_params(channels);
-                sq.transform_channel_info(channels, None)
+                sq.transform_channel_info::<i16>(channels, None)
             }
         }
     }
 
-    pub(super) fn prepare_meta_channels(
+    pub(super) fn prepare_meta_channels<S: Sample>(
         &self,
-        meta_channels: &mut Vec<SimpleGrid<i32>>,
+        meta_channels: &mut Vec<SimpleGrid<S>>,
         tracker: Option<&AllocTracker>,
     ) -> Result<()> {
         if let Self::Palette(pal) = self {
@@ -51,11 +53,11 @@ impl TransformInfo {
         Ok(())
     }
 
-    pub(super) fn transform_channels<'dest>(
+    pub(super) fn transform_channels<'dest, S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
-        meta_channel_grids: &mut Vec<CutGrid<'dest, i32>>,
-        grids: &mut Vec<TransformedGrid<'dest>>,
+        meta_channel_grids: &mut Vec<CutGrid<'dest, S>>,
+        grids: &mut Vec<TransformedGrid<'dest, S>>,
     ) -> Result<()> {
         match self {
             Self::Rct(rct) => rct.transform_channel_info(channels),
@@ -66,14 +68,14 @@ impl TransformInfo {
         }
     }
 
-    pub(super) fn inverse(
+    pub(super) fn inverse<S: Sample>(
         &self,
-        grids: &mut Vec<TransformedGrid<'_>>,
+        grids: &mut Vec<TransformedGrid<'_, S>>,
         bit_depth: u32,
-        pool: &jxl_threadpool::JxlThreadPool,
+        pool: &JxlThreadPool,
     ) {
         match self {
-            Self::Rct(rct) => rct.inverse(grids),
+            Self::Rct(rct) => rct.inverse(grids, pool),
             Self::Palette(pal) => pal.inverse(grids, bit_depth),
             Self::Squeeze(sq) => sq.inverse(grids, pool),
         }
@@ -182,8 +184,8 @@ impl Rct {
         Ok(())
     }
 
-    fn inverse(&self, grids: &mut [TransformedGrid<'_>]) {
-        let permutation = (self.rct_type / 7) as usize;
+    fn inverse<S: Sample>(&self, grids: &mut [TransformedGrid<'_, S>], pool: &JxlThreadPool) {
+        let permutation = self.rct_type / 7;
         let ty = self.rct_type % 7;
 
         let begin_c = self.begin_c as usize;
@@ -192,44 +194,30 @@ impl Rct {
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
 
-        let width = a.width();
-        let height = a.height();
-        assert_eq!(width, b.width());
-        assert_eq!(width, c.width());
-        assert_eq!(height, b.height());
-        assert_eq!(height, c.height());
-
-        for y in 0..height {
-            for x in 0..width {
-                let samples = [a.get_mut(x, y), b.get_mut(x, y), c.get_mut(x, y)];
-
-                let a = Wrapping(*samples[0]);
-                let b = Wrapping(*samples[1]);
-                let c = Wrapping(*samples[2]);
-                let d;
-                let e;
-                let f;
-                if ty == 6 {
-                    let tmp = a - (c >> 1);
-                    e = c + tmp;
-                    f = tmp - (b >> 1);
-                    d = f + b;
-                } else {
-                    d = a;
-                    f = if ty & 1 != 0 { c + a } else { c };
-                    e = if (ty >> 1) == 1 {
-                        b + a
-                    } else if (ty >> 1) == 2 {
-                        b + ((a + f) >> 1)
-                    } else {
-                        b
-                    };
-                }
-                *samples[permutation % 3] = d.0;
-                *samples[(permutation + 1 + (permutation / 3)) % 3] = e.0;
-                *samples[(permutation + 2 - (permutation / 3)) % 3] = f.0;
-            }
-        }
+        let a = {
+            let g = a.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let b = {
+            let g = b.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let c = {
+            let g = c.subgrid_mut(.., ..);
+            let width = g.width();
+            g.into_groups(width, 8)
+        };
+        let groups = a
+            .into_iter()
+            .zip(b)
+            .zip(c)
+            .map(|((a, b), c)| (a, b, c))
+            .collect::<Vec<_>>();
+        pool.for_each_vec(groups, |(mut a, mut b, mut c)| {
+            rct::inverse_rct(permutation, ty, [&mut a, &mut b, &mut c]);
+        })
     }
 }
 
@@ -250,11 +238,11 @@ impl Palette {
         [45, -45, 24], [24, 45, -45], [64, 64, -64], [128, 128, 0], [0, 0, -128], [-24, 45, -45],
     ];
 
-    fn transform_channel_info<'dest>(
+    fn transform_channel_info<'dest, S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
-        meta_channel_grids: &mut Vec<CutGrid<'dest, i32>>,
-        grids: Option<&mut Vec<TransformedGrid<'dest>>>,
+        meta_channel_grids: &mut Vec<CutGrid<'dest, S>>,
+        grids: Option<&mut Vec<TransformedGrid<'dest, S>>>,
     ) -> Result<()> {
         let begin_c = self.begin_c;
         let end_c = begin_c + self.num_c;
@@ -297,12 +285,12 @@ impl Palette {
         Ok(())
     }
 
-    fn inverse_once(
+    fn inverse_once<S: Sample>(
         &self,
         c: usize,
-        palette: &CutGrid<'_, i32>,
-        indices: Option<&CutGrid<'_, i32>>,
-        grid: &mut CutGrid<'_, i32>,
+        palette: &CutGrid<'_, S>,
+        indices: Option<&CutGrid<'_, S>>,
+        grid: &mut CutGrid<'_, S>,
         bit_depth: u32,
     ) {
         let nb_deltas = self.nb_deltas as i32;
@@ -317,7 +305,8 @@ impl Palette {
                     indices.get(x, y)
                 } else {
                     grid.get(x, y)
-                };
+                }
+                .to_i32();
                 let sample = grid.get_mut(x, y);
                 if index < nb_deltas {
                     need_delta.push((x, y));
@@ -328,27 +317,30 @@ impl Palette {
                     let value = index;
                     let index = index - nb_colors;
                     if index < 64 {
-                        *sample = ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
-                            + (1i32 << bit_depth.saturating_sub(3));
+                        *sample = S::from_i32(
+                            ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
+                                + (1i32 << bit_depth.saturating_sub(3)),
+                        );
                     } else {
                         let mut index = index - 64;
                         for _ in 0..c {
                             index /= 5;
                         }
-                        *sample = (index % 5) * ((1i32 << bit_depth) - 1) / 4;
+                        *sample = S::from_i32((index % 5) * ((1i32 << bit_depth) - 1) / 4);
                     }
                 } else if c < 3 {
                     let index = -(index + 1);
                     let index = (index % 143) as usize;
-                    *sample = Self::DELTA_PALETTE[(index + 1) >> 1][c] as i32;
+                    let mut temp_sample = Self::DELTA_PALETTE[(index + 1) >> 1][c] as i32;
                     if index & 1 == 0 {
-                        *sample = -*sample;
+                        temp_sample = -temp_sample;
                     }
                     if bit_depth > 8 {
-                        *sample <<= bit_depth.min(24) - 8;
+                        temp_sample <<= bit_depth.min(24) - 8;
                     }
+                    *sample = S::from_i32(temp_sample);
                 } else {
-                    *sample = 0;
+                    *sample = S::default();
                 }
             }
         }
@@ -370,11 +362,11 @@ impl Palette {
             for x in 0..width {
                 let properties = predictor.properties(&[]);
                 let sample = grid.get_mut(x, y);
-                let mut sample_value = *sample;
+                let mut sample_value = sample.to_i32();
                 if need_delta[idx] == (x, y) {
                     let diff = d_pred.predict(&properties);
                     sample_value = (sample_value as i64 + diff) as i32;
-                    *sample = sample_value;
+                    *sample = S::from_i32(sample_value);
                     idx += 1;
                     if idx >= need_delta.len() {
                         return;
@@ -385,7 +377,7 @@ impl Palette {
         }
     }
 
-    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, bit_depth: u32) {
+    fn inverse<S: Sample>(&self, grids: &mut Vec<TransformedGrid<'_, S>>, bit_depth: u32) {
         let begin_c = self.begin_c as usize;
         let num_c = self.num_c as usize;
 
@@ -471,10 +463,10 @@ impl Squeeze {
         }
     }
 
-    fn transform_channel_info(
+    fn transform_channel_info<S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
-        mut grids: Option<&mut Vec<TransformedGrid<'_>>>,
+        mut grids: Option<&mut Vec<TransformedGrid<'_, S>>>,
     ) -> Result<()> {
         for sp in &self.sp {
             let SqueezeParams {
@@ -560,7 +552,7 @@ impl Squeeze {
         Ok(())
     }
 
-    fn inverse(&self, grids: &mut Vec<TransformedGrid<'_>>, pool: &jxl_threadpool::JxlThreadPool) {
+    fn inverse<S: Sample>(&self, grids: &mut Vec<TransformedGrid<'_, S>>, pool: &JxlThreadPool) {
         for sp in self.sp.iter().rev() {
             let begin = sp.begin_c as usize;
             let channel_count = sp.num_c as usize;
@@ -579,10 +571,10 @@ impl Squeeze {
 }
 
 impl SqueezeParams {
-    fn inverse<'dest>(
+    fn inverse<'dest, S: Sample>(
         &self,
-        i0: &mut TransformedGrid<'dest>,
-        i1: TransformedGrid<'dest>,
+        i0: &mut TransformedGrid<'dest, S>,
+        i1: TransformedGrid<'dest, S>,
         pool: &jxl_threadpool::JxlThreadPool,
     ) {
         let i0 = i0.grid_mut();

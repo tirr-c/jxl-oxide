@@ -2,7 +2,7 @@ use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
 use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
 use jxl_modular::{
-    ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams,
+    ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams, Sample,
 };
 use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
@@ -11,13 +11,13 @@ use crate::{header::Encoding, FrameHeader, Result};
 use super::{NoiseParameters, Patches, Splines};
 
 #[derive(Debug)]
-pub struct LfGlobal {
+pub struct LfGlobal<S: Sample> {
     pub patches: Option<Patches>,
     pub splines: Option<Splines>,
     pub noise: Option<NoiseParameters>,
     pub lf_dequant: LfChannelDequantization,
     pub vardct: Option<LfGlobalVarDct>,
-    pub gmodular: GlobalModular,
+    pub gmodular: GlobalModular<S>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,7 +44,7 @@ impl<'a, 'b> LfGlobalParams<'a, 'b> {
     }
 }
 
-impl Bundle<LfGlobalParams<'_, '_>> for LfGlobal {
+impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for LfGlobal<S> {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGlobalParams) -> Result<Self> {
@@ -139,7 +139,7 @@ impl Bundle<LfGlobalParams<'_, '_>> for LfGlobal {
             }
         }
 
-        let gmodular = read_bits!(bitstream, Bundle(GlobalModular), params)?;
+        let gmodular = read_bits!(bitstream, Bundle(GlobalModular::<S>), params)?;
 
         Ok(Self {
             patches,
@@ -162,13 +162,13 @@ define_bundle! {
 }
 
 #[derive(Debug)]
-pub struct GlobalModular {
+pub struct GlobalModular<S: Sample> {
     pub ma_config: Option<MaConfig>,
-    pub modular: Modular,
+    pub modular: Modular<S>,
     extra_channel_from: usize,
 }
 
-impl GlobalModular {
+impl<S: Sample> GlobalModular<S> {
     pub fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             ma_config: self.ma_config.clone(),
@@ -186,7 +186,7 @@ impl GlobalModular {
     }
 }
 
-impl Bundle<LfGlobalParams<'_, '_>> for GlobalModular {
+impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, params: LfGlobalParams) -> Result<Self> {
@@ -265,7 +265,7 @@ impl Bundle<LfGlobalParams<'_, '_>> for GlobalModular {
             ma_config.as_ref(),
             tracker,
         );
-        let mut modular = read_bits!(bitstream, Bundle(Modular), modular_params)?;
+        let mut modular = read_bits!(bitstream, Bundle(Modular::<S>), modular_params)?;
         if let Some(image) = modular.image_mut() {
             let mut gmodular = image.prepare_gmodular()?;
             gmodular.decode(bitstream, 0, allow_partial)?;

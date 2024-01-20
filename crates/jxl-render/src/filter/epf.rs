@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
+use jxl_modular::Sample;
 
 use crate::{region::ImageWithRegion, Region};
 
-pub fn apply_epf(
+pub fn apply_epf<S: Sample>(
     fb: &mut ImageWithRegion,
-    lf_groups: &HashMap<u32, LfGroup>,
+    lf_groups: &HashMap<u32, LfGroup<S>>,
     frame_header: &FrameHeader,
     pool: &jxl_threadpool::JxlThreadPool,
 ) -> crate::Result<()> {
