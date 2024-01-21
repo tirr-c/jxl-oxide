@@ -1,5 +1,7 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::is_aarch64_feature_detected;
+#[cfg(target_arch = "x86_64")]
+use std::arch::is_x86_feature_detected;
 
 use jxl_grid::CutGrid;
 
@@ -18,6 +20,21 @@ fn inverse_h_i32(merged: &mut CutGrid<i32>) {
 }
 
 fn inverse_h_i16(merged: &mut CutGrid<i16>) {
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                inverse_h_i16_x86_64_avx2(merged);
+                return;
+            }
+        } else {
+            unsafe {
+                inverse_h_i16_x86_64_sse41(merged);
+                return;
+            }
+        }
+    }
+
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
         unsafe {
@@ -59,6 +76,7 @@ fn inverse_h_i32_base(merged: &mut CutGrid<'_, i32>) {
     }
 }
 
+#[inline(never)]
 fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
     let height = merged.height();
     let width = merged.width();
@@ -86,6 +104,348 @@ fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
         if let [v] = row_out_it.into_remainder() {
             *v = avg_row[avg_width - 1];
         }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "sse2")]
+#[inline]
+unsafe fn transpose_i16x16(vs: [std::arch::x86_64::__m256i; 8]) -> [std::arch::x86_64::__m256i; 8] {
+    use std::arch::x86_64::*;
+
+    let vs = [
+        _mm256_unpacklo_epi16(vs[0], vs[1]),
+        _mm256_unpacklo_epi16(vs[2], vs[3]),
+        _mm256_unpacklo_epi16(vs[4], vs[5]),
+        _mm256_unpacklo_epi16(vs[6], vs[7]),
+        _mm256_unpackhi_epi16(vs[0], vs[1]),
+        _mm256_unpackhi_epi16(vs[2], vs[3]),
+        _mm256_unpackhi_epi16(vs[4], vs[5]),
+        _mm256_unpackhi_epi16(vs[6], vs[7]),
+    ];
+
+    let vs = [
+        _mm256_unpacklo_epi32(vs[0], vs[1]),
+        _mm256_unpacklo_epi32(vs[2], vs[3]),
+        _mm256_unpacklo_epi32(vs[4], vs[5]),
+        _mm256_unpacklo_epi32(vs[6], vs[7]),
+        _mm256_unpackhi_epi32(vs[0], vs[1]),
+        _mm256_unpackhi_epi32(vs[2], vs[3]),
+        _mm256_unpackhi_epi32(vs[4], vs[5]),
+        _mm256_unpackhi_epi32(vs[6], vs[7]),
+    ];
+
+    [
+        _mm256_unpacklo_epi64(vs[0], vs[1]),
+        _mm256_unpackhi_epi64(vs[0], vs[1]),
+        _mm256_unpacklo_epi64(vs[4], vs[5]),
+        _mm256_unpackhi_epi64(vs[4], vs[5]),
+        _mm256_unpacklo_epi64(vs[2], vs[3]),
+        _mm256_unpackhi_epi64(vs[2], vs[3]),
+        _mm256_unpacklo_epi64(vs[6], vs[7]),
+        _mm256_unpackhi_epi64(vs[6], vs[7]),
+    ]
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+#[inline]
+unsafe fn transpose_i16x8(vs: [std::arch::x86_64::__m128i; 8]) -> [std::arch::x86_64::__m128i; 8] {
+    use std::arch::x86_64::*;
+
+    let vs = [
+        _mm_unpacklo_epi16(vs[0], vs[1]),
+        _mm_unpacklo_epi16(vs[2], vs[3]),
+        _mm_unpacklo_epi16(vs[4], vs[5]),
+        _mm_unpacklo_epi16(vs[6], vs[7]),
+        _mm_unpackhi_epi16(vs[0], vs[1]),
+        _mm_unpackhi_epi16(vs[2], vs[3]),
+        _mm_unpackhi_epi16(vs[4], vs[5]),
+        _mm_unpackhi_epi16(vs[6], vs[7]),
+    ];
+
+    let vs = [
+        _mm_unpacklo_epi32(vs[0], vs[1]),
+        _mm_unpacklo_epi32(vs[2], vs[3]),
+        _mm_unpacklo_epi32(vs[4], vs[5]),
+        _mm_unpacklo_epi32(vs[6], vs[7]),
+        _mm_unpackhi_epi32(vs[0], vs[1]),
+        _mm_unpackhi_epi32(vs[2], vs[3]),
+        _mm_unpackhi_epi32(vs[4], vs[5]),
+        _mm_unpackhi_epi32(vs[6], vs[7]),
+    ];
+
+    [
+        _mm_unpacklo_epi64(vs[0], vs[1]),
+        _mm_unpackhi_epi64(vs[0], vs[1]),
+        _mm_unpacklo_epi64(vs[4], vs[5]),
+        _mm_unpackhi_epi64(vs[4], vs[5]),
+        _mm_unpacklo_epi64(vs[2], vs[3]),
+        _mm_unpackhi_epi64(vs[2], vs[3]),
+        _mm_unpacklo_epi64(vs[6], vs[7]),
+        _mm_unpackhi_epi64(vs[6], vs[7]),
+    ]
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "sse2")]
+unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::x86_64::*;
+    use std::mem::MaybeUninit;
+
+    let height = merged.height();
+    let width = merged.width();
+
+    if width <= 32 {
+        return inverse_h_i16_base(merged);
+    }
+
+    // SAFETY: __m128i doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); width];
+    let avg_width = (width + 1) / 2;
+
+    let h8 = height / 8;
+    for y8 in 0..h8 {
+        let y = y8 * 8;
+
+        // SAFETY: Rows are disjoint.
+        let rows: [_; 8] = std::array::from_fn(|dy| merged.get_row_mut(y + dy).as_mut_ptr());
+
+        let mut avg = _mm_setr_epi16(
+            *rows[0x0], *rows[0x1], *rows[0x2], *rows[0x3], *rows[0x4], *rows[0x5], *rows[0x6],
+            *rows[0x7],
+        );
+        let mut left = avg;
+        for x16 in 0..(avg_width - 1) / 16 {
+            let x = x16 * 16 + 1;
+            let avgs = transpose_i16x16(std::array::from_fn(|idx| unsafe {
+                _mm256_loadu_si256(rows[idx].add(x) as *const _)
+            }));
+            let residuals = transpose_i16x16(std::array::from_fn(|idx| unsafe {
+                _mm256_loadu_si256(rows[idx].add(avg_width - 1 + x) as *const _)
+            }));
+
+            // Lower half
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let residual = _mm256_extracti128_si256::<0>(residual);
+                let next_avg = _mm256_extracti128_si256::<0>(next_avg);
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[x16 * 32 + dx * 2].write(first);
+                scratch[x16 * 32 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+
+            // Upper half
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let residual = _mm256_extracti128_si256::<1>(residual);
+                let next_avg = _mm256_extracti128_si256::<1>(next_avg);
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[x16 * 32 + 16 + dx * 2].write(first);
+                scratch[x16 * 32 + 16 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        if (avg_width - 1) % 16 >= 8 {
+            let x16 = (avg_width - 1) / 16;
+            let x = x16 * 16 + 1;
+            let avgs = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(x) as *const _)
+            }));
+            let residuals = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(avg_width - 1 + x) as *const _)
+            }));
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[x16 * 32 + dx * 2].write(first);
+                scratch[x16 * 32 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        // Check if we have more data to process.
+        if (avg_width - 1) % 8 != 0 || width % 2 == 0 {
+            let mut avgs = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(avg_width - 8) as *const _)
+            }));
+            if width % 2 == 0 {
+                avgs = std::array::from_fn(|idx| if idx == 7 { avgs[7] } else { avgs[idx + 1] });
+            }
+            let residuals = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(width - 8) as *const _)
+            }));
+            let from = (!(width / 2) + 1) % 8;
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate().skip(from)
+            {
+                let dx = 8 - dx;
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[width / 2 * 2 - dx * 2].write(first);
+                scratch[width / 2 * 2 - dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        if width % 2 == 1 {
+            scratch.last_mut().unwrap().write(avg);
+        }
+
+        let mut chunks_it = scratch.chunks_exact(8);
+        for (x8, chunk) in (&mut chunks_it).enumerate() {
+            let x = x8 * 8;
+            let v = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                chunk[idx].assume_init_read()
+            }));
+            for (row, v) in rows.iter().zip(v) {
+                _mm_storeu_si128(row.add(x) as *mut _, v);
+            }
+        }
+
+        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+            let x = width / 8 * 8 + dx;
+            let v = v.assume_init_read();
+            *rows[0x0].add(x) = _mm_extract_epi16::<0x0>(v) as i16;
+            *rows[0x1].add(x) = _mm_extract_epi16::<0x1>(v) as i16;
+            *rows[0x2].add(x) = _mm_extract_epi16::<0x2>(v) as i16;
+            *rows[0x3].add(x) = _mm_extract_epi16::<0x3>(v) as i16;
+            *rows[0x4].add(x) = _mm_extract_epi16::<0x4>(v) as i16;
+            *rows[0x5].add(x) = _mm_extract_epi16::<0x5>(v) as i16;
+            *rows[0x6].add(x) = _mm_extract_epi16::<0x6>(v) as i16;
+            *rows[0x7].add(x) = _mm_extract_epi16::<0x7>(v) as i16;
+        }
+    }
+
+    if height % 8 != 0 {
+        inverse_h_i16_base(&mut merged.split_vertical(h8 * 8).1);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+#[target_feature(enable = "sse4.1")]
+unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::x86_64::*;
+    use std::mem::MaybeUninit;
+
+    let height = merged.height();
+    let width = merged.width();
+
+    if width <= 16 {
+        return inverse_h_i16_base(merged);
+    }
+
+    // SAFETY: __m128i doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); width];
+    let avg_width = (width + 1) / 2;
+
+    let h8 = height / 8;
+    for y8 in 0..h8 {
+        let y = y8 * 8;
+
+        // SAFETY: Rows are disjoint.
+        let rows: [_; 8] = std::array::from_fn(|dy| merged.get_row_mut(y + dy).as_mut_ptr());
+
+        let mut avg = _mm_setr_epi16(
+            *rows[0x0], *rows[0x1], *rows[0x2], *rows[0x3], *rows[0x4], *rows[0x5], *rows[0x6],
+            *rows[0x7],
+        );
+        let mut left = avg;
+        for x8 in 0..(avg_width - 1) / 8 {
+            let x = x8 * 8 + 1;
+            let avgs = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(x) as *const _)
+            }));
+            let residuals = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(avg_width - 1 + x) as *const _)
+            }));
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[x8 * 16 + dx * 2].write(first);
+                scratch[x8 * 16 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        // Check if we have more data to process.
+        if (avg_width - 1) % 8 != 0 || width % 2 == 0 {
+            let mut avgs = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(avg_width - 8) as *const _)
+            }));
+            if width % 2 == 0 {
+                avgs = std::array::from_fn(|idx| if idx == 7 { avgs[7] } else { avgs[idx + 1] });
+            }
+            let residuals = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                _mm_loadu_si128(rows[idx].add(width - 8) as *const _)
+            }));
+            let from = (!(width / 2) + 1) % 8;
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate().skip(from)
+            {
+                let dx = 8 - dx;
+                let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(left, avg, next_avg));
+                let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+                let first = _mm_add_epi16(avg, diff_2);
+                let second = _mm_sub_epi16(first, diff);
+                scratch[width / 2 * 2 - dx * 2].write(first);
+                scratch[width / 2 * 2 - dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        if width % 2 == 1 {
+            scratch.last_mut().unwrap().write(avg);
+        }
+
+        let mut chunks_it = scratch.chunks_exact(8);
+        for (x8, chunk) in (&mut chunks_it).enumerate() {
+            let x = x8 * 8;
+            let v = transpose_i16x8(std::array::from_fn(|idx| unsafe {
+                chunk[idx].assume_init_read()
+            }));
+            for (row, v) in rows.iter().zip(v) {
+                _mm_storeu_si128(row.add(x) as *mut _, v);
+            }
+        }
+
+        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+            let x = width / 8 * 8 + dx;
+            let v = v.assume_init_read();
+            *rows[0x0].add(x) = _mm_extract_epi16::<0x0>(v) as i16;
+            *rows[0x1].add(x) = _mm_extract_epi16::<0x1>(v) as i16;
+            *rows[0x2].add(x) = _mm_extract_epi16::<0x2>(v) as i16;
+            *rows[0x3].add(x) = _mm_extract_epi16::<0x3>(v) as i16;
+            *rows[0x4].add(x) = _mm_extract_epi16::<0x4>(v) as i16;
+            *rows[0x5].add(x) = _mm_extract_epi16::<0x5>(v) as i16;
+            *rows[0x6].add(x) = _mm_extract_epi16::<0x6>(v) as i16;
+            *rows[0x7].add(x) = _mm_extract_epi16::<0x7>(v) as i16;
+        }
+    }
+
+    if height % 8 != 0 {
+        inverse_h_i16_base(&mut merged.split_vertical(h8 * 8).1);
     }
 }
 
@@ -250,6 +610,21 @@ fn inverse_v_i32(merged: &mut CutGrid<i32>) {
 }
 
 fn inverse_v_i16(merged: &mut CutGrid<i16>) {
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                inverse_v_i16_x86_64_avx2(merged);
+                return;
+            }
+        } else {
+            unsafe {
+                inverse_v_i16_x86_64_sse41(merged);
+                return;
+            }
+        }
+    }
+
     #[cfg(target_arch = "aarch64")]
     if is_aarch64_feature_detected!("neon") {
         unsafe {
@@ -290,6 +665,7 @@ fn inverse_v_i32_base(merged: &mut CutGrid<'_, i32>) {
     }
 }
 
+#[inline(never)]
 fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
     let width = merged.width();
     let height = merged.height();
@@ -316,6 +692,129 @@ fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
         if height % 2 == 1 {
             *merged.get_mut(x, height - 1) = avg_col[avg_height - 1];
         }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "sse2")]
+unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::x86_64::*;
+    use std::mem::MaybeUninit;
+
+    let width = merged.width();
+    let height = merged.height();
+
+    if height <= 1 {
+        return;
+    }
+
+    // SAFETY: __m256i doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<__m256i>::uninit(); height];
+    let avg_height = (height + 1) / 2;
+
+    let w16 = width / 16;
+    for x16 in 0..w16 {
+        let x = x16 * 16;
+
+        let mut avg = _mm256_loadu_si256(merged.get_mut(x, 0) as *mut i16 as *const _);
+        let mut top = avg;
+        let mut chunks_it = scratch.chunks_exact_mut(2);
+        for (y, pair) in (&mut chunks_it).enumerate() {
+            let residual =
+                _mm256_loadu_si256(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
+            let next_avg = if y + 1 < avg_height {
+                _mm256_loadu_si256(merged.get_mut(x, y + 1) as *mut _ as *const _)
+            } else {
+                avg
+            };
+
+            let diff = _mm256_add_epi16(residual, tendency_i16_x86_64_avx2(top, avg, next_avg));
+            let diff_2 =
+                _mm256_srai_epi16::<1>(_mm256_add_epi16(diff, _mm256_srli_epi16::<15>(diff)));
+            let first = _mm256_add_epi16(avg, diff_2);
+            let second = _mm256_sub_epi16(first, diff);
+            pair[0].write(first);
+            pair[1].write(second);
+            avg = next_avg;
+            top = second;
+        }
+
+        if let [v] = chunks_it.into_remainder() {
+            v.write(avg);
+        }
+
+        for (y, v) in scratch.iter().enumerate() {
+            _mm256_storeu_si256(
+                merged.get_mut(x, y) as *mut i16 as *mut _,
+                v.assume_init_read(),
+            );
+        }
+    }
+
+    if width % 16 != 0 {
+        inverse_v_i16_x86_64_sse41(&mut merged.split_horizontal(w16 * 16).1);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse4.1")]
+#[target_feature(enable = "sse2")]
+unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::x86_64::*;
+    use std::mem::MaybeUninit;
+
+    let width = merged.width();
+    let height = merged.height();
+
+    if height <= 1 {
+        return;
+    }
+
+    // SAFETY: __m128i doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); height];
+    let avg_height = (height + 1) / 2;
+
+    let w8 = width / 8;
+    for x8 in 0..w8 {
+        let x = x8 * 8;
+
+        let mut avg = _mm_loadu_si128(merged.get_mut(x, 0) as *mut i16 as *const _);
+        let mut top = avg;
+        let mut chunks_it = scratch.chunks_exact_mut(2);
+        for (y, pair) in (&mut chunks_it).enumerate() {
+            let residual = _mm_loadu_si128(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
+            let next_avg = if y + 1 < avg_height {
+                _mm_loadu_si128(merged.get_mut(x, y + 1) as *mut _ as *const _)
+            } else {
+                avg
+            };
+
+            let diff = _mm_add_epi16(residual, tendency_i16_x86_64_sse41(top, avg, next_avg));
+            let diff_2 = _mm_srai_epi16::<1>(_mm_add_epi16(diff, _mm_srli_epi16::<15>(diff)));
+            let first = _mm_add_epi16(avg, diff_2);
+            let second = _mm_sub_epi16(first, diff);
+            pair[0].write(first);
+            pair[1].write(second);
+            avg = next_avg;
+            top = second;
+        }
+
+        if let [v] = chunks_it.into_remainder() {
+            v.write(avg);
+        }
+
+        for (y, v) in scratch.iter().enumerate() {
+            _mm_storeu_si128(
+                merged.get_mut(x, y) as *mut i16 as *mut _,
+                v.assume_init_read(),
+            );
+        }
+    }
+
+    if width % 8 != 0 {
+        inverse_v_i16_base(&mut merged.split_horizontal(w8 * 8).1);
     }
 }
 
@@ -428,64 +927,109 @@ fn tendency_i16(a: i16, b: i16, c: i16) -> i16 {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-#[allow(dead_code)]
-unsafe fn tendency_i32_avx2(
+unsafe fn tendency_i16_x86_64_avx2(
     a: std::arch::x86_64::__m256i,
     b: std::arch::x86_64::__m256i,
     c: std::arch::x86_64::__m256i,
 ) -> std::arch::x86_64::__m256i {
     use std::arch::x86_64::*;
 
-    let a_b = _mm256_sub_epi32(a, b);
-    let b_c = _mm256_sub_epi32(b, c);
-    let a_c = _mm256_sub_epi32(a, c);
-    let abs_a_b = _mm256_abs_epi32(a_b);
-    let abs_b_c = _mm256_abs_epi32(b_c);
-    let abs_a_c = _mm256_abs_epi32(a_c);
-    let non_monotonic = _mm256_cmpgt_epi32(_mm256_setzero_si256(), _mm256_xor_si256(a_b, b_c));
+    let a_b = _mm256_sub_epi16(a, b);
+    let b_c = _mm256_sub_epi16(b, c);
+    let a_c = _mm256_sub_epi16(a, c);
+    let abs_a_b = _mm256_abs_epi16(a_b);
+    let abs_b_c = _mm256_abs_epi16(b_c);
+    let abs_a_c = _mm256_abs_epi16(a_c);
+    let non_monotonic = _mm256_cmpgt_epi16(_mm256_setzero_si256(), _mm256_xor_si256(a_b, b_c));
     let skip = _mm256_andnot_si256(
-        _mm256_cmpeq_epi32(a_b, _mm256_setzero_si256()),
+        _mm256_cmpeq_epi16(a_b, _mm256_setzero_si256()),
         non_monotonic,
     );
-    let skip = _mm256_andnot_si256(_mm256_cmpeq_epi32(b_c, _mm256_setzero_si256()), skip);
+    let skip = _mm256_andnot_si256(_mm256_cmpeq_epi16(b_c, _mm256_setzero_si256()), skip);
 
-    let abs_a_b_3_lo =
-        _mm256_srli_si256::<4>(_mm256_mul_epi32(abs_a_b, _mm256_set1_epi32(0x55555556)));
-    let abs_a_b_3_hi = _mm256_mul_epi32(
-        _mm256_srli_si256::<4>(abs_a_b),
-        _mm256_set1_epi32(0x55555556),
-    );
-    let abs_a_b_3 = _mm256_blend_epi32::<0b10101010>(abs_a_b_3_lo, abs_a_b_3_hi);
+    let abs_a_b_3 = _mm256_mulhi_epi16(abs_a_b, _mm256_set1_epi16(0x5556));
 
-    let x = _mm256_add_epi32(abs_a_b_3, _mm256_add_epi32(abs_a_c, _mm256_set1_epi32(2)));
-    let x = _mm256_srai_epi32::<2>(x);
+    let x = _mm256_add_epi16(abs_a_b_3, _mm256_add_epi16(abs_a_c, _mm256_set1_epi16(2)));
+    let x = _mm256_srai_epi16::<2>(x);
 
-    let abs_a_b_2_add_x = _mm256_add_epi32(
-        _mm256_slli_epi32::<1>(abs_a_b),
-        _mm256_and_si256(x, _mm256_set1_epi32(1)),
+    let abs_a_b_2_add_x = _mm256_add_epi16(
+        _mm256_slli_epi16::<1>(abs_a_b),
+        _mm256_and_si256(x, _mm256_set1_epi16(1)),
     );
     let x = _mm256_blendv_epi8(
         x,
-        _mm256_add_epi32(_mm256_slli_epi32::<1>(abs_a_b), _mm256_set1_epi32(1)),
-        _mm256_cmpgt_epi32(x, abs_a_b_2_add_x),
+        _mm256_add_epi16(_mm256_slli_epi16::<1>(abs_a_b), _mm256_set1_epi16(1)),
+        _mm256_cmpgt_epi16(x, abs_a_b_2_add_x),
     );
 
-    let abs_b_c_2 = _mm256_slli_epi32::<1>(abs_b_c);
+    let abs_b_c_2 = _mm256_slli_epi16::<1>(abs_b_c);
     let x = _mm256_blendv_epi8(
         x,
         abs_b_c_2,
-        _mm256_cmpgt_epi32(
-            _mm256_add_epi32(x, _mm256_and_si256(x, _mm256_set1_epi32(1))),
+        _mm256_cmpgt_epi16(
+            _mm256_add_epi16(x, _mm256_and_si256(x, _mm256_set1_epi16(1))),
             abs_b_c_2,
         ),
     );
 
-    let need_neg = _mm256_cmpgt_epi32(c, a);
+    let need_neg = _mm256_cmpgt_epi16(c, a);
     let mask = _mm256_andnot_si256(
         skip,
-        _mm256_or_si256(_mm256_slli_epi32::<1>(need_neg), _mm256_set1_epi32(1)),
+        _mm256_or_si256(_mm256_slli_epi16::<1>(need_neg), _mm256_set1_epi16(1)),
     );
-    _mm256_sign_epi32(x, mask)
+    _mm256_sign_epi16(x, mask)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse4.1")]
+unsafe fn tendency_i16_x86_64_sse41(
+    a: std::arch::x86_64::__m128i,
+    b: std::arch::x86_64::__m128i,
+    c: std::arch::x86_64::__m128i,
+) -> std::arch::x86_64::__m128i {
+    use std::arch::x86_64::*;
+
+    let a_b = _mm_sub_epi16(a, b);
+    let b_c = _mm_sub_epi16(b, c);
+    let a_c = _mm_sub_epi16(a, c);
+    let abs_a_b = _mm_abs_epi16(a_b);
+    let abs_b_c = _mm_abs_epi16(b_c);
+    let abs_a_c = _mm_abs_epi16(a_c);
+    let non_monotonic = _mm_cmpgt_epi16(_mm_setzero_si128(), _mm_xor_si128(a_b, b_c));
+    let skip = _mm_andnot_si128(_mm_cmpeq_epi16(a_b, _mm_setzero_si128()), non_monotonic);
+    let skip = _mm_andnot_si128(_mm_cmpeq_epi16(b_c, _mm_setzero_si128()), skip);
+
+    let abs_a_b_3 = _mm_mulhi_epi16(abs_a_b, _mm_set1_epi16(0x5556));
+
+    let x = _mm_add_epi16(abs_a_b_3, _mm_add_epi16(abs_a_c, _mm_set1_epi16(2)));
+    let x = _mm_srai_epi16::<2>(x);
+
+    let abs_a_b_2_add_x = _mm_add_epi16(
+        _mm_slli_epi16::<1>(abs_a_b),
+        _mm_and_si128(x, _mm_set1_epi16(1)),
+    );
+    let x = _mm_blendv_epi8(
+        x,
+        _mm_add_epi16(_mm_slli_epi16::<1>(abs_a_b), _mm_set1_epi16(1)),
+        _mm_cmpgt_epi16(x, abs_a_b_2_add_x),
+    );
+
+    let abs_b_c_2 = _mm_slli_epi16::<1>(abs_b_c);
+    let x = _mm_blendv_epi8(
+        x,
+        abs_b_c_2,
+        _mm_cmpgt_epi16(
+            _mm_add_epi16(x, _mm_and_si128(x, _mm_set1_epi16(1))),
+            abs_b_c_2,
+        ),
+    );
+
+    let need_neg = _mm_cmpgt_epi16(c, a);
+    let mask = _mm_andnot_si128(
+        skip,
+        _mm_or_si128(_mm_slli_epi16::<1>(need_neg), _mm_set1_epi16(1)),
+    );
+    _mm_sign_epi16(x, mask)
 }
 
 #[cfg(target_arch = "aarch64")]
