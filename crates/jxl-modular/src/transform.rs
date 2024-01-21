@@ -527,10 +527,11 @@ impl Squeeze {
                 if let Some(residu_grids) = &mut residu_grids {
                     let grids = grids.as_mut().unwrap();
                     let g = &mut grids[begin as usize + idx];
+                    let g = g.grid_mut();
                     let residu_grid = if horizontal {
-                        g.grid_mut().split_interleaved_horizontal_in_place()
+                        g.split_horizontal_in_place((g.width() + 1) / 2)
                     } else {
-                        g.grid_mut().split_interleaved_vertical_in_place()
+                        g.split_vertical_in_place((g.height() + 1) / 2)
                     };
                     residu_grids.push(TransformedGrid::from(residu_grid));
                 }
@@ -582,28 +583,24 @@ impl SqueezeParams {
             panic!("residual channel should be Single channel")
         };
         if self.horizontal {
-            if !i0.merge_interleaved_horizontal(i1) {
-                panic!("two grids are not from same squeeze transform");
-            }
+            i0.merge_horizontal_in_place(i1);
             let width = i0.width();
             let height = i0.height();
             if height > 16 {
                 let remaining = i0.split_vertical(0).1;
-                pool.for_each_vec(remaining.into_groups(width, 8), |mut group| {
+                pool.for_each_vec(remaining.into_groups(width, 16), |mut group| {
                     squeeze::inverse_h(&mut group)
                 });
             } else {
                 squeeze::inverse_h(i0);
             }
         } else {
-            if !i0.merge_interleaved_vertical(i1) {
-                panic!("two grids are not from same squeeze transform");
-            }
+            i0.merge_vertical_in_place(i1);
             let width = i0.width();
             let height = i0.height();
             if width > 16 {
                 let remaining = i0.split_horizontal(0).1;
-                pool.for_each_vec(remaining.into_groups(8, height), |mut group| {
+                pool.for_each_vec(remaining.into_groups(16, height), |mut group| {
                     squeeze::inverse_v(&mut group)
                 });
             } else {
