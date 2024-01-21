@@ -168,7 +168,7 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
             }
         }
 
-        // Check if we need more data to process.
+        // Check if we have more data to process.
         if (avg_width - 1) % 4 != 0 || width % 2 == 0 {
             let mut avgs = transpose([
                 vld1_s16(rows[0].add(avg_width - 4) as *const _),
