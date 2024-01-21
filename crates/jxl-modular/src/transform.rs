@@ -588,7 +588,7 @@ impl SqueezeParams {
             let height = i0.height();
             if height > 16 {
                 let remaining = i0.split_vertical(0).1;
-                pool.for_each_vec(remaining.into_groups(width, 8), |mut group| {
+                pool.for_each_vec(remaining.into_groups(width, 16), |mut group| {
                     squeeze::inverse_h(&mut group)
                 });
             } else {
@@ -600,7 +600,7 @@ impl SqueezeParams {
             let height = i0.height();
             if width > 16 {
                 let remaining = i0.split_horizontal(0).1;
-                pool.for_each_vec(remaining.into_groups(8, height), |mut group| {
+                pool.for_each_vec(remaining.into_groups(16, height), |mut group| {
                     squeeze::inverse_v(&mut group)
                 });
             } else {
