@@ -1,3 +1,6 @@
+#[cfg(target_arch = "aarch64")]
+use std::arch::is_aarch64_feature_detected;
+
 use jxl_grid::CutGrid;
 
 use crate::Sample;
@@ -15,6 +18,14 @@ fn inverse_h_i32(merged: &mut CutGrid<i32>) {
 }
 
 fn inverse_h_i16(merged: &mut CutGrid<i16>) {
+    #[cfg(target_arch = "aarch64")]
+    if is_aarch64_feature_detected!("neon") {
+        unsafe {
+            inverse_h_i16_aarch64_neon(merged);
+            return;
+        }
+    }
+
     inverse_h_i16_base(merged)
 }
 
@@ -78,6 +89,154 @@ fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn inverse_h_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::aarch64::*;
+    use std::mem::MaybeUninit;
+
+    #[inline]
+    unsafe fn transpose([v0, v1, v2, v3]: [int16x4_t; 4]) -> [int16x4_t; 4] {
+        let int16x4x2_t(tr0, tr1) = vtrn_s16(v0, v1);
+        let int16x4x2_t(tr2, tr3) = vtrn_s16(v2, v3);
+        let int32x2x2_t(o0, o2) = vtrn_s32(vreinterpret_s32_s16(tr0), vreinterpret_s32_s16(tr2));
+        let int32x2x2_t(o1, o3) = vtrn_s32(vreinterpret_s32_s16(tr1), vreinterpret_s32_s16(tr3));
+        [
+            vreinterpret_s16_s32(o0),
+            vreinterpret_s16_s32(o1),
+            vreinterpret_s16_s32(o2),
+            vreinterpret_s16_s32(o3),
+        ]
+    }
+
+    let height = merged.height();
+    let width = merged.width();
+
+    if width <= 8 {
+        return inverse_h_i16_base(merged);
+    }
+
+    // SAFETY: int16x4_t doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<int16x4_t>::uninit(); width];
+    let avg_width = (width + 1) / 2;
+
+    let h4 = height / 4;
+    for y4 in 0..h4 {
+        let y = y4 * 4;
+
+        // SAFETY: Rows are disjoint.
+        let rows = [
+            merged.get_row_mut(y).as_mut_ptr(),
+            merged.get_row_mut(y + 1).as_mut_ptr(),
+            merged.get_row_mut(y + 2).as_mut_ptr(),
+            merged.get_row_mut(y + 3).as_mut_ptr(),
+        ];
+
+        let mut avg = {
+            let v = vld1_lane_s16::<0>(rows[0] as *const _, vdup_n_s16(0));
+            let v = vld1_lane_s16::<1>(rows[1] as *const _, v);
+            let v = vld1_lane_s16::<2>(rows[2] as *const _, v);
+            vld1_lane_s16::<3>(rows[3] as *const _, v)
+        };
+        let mut left = avg;
+        for x4 in 0..(avg_width - 1) / 4 {
+            let x = x4 * 4 + 1;
+            let avgs = transpose([
+                vld1_s16(rows[0].add(x) as *const _),
+                vld1_s16(rows[1].add(x) as *const _),
+                vld1_s16(rows[2].add(x) as *const _),
+                vld1_s16(rows[3].add(x) as *const _),
+            ]);
+            let residuals = transpose([
+                vld1_s16(rows[0].add(avg_width - 1 + x) as *const _),
+                vld1_s16(rows[1].add(avg_width - 1 + x) as *const _),
+                vld1_s16(rows[2].add(avg_width - 1 + x) as *const _),
+                vld1_s16(rows[3].add(avg_width - 1 + x) as *const _),
+            ]);
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let diff = vadd_s16(residual, tendency_i16_neon(left, avg, next_avg));
+                let diff_2 = vshr_n_s16::<1>(vadd_s16(
+                    diff,
+                    vreinterpret_s16_u16(vshr_n_u16::<15>(vreinterpret_u16_s16(diff))),
+                ));
+                let first = vadd_s16(avg, diff_2);
+                let second = vsub_s16(first, diff);
+                scratch[x4 * 8 + dx * 2].write(first);
+                scratch[x4 * 8 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        // Check if we need more data to process.
+        if (avg_width - 1) % 4 != 0 || width % 2 == 0 {
+            let mut avgs = transpose([
+                vld1_s16(rows[0].add(avg_width - 4) as *const _),
+                vld1_s16(rows[1].add(avg_width - 4) as *const _),
+                vld1_s16(rows[2].add(avg_width - 4) as *const _),
+                vld1_s16(rows[3].add(avg_width - 4) as *const _),
+            ]);
+            if width % 2 == 0 {
+                avgs = [avgs[1], avgs[2], avgs[3], avgs[3]];
+            }
+            let residuals = transpose([
+                vld1_s16(rows[0].add(width - 4) as *const _),
+                vld1_s16(rows[1].add(width - 4) as *const _),
+                vld1_s16(rows[2].add(width - 4) as *const _),
+                vld1_s16(rows[3].add(width - 4) as *const _),
+            ]);
+            let from = (!(width / 2) + 1) % 4;
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate().skip(from)
+            {
+                let dx = 4 - dx;
+                let diff = vadd_s16(residual, tendency_i16_neon(left, avg, next_avg));
+                let diff_2 = vshr_n_s16::<1>(vadd_s16(
+                    diff,
+                    vreinterpret_s16_u16(vshr_n_u16::<15>(vreinterpret_u16_s16(diff))),
+                ));
+                let first = vadd_s16(avg, diff_2);
+                let second = vsub_s16(first, diff);
+                scratch[width / 2 * 2 - dx * 2].write(first);
+                scratch[width / 2 * 2 - dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        if width % 2 == 1 {
+            scratch.last_mut().unwrap().write(avg);
+        }
+
+        let mut chunks_it = scratch.chunks_exact(4);
+        for (x4, chunk) in (&mut chunks_it).enumerate() {
+            let x = x4 * 4;
+            let v = transpose([
+                chunk[0].assume_init_read(),
+                chunk[1].assume_init_read(),
+                chunk[2].assume_init_read(),
+                chunk[3].assume_init_read(),
+            ]);
+            vst1_s16(rows[0].add(x), v[0]);
+            vst1_s16(rows[1].add(x), v[1]);
+            vst1_s16(rows[2].add(x), v[2]);
+            vst1_s16(rows[3].add(x), v[3]);
+        }
+
+        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+            let x = width / 4 * 4 + dx;
+            let v = v.assume_init_read();
+            *rows[0].add(x) = vget_lane_s16::<0>(v);
+            *rows[1].add(x) = vget_lane_s16::<1>(v);
+            *rows[2].add(x) = vget_lane_s16::<2>(v);
+            *rows[3].add(x) = vget_lane_s16::<3>(v);
+        }
+    }
+
+    if height % 4 != 0 {
+        inverse_h_i16_base(&mut merged.split_vertical(h4 * 4).1);
+    }
+}
+
 pub fn inverse_v<S: Sample>(merged: &mut CutGrid<'_, S>) {
     if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
         inverse_v_i16(merged)
@@ -91,6 +250,14 @@ fn inverse_v_i32(merged: &mut CutGrid<i32>) {
 }
 
 fn inverse_v_i16(merged: &mut CutGrid<i16>) {
+    #[cfg(target_arch = "aarch64")]
+    if is_aarch64_feature_detected!("neon") {
+        unsafe {
+            inverse_v_i16_aarch64_neon(merged);
+            return;
+        }
+    }
+
     inverse_v_i16_base(merged)
 }
 
@@ -149,6 +316,65 @@ fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
         if height % 2 == 1 {
             *merged.get_mut(x, height - 1) = avg_col[avg_height - 1];
         }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn inverse_v_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::aarch64::*;
+    use std::mem::MaybeUninit;
+
+    let width = merged.width();
+    let height = merged.height();
+
+    if height <= 1 {
+        return;
+    }
+
+    // SAFETY: int16x4_t doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<int16x4_t>::uninit(); height];
+    let avg_height = (height + 1) / 2;
+
+    let w4 = width / 4;
+    for x4 in 0..w4 {
+        let x = x4 * 4;
+
+        let mut avg = vld1_s16(merged.get_mut(x, 0) as *mut i16);
+        let mut top = avg;
+        let mut chunks_it = scratch.chunks_exact_mut(2);
+        for (y, pair) in (&mut chunks_it).enumerate() {
+            let residual = vld1_s16(merged.get_mut(x, avg_height + y) as *mut i16);
+            let next_avg = if y + 1 < avg_height {
+                vld1_s16(merged.get_mut(x, y + 1) as *mut i16)
+            } else {
+                avg
+            };
+
+            let diff = vadd_s16(residual, tendency_i16_neon(top, avg, next_avg));
+            let diff_2 = vshr_n_s16::<1>(vadd_s16(
+                diff,
+                vreinterpret_s16_u16(vshr_n_u16::<15>(vreinterpret_u16_s16(diff))),
+            ));
+            let first = vadd_s16(avg, diff_2);
+            let second = vsub_s16(first, diff);
+            pair[0].write(first);
+            pair[1].write(second);
+            avg = next_avg;
+            top = second;
+        }
+
+        if let [v] = chunks_it.into_remainder() {
+            v.write(avg);
+        }
+
+        for (y, v) in scratch.iter().enumerate() {
+            vst1_s16(merged.get_mut(x, y) as *mut _, v.assume_init_read());
+        }
+    }
+
+    if width % 4 != 0 {
+        inverse_v_i16_base(&mut merged.split_horizontal(w4 * 4).1);
     }
 }
 
@@ -264,7 +490,6 @@ unsafe fn tendency_i32_avx2(
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-#[allow(dead_code)]
 unsafe fn tendency_i16_neon(
     a: std::arch::aarch64::int16x4_t,
     b: std::arch::aarch64::int16x4_t,
