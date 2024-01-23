@@ -84,6 +84,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
 
     let (width, height) = if let Some(crop) = crop {
         tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
+        image.set_image_region(crop);
         (crop.width, crop.height)
     } else {
         (image_size.width, image_size.height)
@@ -106,7 +107,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
 
                 (0..image.num_loaded_keyframes())
                     .into_par_iter()
-                    .map(|idx| image.render_frame_cropped(idx, crop))
+                    .map(|idx| image.render_frame_cropped(idx))
                     .collect::<std::result::Result<Vec<_>, _>>()
             })
             .map_err(Error::Render)?;
@@ -116,13 +117,13 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     if !rendered {
         for idx in 0..image.num_loaded_keyframes() {
             let frame = image
-                .render_frame_cropped(idx, crop)
+                .render_frame_cropped(idx)
                 .expect("rendering frames failed");
             keyframes.push(frame);
         }
     }
 
-    if let Ok(frame) = image.render_loading_frame_cropped(crop) {
+    if let Ok(frame) = image.render_loading_frame_cropped() {
         tracing::warn!("Rendered partially loaded frame");
         keyframes.push(frame);
     }

@@ -20,7 +20,7 @@ fn run_test(buf: &[u8], name: &str) {
     let width_dist = rand::distributions::Uniform::new_inclusive(128, (width / 2).max(128));
     let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
 
-    let tester_image = JxlImage::builder()
+    let mut tester_image = JxlImage::builder()
         .read(Cursor::new(buf))
         .expect("Failed to open file");
 
@@ -36,6 +36,7 @@ fn run_test(buf: &[u8], name: &str) {
             height: crop_height,
         };
         eprintln!("  Crop region: {:?}", crop);
+        tester_image.set_image_region(crop);
         test_crop_region(&image, &tester_image, crop, name, is_ci);
     }
 }
@@ -62,7 +63,7 @@ fn test_crop_region(
             .render_frame(idx)
             .expect("Failed to render full image");
         let cropped_render = tester_image
-            .render_frame_cropped(idx, Some(crop))
+            .render_frame_cropped(idx)
             .expect("Failed to render cropped image");
 
         for (expected, actual) in full_render
@@ -82,7 +83,7 @@ fn test_crop_region(
                 for (x, (expected, actual)) in expected_row.iter().zip(actual_row).enumerate() {
                     if (expected - actual).abs() > 1e-6 {
                         if is_ci {
-                            eprintln!("Test failed at x={x}, y={y}");
+                            eprintln!("Test failed at x={x}, y={y} (expected={expected}, actual={actual})");
                             let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
                             path.push("tests/.artifact");
                             std::fs::create_dir_all(&path).unwrap();
@@ -136,6 +137,7 @@ macro_rules! testcase_with_crop {
 
                 for region in regions {
                     eprintln!("{:?}", region);
+                    tester_image.set_image_region(region);
                     test_crop_region(&mut image, &mut tester_image, region, stringify!($name), is_ci);
                 }
             }

@@ -633,6 +633,11 @@ impl JxlImage {
         self.render_spot_colour = render_spot_colour;
         self
     }
+
+    pub fn set_image_region(&mut self, region: CropInfo) -> &mut Self {
+        self.ctx.request_image_region(region.into());
+        self
+    }
 }
 
 impl JxlImage {
@@ -688,18 +693,12 @@ impl JxlImage {
 impl JxlImage {
     /// Renders the given keyframe.
     pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
-        self.render_frame_cropped(keyframe_index, None)
+        self.render_frame_cropped(keyframe_index)
     }
 
     /// Renders the given keyframe with optional cropping region.
-    pub fn render_frame_cropped(
-        &self,
-        keyframe_index: usize,
-        image_region: Option<CropInfo>,
-    ) -> Result<Render> {
-        let mut grids = self
-            .ctx
-            .render_keyframe(keyframe_index, image_region.map(From::from))?;
+    pub fn render_frame_cropped(&self, keyframe_index: usize) -> Result<Render> {
+        let mut grids = self.ctx.render_keyframe(keyframe_index)?;
         let grids = grids.take_buffer();
         let (color_channels, extra_channels) = self.process_render(grids)?;
 
@@ -718,17 +717,12 @@ impl JxlImage {
 
     /// Renders the currently loading keyframe.
     pub fn render_loading_frame(&mut self) -> Result<Render> {
-        self.render_loading_frame_cropped(None)
+        self.render_loading_frame_cropped()
     }
 
     /// Renders the currently loading keyframe with optional cropping region.
-    pub fn render_loading_frame_cropped(
-        &mut self,
-        image_region: Option<CropInfo>,
-    ) -> Result<Render> {
-        let (frame, mut grids) = self
-            .ctx
-            .render_loading_keyframe(image_region.map(From::from))?;
+    pub fn render_loading_frame_cropped(&mut self) -> Result<Render> {
+        let (frame, mut grids) = self.ctx.render_loading_keyframe()?;
         let frame_header = frame.header();
         let name = frame_header.name.clone();
         let duration = frame_header.duration;

@@ -21,11 +21,17 @@ pub(crate) fn render_frame<S: Sample>(
     frame: &IndexedFrame,
     reference_frames: ReferenceFrames<S>,
     cache: &mut RenderCache<S>,
-    image_region: Option<Region>,
+    image_region: Region,
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
 ) -> Result<ImageWithRegion> {
     let frame_region = crate::image_region_to_frame(frame, image_region, false);
+    tracing::debug!(
+        index = frame.idx,
+        ?image_region,
+        ?frame_region,
+        "Rendering frame"
+    );
 
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -97,13 +103,12 @@ pub(crate) fn render_frame<S: Sample>(
                 reference_frames.lf.as_ref(),
                 cache,
                 color_padded_region,
-                image_region,
                 &pool,
             );
             match (result, reference_frames.lf) {
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
-                    let render = lf.image.run_with_image(image_region)?;
+                    let render = lf.image.run_with_image()?;
                     (super::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
@@ -131,7 +136,6 @@ pub(crate) fn render_frame<S: Sample>(
 
     render_features(
         frame,
-        image_region,
         &mut fb,
         reference_frames.refs.clone(),
         cache,
@@ -159,13 +163,7 @@ pub(crate) fn render_frame<S: Sample>(
                 fb.set_ct_done(ct_done);
             }
 
-            blend::blend(
-                frame.image_header(),
-                image_region,
-                reference_frames.refs,
-                frame,
-                &fb,
-            )?
+            blend::blend(frame.image_header(), reference_frames.refs, frame, &fb)?
         },
     )
 }
@@ -277,7 +275,6 @@ fn append_extra_channels<S: Sample>(
 
 fn render_features<S: Sample>(
     frame: &IndexedFrame,
-    image_region: Option<Region>,
     grid: &mut ImageWithRegion,
     reference_grids: [Option<Reference<S>>; 4],
     cache: &mut RenderCache<S>,
@@ -302,7 +299,7 @@ fn render_features<S: Sample>(
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
             };
-            let ref_grid_image = ref_grid.image.run_with_image(image_region)?;
+            let ref_grid_image = ref_grid.image.run_with_image()?;
             blend::patch(image_header, grid, &ref_grid_image, patch);
         }
     }

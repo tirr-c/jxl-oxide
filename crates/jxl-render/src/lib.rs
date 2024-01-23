@@ -49,6 +49,7 @@ pub struct RenderContext {
     pub(crate) loading_render_cache_wide: Option<RenderCache<i32>>,
     pub(crate) loading_render_cache_narrow: Option<RenderCache<i16>>,
     pub(crate) loading_region: Option<Region>,
+    requested_image_region: Region,
     embedded_icc: Vec<u8>,
     requested_color_encoding: ColorEncodingWithProfile,
     cms: Box<dyn ColorManagementSystem + Send + Sync>,
@@ -109,6 +110,11 @@ impl RenderContextBuilder {
             }
         };
 
+        let full_image_region = Region::with_size(
+            image_header.width_with_orientation(),
+            image_header.height_with_orientation(),
+        );
+
         RenderContext {
             image_header,
             tracker: self.tracker,
@@ -126,6 +132,7 @@ impl RenderContextBuilder {
             loading_render_cache_wide: None,
             loading_render_cache_narrow: None,
             loading_region: None,
+            requested_image_region: full_image_region,
             embedded_icc: self.embedded_icc,
             requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
@@ -154,6 +161,12 @@ impl RenderContext {
     #[inline]
     pub fn requested_color_encoding(&self) -> &ColorEncodingWithProfile {
         &self.requested_color_encoding
+    }
+
+    #[inline]
+    pub fn request_image_region(&mut self, image_region: Region) {
+        self.requested_image_region = image_region;
+        self.reset_cache();
     }
 }
 
@@ -248,22 +261,21 @@ impl RenderContext {
         }
 
         let frame = Arc::new(frame);
+        let image_region = self.requested_image_region;
         if self.narrow_modular() {
             let render_op = self.render_op_narrow(Arc::clone(&frame), deps);
             let handle = if let Some(cache) = self.loading_render_cache_narrow.take() {
-                let region = self.loading_region.take().unwrap();
-                FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
+                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
             };
             self.renders_narrow.push(Arc::new(handle));
         } else {
             let render_op = self.render_op_wide(Arc::clone(&frame), deps);
             let handle = if let Some(cache) = self.loading_render_cache_wide.take() {
-                let region = self.loading_region.take().unwrap();
-                FrameRenderHandle::from_cache(Arc::clone(&frame), region, cache, render_op)
+                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
             };
             self.renders_wide.push(Arc::new(handle));
         }
@@ -418,8 +430,6 @@ impl RenderContext {
                 }
             };
 
-            tracing::debug!(index = frame.idx, ?image_region, "Rendering frame");
-
             let result = inner::render_frame(
                 &frame,
                 reference_frames.clone(),
@@ -462,16 +472,12 @@ impl RenderContext {
     }
 }
 
-fn image_region_to_frame(
-    frame: &Frame,
-    image_region: Option<Region>,
-    ignore_lf_level: bool,
-) -> Region {
+fn image_region_to_frame(frame: &Frame, image_region: Region, ignore_lf_level: bool) -> Region {
     let image_header = frame.image_header();
     let frame_header = frame.header();
     let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
         Region::with_size(frame_header.width, frame_header.height)
-    } else if let Some(image_region) = image_region {
+    } else {
         let image_width = image_header.width_with_orientation();
         let image_height = image_header.height_with_orientation();
         let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
@@ -503,9 +509,6 @@ fn image_region_to_frame(
             width,
             height,
         }
-    } else {
-        Region::with_size(image_header.size.width, image_header.size.height)
-            .translate(-frame_header.x0, -frame_header.y0)
     };
 
     if ignore_lf_level {
@@ -516,7 +519,8 @@ fn image_region_to_frame(
 }
 
 impl RenderContext {
-    fn spawn_renderer(&self, index: usize, image_region: Option<Region>) {
+    fn spawn_renderer(&self, index: usize) {
+        let image_region = self.requested_image_region;
         if self.narrow_modular() {
             let render_handle = Arc::clone(&self.renders_narrow[index]);
             self.pool.spawn(move || {
@@ -530,11 +534,7 @@ impl RenderContext {
         }
     }
 
-    fn render_by_index(
-        &self,
-        index: usize,
-        image_region: Option<Region>,
-    ) -> Result<ImageWithRegion> {
+    fn render_by_index(&self, index: usize) -> Result<ImageWithRegion> {
         let deps = self.frame_deps[index];
         let indices: Vec<_> = deps.indices().collect();
         if !indices.is_empty() {
@@ -548,14 +548,14 @@ impl RenderContext {
                 },
             );
             for dep in indices {
-                self.spawn_renderer(dep, image_region);
+                self.spawn_renderer(dep);
             }
         }
 
         if self.narrow_modular() {
-            self.renders_narrow[index].run_with_image(image_region)
+            self.renders_narrow[index].run_with_image()
         } else {
-            self.renders_wide[index].run_with_image(image_region)
+            self.renders_wide[index].run_with_image()
         }
     }
 
@@ -563,36 +563,29 @@ impl RenderContext {
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
     #[inline]
-    pub fn render(&mut self, image_region: Option<Region>) -> Result<ImageWithRegion> {
-        self.render_keyframe(0, image_region)
+    pub fn render(&mut self) -> Result<ImageWithRegion> {
+        self.render_keyframe(0)
     }
 
     /// Renders the keyframe.
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
-    pub fn render_keyframe(
-        &self,
-        keyframe_idx: usize,
-        image_region: Option<Region>,
-    ) -> Result<ImageWithRegion> {
+    pub fn render_keyframe(&self, keyframe_idx: usize) -> Result<ImageWithRegion> {
         let idx = *self
             .keyframes
             .get(keyframe_idx)
             .ok_or(Error::IncompleteFrame)?;
-        let mut grid = self.render_by_index(idx, image_region)?;
+        let mut grid = self.render_by_index(idx)?;
         let frame = &*self.frames[idx];
 
-        self.postprocess_keyframe(frame, &mut grid, image_region)?;
+        self.postprocess_keyframe(frame, &mut grid)?;
         Ok(grid)
     }
 
-    pub fn render_loading_keyframe(
-        &mut self,
-        image_region: Option<Region>,
-    ) -> Result<(&IndexedFrame, ImageWithRegion)> {
+    pub fn render_loading_keyframe(&mut self) -> Result<(&IndexedFrame, ImageWithRegion)> {
         let mut current_frame_grid = None;
         if self.loading_frame().is_some() {
-            let ret = self.render_loading_frame(image_region);
+            let ret = self.render_loading_frame();
             match ret {
                 Ok(grid) => current_frame_grid = Some(grid),
                 Err(Error::IncompleteFrame) => {}
@@ -604,23 +597,48 @@ impl RenderContext {
             let frame = self.loading_frame().unwrap();
             (frame, grid)
         } else if let Some(idx) = self.keyframe_in_progress {
-            let grid = self.render_by_index(idx, image_region)?;
+            let grid = self.render_by_index(idx)?;
             let frame = &*self.frames[idx];
             (frame, grid)
         } else {
             return Err(Error::IncompleteFrame);
         };
 
-        self.postprocess_keyframe(frame, &mut grid, image_region)?;
+        self.postprocess_keyframe(frame, &mut grid)?;
         Ok((frame, grid))
     }
 
-    fn render_loading_frame(&mut self, image_region: Option<Region>) -> Result<ImageWithRegion> {
+    pub fn reset_cache(&mut self) {
+        let image_region = self.requested_image_region;
+
+        self.loading_region = None;
+        self.loading_render_cache_wide = None;
+        self.loading_render_cache_narrow = None;
+        for (idx, frame) in self.frames.iter().enumerate() {
+            if frame.header().frame_type == FrameType::ReferenceOnly {
+                continue;
+            }
+
+            let deps = self.frame_deps[idx];
+            if self.narrow_modular() {
+                let render_op = self.render_op_narrow(Arc::clone(frame), deps);
+                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                self.renders_narrow[idx] = Arc::new(handle);
+            } else {
+                let render_op = self.render_op_wide(Arc::clone(frame), deps);
+                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                self.renders_wide[idx] = Arc::new(handle);
+            }
+        }
+    }
+
+    fn render_loading_frame(&mut self) -> Result<ImageWithRegion> {
         let frame = self.loading_frame().unwrap();
         if !frame.header().frame_type.is_progressive_frame() {
             return Err(Error::IncompleteFrame);
         }
 
+        let image_region = self.requested_image_region;
         let frame_region = image_region_to_frame(frame, image_region, false);
         self.loading_region = Some(frame_region);
 
@@ -637,11 +655,11 @@ impl RenderContext {
 
         let lf_frame_idx = self.lf_frame[header.lf_level as usize];
         if header.flags.use_lf_frame() {
-            self.spawn_renderer(lf_frame_idx, image_region);
+            self.spawn_renderer(lf_frame_idx);
         }
         for idx in self.reference {
             if idx != usize::MAX {
-                self.spawn_renderer(idx, image_region);
+                self.spawn_renderer(idx);
             }
         }
 
@@ -727,12 +745,8 @@ impl RenderContext {
         }
     }
 
-    fn postprocess_keyframe(
-        &self,
-        frame: &IndexedFrame,
-        grid: &mut ImageWithRegion,
-        image_region: Option<Region>,
-    ) -> Result<()> {
+    fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion) -> Result<()> {
+        let image_region = self.requested_image_region;
         let frame_region = image_region_to_frame(frame, image_region, frame.header().lf_level > 0);
         if grid.region() != frame_region {
             let mut new_grid = ImageWithRegion::from_region_and_tracker(

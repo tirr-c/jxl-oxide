@@ -38,7 +38,6 @@ pub(crate) fn render_vardct<S: Sample>(
     lf_frame: Option<&Reference<S>>,
     cache: &mut RenderCache<S>,
     region: Region,
-    image_region: Option<Region>,
     pool: &jxl_threadpool::JxlThreadPool,
 ) -> Result<(ImageWithRegion, GlobalModular<S>)> {
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
@@ -162,7 +161,7 @@ pub(crate) fn render_vardct<S: Sample>(
                 ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
 
             if let Some(x) = lf_frame {
-                let lf_frame = x.image.run_with_image(image_region)?;
+                let lf_frame = x.image.run_with_image()?;
                 lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
                 lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
                 lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);

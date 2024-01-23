@@ -142,7 +142,6 @@ fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, 
 
 pub(crate) fn blend<S: Sample>(
     image_header: &ImageHeader,
-    image_region: Option<Region>,
     reference_grids: [Option<Reference<S>>; 4],
     new_frame: &Frame,
     new_grid: &ImageWithRegion,
@@ -179,7 +178,7 @@ pub(crate) fn blend<S: Sample>(
                 let base_frame_header = grid.frame.header();
                 let base_frame_region =
                     output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-                if let Ok(base_grid) = grid.image.run_with_image(image_region) {
+                if let Ok(base_grid) = grid.image.run_with_image() {
                     base_grid.clone_region_channel(
                         base_frame_region,
                         idx,
@@ -230,7 +229,7 @@ pub(crate) fn blend<S: Sample>(
             let base_frame_header = grid.frame.header();
             let base_frame_region =
                 output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-            if let Ok(base_grid) = grid.image.run_with_image(image_region) {
+            if let Ok(base_grid) = grid.image.run_with_image() {
                 base_grid.clone_region_channel(
                     base_frame_region,
                     idx,
