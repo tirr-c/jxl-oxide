@@ -193,24 +193,13 @@ fn upsample_color_channels(
         buffer
     };
 
-    let upsampled_fb = ImageWithRegion::from_buffer(
+    *fb = ImageWithRegion::from_buffer(
         upsampled_buffer,
         upsampled_region.left,
         upsampled_region.top,
         ct_done,
     );
-    tracing::trace_span!("Copy upsampled color channels").in_scope(|| -> Result<_> {
-        *fb = ImageWithRegion::from_region_and_tracker(
-            upsampled_fb.channels(),
-            original_region,
-            fb.ct_done(),
-            fb.alloc_tracker(),
-        )?;
-        for (channel_idx, output) in fb.buffer_mut().iter_mut().enumerate() {
-            upsampled_fb.clone_region_channel(original_region, channel_idx, output);
-        }
-        Ok(())
-    })
+    Ok(())
 }
 
 fn append_extra_channels<S: Sample>(
