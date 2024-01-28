@@ -424,6 +424,21 @@ impl RenderContext {
 
         let pool = self.pool.clone();
         Arc::new(move |mut state, image_region| {
+            if let Some(lf) = &reference_frames.lf {
+                tracing::trace!(idx = lf.frame.idx, "Spawn LF frame renderer");
+                let lf_handle = Arc::clone(&lf.image);
+                pool.spawn(move || {
+                    lf_handle.run(image_region);
+                });
+            }
+            for grid in reference_frames.refs.iter().flatten() {
+                tracing::trace!(idx = grid.frame.idx, "Spawn reference frame renderer");
+                let ref_handle = Arc::clone(&grid.image);
+                pool.spawn(move || {
+                    ref_handle.run(image_region);
+                });
+            }
+
             let mut cache = match state {
                 FrameRender::InProgress(cache) => cache,
                 _ => {
@@ -549,23 +564,6 @@ impl RenderContext {
     }
 
     fn render_by_index(&self, index: usize) -> Result<ImageWithRegion> {
-        let deps = self.frame_deps[index];
-        let indices: Vec<_> = deps.indices().collect();
-        if !indices.is_empty() {
-            tracing::trace!(
-                "Depends on {} {}",
-                indices.len(),
-                if indices.len() == 1 {
-                    "frame"
-                } else {
-                    "frames"
-                },
-            );
-            for dep in indices {
-                self.spawn_renderer(dep);
-            }
-        }
-
         let mut cache = HashMap::new();
         if self.narrow_modular() {
             Arc::clone(&self.renders_narrow[index])
@@ -1041,14 +1039,6 @@ impl std::ops::DerefMut for IndexedFrame {
 struct FrameDependence {
     pub(crate) lf: usize,
     pub(crate) ref_slots: [usize; 4],
-}
-
-impl FrameDependence {
-    pub fn indices(&self) -> impl Iterator<Item = usize> + 'static {
-        std::iter::once(self.lf)
-            .chain(self.ref_slots)
-            .filter(|&v| v != usize::MAX)
-    }
 }
 
 #[derive(Debug, Clone, Default)]
