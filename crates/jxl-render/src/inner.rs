@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use jxl_color::{ColourEncoding, EnumColourEncoding};
 use jxl_frame::{
     data::*,
@@ -108,7 +110,10 @@ pub(crate) fn render_frame<S: Sample>(
             match (result, reference_frames.lf) {
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
-                    let render = lf.image.run_with_image()?;
+                    let render = lf
+                        .image
+                        .run_with_image()?
+                        .blend(&mut HashMap::new(), &pool)?;
                     (super::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
@@ -141,6 +146,7 @@ pub(crate) fn render_frame<S: Sample>(
         cache,
         frame_visibility.0,
         frame_visibility.1,
+        &pool,
     )?;
 
     if !frame_header.save_before_ct && !frame_header.is_last {
@@ -149,23 +155,7 @@ pub(crate) fn render_frame<S: Sample>(
         fb.set_ct_done(ct_done);
     }
 
-    Ok(
-        if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
-            fb
-        } else {
-            if !frame_header.save_before_ct && !fb.ct_done() {
-                let ct_done = convert_color_for_record(
-                    image_header,
-                    frame_header.do_ycbcr,
-                    fb.buffer_mut(),
-                    &pool,
-                );
-                fb.set_ct_done(ct_done);
-            }
-
-            blend::blend(frame.image_header(), reference_frames.refs, frame, &fb)?
-        },
-    )
+    Ok(fb)
 }
 
 fn upsample_color_channels(
@@ -269,6 +259,7 @@ fn render_features<S: Sample>(
     cache: &mut RenderCache<S>,
     visible_frames_num: usize,
     invisible_frames_num: usize,
+    pool: &JxlThreadPool,
 ) -> Result<()> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -284,11 +275,14 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
+        let mut cache = HashMap::new();
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
             };
-            let ref_grid_image = ref_grid.image.run_with_image()?;
+            let ref_grid_image = std::sync::Arc::clone(&ref_grid.image)
+                .run_with_image()?
+                .blend(&mut cache, pool)?;
             blend::patch(image_header, grid, &ref_grid_image, patch);
         }
     }
@@ -310,7 +304,7 @@ fn render_features<S: Sample>(
     Ok(())
 }
 
-fn convert_color_for_record(
+pub(crate) fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
     grid: &mut [SimpleGrid<f32>],

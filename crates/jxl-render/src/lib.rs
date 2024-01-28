@@ -1,5 +1,5 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::{
@@ -218,7 +218,6 @@ impl RenderContext {
 
         let header = frame.header();
         let idx = self.frames.len();
-        let is_last = header.is_last;
 
         self.refcounts.push(0);
 
@@ -240,10 +239,7 @@ impl RenderContext {
             ref_slots: self.reference,
         };
 
-        if !is_last
-            && (header.duration == 0 || header.save_as_reference != 0)
-            && header.frame_type != FrameType::LfFrame
-        {
+        if header.can_reference() {
             let ref_idx = header.save_as_reference as usize;
             self.reference[ref_idx] = idx;
         }
@@ -262,20 +258,61 @@ impl RenderContext {
 
         let frame = Arc::new(frame);
         let image_region = self.requested_image_region;
+
         if self.narrow_modular() {
-            let render_op = self.render_op_narrow(Arc::clone(&frame), deps);
+            let reference_frames = ReferenceFrames {
+                lf: (deps.lf != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[deps.lf]),
+                    image: Arc::clone(&self.renders_narrow[deps.lf]),
+                }),
+                refs: deps.ref_slots.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_narrow[r]),
+                    })
+                }),
+            };
+            let refs = reference_frames.refs.clone();
+
+            let render_op = self.render_op::<i16>(Arc::clone(&frame), reference_frames);
             let handle = if let Some(cache) = self.loading_render_cache_narrow.take() {
-                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
+                FrameRenderHandle::from_cache(
+                    Arc::clone(&frame),
+                    image_region,
+                    cache,
+                    render_op,
+                    refs,
+                )
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op, refs)
             };
             self.renders_narrow.push(Arc::new(handle));
         } else {
-            let render_op = self.render_op_wide(Arc::clone(&frame), deps);
+            let reference_frames = ReferenceFrames {
+                lf: (deps.lf != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[deps.lf]),
+                    image: Arc::clone(&self.renders_wide[deps.lf]),
+                }),
+                refs: deps.ref_slots.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_wide[r]),
+                    })
+                }),
+            };
+            let refs = reference_frames.refs.clone();
+
+            let render_op = self.render_op::<i32>(Arc::clone(&frame), reference_frames);
             let handle = if let Some(cache) = self.loading_render_cache_wide.take() {
-                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
+                FrameRenderHandle::from_cache(
+                    Arc::clone(&frame),
+                    image_region,
+                    cache,
+                    render_op,
+                    refs,
+                )
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op, refs)
             };
             self.renders_wide.push(Arc::new(handle));
         }
@@ -378,38 +415,6 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_op_narrow(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i16> {
-        let reference_frames = ReferenceFrames {
-            lf: (deps.lf != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.frames[deps.lf]),
-                image: Arc::clone(&self.renders_narrow[deps.lf]),
-            }),
-            refs: deps.ref_slots.map(|r| {
-                (r != usize::MAX).then(|| Reference {
-                    frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders_narrow[r]),
-                })
-            }),
-        };
-        self.render_op(frame, reference_frames)
-    }
-
-    fn render_op_wide(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i32> {
-        let reference_frames = ReferenceFrames {
-            lf: (deps.lf != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.frames[deps.lf]),
-                image: Arc::clone(&self.renders_wide[deps.lf]),
-            }),
-            refs: deps.ref_slots.map(|r| {
-                (r != usize::MAX).then(|| Reference {
-                    frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders_wide[r]),
-                })
-            }),
-        };
-        self.render_op(frame, reference_frames)
-    }
-
     fn render_op<S: Sample>(
         &self,
         frame: Arc<IndexedFrame>,
@@ -561,10 +566,15 @@ impl RenderContext {
             }
         }
 
+        let mut cache = HashMap::new();
         if self.narrow_modular() {
-            self.renders_narrow[index].run_with_image()
+            Arc::clone(&self.renders_narrow[index])
+                .run_with_image()?
+                .blend(&mut cache, &self.pool)
         } else {
-            self.renders_wide[index].run_with_image()
+            Arc::clone(&self.renders_wide[index])
+                .run_with_image()?
+                .blend(&mut cache, &self.pool)
         }
     }
 
@@ -630,12 +640,42 @@ impl RenderContext {
 
             let deps = self.frame_deps[idx];
             if self.narrow_modular() {
-                let render_op = self.render_op_narrow(Arc::clone(frame), deps);
-                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                let reference_frames = ReferenceFrames {
+                    lf: (deps.lf != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[deps.lf]),
+                        image: Arc::clone(&self.renders_narrow[deps.lf]),
+                    }),
+                    refs: deps.ref_slots.map(|r| {
+                        (r != usize::MAX).then(|| Reference {
+                            frame: Arc::clone(&self.frames[r]),
+                            image: Arc::clone(&self.renders_narrow[r]),
+                        })
+                    }),
+                };
+                let refs = reference_frames.refs.clone();
+
+                let render_op = self.render_op::<i16>(Arc::clone(frame), reference_frames);
+                let handle =
+                    FrameRenderHandle::new(Arc::clone(frame), image_region, render_op, refs);
                 self.renders_narrow[idx] = Arc::new(handle);
             } else {
-                let render_op = self.render_op_wide(Arc::clone(frame), deps);
-                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                let reference_frames = ReferenceFrames {
+                    lf: (deps.lf != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[deps.lf]),
+                        image: Arc::clone(&self.renders_wide[deps.lf]),
+                    }),
+                    refs: deps.ref_slots.map(|r| {
+                        (r != usize::MAX).then(|| Reference {
+                            frame: Arc::clone(&self.frames[r]),
+                            image: Arc::clone(&self.renders_wide[r]),
+                        })
+                    }),
+                };
+                let refs = reference_frames.refs.clone();
+
+                let render_op = self.render_op::<i32>(Arc::clone(frame), reference_frames);
+                let handle =
+                    FrameRenderHandle::new(Arc::clone(frame), image_region, render_op, refs);
                 self.renders_wide[idx] = Arc::new(handle);
             }
         }

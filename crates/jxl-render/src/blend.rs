@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::Arc};
+
 use jxl_frame::{
     data::{BlendingModeInformation, PatchRef},
     header::{BlendMode as FrameBlendMode, BlendingInfo},
@@ -6,6 +8,7 @@ use jxl_frame::{
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
+use jxl_threadpool::JxlThreadPool;
 
 use crate::{
     region::{ImageWithRegion, Region},
@@ -145,6 +148,8 @@ pub(crate) fn blend<S: Sample>(
     reference_grids: [Option<Reference<S>>; 4],
     new_frame: &Frame,
     new_grid: &ImageWithRegion,
+    blend_cache: &mut HashMap<usize, ImageWithRegion>,
+    pool: &JxlThreadPool,
 ) -> Result<ImageWithRegion> {
     let header = new_frame.header();
     let channels = 3 + image_header.metadata.ec_info.len();
@@ -154,26 +159,51 @@ pub(crate) fn blend<S: Sample>(
 
     // Compute the final region.
     let mut output_frame_region = original_frame_region;
-    for blending_info in [&header.blending_info; 3]
-        .into_iter()
-        .chain(&header.ec_blending_info)
-    {
+    let mut used_refs = [false; 4];
+    for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
         let ref_idx = blending_info.source as usize;
-        let ref_grid = &reference_grids[ref_idx];
+        used_refs[ref_idx] = true;
+    }
 
+    let mut ref_list = Vec::new();
+    for ref_idx in 0..4 {
+        if !used_refs[ref_idx] {
+            continue;
+        }
+        let ref_grid = &reference_grids[ref_idx];
         if let Some(grid) = ref_grid {
-            let base_frame_header = grid.frame.header();
-            if let Ok(base_grid) = grid.image.run_with_image() {
-                let region_in_base_frame = base_grid.region();
-                let region_in_new_frame = region_in_base_frame.translate(
-                    base_frame_header.x0 - header.x0,
-                    base_frame_header.y0 - header.y0,
-                );
-                output_frame_region = output_frame_region.merge(region_in_new_frame);
+            ref_list.push(grid);
+        }
+    }
+    ref_list.sort_by_key(|grid| grid.frame.idx);
+
+    for grid in ref_list {
+        let base_idx = grid.frame.idx;
+        let base_frame_header = grid.frame.header();
+        let base_grid = if let Some(base_grid) = blend_cache.get(&base_idx) {
+            base_grid
+        } else {
+            let base_grid = if let Ok(base_grid) = Arc::clone(&grid.image).run_with_image() {
+                base_grid.blend(&mut *blend_cache, pool)?
             } else {
                 tracing::warn!("Reference frame is not decoded");
+                ImageWithRegion::from_region_and_tracker(
+                    new_grid.channels(),
+                    Region::empty(),
+                    false,
+                    tracker,
+                )?
             };
-        }
+            blend_cache.insert(base_idx, base_grid);
+            blend_cache.get(&base_idx).unwrap()
+        };
+
+        let region_in_base_frame = base_grid.region();
+        let region_in_new_frame = region_in_base_frame.translate(
+            base_frame_header.x0 - header.x0,
+            base_frame_header.y0 - header.y0,
+        );
+        output_frame_region = output_frame_region.merge(region_in_new_frame);
     }
 
     let mut output_grid = ImageWithRegion::from_region_and_tracker(
@@ -209,18 +239,18 @@ pub(crate) fn blend<S: Sample>(
         if used_as_alpha[idx] {
             let mut clone_empty = false;
             if let Some(grid) = ref_grid {
-                let base_frame_header = grid.frame.header();
-                let base_frame_region =
-                    output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-                if let Ok(base_grid) = grid.image.run_with_image() {
+                let base_grid = blend_cache.get(&grid.frame.idx).unwrap();
+                if base_grid.region().is_empty() {
+                    clone_empty = true;
+                } else {
+                    let base_frame_header = grid.frame.header();
+                    let base_frame_region =
+                        output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
                     base_grid.clone_region_channel(
                         base_frame_region,
                         idx,
                         &mut output_grid.buffer_mut()[idx],
                     );
-                } else {
-                    tracing::warn!("Reference frame is not decoded");
-                    clone_empty = true;
                 }
             } else {
                 clone_empty = true;
@@ -260,10 +290,13 @@ pub(crate) fn blend<S: Sample>(
         let mut base_alpha = None;
         let mut clone_empty = false;
         if let Some(grid) = ref_grid {
-            let base_frame_header = grid.frame.header();
-            let base_frame_region =
-                output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-            if let Ok(base_grid) = grid.image.run_with_image() {
+            let base_grid = blend_cache.get(&grid.frame.idx).unwrap();
+            if base_grid.region().is_empty() {
+                clone_empty = true;
+            } else {
+                let base_frame_header = grid.frame.header();
+                let base_frame_region =
+                    output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
                 base_grid.clone_region_channel(
                     base_frame_region,
                     idx,
@@ -283,8 +316,6 @@ pub(crate) fn blend<S: Sample>(
                     );
                     base_alpha = Some(&base_alpha_grid)
                 }
-            } else {
-                clone_empty = true;
             }
         } else {
             clone_empty = true;
@@ -307,6 +338,14 @@ pub(crate) fn blend<S: Sample>(
 
         let base_grid = &mut output_grid.buffer_mut()[idx];
         blend_single(base_grid, &new_grid.buffer()[idx], &blend_params);
+    }
+
+    if new_frame.header().can_reference() {
+        let ref_idx = new_frame.header().save_as_reference as usize;
+        if let Some(grid) = &reference_grids[ref_idx] {
+            let overwritten_frame_idx = grid.frame.idx;
+            blend_cache.remove(&overwritten_frame_idx);
+        }
     }
 
     Ok(output_grid)

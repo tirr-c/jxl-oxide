@@ -5,8 +5,9 @@ use std::{
 
 use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_modular::{ChannelShift, Sample};
+use jxl_threadpool::JxlThreadPool;
 
-use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, Result};
+use crate::{region::ImageWithRegion, Error, IndexedFrame, Reference, Region, Result};
 
 pub type RenderOp<S> =
     Arc<dyn Fn(FrameRender<S>, Region) -> FrameRender<S> + Send + Sync + 'static>;
@@ -64,7 +65,7 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
 }
 
 impl<S: Sample> FrameRender<S> {
-    pub fn as_grid(&self) -> Option<&ImageWithRegion> {
+    fn as_grid_mut(&mut self) -> Option<&mut ImageWithRegion> {
         if let Self::Done(grid) = self {
             Some(grid)
         } else {
@@ -79,6 +80,7 @@ pub struct FrameRenderHandle<S: Sample> {
     render: Mutex<FrameRender<S>>,
     condvar: Condvar,
     render_op: RenderOp<S>,
+    refs: [Option<Reference<S>>; 4],
 }
 
 impl<S: Sample> std::fmt::Debug for FrameRenderHandle<S> {
@@ -92,13 +94,19 @@ impl<S: Sample> std::fmt::Debug for FrameRenderHandle<S> {
 
 impl<S: Sample> FrameRenderHandle<S> {
     #[inline]
-    pub fn new(frame: Arc<IndexedFrame>, image_region: Region, render_op: RenderOp<S>) -> Self {
+    pub fn new(
+        frame: Arc<IndexedFrame>,
+        image_region: Region,
+        render_op: RenderOp<S>,
+        refs: [Option<Reference<S>>; 4],
+    ) -> Self {
         Self {
             frame,
             image_region,
             render: Mutex::new(FrameRender::None),
             condvar: Condvar::new(),
             render_op,
+            refs,
         }
     }
 
@@ -108,6 +116,7 @@ impl<S: Sample> FrameRenderHandle<S> {
         image_region: Region,
         cache: RenderCache<S>,
         render_op: RenderOp<S>,
+        refs: [Option<Reference<S>>; 4],
     ) -> Self {
         let render = FrameRender::InProgress(Box::new(cache));
         Self {
@@ -116,10 +125,11 @@ impl<S: Sample> FrameRenderHandle<S> {
             render: Mutex::new(render),
             condvar: Condvar::new(),
             render_op,
+            refs,
         }
     }
 
-    pub fn run_with_image(&self) -> Result<ImageWithRegion> {
+    pub fn run_with_image(self: Arc<Self>) -> Result<RenderedImage<S>> {
         let _guard = tracing::trace_span!("Run with image", index = self.frame.idx).entered();
 
         let render = if let Some(state) = self.start_render()? {
@@ -140,8 +150,9 @@ impl<S: Sample> FrameRenderHandle<S> {
             tracing::trace!("Another thread has started rendering");
             self.wait_until_render()?
         };
-        let grid = render.as_grid().unwrap().try_clone()?;
-        Ok(grid)
+        drop(render);
+
+        Ok(RenderedImage { image: self })
     }
 
     pub fn run(&self, image_region: Region) {
@@ -213,5 +224,51 @@ impl<S: Sample> FrameRenderHandle<S> {
         *guard = render;
         self.condvar.notify_all();
         guard
+    }
+}
+
+pub struct RenderedImage<S: Sample> {
+    image: Arc<FrameRenderHandle<S>>,
+}
+
+impl<S: Sample> RenderedImage<S> {
+    pub fn blend(
+        &self,
+        blend_cache: &mut HashMap<usize, ImageWithRegion>,
+        pool: &JxlThreadPool,
+    ) -> Result<ImageWithRegion> {
+        let idx = self.image.frame.idx;
+        if let Some(grid) = blend_cache.get(&idx) {
+            return grid.try_clone();
+        }
+
+        let image_header = self.image.frame.image_header();
+        let frame_header = self.image.frame.header();
+
+        let mut grid = self.image.render.lock().unwrap();
+        let grid = grid.as_grid_mut().unwrap();
+        if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
+            return grid.try_clone().map_err(From::from);
+        }
+
+        if !grid.ct_done() {
+            let ct_done = crate::inner::convert_color_for_record(
+                image_header,
+                frame_header.do_ycbcr,
+                grid.buffer_mut(),
+                pool,
+            );
+            grid.set_ct_done(ct_done);
+        }
+
+        let out = crate::blend::blend(
+            image_header,
+            self.image.refs.clone(),
+            &self.image.frame,
+            grid,
+            blend_cache,
+            pool,
+        )?;
+        Ok(out)
     }
 }

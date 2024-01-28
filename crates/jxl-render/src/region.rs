@@ -100,6 +100,13 @@ impl Region {
 
     #[inline]
     pub fn merge(self, other: Self) -> Self {
+        if other.is_empty() {
+            return self;
+        }
+        if self.is_empty() {
+            return other;
+        }
+
         let left = self.left.min(other.left);
         let top = self.top.min(other.top);
         let right = self
