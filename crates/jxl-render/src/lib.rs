@@ -510,11 +510,13 @@ impl RenderContext {
         if self.narrow_modular() {
             Arc::clone(&self.renders_narrow[index])
                 .run_with_image()?
-                .blend(&mut cache, &self.pool)
+                .blend(&mut cache, None, &self.pool)?
+                .try_clone()
         } else {
             Arc::clone(&self.renders_wide[index])
                 .run_with_image()?
-                .blend(&mut cache, &self.pool)
+                .blend(&mut cache, None, &self.pool)?
+                .try_clone()
         }
     }
 

@@ -7,7 +7,11 @@ use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_modular::{ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{region::ImageWithRegion, Error, IndexedFrame, Reference, Region, Result};
+use crate::{
+    region::ImageWithRegion,
+    util::{self, apply_orientation_to_image_region},
+    Error, IndexedFrame, Reference, Region, Result,
+};
 
 pub type RenderOp<S> =
     Arc<dyn Fn(FrameRender<S>, Region) -> FrameRender<S> + Send + Sync + 'static>;
@@ -232,27 +236,50 @@ pub struct RenderedImage<S: Sample> {
 }
 
 impl<S: Sample> RenderedImage<S> {
-    pub fn blend(
-        &self,
-        blend_cache: &mut HashMap<usize, ImageWithRegion>,
+    pub(crate) fn blend<'r, 'cache: 'r>(
+        &'r self,
+        blend_cache: &'cache mut HashMap<usize, ImageWithRegion>,
+        oriented_image_region: Option<Region>,
         pool: &JxlThreadPool,
-    ) -> Result<ImageWithRegion> {
+    ) -> Result<&'cache ImageWithRegion> {
         let idx = self.image.frame.idx;
-        if let Some(grid) = blend_cache.get(&idx) {
-            return grid.try_clone();
+        if blend_cache.contains_key(&idx) {
+            let out = blend_cache.get(&idx).unwrap();
+            return Ok(out);
         }
 
         let image_header = self.image.frame.image_header();
         let frame_header = self.image.frame.header();
+        let image_region = self.image.image_region;
+        let oriented_image_region = oriented_image_region
+            .unwrap_or_else(|| apply_orientation_to_image_region(image_header, image_region));
+        let frame_region = oriented_image_region
+            .translate(-frame_header.x0, -frame_header.y0)
+            .downsample(frame_header.lf_level * 3);
+        let frame_region = util::pad_lf_region(frame_header, frame_region);
+        let frame_region = util::pad_color_region(image_header, frame_header, frame_region);
+        let frame_region = frame_region.upsample(frame_header.upsampling.ilog2());
 
-        let mut grid = self.image.render.lock().unwrap();
-        let grid = grid.as_grid_mut().unwrap();
+        let mut grid_lock = self.image.render.lock().unwrap();
+        let grid = grid_lock.as_grid_mut().unwrap();
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
-            return grid.try_clone().map_err(From::from);
+            let mut out = ImageWithRegion::from_region_and_tracker(
+                grid.channels(),
+                frame_region,
+                grid.ct_done(),
+                grid.alloc_tracker(),
+            )?;
+            for (idx, channel) in out.buffer_mut().iter_mut().enumerate() {
+                grid.clone_region_channel(frame_region, idx, channel);
+            }
+            blend_cache.insert(idx, out);
+
+            let out = blend_cache.get(&idx).unwrap();
+            return Ok(out);
         }
 
         if !grid.ct_done() {
-            let ct_done = crate::util::convert_color_for_record(
+            let ct_done = util::convert_color_for_record(
                 image_header,
                 frame_header.do_ycbcr,
                 grid.buffer_mut(),
@@ -266,9 +293,13 @@ impl<S: Sample> RenderedImage<S> {
             self.image.refs.clone(),
             &self.image.frame,
             grid,
+            frame_region,
             blend_cache,
             pool,
         )?;
+        blend_cache.insert(idx, out);
+
+        let out = blend_cache.get(&idx).unwrap();
         Ok(out)
     }
 }

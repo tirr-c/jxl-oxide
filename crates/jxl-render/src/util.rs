@@ -3,8 +3,9 @@ use jxl_color::{
 };
 use jxl_frame::{
     data::{LfGlobalVarDct, LfGroup},
+    filter::EdgePreservingFilter,
     header::FrameType,
-    Frame,
+    Frame, FrameHeader,
 };
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
@@ -73,6 +74,66 @@ pub(crate) fn apply_orientation_to_image_region(
         width,
         height,
     }
+}
+
+pub(crate) fn pad_lf_region(frame_header: &FrameHeader, frame_region: Region) -> Region {
+    if frame_header.lf_level != 0 {
+        // Lower level frames might be padded, so apply padding to LF frames
+        frame_region.pad(4 * frame_header.lf_level + 32)
+    } else {
+        frame_region
+    }
+}
+
+pub(crate) fn pad_color_region(
+    image_header: &ImageHeader,
+    frame_header: &FrameHeader,
+    frame_region: Region,
+) -> Region {
+    let color_upsample_factor = frame_header.upsampling.ilog2();
+    let max_upsample_factor = frame_header
+        .ec_upsampling
+        .iter()
+        .zip(image_header.metadata.ec_info.iter())
+        .map(|(upsampling, ec_info)| upsampling.ilog2() + ec_info.dim_shift)
+        .max()
+        .unwrap_or(color_upsample_factor);
+
+    let mut color_padded_region = if max_upsample_factor > 0 {
+        // Additional upsampling pass is needed for every 3 levels of upsampling factor.
+        let padded_region = frame_region
+            .downsample(max_upsample_factor)
+            .pad(2 + (max_upsample_factor - 1) / 3);
+        let upsample_diff = max_upsample_factor - color_upsample_factor;
+        padded_region.upsample(upsample_diff)
+    } else {
+        frame_region
+    };
+
+    // TODO: actual region could be smaller.
+    if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+        // EPF references adjacent samples.
+        color_padded_region = if iters == 1 {
+            color_padded_region.pad(2)
+        } else if iters == 2 {
+            color_padded_region.pad(5)
+        } else {
+            color_padded_region.pad(6)
+        };
+    }
+    if frame_header.restoration_filter.gab.enabled() {
+        // Gabor-like filter references adjacent samples.
+        color_padded_region = color_padded_region.pad(1);
+    }
+    if frame_header.do_ycbcr {
+        // Chroma upsampling references adjacent samples.
+        color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
+    }
+    if frame_header.restoration_filter.epf.enabled() {
+        // EPF performs filtering in 8x8 blocks.
+        color_padded_region = color_padded_region.container_aligned(8);
+    }
+    color_padded_region
 }
 
 pub(crate) fn load_lf_groups<S: Sample>(

@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
-use jxl_frame::{
-    data::*,
-    filter::{EdgePreservingFilter, Gabor},
-    header::Encoding,
-    FrameHeader,
-};
+use jxl_frame::{data::*, filter::Gabor, header::Encoding, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
@@ -40,57 +35,9 @@ pub(crate) fn render_frame<S: Sample>(
         frame_header.color_sample_width(),
         frame_header.color_sample_height(),
     );
-    let frame_region = if frame_header.lf_level != 0 {
-        // Lower level frames might be padded, so apply padding to LF frames
-        frame_region.pad(4 * frame_header.lf_level + 32)
-    } else {
-        frame_region
-    };
-
-    let color_upsample_factor = frame_header.upsampling.ilog2();
-    let max_upsample_factor = frame_header
-        .ec_upsampling
-        .iter()
-        .zip(image_header.metadata.ec_info.iter())
-        .map(|(upsampling, ec_info)| upsampling.ilog2() + ec_info.dim_shift)
-        .max()
-        .unwrap_or(color_upsample_factor);
-
-    let mut color_padded_region = if max_upsample_factor > 0 {
-        // Additional upsampling pass is needed for every 3 levels of upsampling factor.
-        let padded_region = frame_region
-            .downsample(max_upsample_factor)
-            .pad(2 + (max_upsample_factor - 1) / 3);
-        let upsample_diff = max_upsample_factor - color_upsample_factor;
-        padded_region.upsample(upsample_diff)
-    } else {
-        frame_region
-    };
-
-    // TODO: actual region could be smaller.
-    if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
-        // EPF references adjacent samples.
-        color_padded_region = if iters == 1 {
-            color_padded_region.pad(2)
-        } else if iters == 2 {
-            color_padded_region.pad(5)
-        } else {
-            color_padded_region.pad(6)
-        };
-    }
-    if frame_header.restoration_filter.gab.enabled() {
-        // Gabor-like filter references adjacent samples.
-        color_padded_region = color_padded_region.pad(1);
-    }
-    if frame_header.do_ycbcr {
-        // Chroma upsampling references adjacent samples.
-        color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
-    }
-    if frame_header.restoration_filter.epf.enabled() {
-        // EPF performs filtering in 8x8 blocks.
-        color_padded_region = color_padded_region.container_aligned(8);
-    }
-    color_padded_region = color_padded_region.intersection(full_frame_region);
+    let frame_region = util::pad_lf_region(frame_header, frame_region);
+    let color_padded_region = util::pad_color_region(image_header, frame_header, frame_region);
+    let color_padded_region = color_padded_region.intersection(full_frame_region);
 
     let (mut fb, gmodular) = match frame_header.encoding {
         Encoding::Modular => {
@@ -109,11 +56,10 @@ pub(crate) fn render_frame<S: Sample>(
             match (result, reference_frames.lf) {
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
-                    let render = lf
-                        .image
-                        .run_with_image()?
-                        .blend(&mut HashMap::new(), &pool)?;
-                    (util::upsample_lf(&render, &lf.frame, frame_region)?, None)
+                    let mut cache = HashMap::new();
+                    let render = lf.image.run_with_image()?;
+                    let render = render.blend(&mut cache, None, &pool)?;
+                    (util::upsample_lf(render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
             }
@@ -283,10 +229,13 @@ fn render_features<S: Sample>(
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
             };
-            let ref_grid_image = std::sync::Arc::clone(&ref_grid.image)
-                .run_with_image()?
-                .blend(&mut cache, pool)?;
-            blend::patch(image_header, grid, &ref_grid_image, patch);
+            let ref_header = ref_grid.frame.f.header();
+            let oriented_image_region = Region::with_size(ref_header.width, ref_header.height)
+                .translate(ref_header.x0, ref_header.y0);
+            let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
+            let ref_grid_image =
+                ref_grid_image.blend(&mut cache, Some(oriented_image_region), pool)?;
+            blend::patch(image_header, grid, ref_grid_image, patch);
         }
     }
 
