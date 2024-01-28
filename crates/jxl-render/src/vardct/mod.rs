@@ -12,8 +12,8 @@ use jxl_vardct::{
 };
 
 use crate::{
-    dct, modular, region::ImageWithRegion, Error, IndexedFrame, Reference, Region, RenderCache,
-    Result,
+    dct, modular, region::ImageWithRegion, util, Error, IndexedFrame, Reference, Region,
+    RenderCache, Result,
 };
 
 mod transform;
@@ -132,7 +132,7 @@ pub(crate) fn render_vardct<S: Sample>(
 
     let lf_groups = &mut cache.lf_groups;
     tracing::trace_span!("Load LF groups").in_scope(|| {
-        crate::load_lf_groups(
+        util::load_lf_groups(
             frame,
             lf_global.vardct.as_ref(),
             lf_groups,

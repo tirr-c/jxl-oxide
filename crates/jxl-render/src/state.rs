@@ -252,7 +252,7 @@ impl<S: Sample> RenderedImage<S> {
         }
 
         if !grid.ct_done() {
-            let ct_done = crate::inner::convert_color_for_record(
+            let ct_done = crate::util::convert_color_for_record(
                 image_header,
                 frame_header.do_ycbcr,
                 grid.buffer_mut(),

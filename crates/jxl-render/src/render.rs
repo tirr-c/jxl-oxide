@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use jxl_color::{ColourEncoding, EnumColourEncoding};
 use jxl_frame::{
     data::*,
     filter::{EdgePreservingFilter, Gabor},
@@ -16,7 +15,7 @@ use crate::{
     blend, features, filter, modular,
     region::{ImageWithRegion, Region},
     state::RenderCache,
-    vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
+    util, vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };
 
 pub(crate) fn render_frame<S: Sample>(
@@ -27,7 +26,7 @@ pub(crate) fn render_frame<S: Sample>(
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
 ) -> Result<ImageWithRegion> {
-    let frame_region = crate::image_region_to_frame(frame, image_region, false);
+    let frame_region = util::image_region_to_frame(frame, image_region, false);
     tracing::debug!(
         index = frame.idx,
         ?image_region,
@@ -114,7 +113,7 @@ pub(crate) fn render_frame<S: Sample>(
                         .image
                         .run_with_image()?
                         .blend(&mut HashMap::new(), &pool)?;
-                    (super::upsample_lf(&render, &lf.frame, frame_region)?, None)
+                    (util::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
             }
@@ -150,8 +149,12 @@ pub(crate) fn render_frame<S: Sample>(
     )?;
 
     if !frame_header.save_before_ct && !frame_header.is_last {
-        let ct_done =
-            convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut(), &pool);
+        let ct_done = util::convert_color_for_record(
+            image_header,
+            frame_header.do_ycbcr,
+            fb.buffer_mut(),
+            &pool,
+        );
         fb.set_ct_done(ct_done);
     }
 
@@ -302,62 +305,4 @@ fn render_features<S: Sample>(
     }
 
     Ok(())
-}
-
-pub(crate) fn convert_color_for_record(
-    image_header: &ImageHeader,
-    do_ycbcr: bool,
-    grid: &mut [SimpleGrid<f32>],
-    pool: &JxlThreadPool,
-) -> bool {
-    // save_before_ct = false
-
-    let metadata = &image_header.metadata;
-    if do_ycbcr {
-        // xyb_encoded = false
-        let [cb, y, cr, ..] = grid else { panic!() };
-        jxl_color::ycbcr_to_rgb([cb, y, cr]);
-    } else if metadata.xyb_encoded {
-        // want_icc = false || is_last = true
-        // in any case, blending does not occur when want_icc = true
-        let ColourEncoding::Enum(encoding) = &metadata.colour_encoding else {
-            return false;
-        };
-
-        match encoding.colour_space {
-            jxl_color::ColourSpace::Xyb => return false,
-            jxl_color::ColourSpace::Unknown => {
-                tracing::warn!(
-                    colour_encoding = ?metadata.colour_encoding,
-                    "Signalled color encoding is unknown",
-                );
-                return false;
-            }
-            _ => {}
-        }
-
-        let [x, y, b, ..] = grid else { panic!() };
-        tracing::trace_span!("XYB to target colorspace").in_scope(|| {
-            tracing::trace!(colour_encoding = ?encoding);
-            let transform = jxl_color::ColorTransform::new(
-                &jxl_color::ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
-                    jxl_color::RenderingIntent::Perceptual,
-                )),
-                &jxl_color::ColorEncodingWithProfile::new(encoding.clone()),
-                &metadata.opsin_inverse_matrix,
-                &metadata.tone_mapping,
-            )
-            .unwrap();
-            transform
-                .run_with_threads(
-                    &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
-                    &jxl_color::NullCms,
-                    pool,
-                )
-                .unwrap();
-        });
-    }
-
-    // color transform is done
-    true
 }
