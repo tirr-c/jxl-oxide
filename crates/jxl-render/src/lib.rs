@@ -475,46 +475,55 @@ impl RenderContext {
 fn image_region_to_frame(frame: &Frame, image_region: Region, ignore_lf_level: bool) -> Region {
     let image_header = frame.image_header();
     let frame_header = frame.header();
-    let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
-        Region::with_size(frame_header.width, frame_header.height)
-    } else {
-        let image_width = image_header.width_with_orientation();
-        let image_height = image_header.height_with_orientation();
-        let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
-            image_width,
-            image_height,
-            image_region.left,
-            image_region.top,
-            true,
-        );
-        let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
-            image_width,
-            image_height,
-            image_region.left + image_region.width as i32 - 1,
-            image_region.top + image_region.height as i32 - 1,
-            true,
-        );
+    let full_frame_region = Region::with_size(frame_header.width, frame_header.height);
 
-        if left > right {
-            std::mem::swap(&mut left, &mut right);
-        }
-        if top > bottom {
-            std::mem::swap(&mut top, &mut bottom);
-        }
-        let width = right.abs_diff(left) + 1;
-        let height = bottom.abs_diff(top) + 1;
-        Region {
-            left: left - frame_header.x0,
-            top: top - frame_header.y0,
-            width,
-            height,
-        }
+    let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
+        full_frame_region
+    } else {
+        let region = apply_orientation_to_image_region(image_header, image_region);
+        region
+            .translate(-frame_header.x0, -frame_header.y0)
+            .intersection(full_frame_region)
     };
 
     if ignore_lf_level {
         frame_region
     } else {
         frame_region.downsample(frame_header.lf_level * 3)
+    }
+}
+
+fn apply_orientation_to_image_region(image_header: &ImageHeader, image_region: Region) -> Region {
+    let image_width = image_header.width_with_orientation();
+    let image_height = image_header.height_with_orientation();
+    let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
+        image_width,
+        image_height,
+        image_region.left,
+        image_region.top,
+        true,
+    );
+    let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
+        image_width,
+        image_height,
+        image_region.left + image_region.width as i32 - 1,
+        image_region.top + image_region.height as i32 - 1,
+        true,
+    );
+
+    if left > right {
+        std::mem::swap(&mut left, &mut right);
+    }
+    if top > bottom {
+        std::mem::swap(&mut top, &mut bottom);
+    }
+    let width = right.abs_diff(left) + 1;
+    let height = bottom.abs_diff(top) + 1;
+    Region {
+        left,
+        top,
+        width,
+        height,
     }
 }
 
@@ -746,8 +755,12 @@ impl RenderContext {
     }
 
     fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion) -> Result<()> {
-        let image_region = self.requested_image_region;
-        let frame_region = image_region_to_frame(frame, image_region, frame.header().lf_level > 0);
+        let frame_header = frame.header();
+
+        let oriented_image_region =
+            apply_orientation_to_image_region(&self.image_header, self.requested_image_region);
+        let frame_region = oriented_image_region.translate(-frame_header.x0, -frame_header.y0);
+
         if grid.region() != frame_region {
             let mut new_grid = ImageWithRegion::from_region_and_tracker(
                 grid.channels(),
@@ -762,7 +775,6 @@ impl RenderContext {
         }
 
         let metadata = self.metadata();
-        let frame_header = frame.header();
 
         tracing::trace_span!("Transform to requested color encoding").in_scope(
             || -> Result<()> {

@@ -99,6 +99,29 @@ impl Region {
     }
 
     #[inline]
+    pub fn merge(self, other: Self) -> Self {
+        let left = self.left.min(other.left);
+        let top = self.top.min(other.top);
+        let right = self
+            .left
+            .wrapping_add_unsigned(self.width)
+            .max(other.left.wrapping_add_unsigned(other.width));
+        let bottom = self
+            .top
+            .wrapping_add_unsigned(self.height)
+            .max(other.top.wrapping_add_unsigned(other.height));
+        let width = right.abs_diff(left);
+        let height = bottom.abs_diff(top);
+
+        Self {
+            left,
+            top,
+            width,
+            height,
+        }
+    }
+
+    #[inline]
     pub fn pad(self, size: u32) -> Self {
         Self {
             left: self.left.saturating_sub_unsigned(size),

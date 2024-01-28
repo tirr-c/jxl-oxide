@@ -149,13 +149,40 @@ pub(crate) fn blend<S: Sample>(
     let header = new_frame.header();
     let channels = 3 + image_header.metadata.ec_info.len();
     let tracker = new_frame.alloc_tracker();
+
+    let original_frame_region = new_grid.region();
+
+    // Compute the final region.
+    let mut output_frame_region = original_frame_region;
+    for blending_info in [&header.blending_info; 3]
+        .into_iter()
+        .chain(&header.ec_blending_info)
+    {
+        let ref_idx = blending_info.source as usize;
+        let ref_grid = &reference_grids[ref_idx];
+
+        if let Some(grid) = ref_grid {
+            let base_frame_header = grid.frame.header();
+            if let Ok(base_grid) = grid.image.run_with_image() {
+                let region_in_base_frame = base_grid.region();
+                let region_in_new_frame = region_in_base_frame.translate(
+                    base_frame_header.x0 - header.x0,
+                    base_frame_header.y0 - header.y0,
+                );
+                output_frame_region = output_frame_region.merge(region_in_new_frame);
+            } else {
+                tracing::warn!("Reference frame is not decoded");
+            };
+        }
+    }
+
     let mut output_grid = ImageWithRegion::from_region_and_tracker(
         channels,
-        new_grid.region(),
+        output_frame_region,
         new_grid.ct_done(),
         tracker,
     )?;
-    let output_image_region = new_grid.region().translate(header.x0, header.y0);
+    let output_image_region = output_frame_region.translate(header.x0, header.y0);
 
     let mut used_as_alpha = vec![false; 3 + image_header.metadata.ec_info.len()];
     for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info) {
@@ -171,6 +198,13 @@ pub(crate) fn blend<S: Sample>(
     {
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
         let ref_grid = &reference_grids[ref_idx];
+
+        let base_topleft = (
+            original_frame_region
+                .left
+                .abs_diff(output_frame_region.left) as usize,
+            original_frame_region.top.abs_diff(output_frame_region.top) as usize,
+        );
 
         if used_as_alpha[idx] {
             let mut clone_empty = false;
@@ -211,10 +245,10 @@ pub(crate) fn blend<S: Sample>(
 
             let blend_params = BlendParams {
                 mode: BlendMode::MixAlpha(blending_info.clamp),
-                base_topleft: (0, 0),
+                base_topleft,
                 new_topleft: (0, 0),
-                width: output_image_region.width as usize,
-                height: output_image_region.height as usize,
+                width: original_frame_region.width as usize,
+                height: original_frame_region.height as usize,
             };
 
             let base_grid = &mut output_grid.buffer_mut()[idx];
@@ -250,7 +284,6 @@ pub(crate) fn blend<S: Sample>(
                     base_alpha = Some(&base_alpha_grid)
                 }
             } else {
-                tracing::warn!("Reference frame is not decoded");
                 clone_empty = true;
             }
         } else {
@@ -268,8 +301,9 @@ pub(crate) fn blend<S: Sample>(
                 alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             BlendParams::from_blending_info(blending_info, base_alpha, new_alpha, premultiplied)
         };
-        blend_params.width = output_image_region.width as usize;
-        blend_params.height = output_image_region.height as usize;
+        blend_params.base_topleft = base_topleft;
+        blend_params.width = original_frame_region.width as usize;
+        blend_params.height = original_frame_region.height as usize;
 
         let base_grid = &mut output_grid.buffer_mut()[idx];
         blend_single(base_grid, &new_grid.buffer()[idx], &blend_params);
