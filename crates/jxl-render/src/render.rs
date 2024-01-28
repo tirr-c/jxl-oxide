@@ -59,7 +59,7 @@ pub(crate) fn render_frame<S: Sample>(
                     let mut cache = HashMap::new();
                     let render = lf.image.run_with_image()?;
                     let render = render.blend(&mut cache, None, &pool)?;
-                    (util::upsample_lf(render, &lf.frame, frame_region)?, None)
+                    (util::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
             }
@@ -235,7 +235,7 @@ fn render_features<S: Sample>(
             let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
             let ref_grid_image =
                 ref_grid_image.blend(&mut cache, Some(oriented_image_region), pool)?;
-            blend::patch(image_header, grid, ref_grid_image, patch);
+            blend::patch(image_header, grid, &ref_grid_image, patch);
         }
     }
 

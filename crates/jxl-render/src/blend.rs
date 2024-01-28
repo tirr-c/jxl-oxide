@@ -225,7 +225,7 @@ pub(crate) fn blend<S: Sample>(
     {
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
         let ref_grid = &reference_grids[ref_idx];
-        let can_overwrite = idx < 3
+        let mut can_overwrite = idx < 3
             && (header.is_last
                 || (header.can_reference() && ref_idx == header.save_as_reference as usize));
 
@@ -236,7 +236,13 @@ pub(crate) fn blend<S: Sample>(
         let mut target_grid;
         let mut clone_empty = false;
         if let Some(grid) = ref_grid {
-            let base_grid = blend_cache.get_mut(&grid.frame.idx).unwrap();
+            let base_grid = Arc::clone(&grid.image).run_with_image()?;
+            let mut base_grid =
+                base_grid.blend(&mut *blend_cache, Some(output_image_region), pool)?;
+            if base_grid.is_shared() {
+                can_overwrite = false;
+            }
+
             if base_grid.region().is_empty() {
                 clone_empty = true;
                 target_grid = SimpleGrid::with_alloc_tracker(
@@ -328,7 +334,9 @@ pub(crate) fn blend<S: Sample>(
         output_grid.push_channel(target_grid);
     }
 
-    if header.is_last || header.can_reference() {
+    if header.is_last {
+        blend_cache.clear();
+    } else if header.can_reference() {
         let ref_idx = header.save_as_reference as usize;
         if let Some(grid) = &reference_grids[ref_idx] {
             let overwritten_frame_idx = grid.frame.idx;

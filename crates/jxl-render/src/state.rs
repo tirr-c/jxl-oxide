@@ -69,6 +69,14 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
 }
 
 impl<S: Sample> FrameRender<S> {
+    fn as_grid(&self) -> Option<&ImageWithRegion> {
+        if let Self::Done(grid) = self {
+            Some(grid)
+        } else {
+            None
+        }
+    }
+
     fn as_grid_mut(&mut self) -> Option<&mut ImageWithRegion> {
         if let Self::Done(grid) = self {
             Some(grid)
@@ -235,17 +243,51 @@ pub struct RenderedImage<S: Sample> {
     image: Arc<FrameRenderHandle<S>>,
 }
 
+pub enum BlendResult<'r, 'cache: 'r, S: Sample> {
+    InBlendCache(&'cache mut ImageWithRegion),
+    InSharedCache(MutexGuard<'r, FrameRender<S>>),
+}
+
+impl<S: Sample> BlendResult<'_, '_, S> {
+    #[inline]
+    pub(crate) fn is_shared(&self) -> bool {
+        matches!(self, Self::InSharedCache(_))
+    }
+}
+
+impl<S: Sample> std::ops::Deref for BlendResult<'_, '_, S> {
+    type Target = ImageWithRegion;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::InBlendCache(grid) => grid,
+            Self::InSharedCache(lock) => lock.as_grid().unwrap(),
+        }
+    }
+}
+
+impl<S: Sample> std::ops::DerefMut for BlendResult<'_, '_, S> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::InBlendCache(grid) => grid,
+            Self::InSharedCache(lock) => lock.as_grid_mut().unwrap(),
+        }
+    }
+}
+
 impl<S: Sample> RenderedImage<S> {
     pub(crate) fn blend<'r, 'cache: 'r>(
         &'r self,
         blend_cache: &'cache mut HashMap<usize, ImageWithRegion>,
         oriented_image_region: Option<Region>,
         pool: &JxlThreadPool,
-    ) -> Result<&'cache ImageWithRegion> {
+    ) -> Result<BlendResult<'r, 'cache, S>> {
         let idx = self.image.frame.idx;
         if blend_cache.contains_key(&idx) {
-            let out = blend_cache.get(&idx).unwrap();
-            return Ok(out);
+            let out = blend_cache.get_mut(&idx).unwrap();
+            return Ok(BlendResult::InBlendCache(out));
         }
 
         let image_header = self.image.frame.image_header();
@@ -259,10 +301,22 @@ impl<S: Sample> RenderedImage<S> {
         let frame_region = util::pad_lf_region(frame_header, frame_region);
         let frame_region = util::pad_color_region(image_header, frame_header, frame_region);
         let frame_region = frame_region.upsample(frame_header.upsampling.ilog2());
+        let frame_region = if frame_header.frame_type.is_normal_frame() {
+            let full_image_region_in_frame =
+                Region::with_size(image_header.size.width, image_header.size.height)
+                    .translate(-frame_header.x0, -frame_header.y0);
+            frame_region.intersection(full_image_region_in_frame)
+        } else {
+            frame_region
+        };
 
         let mut grid_lock = self.image.render.lock().unwrap();
         let grid = grid_lock.as_grid_mut().unwrap();
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
+            if grid.region().contains(frame_region) {
+                return Ok(BlendResult::InSharedCache(grid_lock));
+            }
+
             let mut out = ImageWithRegion::from_region_and_tracker(
                 grid.channels(),
                 frame_region,
@@ -274,8 +328,8 @@ impl<S: Sample> RenderedImage<S> {
             }
             blend_cache.insert(idx, out);
 
-            let out = blend_cache.get(&idx).unwrap();
-            return Ok(out);
+            let out = blend_cache.get_mut(&idx).unwrap();
+            return Ok(BlendResult::InBlendCache(out));
         }
 
         if !grid.ct_done() {
@@ -299,7 +353,7 @@ impl<S: Sample> RenderedImage<S> {
         )?;
         blend_cache.insert(idx, out);
 
-        let out = blend_cache.get(&idx).unwrap();
-        Ok(out)
+        let out = blend_cache.get_mut(&idx).unwrap();
+        return Ok(BlendResult::InBlendCache(out));
     }
 }
