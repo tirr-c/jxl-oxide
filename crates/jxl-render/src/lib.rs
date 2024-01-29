@@ -1,15 +1,11 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, EnumColourEncoding,
 };
-use jxl_frame::{
-    data::{LfGlobalVarDct, LfGroup},
-    header::FrameType,
-    Frame, FrameContext,
-};
+use jxl_frame::{header::FrameType, Frame, FrameContext};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 
@@ -18,14 +14,15 @@ mod dct;
 mod error;
 mod features;
 mod filter;
-mod inner;
 mod modular;
 mod region;
+mod render;
 mod state;
+mod util;
 mod vardct;
 pub use error::{Error, Result};
 pub use features::render_spot_color;
-use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
+use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 pub use region::{ImageWithRegion, Region};
 
@@ -218,7 +215,6 @@ impl RenderContext {
 
         let header = frame.header();
         let idx = self.frames.len();
-        let is_last = header.is_last;
 
         self.refcounts.push(0);
 
@@ -240,10 +236,7 @@ impl RenderContext {
             ref_slots: self.reference,
         };
 
-        if !is_last
-            && (header.duration == 0 || header.save_as_reference != 0)
-            && header.frame_type != FrameType::LfFrame
-        {
+        if header.can_reference() {
             let ref_idx = header.save_as_reference as usize;
             self.reference[ref_idx] = idx;
         }
@@ -262,20 +255,61 @@ impl RenderContext {
 
         let frame = Arc::new(frame);
         let image_region = self.requested_image_region;
+
         if self.narrow_modular() {
-            let render_op = self.render_op_narrow(Arc::clone(&frame), deps);
+            let reference_frames = ReferenceFrames {
+                lf: (deps.lf != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[deps.lf]),
+                    image: Arc::clone(&self.renders_narrow[deps.lf]),
+                }),
+                refs: deps.ref_slots.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_narrow[r]),
+                    })
+                }),
+            };
+            let refs = reference_frames.refs.clone();
+
+            let render_op = self.render_op::<i16>(Arc::clone(&frame), reference_frames);
             let handle = if let Some(cache) = self.loading_render_cache_narrow.take() {
-                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
+                FrameRenderHandle::from_cache(
+                    Arc::clone(&frame),
+                    image_region,
+                    cache,
+                    render_op,
+                    refs,
+                )
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op, refs)
             };
             self.renders_narrow.push(Arc::new(handle));
         } else {
-            let render_op = self.render_op_wide(Arc::clone(&frame), deps);
+            let reference_frames = ReferenceFrames {
+                lf: (deps.lf != usize::MAX).then(|| Reference {
+                    frame: Arc::clone(&self.frames[deps.lf]),
+                    image: Arc::clone(&self.renders_wide[deps.lf]),
+                }),
+                refs: deps.ref_slots.map(|r| {
+                    (r != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[r]),
+                        image: Arc::clone(&self.renders_wide[r]),
+                    })
+                }),
+            };
+            let refs = reference_frames.refs.clone();
+
+            let render_op = self.render_op::<i32>(Arc::clone(&frame), reference_frames);
             let handle = if let Some(cache) = self.loading_render_cache_wide.take() {
-                FrameRenderHandle::from_cache(Arc::clone(&frame), image_region, cache, render_op)
+                FrameRenderHandle::from_cache(
+                    Arc::clone(&frame),
+                    image_region,
+                    cache,
+                    render_op,
+                    refs,
+                )
             } else {
-                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op)
+                FrameRenderHandle::new(Arc::clone(&frame), image_region, render_op, refs)
             };
             self.renders_wide.push(Arc::new(handle));
         }
@@ -378,38 +412,6 @@ impl RenderContext {
 }
 
 impl RenderContext {
-    fn render_op_narrow(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i16> {
-        let reference_frames = ReferenceFrames {
-            lf: (deps.lf != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.frames[deps.lf]),
-                image: Arc::clone(&self.renders_narrow[deps.lf]),
-            }),
-            refs: deps.ref_slots.map(|r| {
-                (r != usize::MAX).then(|| Reference {
-                    frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders_narrow[r]),
-                })
-            }),
-        };
-        self.render_op(frame, reference_frames)
-    }
-
-    fn render_op_wide(&self, frame: Arc<IndexedFrame>, deps: FrameDependence) -> RenderOp<i32> {
-        let reference_frames = ReferenceFrames {
-            lf: (deps.lf != usize::MAX).then(|| Reference {
-                frame: Arc::clone(&self.frames[deps.lf]),
-                image: Arc::clone(&self.renders_wide[deps.lf]),
-            }),
-            refs: deps.ref_slots.map(|r| {
-                (r != usize::MAX).then(|| Reference {
-                    frame: Arc::clone(&self.frames[r]),
-                    image: Arc::clone(&self.renders_wide[r]),
-                })
-            }),
-        };
-        self.render_op(frame, reference_frames)
-    }
-
     fn render_op<S: Sample>(
         &self,
         frame: Arc<IndexedFrame>,
@@ -419,6 +421,21 @@ impl RenderContext {
 
         let pool = self.pool.clone();
         Arc::new(move |mut state, image_region| {
+            if let Some(lf) = &reference_frames.lf {
+                tracing::trace!(idx = lf.frame.idx, "Spawn LF frame renderer");
+                let lf_handle = Arc::clone(&lf.image);
+                pool.spawn(move || {
+                    lf_handle.run(image_region);
+                });
+            }
+            for grid in reference_frames.refs.iter().flatten() {
+                tracing::trace!(idx = grid.frame.idx, "Spawn reference frame renderer");
+                let ref_handle = Arc::clone(&grid.image);
+                pool.spawn(move || {
+                    ref_handle.run(image_region);
+                });
+            }
+
             let mut cache = match state {
                 FrameRender::InProgress(cache) => cache,
                 _ => {
@@ -430,7 +447,7 @@ impl RenderContext {
                 }
             };
 
-            let result = inner::render_frame(
+            let result = render::render_frame(
                 &frame,
                 reference_frames.clone(),
                 &mut cache,
@@ -472,61 +489,6 @@ impl RenderContext {
     }
 }
 
-fn image_region_to_frame(frame: &Frame, image_region: Region, ignore_lf_level: bool) -> Region {
-    let image_header = frame.image_header();
-    let frame_header = frame.header();
-    let full_frame_region = Region::with_size(frame_header.width, frame_header.height);
-
-    let frame_region = if frame_header.frame_type == FrameType::ReferenceOnly {
-        full_frame_region
-    } else {
-        let region = apply_orientation_to_image_region(image_header, image_region);
-        region
-            .translate(-frame_header.x0, -frame_header.y0)
-            .intersection(full_frame_region)
-    };
-
-    if ignore_lf_level {
-        frame_region
-    } else {
-        frame_region.downsample(frame_header.lf_level * 3)
-    }
-}
-
-fn apply_orientation_to_image_region(image_header: &ImageHeader, image_region: Region) -> Region {
-    let image_width = image_header.width_with_orientation();
-    let image_height = image_header.height_with_orientation();
-    let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left,
-        image_region.top,
-        true,
-    );
-    let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left + image_region.width as i32 - 1,
-        image_region.top + image_region.height as i32 - 1,
-        true,
-    );
-
-    if left > right {
-        std::mem::swap(&mut left, &mut right);
-    }
-    if top > bottom {
-        std::mem::swap(&mut top, &mut bottom);
-    }
-    let width = right.abs_diff(left) + 1;
-    let height = bottom.abs_diff(top) + 1;
-    Region {
-        left,
-        top,
-        width,
-        height,
-    }
-}
-
 impl RenderContext {
     fn spawn_renderer(&self, index: usize) {
         let image_region = self.requested_image_region;
@@ -544,27 +506,17 @@ impl RenderContext {
     }
 
     fn render_by_index(&self, index: usize) -> Result<ImageWithRegion> {
-        let deps = self.frame_deps[index];
-        let indices: Vec<_> = deps.indices().collect();
-        if !indices.is_empty() {
-            tracing::trace!(
-                "Depends on {} {}",
-                indices.len(),
-                if indices.len() == 1 {
-                    "frame"
-                } else {
-                    "frames"
-                },
-            );
-            for dep in indices {
-                self.spawn_renderer(dep);
-            }
-        }
-
+        let mut cache = HashMap::new();
         if self.narrow_modular() {
-            self.renders_narrow[index].run_with_image()
+            Arc::clone(&self.renders_narrow[index])
+                .run_with_image()?
+                .blend(&mut cache, None, &self.pool)?
+                .try_clone()
         } else {
-            self.renders_wide[index].run_with_image()
+            Arc::clone(&self.renders_wide[index])
+                .run_with_image()?
+                .blend(&mut cache, None, &self.pool)?
+                .try_clone()
         }
     }
 
@@ -630,12 +582,42 @@ impl RenderContext {
 
             let deps = self.frame_deps[idx];
             if self.narrow_modular() {
-                let render_op = self.render_op_narrow(Arc::clone(frame), deps);
-                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                let reference_frames = ReferenceFrames {
+                    lf: (deps.lf != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[deps.lf]),
+                        image: Arc::clone(&self.renders_narrow[deps.lf]),
+                    }),
+                    refs: deps.ref_slots.map(|r| {
+                        (r != usize::MAX).then(|| Reference {
+                            frame: Arc::clone(&self.frames[r]),
+                            image: Arc::clone(&self.renders_narrow[r]),
+                        })
+                    }),
+                };
+                let refs = reference_frames.refs.clone();
+
+                let render_op = self.render_op::<i16>(Arc::clone(frame), reference_frames);
+                let handle =
+                    FrameRenderHandle::new(Arc::clone(frame), image_region, render_op, refs);
                 self.renders_narrow[idx] = Arc::new(handle);
             } else {
-                let render_op = self.render_op_wide(Arc::clone(frame), deps);
-                let handle = FrameRenderHandle::new(Arc::clone(frame), image_region, render_op);
+                let reference_frames = ReferenceFrames {
+                    lf: (deps.lf != usize::MAX).then(|| Reference {
+                        frame: Arc::clone(&self.frames[deps.lf]),
+                        image: Arc::clone(&self.renders_wide[deps.lf]),
+                    }),
+                    refs: deps.ref_slots.map(|r| {
+                        (r != usize::MAX).then(|| Reference {
+                            frame: Arc::clone(&self.frames[r]),
+                            image: Arc::clone(&self.renders_wide[r]),
+                        })
+                    }),
+                };
+                let refs = reference_frames.refs.clone();
+
+                let render_op = self.render_op::<i32>(Arc::clone(frame), reference_frames);
+                let handle =
+                    FrameRenderHandle::new(Arc::clone(frame), image_region, render_op, refs);
                 self.renders_wide[idx] = Arc::new(handle);
             }
         }
@@ -648,7 +630,7 @@ impl RenderContext {
         }
 
         let image_region = self.requested_image_region;
-        let frame_region = image_region_to_frame(frame, image_region, false);
+        let frame_region = util::image_region_to_frame(frame, image_region, false);
         self.loading_region = Some(frame_region);
 
         let frame = self.loading_frame().unwrap();
@@ -693,7 +675,7 @@ impl RenderContext {
             };
 
             let frame = self.loading_frame().unwrap();
-            let image_result = inner::render_frame(
+            let image_result = render::render_frame(
                 frame,
                 reference_frames,
                 &mut cache,
@@ -728,7 +710,7 @@ impl RenderContext {
             };
 
             let frame = self.loading_frame().unwrap();
-            let image_result = inner::render_frame(
+            let image_result = render::render_frame(
                 frame,
                 reference_frames,
                 &mut cache,
@@ -747,8 +729,8 @@ impl RenderContext {
 
         let frame = self.loading_frame().unwrap();
         if frame.header().lf_level > 0 {
-            let frame_region = image_region_to_frame(frame, image_region, true);
-            Ok(upsample_lf(&image, frame, frame_region)?)
+            let frame_region = util::image_region_to_frame(frame, image_region, true);
+            Ok(util::upsample_lf(&image, frame, frame_region)?)
         } else {
             Ok(image)
         }
@@ -757,8 +739,10 @@ impl RenderContext {
     fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion) -> Result<()> {
         let frame_header = frame.header();
 
-        let oriented_image_region =
-            apply_orientation_to_image_region(&self.image_header, self.requested_image_region);
+        let oriented_image_region = util::apply_orientation_to_image_region(
+            &self.image_header,
+            self.requested_image_region,
+        );
         let frame_region = oriented_image_region.translate(-frame_header.x0, -frame_header.y0);
 
         if grid.region() != frame_region {
@@ -843,125 +827,6 @@ impl RenderContext {
     }
 }
 
-fn load_lf_groups<S: Sample>(
-    frame: &IndexedFrame,
-    lf_global_vardct: Option<&LfGlobalVarDct>,
-    lf_groups: &mut std::collections::HashMap<u32, LfGroup<S>>,
-    global_ma_config: Option<&MaConfig>,
-    mlf_groups: Vec<TransformedModularSubimage<S>>,
-    lf_region: Region,
-    pool: &JxlThreadPool,
-) -> Result<()> {
-    #[derive(Default)]
-    struct LfGroupJob<'modular, S: Sample> {
-        idx: u32,
-        lf_group: Option<LfGroup<S>>,
-        modular: Option<TransformedModularSubimage<'modular, S>>,
-    }
-
-    let frame_header = frame.header();
-    let lf_groups_per_row = frame_header.lf_groups_per_row();
-    let group_dim = frame_header.group_dim();
-    let num_lf_groups = frame_header.num_lf_groups();
-
-    let mlf_groups = mlf_groups
-        .into_iter()
-        .map(Some)
-        .chain(std::iter::repeat_with(|| None));
-    let mut lf_groups_out = (0..num_lf_groups)
-        .map(|idx| LfGroupJob {
-            idx,
-            lf_group: None,
-            modular: None,
-        })
-        .zip(mlf_groups)
-        .filter_map(|(job, modular)| {
-            let loaded = lf_groups.get(&job.idx).map(|g| !g.partial).unwrap_or(false);
-            if loaded {
-                return None;
-            }
-
-            let idx = job.idx;
-            let left = (idx % lf_groups_per_row) * group_dim;
-            let top = (idx / lf_groups_per_row) * group_dim;
-            let lf_group_region = Region {
-                left: left as i32,
-                top: top as i32,
-                width: group_dim,
-                height: group_dim,
-            };
-            if lf_region.intersection(lf_group_region).is_empty() {
-                return None;
-            }
-
-            Some(LfGroupJob { modular, ..job })
-        })
-        .collect::<Vec<_>>();
-
-    let result = std::sync::RwLock::new(Result::Ok(()));
-    pool.for_each_mut_slice(
-        &mut lf_groups_out,
-        |LfGroupJob {
-             idx,
-             lf_group,
-             modular,
-         }| {
-            match frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular.take(), *idx)
-            {
-                Some(Ok(g)) => {
-                    *lf_group = Some(g);
-                }
-                Some(Err(e)) => {
-                    *result.write().unwrap() = Err(e.into());
-                }
-                None => {}
-            }
-        },
-    );
-
-    for LfGroupJob { idx, lf_group, .. } in lf_groups_out.into_iter() {
-        if let Some(group) = lf_group {
-            lf_groups.insert(idx, group);
-        }
-    }
-    result.into_inner().unwrap()
-}
-
-fn upsample_lf(
-    image: &ImageWithRegion,
-    frame: &IndexedFrame,
-    frame_region: Region,
-) -> Result<ImageWithRegion> {
-    let factor = frame.header().lf_level * 3;
-    let step = 1usize << factor;
-    let new_region = image.region().upsample(factor);
-    let mut new_image = ImageWithRegion::from_region_and_tracker(
-        image.channels(),
-        new_region,
-        image.ct_done(),
-        frame.alloc_tracker(),
-    )?;
-    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
-        let height = original.height();
-        let width = original.width();
-        let stride = target.width();
-
-        let original = original.buf();
-        let target = target.buf_mut();
-        for y in 0..height {
-            let original = &original[y * width..];
-            let target = &mut target[y * step * stride..];
-            for (x, &value) in original[..width].iter().enumerate() {
-                target[x * step..][..step].fill(value);
-            }
-            for row in 1..step {
-                target.copy_within(..stride, stride * row);
-            }
-        }
-    }
-    new_image.clone_intersection(frame_region)
-}
-
 /// Frame with its index in the image.
 #[derive(Debug)]
 pub struct IndexedFrame {
@@ -1001,14 +866,6 @@ impl std::ops::DerefMut for IndexedFrame {
 struct FrameDependence {
     pub(crate) lf: usize,
     pub(crate) ref_slots: [usize; 4],
-}
-
-impl FrameDependence {
-    pub fn indices(&self) -> impl Iterator<Item = usize> + 'static {
-        std::iter::once(self.lf)
-            .chain(self.ref_slots)
-            .filter(|&v| v != usize::MAX)
-    }
 }
 
 #[derive(Debug, Clone, Default)]

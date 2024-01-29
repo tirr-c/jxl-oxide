@@ -1,10 +1,6 @@
-use jxl_color::{ColourEncoding, EnumColourEncoding};
-use jxl_frame::{
-    data::*,
-    filter::{EdgePreservingFilter, Gabor},
-    header::Encoding,
-    FrameHeader,
-};
+use std::collections::HashMap;
+
+use jxl_frame::{data::*, filter::Gabor, header::Encoding, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
@@ -14,7 +10,7 @@ use crate::{
     blend, features, filter, modular,
     region::{ImageWithRegion, Region},
     state::RenderCache,
-    vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
+    util, vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };
 
 pub(crate) fn render_frame<S: Sample>(
@@ -25,7 +21,7 @@ pub(crate) fn render_frame<S: Sample>(
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
 ) -> Result<ImageWithRegion> {
-    let frame_region = crate::image_region_to_frame(frame, image_region, false);
+    let frame_region = util::image_region_to_frame(frame, image_region, false);
     tracing::debug!(
         index = frame.idx,
         ?image_region,
@@ -39,57 +35,9 @@ pub(crate) fn render_frame<S: Sample>(
         frame_header.color_sample_width(),
         frame_header.color_sample_height(),
     );
-    let frame_region = if frame_header.lf_level != 0 {
-        // Lower level frames might be padded, so apply padding to LF frames
-        frame_region.pad(4 * frame_header.lf_level + 32)
-    } else {
-        frame_region
-    };
-
-    let color_upsample_factor = frame_header.upsampling.ilog2();
-    let max_upsample_factor = frame_header
-        .ec_upsampling
-        .iter()
-        .zip(image_header.metadata.ec_info.iter())
-        .map(|(upsampling, ec_info)| upsampling.ilog2() + ec_info.dim_shift)
-        .max()
-        .unwrap_or(color_upsample_factor);
-
-    let mut color_padded_region = if max_upsample_factor > 0 {
-        // Additional upsampling pass is needed for every 3 levels of upsampling factor.
-        let padded_region = frame_region
-            .downsample(max_upsample_factor)
-            .pad(2 + (max_upsample_factor - 1) / 3);
-        let upsample_diff = max_upsample_factor - color_upsample_factor;
-        padded_region.upsample(upsample_diff)
-    } else {
-        frame_region
-    };
-
-    // TODO: actual region could be smaller.
-    if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
-        // EPF references adjacent samples.
-        color_padded_region = if iters == 1 {
-            color_padded_region.pad(2)
-        } else if iters == 2 {
-            color_padded_region.pad(5)
-        } else {
-            color_padded_region.pad(6)
-        };
-    }
-    if frame_header.restoration_filter.gab.enabled() {
-        // Gabor-like filter references adjacent samples.
-        color_padded_region = color_padded_region.pad(1);
-    }
-    if frame_header.do_ycbcr {
-        // Chroma upsampling references adjacent samples.
-        color_padded_region = color_padded_region.pad(1).downsample(2).upsample(2);
-    }
-    if frame_header.restoration_filter.epf.enabled() {
-        // EPF performs filtering in 8x8 blocks.
-        color_padded_region = color_padded_region.container_aligned(8);
-    }
-    color_padded_region = color_padded_region.intersection(full_frame_region);
+    let frame_region = util::pad_lf_region(frame_header, frame_region);
+    let color_padded_region = util::pad_color_region(image_header, frame_header, frame_region);
+    let color_padded_region = color_padded_region.intersection(full_frame_region);
 
     let (mut fb, gmodular) = match frame_header.encoding {
         Encoding::Modular => {
@@ -108,8 +56,10 @@ pub(crate) fn render_frame<S: Sample>(
             match (result, reference_frames.lf) {
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
+                    let mut cache = HashMap::new();
                     let render = lf.image.run_with_image()?;
-                    (super::upsample_lf(&render, &lf.frame, frame_region)?, None)
+                    let render = render.blend(&mut cache, None, &pool)?;
+                    (util::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
             }
@@ -141,31 +91,20 @@ pub(crate) fn render_frame<S: Sample>(
         cache,
         frame_visibility.0,
         frame_visibility.1,
+        &pool,
     )?;
 
     if !frame_header.save_before_ct && !frame_header.is_last {
-        let ct_done =
-            convert_color_for_record(image_header, frame_header.do_ycbcr, fb.buffer_mut(), &pool);
+        let ct_done = util::convert_color_for_record(
+            image_header,
+            frame_header.do_ycbcr,
+            fb.buffer_mut(),
+            &pool,
+        );
         fb.set_ct_done(ct_done);
     }
 
-    Ok(
-        if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
-            fb
-        } else {
-            if !frame_header.save_before_ct && !fb.ct_done() {
-                let ct_done = convert_color_for_record(
-                    image_header,
-                    frame_header.do_ycbcr,
-                    fb.buffer_mut(),
-                    &pool,
-                );
-                fb.set_ct_done(ct_done);
-            }
-
-            blend::blend(frame.image_header(), reference_frames.refs, frame, &fb)?
-        },
-    )
+    Ok(fb)
 }
 
 fn upsample_color_channels(
@@ -269,6 +208,7 @@ fn render_features<S: Sample>(
     cache: &mut RenderCache<S>,
     visible_frames_num: usize,
     invisible_frames_num: usize,
+    pool: &JxlThreadPool,
 ) -> Result<()> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
@@ -284,11 +224,17 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
+        let mut cache = HashMap::new();
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
             };
-            let ref_grid_image = ref_grid.image.run_with_image()?;
+            let ref_header = ref_grid.frame.f.header();
+            let oriented_image_region = Region::with_size(ref_header.width, ref_header.height)
+                .translate(ref_header.x0, ref_header.y0);
+            let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
+            let ref_grid_image =
+                ref_grid_image.blend(&mut cache, Some(oriented_image_region), pool)?;
             blend::patch(image_header, grid, &ref_grid_image, patch);
         }
     }
@@ -308,62 +254,4 @@ fn render_features<S: Sample>(
     }
 
     Ok(())
-}
-
-fn convert_color_for_record(
-    image_header: &ImageHeader,
-    do_ycbcr: bool,
-    grid: &mut [SimpleGrid<f32>],
-    pool: &JxlThreadPool,
-) -> bool {
-    // save_before_ct = false
-
-    let metadata = &image_header.metadata;
-    if do_ycbcr {
-        // xyb_encoded = false
-        let [cb, y, cr, ..] = grid else { panic!() };
-        jxl_color::ycbcr_to_rgb([cb, y, cr]);
-    } else if metadata.xyb_encoded {
-        // want_icc = false || is_last = true
-        // in any case, blending does not occur when want_icc = true
-        let ColourEncoding::Enum(encoding) = &metadata.colour_encoding else {
-            return false;
-        };
-
-        match encoding.colour_space {
-            jxl_color::ColourSpace::Xyb => return false,
-            jxl_color::ColourSpace::Unknown => {
-                tracing::warn!(
-                    colour_encoding = ?metadata.colour_encoding,
-                    "Signalled color encoding is unknown",
-                );
-                return false;
-            }
-            _ => {}
-        }
-
-        let [x, y, b, ..] = grid else { panic!() };
-        tracing::trace_span!("XYB to target colorspace").in_scope(|| {
-            tracing::trace!(colour_encoding = ?encoding);
-            let transform = jxl_color::ColorTransform::new(
-                &jxl_color::ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
-                    jxl_color::RenderingIntent::Perceptual,
-                )),
-                &jxl_color::ColorEncodingWithProfile::new(encoding.clone()),
-                &metadata.opsin_inverse_matrix,
-                &metadata.tone_mapping,
-            )
-            .unwrap();
-            transform
-                .run_with_threads(
-                    &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
-                    &jxl_color::NullCms,
-                    pool,
-                )
-                .unwrap();
-        });
-    }
-
-    // color transform is done
-    true
 }

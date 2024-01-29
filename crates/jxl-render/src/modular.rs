@@ -3,7 +3,7 @@ use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 
-use crate::{region::ImageWithRegion, Error, IndexedFrame, Region, RenderCache, Result};
+use crate::{region::ImageWithRegion, util, Error, IndexedFrame, Region, RenderCache, Result};
 
 pub(crate) fn render_modular<S: Sample>(
     frame: &IndexedFrame,
@@ -48,7 +48,7 @@ pub(crate) fn render_modular<S: Sample>(
         pool.scope(|scope| {
             let lf_groups = &mut cache.lf_groups;
             scope.spawn(|_| {
-                let r = crate::load_lf_groups(
+                let r = util::load_lf_groups(
                     frame,
                     lf_global.vardct.as_ref(),
                     lf_groups,

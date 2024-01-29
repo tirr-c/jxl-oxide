@@ -206,6 +206,13 @@ impl FrameHeader {
         self.frame_type.is_normal_frame() && (self.is_last || self.duration != 0)
     }
 
+    #[inline]
+    pub fn can_reference(&self) -> bool {
+        !self.is_last
+            && (self.duration == 0 || self.save_as_reference != 0)
+            && self.frame_type != FrameType::LfFrame
+    }
+
     pub fn sample_width(&self, upsampling: u32) -> u32 {
         let &Self {
             mut width,
