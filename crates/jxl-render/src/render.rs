@@ -8,7 +8,7 @@ use jxl_threadpool::JxlThreadPool;
 
 use crate::{
     blend, features, filter, modular,
-    region::{ImageWithRegion, Region},
+    ImageWithRegion, Region,
     state::RenderCache,
     util, vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
 };

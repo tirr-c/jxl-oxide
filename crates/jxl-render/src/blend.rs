@@ -11,8 +11,7 @@ use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    region::{ImageWithRegion, Region},
-    Reference, Result,
+    ImageWithRegion, Region, Reference, Result,
 };
 
 #[derive(Debug)]

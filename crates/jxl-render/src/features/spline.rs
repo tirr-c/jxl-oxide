@@ -5,7 +5,7 @@ use jxl_frame::{
     FrameHeader,
 };
 
-use crate::region::ImageWithRegion;
+use crate::ImageWithRegion;
 
 /// Holds control point coordinates and dequantized DCT32 coefficients of XYB channels, σ parameter of the spline
 #[derive(Debug)]

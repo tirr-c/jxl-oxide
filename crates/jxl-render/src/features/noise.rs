@@ -3,7 +3,7 @@ use std::num::Wrapping;
 use jxl_frame::{data::NoiseParameters, FrameHeader};
 use jxl_grid::{AllocTracker, PaddedGrid, SimpleGrid};
 
-use crate::{region::ImageWithRegion, Result};
+use crate::{ImageWithRegion, Result};
 
 pub fn render_noise(
     header: &FrameHeader,

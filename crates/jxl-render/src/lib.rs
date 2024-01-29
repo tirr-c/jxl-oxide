@@ -8,24 +8,26 @@ use jxl_color::{
 use jxl_frame::{header::FrameType, Frame, FrameContext};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
+use jxl_modular::Sample;
+use jxl_threadpool::JxlThreadPool;
 
 mod blend;
 mod dct;
 mod error;
 mod features;
 mod filter;
+mod image;
 mod modular;
 mod region;
 mod render;
 mod state;
 mod util;
 mod vardct;
+
 pub use error::{Error, Result};
 pub use features::render_spot_color;
-use jxl_modular::Sample;
-use jxl_threadpool::JxlThreadPool;
-pub use region::{ImageWithRegion, Region};
-
+pub use image::ImageWithRegion;
+pub use region::Region;
 use state::*;
 
 /// Render context that tracks loaded and rendered frames.

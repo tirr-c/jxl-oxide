@@ -12,7 +12,7 @@ use jxl_vardct::{
 };
 
 use crate::{
-    dct, modular, region::ImageWithRegion, util, Error, IndexedFrame, Reference, Region,
+    dct, modular, ImageWithRegion, util, Error, IndexedFrame, Reference, Region,
     RenderCache, Result,
 };
 
