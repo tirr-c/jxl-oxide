@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use jxl_frame::{data::*, filter::Gabor, header::Encoding, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
@@ -7,10 +5,8 @@ use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    blend, features, filter, modular,
-    region::{ImageWithRegion, Region},
-    state::RenderCache,
-    util, vardct, Error, IndexedFrame, Reference, ReferenceFrames, Result,
+    blend, features, filter, modular, state::RenderCache, util, vardct, Error, ImageWithRegion,
+    IndexedFrame, Reference, ReferenceFrames, Region, Result,
 };
 
 pub(crate) fn render_frame<S: Sample>(
@@ -56,9 +52,8 @@ pub(crate) fn render_frame<S: Sample>(
             match (result, reference_frames.lf) {
                 (Ok((grid, gmodular)), _) => (grid, Some(gmodular)),
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
-                    let mut cache = HashMap::new();
                     let render = lf.image.run_with_image()?;
-                    let render = render.blend(&mut cache, None, &pool)?;
+                    let render = render.blend(None, &pool)?;
                     (util::upsample_lf(&render, &lf.frame, frame_region)?, None)
                 }
                 (Err(e), _) => return Err(e),
@@ -224,7 +219,6 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
-        let mut cache = HashMap::new();
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
@@ -233,8 +227,7 @@ fn render_features<S: Sample>(
             let oriented_image_region = Region::with_size(ref_header.width, ref_header.height)
                 .translate(ref_header.x0, ref_header.y0);
             let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
-            let ref_grid_image =
-                ref_grid_image.blend(&mut cache, Some(oriented_image_region), pool)?;
+            let ref_grid_image = ref_grid_image.blend(Some(oriented_image_region), pool)?;
             blend::patch(image_header, grid, &ref_grid_image, patch);
         }
     }

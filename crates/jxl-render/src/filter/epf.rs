@@ -4,7 +4,7 @@ use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_modular::Sample;
 
-use crate::{region::ImageWithRegion, Region};
+use crate::{ImageWithRegion, Region};
 
 pub fn apply_epf<S: Sample>(
     fb: &mut ImageWithRegion,
