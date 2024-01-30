@@ -3,7 +3,7 @@ use jxl_grid::SimpleGrid;
 use jxl_image::BitDepth;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 
-use crate::{ImageWithRegion, util, Error, IndexedFrame, Region, RenderCache, Result};
+use crate::{util, Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result};
 
 pub(crate) fn render_modular<S: Sample>(
     frame: &IndexedFrame,

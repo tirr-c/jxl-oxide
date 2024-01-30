@@ -1,5 +1,5 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::{
@@ -508,16 +508,15 @@ impl RenderContext {
     }
 
     fn render_by_index(&self, index: usize) -> Result<ImageWithRegion> {
-        let mut cache = HashMap::new();
         if self.narrow_modular() {
             Arc::clone(&self.renders_narrow[index])
                 .run_with_image()?
-                .blend(&mut cache, None, &self.pool)?
+                .blend(None, &self.pool)?
                 .try_clone()
         } else {
             Arc::clone(&self.renders_wide[index])
                 .run_with_image()?
-                .blend(&mut cache, None, &self.pool)?
+                .blend(None, &self.pool)?
                 .try_clone()
         }
     }

@@ -7,7 +7,7 @@ use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_modular::{ChannelShift, Sample};
 
 use crate::{
-    image::RenderedImage, Error, ImageWithRegion, IndexedFrame, Reference, Region, Result
+    image::RenderedImage, Error, ImageWithRegion, IndexedFrame, Reference, Region, Result,
 };
 
 pub type RenderOp<S> =
@@ -173,6 +173,11 @@ impl<S: Sample> FrameRenderHandle<S> {
         } else {
             tracing::trace!("Another thread has started rendering");
         }
+    }
+
+    pub fn reset(&self) -> FrameRender<S> {
+        let mut render_ref = self.render.lock().unwrap();
+        std::mem::replace(&mut *render_ref, FrameRender::None)
     }
 
     fn start_render(&self) -> Result<Option<FrameRender<S>>> {

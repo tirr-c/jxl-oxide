@@ -12,8 +12,8 @@ use jxl_vardct::{
 };
 
 use crate::{
-    dct, modular, ImageWithRegion, util, Error, IndexedFrame, Reference, Region,
-    RenderCache, Result,
+    dct, modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache,
+    Result,
 };
 
 mod transform;
@@ -161,9 +161,8 @@ pub(crate) fn render_vardct<S: Sample>(
                 ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
 
             if let Some(x) = lf_frame {
-                let mut cache = HashMap::new();
                 let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
-                let lf_frame = lf_frame.blend(&mut cache, None, pool)?;
+                let lf_frame = lf_frame.blend(None, pool)?;
                 lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
                 lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
                 lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
