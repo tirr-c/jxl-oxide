@@ -11,6 +11,7 @@ use epf::weight;
 
 pub(crate) struct EpfRow<'buf, 'epf> {
     pub(crate) input_rows: [[&'buf [f32]; 7]; 3],
+    pub(crate) merged_input_rows: Option<[&'buf [f32]; 3]>,
     pub(crate) output_rows: [&'buf mut [f32]; 3],
     pub(crate) width: usize,
     pub(crate) x: usize,
@@ -32,7 +33,7 @@ pub(crate) unsafe fn epf_common<'buf>(
     handle_row_generic: for<'a, 'b> fn(EpfRow<'a, 'b>),
 ) {
     struct EpfJob<'buf> {
-        y8: usize,
+        base_y: usize,
         output0: &'buf mut [f32],
         output1: &'buf mut [f32],
         output2: &'buf mut [f32],
@@ -61,53 +62,142 @@ pub(crate) unsafe fn epf_common<'buf>(
     assert_eq!(output1.len(), width * height);
     assert_eq!(output2.len(), width * height);
 
+    if height <= 6 {
+        let it = output0.chunks_exact_mut(width).zip(output1.chunks_exact_mut(width)).zip(output2.chunks_exact_mut(width));
+        for (y, ((output0, output1), output2)) in it.enumerate() {
+            let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
+                std::array::from_fn(|idx| {
+                    let y = mirror((y + idx) as isize - 3, height);
+                    &input_buf[c][y * width..][..width]
+                })
+            });
+
+            let image_y = y + top;
+            let sigma_y = (image_y / 8) - (top / 8);
+            let sigma_row = &sigma_buf[sigma_y * width..][..width];
+
+            let output_rows = [output0, output1, output2];
+            let row = EpfRow {
+                input_rows,
+                merged_input_rows: None,
+                output_rows,
+                width,
+                x: left,
+                y: image_y,
+                sigma_row,
+                epf_params,
+                skip_inner: false,
+            };
+            handle_row_generic(row);
+        }
+
+        return;
+    }
+
+    let (output0_head, output0, output0_tail) = {
+        let (output_head, tmp) = output0.split_at_mut(3 * width);
+        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
+        (output_head, output, output_tail)
+    };
+    let (output1_head, output1, output1_tail) = {
+        let (output_head, tmp) = output1.split_at_mut(3 * width);
+        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
+        (output_head, output, output_tail)
+    };
+    let (output2_head, output2, output2_tail) = {
+        let (output_head, tmp) = output2.split_at_mut(3 * width);
+        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
+        (output_head, output, output_tail)
+    };
+
+    let mut jobs = vec![
+        EpfJob {
+            base_y: 0,
+            output0: output0_head,
+            output1: output1_head,
+            output2: output2_head,
+        },
+        EpfJob {
+            base_y: height - 3,
+            output0: output0_tail,
+            output1: output1_tail,
+            output2: output2_tail,
+        },
+    ];
     let output0_it = output0.chunks_mut(8 * width);
     let output1_it = output1.chunks_mut(8 * width);
     let output2_it = output2.chunks_mut(8 * width);
-    let jobs = output0_it
+    jobs.extend(output0_it
         .zip(output1_it)
         .zip(output2_it)
         .enumerate()
         .map(|(y8, ((output0, output1), output2))| EpfJob {
-            y8,
+            base_y: y8 * 8 + 3,
             output0,
             output1,
             output2,
-        })
-        .collect();
+        }));
 
     pool.for_each_vec(
         jobs,
         |EpfJob {
-             y8,
+             base_y,
              output0,
              output1,
              output2,
          }| {
-            let y = y8 * 8;
             let it = output0.chunks_exact_mut(width).zip(output1.chunks_exact_mut(width)).zip(output2.chunks_exact_mut(width));
             for (dy, ((output0, output1), output2)) in it.enumerate() {
-                let output_rows = [output0, output1, output2];
-                let y = y + dy;
+                let y = base_y + dy;
                 let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
                     std::array::from_fn(|idx| {
                         let y = mirror((y + idx) as isize - 3, height);
                         &input_buf[c][y * width..][..width]
                     })
                 });
+                let merged_input_rows: Option<[_; 3]> = if y >= 3 && y < height - 3 {
+                    Some(std::array::from_fn(|c| {
+                        &input_buf[c][(y - 3) * width..][..7 * width]
+                    }))
+                } else {
+                    None
+                };
 
-                // TODO: SIMD
                 let image_y = y + top;
                 let sigma_y = (image_y / 8) - (top / 8);
+                let sigma_row = &sigma_buf[sigma_y * width..][..width];
+
+                let mut skip_inner = false;
+                if merged_input_rows.is_some() {
+                    if let Some(handle_row_simd) = handle_row_simd {
+                        skip_inner = true;
+                        let output_rows = [&mut *output0, &mut *output1, &mut *output2];
+                        let row = EpfRow {
+                            input_rows,
+                            merged_input_rows,
+                            output_rows,
+                            width,
+                            x: left,
+                            y: image_y,
+                            sigma_row,
+                            epf_params,
+                            skip_inner,
+                        };
+                        handle_row_simd(row);
+                    }
+                }
+
+                let output_rows = [output0, output1, output2];
                 let row = EpfRow {
                     input_rows,
                     output_rows,
+                    merged_input_rows,
                     width,
                     x: left,
                     y: image_y,
-                    sigma_row: &sigma_buf[sigma_y * width..][..width],
+                    sigma_row,
                     epf_params,
-                    skip_inner: false,
+                    skip_inner,
                 };
                 handle_row_generic(row);
             }
@@ -159,6 +249,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         sigma_row,
         epf_params,
         skip_inner,
+        ..
     } = epf_row;
     let (kernel_offsets, dist_offsets) = epf_kernel::<STEP>();
 
@@ -176,9 +267,10 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     let sm = if is_y_border {
         [step_multiplier * border_sad_mul; 8]
     } else {
+        let neg_x = 8 - (x & 7);
         let mut sm = [step_multiplier; 8];
-        sm[x & 7] *= border_sad_mul;
-        sm[(x + 7) & 7] *= border_sad_mul;
+        sm[neg_x & 7] *= border_sad_mul;
+        sm[(neg_x + 7) & 7] *= border_sad_mul;
         sm
     };
 
