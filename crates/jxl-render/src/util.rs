@@ -3,7 +3,7 @@ use jxl_color::{
 };
 use jxl_frame::{
     data::{LfGlobalVarDct, LfGroup},
-    filter::EdgePreservingFilter,
+    filter::{EdgePreservingFilter, EpfParams},
     header::FrameType,
     Frame, FrameHeader,
 };
@@ -111,7 +111,7 @@ pub(crate) fn pad_color_region(
     };
 
     // TODO: actual region could be smaller.
-    if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+    if let EdgePreservingFilter::Enabled(EpfParams { iters, .. }) = frame_header.restoration_filter.epf {
         // EPF references adjacent samples.
         color_padded_region = if iters == 1 {
             color_padded_region.pad(2)

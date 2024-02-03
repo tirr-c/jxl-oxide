@@ -3,7 +3,7 @@ use jxl_grid::AllocTracker;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
 use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
-use crate::{filter::EdgePreservingFilter, header::Encoding, FrameHeader, Result};
+use crate::{filter::{EdgePreservingFilter, EpfParams}, header::Encoding, FrameHeader, Result};
 
 #[derive(Debug)]
 pub struct LfGroupParams<'a, 'dest, 'tracker, S: Sample> {
@@ -92,9 +92,9 @@ impl<S: Sample> Bundle<LfGroupParams<'_, '_, '_, S>> for LfGroup<S> {
                     global_ma_config,
                     epf: match &frame_header.restoration_filter.epf {
                         EdgePreservingFilter::Disabled => None,
-                        EdgePreservingFilter::Enabled {
+                        EdgePreservingFilter::Enabled(EpfParams {
                             sharp_lut, sigma, ..
-                        } => Some((sigma.quant_mul, *sharp_lut)),
+                        }) => Some((sigma.quant_mul, *sharp_lut)),
                     },
                     quantizer_global_scale: params.quantizer.unwrap().global_scale,
                     tracker,

@@ -1,5 +1,8 @@
+use jxl_frame::filter::EpfParams;
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
+
+use crate::Region;
 
 use super::generic::epf_common;
 
@@ -10,9 +13,8 @@ pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
@@ -22,12 +24,11 @@ pub fn epf_step0(
                 input,
                 output,
                 sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                region,
+                epf_params,
                 pool,
-                Some(epf_avx2::epf_row_step0_avx2),
-                super::generic::epf_row_step0,
+                Some(epf_avx2::epf_row_x86_64_avx2::<0>),
+                super::generic::epf_row::<0>,
             );
         }
     }
@@ -38,12 +39,11 @@ pub fn epf_step0(
             input,
             output,
             sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            region,
+            epf_params,
             pool,
-            Some(epf_sse2::epf_row_step0_sse2),
-            super::generic::epf_row_step0,
+            Some(epf_sse2::epf_row_x86_64_sse2::<0>),
+            super::generic::epf_row::<0>,
         )
     }
 }
@@ -52,9 +52,8 @@ pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
@@ -64,12 +63,11 @@ pub fn epf_step1(
                 input,
                 output,
                 sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                region,
+                epf_params,
                 pool,
-                Some(epf_avx2::epf_row_step1_avx2),
-                super::generic::epf_row_step1,
+                Some(epf_avx2::epf_row_x86_64_avx2::<1>),
+                super::generic::epf_row::<1>,
             );
         }
     }
@@ -80,12 +78,11 @@ pub fn epf_step1(
             input,
             output,
             sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            region,
+            epf_params,
             pool,
-            Some(epf_sse2::epf_row_step1_sse2),
-            super::generic::epf_row_step1,
+            Some(epf_sse2::epf_row_x86_64_sse2::<1>),
+            super::generic::epf_row::<1>,
         )
     }
 }
@@ -94,9 +91,8 @@ pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
@@ -106,12 +102,11 @@ pub fn epf_step2(
                 input,
                 output,
                 sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                region,
+                epf_params,
                 pool,
-                Some(epf_avx2::epf_row_step2_avx2),
-                super::generic::epf_row_step2,
+                Some(epf_avx2::epf_row_x86_64_avx2::<2>),
+                super::generic::epf_row::<2>,
             );
         }
     }
@@ -122,12 +117,11 @@ pub fn epf_step2(
             input,
             output,
             sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            region,
+            epf_params,
             pool,
-            Some(epf_sse2::epf_row_step2_sse2),
-            super::generic::epf_row_step2,
+            Some(epf_sse2::epf_row_x86_64_sse2::<2>),
+            super::generic::epf_row::<2>,
         )
     }
 }

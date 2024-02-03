@@ -12,16 +12,11 @@ pub fn apply_epf<S: Sample>(
     frame_header: &FrameHeader,
     pool: &jxl_threadpool::JxlThreadPool,
 ) -> crate::Result<()> {
-    let EdgePreservingFilter::Enabled {
-        iters,
-        channel_scale,
-        ref sigma,
-        sigma_for_modular,
-        ..
-    } = frame_header.restoration_filter.epf
+    let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf
     else {
         return Ok(());
     };
+    let iters = epf_params.iters;
 
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
@@ -29,23 +24,18 @@ pub fn apply_epf<S: Sample>(
     let tracker = fb.alloc_tracker().cloned();
     let region = fb.region();
     let fb = fb.buffer_mut();
-    assert!(region.left % 8 == 0);
-    assert!(region.top % 8 == 0);
 
     let width = region.width as usize;
     let height = region.height as usize;
-    // Mirror padding, extra padding for SIMD
-    let padded_width = (width + 8 + 3 + 7) & !7;
-    let padded_height = height + 6;
-    let mut fb_in = [
-        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
-        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
-        SimpleGrid::with_alloc_tracker(padded_width, padded_height, tracker.as_ref())?,
+    let fb_in = <&mut [_; 3]>::try_from(fb).unwrap();
+    let mut fb_out = [
+        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
+        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
+        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
     ];
-    let fb_out = <&mut [_; 3]>::try_from(fb).unwrap();
 
     tracing::debug!("Preparing sigma grid");
-    let sigma_region = region.downsample(3);
+    let sigma_region = region.downsample_separate(0, 3);
     let mut sigma_image =
         ImageWithRegion::from_region_and_tracker(1, sigma_region, false, tracker.as_ref())?;
     let sigma_grid = &mut sigma_image.buffer_mut()[0];
@@ -57,9 +47,9 @@ pub fn apply_epf<S: Sample>(
         let base_x = ((lf_group_idx % lf_groups_per_row) * lf_group_dim8) as usize;
         let base_y = ((lf_group_idx / lf_groups_per_row) * lf_group_dim8) as usize;
         let lf_region = Region {
-            left: base_x as i32,
+            left: base_x as i32 * 8,
             top: base_y as i32,
-            width: lf_group_dim8,
+            width: lf_group_dim8 * 8,
             height: lf_group_dim8,
         };
         let intersection = sigma_region.intersection(lf_region);
@@ -76,9 +66,9 @@ pub fn apply_epf<S: Sample>(
             for y8 in 0..lf_region.height as usize {
                 let lf_y = lf_region.top as usize + y8;
                 let sigma_y = sigma_region.top as usize + y8;
-                for x8 in 0..lf_region.width as usize {
-                    let lf_x = lf_region.left as usize + x8;
-                    let sigma_x = sigma_region.left as usize + x8;
+                for x in 0..lf_region.width as usize {
+                    let lf_x = (lf_region.left as usize + x) / 8;
+                    let sigma_x = sigma_region.left as usize + x;
                     *sigma_grid.get_mut(sigma_x, sigma_y).unwrap() =
                         *epf_sigma.get(lf_x, lf_y).unwrap();
                 }
@@ -87,164 +77,56 @@ pub fn apply_epf<S: Sample>(
     }
     if need_sigma_init {
         for sigma in sigma_grid.buf_mut() {
-            *sigma = sigma_for_modular;
+            *sigma = epf_params.sigma_for_modular;
         }
     }
 
     // Step 0
     if iters == 3 {
         tracing::debug!("Running step 0");
-        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
-            let output = output.buf_mut();
-            let input = input.buf();
-            for y in 0..height {
-                output[(y + 3) * padded_width + 8..][..width]
-                    .copy_from_slice(&input[y * width..][..width]);
-            }
-        }
-        for output in &mut fb_in {
-            let output = output.buf_mut();
-
-            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
-                row[7] = row[8];
-                row[8 + width] = row[8 + width - 1];
-                row[6] = row[9];
-                row[8 + width + 1] = row[8 + width - 2];
-                row[5] = row[10];
-                row[8 + width + 2] = row[8 + width - 3];
-            }
-
-            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
-            let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-
-            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-        }
-
         super::impls::epf_step0(
-            &fb_in,
-            fb_out,
+            fb_in,
+            &mut fb_out,
             sigma_grid,
-            channel_scale,
-            sigma.border_sad_mul,
-            sigma.pass0_sigma_scale,
+            region,
+            epf_params,
             pool,
         );
+        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
+        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
+        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
-        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
-            let output = output.buf_mut();
-            let input = input.buf();
-            for y in 0..height {
-                output[(y + 3) * padded_width + 8..][..width]
-                    .copy_from_slice(&input[y * width..][..width]);
-            }
-        }
-        for output in &mut fb_in {
-            let output = output.buf_mut();
-
-            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
-                row[7] = row[8];
-                row[8 + width] = row[8 + width - 1];
-                row[6] = row[9];
-                row[8 + width + 1] = row[8 + width - 2];
-                row[5] = row[10];
-                row[8 + width + 2] = row[8 + width - 3];
-            }
-
-            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
-            let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-
-            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-        }
-
         super::impls::epf_step1(
-            &fb_in,
-            fb_out,
+            fb_in,
+            &mut fb_out,
             sigma_grid,
-            channel_scale,
-            sigma.border_sad_mul,
-            1.0,
+            region,
+            epf_params,
             pool,
         );
+        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
+        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
+        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
     }
 
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
-        for (output, input) in fb_in.iter_mut().zip(&*fb_out) {
-            let output = output.buf_mut();
-            let input = input.buf();
-            for y in 0..height {
-                output[(y + 3) * padded_width + 8..][..width]
-                    .copy_from_slice(&input[y * width..][..width]);
-            }
-        }
-        for output in &mut fb_in {
-            let output = output.buf_mut();
-
-            for row in output.chunks_exact_mut(padded_width).skip(3).take(height) {
-                row[7] = row[8];
-                row[8 + width] = row[8 + width - 1];
-                row[6] = row[9];
-                row[8 + width + 1] = row[8 + width - 2];
-                row[5] = row[10];
-                row[8 + width + 2] = row[8 + width - 3];
-            }
-
-            let (out_chunk, in_chunk) = output.split_at_mut(padded_width * 3);
-            let in_chunk = &in_chunk[..padded_width * 3];
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-
-            let (in_chunk, out_chunk) = output.split_at_mut(padded_width * (height + 3));
-            for (out_row, in_row) in out_chunk
-                .chunks_exact_mut(padded_width)
-                .zip(in_chunk.chunks_exact(padded_width).rev())
-            {
-                out_row.copy_from_slice(in_row);
-            }
-        }
-
         super::impls::epf_step2(
-            &fb_in,
-            fb_out,
+            fb_in,
+            &mut fb_out,
             sigma_grid,
-            channel_scale,
-            sigma.border_sad_mul,
-            sigma.pass2_sigma_scale,
+            region,
+            epf_params,
             pool,
         );
+        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
+        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
+        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
     }
 
     Ok(())

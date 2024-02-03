@@ -49,31 +49,22 @@ impl Gabor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EdgePreservingFilter {
     Disabled,
-    Enabled {
-        iters: u32,
-        sharp_lut: [f32; 8],
-        channel_scale: [f32; 3],
-        sigma: EpfSigma,
-        sigma_for_modular: f32,
-    },
+    Enabled(EpfParams),
+}
+
+#[derive(Debug, Clone)]
+pub struct EpfParams {
+    pub iters: u32,
+    pub sharp_lut: [f32; 8],
+    pub channel_scale: [f32; 3],
+    pub sigma: EpfSigma,
+    pub sigma_for_modular: f32,
 }
 
 impl EdgePreservingFilter {
-    const SHARP_LUT_DEFAULT: [f32; 8] = [
-        0.0,
-        1.0 / 7.0,
-        2.0 / 7.0,
-        3.0 / 7.0,
-        4.0 / 7.0,
-        5.0 / 7.0,
-        6.0 / 7.0,
-        1.0,
-    ];
-    const CHANNEL_SCALE_DEFAULT: [f32; 3] = [40.0, 5.0, 3.5];
-
     pub fn enabled(&self) -> bool {
         matches!(self, Self::Enabled { .. })
     }
@@ -81,10 +72,28 @@ impl EdgePreservingFilter {
 
 impl Default for EdgePreservingFilter {
     fn default() -> Self {
-        Self::Enabled {
+        Self::Enabled(EpfParams::default())
+    }
+}
+
+const EPF_SHARP_LUT_DEFAULT: [f32; 8] = [
+    0.0,
+    1.0 / 7.0,
+    2.0 / 7.0,
+    3.0 / 7.0,
+    4.0 / 7.0,
+    5.0 / 7.0,
+    6.0 / 7.0,
+    1.0,
+];
+const EPF_CHANNEL_SCALE_DEFAULT: [f32; 3] = [40.0, 5.0, 3.5];
+
+impl Default for EpfParams {
+    fn default() -> Self {
+        Self {
             iters: 2,
-            sharp_lut: Self::SHARP_LUT_DEFAULT,
-            channel_scale: Self::CHANNEL_SCALE_DEFAULT,
+            sharp_lut: EPF_SHARP_LUT_DEFAULT,
+            channel_scale: EPF_CHANNEL_SCALE_DEFAULT,
             sigma: Default::default(),
             sigma_for_modular: 1.0,
         }
@@ -112,7 +121,7 @@ impl Bundle<Encoding> for EdgePreservingFilter {
             }
             ret
         } else {
-            Self::SHARP_LUT_DEFAULT
+            EPF_SHARP_LUT_DEFAULT
         };
 
         let weight_custom = bitstream.read_bool()?;
@@ -124,7 +133,7 @@ impl Bundle<Encoding> for EdgePreservingFilter {
             bitstream.read_bits(32)?; // ignored
             ret
         } else {
-            Self::CHANNEL_SCALE_DEFAULT
+            EPF_CHANNEL_SCALE_DEFAULT
         };
 
         let sigma_custom = bitstream.read_bool()?;
@@ -144,17 +153,17 @@ impl Bundle<Encoding> for EdgePreservingFilter {
             1.0
         };
 
-        Ok(Self::Enabled {
+        Ok(Self::Enabled(EpfParams {
             iters,
             sharp_lut,
             channel_scale,
             sigma,
             sigma_for_modular,
-        })
+        }))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EpfSigma {
     pub quant_mul: f32,
     pub pass0_sigma_scale: f32,
