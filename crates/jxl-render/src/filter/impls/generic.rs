@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use jxl_frame::filter::EpfParams;
+use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
@@ -25,7 +25,8 @@ pub(crate) struct EpfRow<'buf, 'epf> {
 pub(crate) unsafe fn epf_common<'buf>(
     input: &'buf [SimpleGrid<f32>; 3],
     output: &'buf mut [SimpleGrid<f32>; 3],
-    sigma_grid: &'buf SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -47,14 +48,11 @@ pub(crate) unsafe fn epf_common<'buf>(
     let top = region.top as usize;
 
     let input_buf = [input[0].buf(), input[1].buf(), input[2].buf()];
-    let sigma_buf = sigma_grid.buf();
-    let (output0, output1, output2) = {
+    let (mut output0, mut output1, mut output2) = {
         let [a, b, c] = output;
         (a.buf_mut(), b.buf_mut(), c.buf_mut())
     };
 
-    let expected_sigma_height = (height + top + 7) / 8 - top / 8;
-    assert_eq!(sigma_buf.len(), width * expected_sigma_height);
     assert_eq!(input_buf[0].len(), width * height);
     assert_eq!(input_buf[1].len(), width * height);
     assert_eq!(input_buf[2].len(), width * height);
@@ -62,82 +60,31 @@ pub(crate) unsafe fn epf_common<'buf>(
     assert_eq!(output1.len(), width * height);
     assert_eq!(output2.len(), width * height);
 
-    if height <= 6 {
-        let it = output0.chunks_exact_mut(width).zip(output1.chunks_exact_mut(width)).zip(output2.chunks_exact_mut(width));
-        for (y, ((output0, output1), output2)) in it.enumerate() {
-            let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
-                std::array::from_fn(|idx| {
-                    let y = mirror((y + idx) as isize - 3, height);
-                    &input_buf[c][y * width..][..width]
-                })
-            });
+    let mut jobs = Vec::new();
+    let mut image_y = top;
+    while image_y < top + height {
+        let next = ((image_y + 8) & !7).min(top + height);
+        let job_height = next - image_y;
 
-            let image_y = y + top;
-            let sigma_y = (image_y / 8) - (top / 8);
-            let sigma_row = &sigma_buf[sigma_y * width..][..width];
+        let (job_output0, next_output0) = output0.split_at_mut(job_height * width);
+        let (job_output1, next_output1) = output1.split_at_mut(job_height * width);
+        let (job_output2, next_output2) = output2.split_at_mut(job_height * width);
+        jobs.push(EpfJob {
+            base_y: image_y - top,
+            output0: job_output0,
+            output1: job_output1,
+            output2: job_output2,
+        });
 
-            let output_rows = [output0, output1, output2];
-            let row = EpfRow {
-                input_rows,
-                merged_input_rows: None,
-                output_rows,
-                width,
-                x: left,
-                y: image_y,
-                sigma_row,
-                epf_params,
-                skip_inner: false,
-            };
-            handle_row_generic(row);
-        }
-
-        return;
+        output0 = next_output0;
+        output1 = next_output1;
+        output2 = next_output2;
+        image_y = next;
     }
 
-    let (output0_head, output0, output0_tail) = {
-        let (output_head, tmp) = output0.split_at_mut(3 * width);
-        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
-        (output_head, output, output_tail)
-    };
-    let (output1_head, output1, output1_tail) = {
-        let (output_head, tmp) = output1.split_at_mut(3 * width);
-        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
-        (output_head, output, output_tail)
-    };
-    let (output2_head, output2, output2_tail) = {
-        let (output_head, tmp) = output2.split_at_mut(3 * width);
-        let (output, output_tail) = tmp.split_at_mut(tmp.len() - 3 * width);
-        (output_head, output, output_tail)
-    };
-
-    let mut jobs = vec![
-        EpfJob {
-            base_y: 0,
-            output0: output0_head,
-            output1: output1_head,
-            output2: output2_head,
-        },
-        EpfJob {
-            base_y: height - 3,
-            output0: output0_tail,
-            output1: output1_tail,
-            output2: output2_tail,
-        },
-    ];
-    let output0_it = output0.chunks_mut(8 * width);
-    let output1_it = output1.chunks_mut(8 * width);
-    let output2_it = output2.chunks_mut(8 * width);
-    jobs.extend(output0_it
-        .zip(output1_it)
-        .zip(output2_it)
-        .enumerate()
-        .map(|(y8, ((output0, output1), output2))| EpfJob {
-            base_y: y8 * 8 + 3,
-            output0,
-            output1,
-            output2,
-        }));
-
+    let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
+    let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
+    let groups_per_row = frame_header.lf_groups_per_row() as usize;
     pool.for_each_vec(
         jobs,
         |EpfJob {
@@ -146,6 +93,22 @@ pub(crate) unsafe fn epf_common<'buf>(
              output1,
              output2,
          }| {
+            let mut sigma_row = vec![epf_params.sigma_for_modular; width];
+            let sigma_y = (top + base_y) / 8;
+            let sigma_group_y = sigma_y >> sigma_group_dim_shift;
+            let sigma_inner_y = sigma_y & sigma_group_dim_mask;
+
+            for (dx, sigma) in sigma_row.iter_mut().enumerate() {
+                let sigma_x = (left + dx) / 8;
+                let sigma_group_x = sigma_x >> sigma_group_dim_shift;
+                let sigma_inner_x = sigma_x & sigma_group_dim_mask;
+                let sigma_grid_idx = sigma_group_y * groups_per_row + sigma_group_x;
+                if let Some(grid) = sigma_grid_map[sigma_grid_idx] {
+                    let width = grid.width();
+                    *sigma = grid.buf()[sigma_inner_y * width + sigma_inner_x];
+                }
+            }
+
             let it = output0.chunks_exact_mut(width).zip(output1.chunks_exact_mut(width)).zip(output2.chunks_exact_mut(width));
             for (dy, ((output0, output1), output2)) in it.enumerate() {
                 let y = base_y + dy;
@@ -163,9 +126,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                     None
                 };
 
-                let image_y = y + top;
-                let sigma_y = (image_y / 8) - (top / 8);
-                let sigma_row = &sigma_buf[sigma_y * width..][..width];
+                let image_y = top + base_y + dy;
 
                 let mut skip_inner = false;
                 if merged_input_rows.is_some() {
@@ -179,7 +140,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                             width,
                             x: left,
                             y: image_y,
-                            sigma_row,
+                            sigma_row: &sigma_row,
                             epf_params,
                             skip_inner,
                         };
@@ -195,7 +156,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                     width,
                     x: left,
                     y: image_y,
-                    sigma_row,
+                    sigma_row: &sigma_row,
                     epf_params,
                     skip_inner,
                 };
@@ -436,7 +397,8 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -445,7 +407,8 @@ pub fn epf_step0(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -458,7 +421,8 @@ pub fn epf_step0(
 pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -467,7 +431,8 @@ pub fn epf_step1(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -480,7 +445,8 @@ pub fn epf_step1(
 pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -489,7 +455,8 @@ pub fn epf_step2(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,

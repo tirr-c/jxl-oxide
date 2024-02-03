@@ -1,4 +1,4 @@
-use jxl_frame::filter::EpfParams;
+use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
@@ -12,7 +12,8 @@ mod epf_sse2;
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -23,7 +24,8 @@ pub fn epf_step0(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
+            frame_header,
+            sigma_grid_map,
                 region,
                 epf_params,
                 pool,
@@ -38,7 +40,8 @@ pub fn epf_step0(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -51,7 +54,8 @@ pub fn epf_step0(
 pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -62,7 +66,8 @@ pub fn epf_step1(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
+            frame_header,
+            sigma_grid_map,
                 region,
                 epf_params,
                 pool,
@@ -77,7 +82,8 @@ pub fn epf_step1(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -90,7 +96,8 @@ pub fn epf_step1(
 pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -101,7 +108,8 @@ pub fn epf_step2(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
+            frame_header,
+            sigma_grid_map,
                 region,
                 epf_params,
                 pool,
@@ -116,7 +124,8 @@ pub fn epf_step2(
         epf_common(
             input,
             output,
-            sigma_grid,
+            frame_header,
+            sigma_grid_map,
             region,
             epf_params,
             pool,

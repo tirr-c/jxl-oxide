@@ -4,7 +4,7 @@ use jxl_frame::{data::LfGroup, filter::EdgePreservingFilter, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_modular::Sample;
 
-use crate::{ImageWithRegion, Region};
+use crate::ImageWithRegion;
 
 pub fn apply_epf<S: Sample>(
     fb: &mut ImageWithRegion,
@@ -34,50 +34,14 @@ pub fn apply_epf<S: Sample>(
         SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
     ];
 
-    tracing::debug!("Preparing sigma grid");
-    let sigma_region = region.downsample_separate(0, 3);
-    let mut sigma_image =
-        ImageWithRegion::from_region_and_tracker(1, sigma_region, false, tracker.as_ref())?;
-    let sigma_grid = &mut sigma_image.buffer_mut()[0];
-    let mut need_sigma_init = true;
-
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let lf_group_dim8 = frame_header.group_dim();
+    let num_lf_groups = frame_header.num_lf_groups() as usize;
+    let mut sigma_grid_map = vec![None::<&SimpleGrid<f32>>; num_lf_groups];
+
     for (&lf_group_idx, lf_group) in lf_groups {
-        let base_x = ((lf_group_idx % lf_groups_per_row) * lf_group_dim8) as usize;
-        let base_y = ((lf_group_idx / lf_groups_per_row) * lf_group_dim8) as usize;
-        let lf_region = Region {
-            left: base_x as i32 * 8,
-            top: base_y as i32,
-            width: lf_group_dim8 * 8,
-            height: lf_group_dim8,
-        };
-        let intersection = sigma_region.intersection(lf_region);
-        if intersection.is_empty() {
-            continue;
-        }
-
         if let Some(hf_meta) = &lf_group.hf_meta {
-            need_sigma_init = false;
-            let epf_sigma = &hf_meta.epf_sigma;
-
-            let lf_region = intersection.translate(-lf_region.left, -lf_region.top);
-            let sigma_region = intersection.translate(-sigma_region.left, -sigma_region.top);
-            for y8 in 0..lf_region.height as usize {
-                let lf_y = lf_region.top as usize + y8;
-                let sigma_y = sigma_region.top as usize + y8;
-                for x in 0..lf_region.width as usize {
-                    let lf_x = (lf_region.left as usize + x) / 8;
-                    let sigma_x = sigma_region.left as usize + x;
-                    *sigma_grid.get_mut(sigma_x, sigma_y).unwrap() =
-                        *epf_sigma.get(lf_x, lf_y).unwrap();
-                }
-            }
-        }
-    }
-    if need_sigma_init {
-        for sigma in sigma_grid.buf_mut() {
-            *sigma = epf_params.sigma_for_modular;
+            sigma_grid_map[lf_group_idx as usize] = Some(&hf_meta.epf_sigma);
         }
     }
 
@@ -87,7 +51,8 @@ pub fn apply_epf<S: Sample>(
         super::impls::epf_step0(
             fb_in,
             &mut fb_out,
-            sigma_grid,
+            frame_header,
+            &sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -103,7 +68,8 @@ pub fn apply_epf<S: Sample>(
         super::impls::epf_step1(
             fb_in,
             &mut fb_out,
-            sigma_grid,
+            frame_header,
+            &sigma_grid_map,
             region,
             epf_params,
             pool,
@@ -119,7 +85,8 @@ pub fn apply_epf<S: Sample>(
         super::impls::epf_step2(
             fb_in,
             &mut fb_out,
-            sigma_grid,
+            frame_header,
+            &sigma_grid_map,
             region,
             epf_params,
             pool,
