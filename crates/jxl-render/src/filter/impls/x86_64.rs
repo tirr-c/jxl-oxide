@@ -23,8 +23,8 @@ pub fn epf_step0(
             return epf_common(
                 input,
                 output,
-            frame_header,
-            sigma_grid_map,
+                frame_header,
+                sigma_grid_map,
                 region,
                 epf_params,
                 pool,
@@ -64,8 +64,8 @@ pub fn epf_step1(
             return epf_common(
                 input,
                 output,
-            frame_header,
-            sigma_grid_map,
+                frame_header,
+                sigma_grid_map,
                 region,
                 epf_params,
                 pool,
@@ -105,8 +105,8 @@ pub fn epf_step2(
             return epf_common(
                 input,
                 output,
-            frame_header,
-            sigma_grid_map,
+                frame_header,
+                sigma_grid_map,
                 region,
                 epf_params,
                 pool,

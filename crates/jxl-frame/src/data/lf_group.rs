@@ -3,7 +3,11 @@ use jxl_grid::AllocTracker;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
 use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
-use crate::{filter::{EdgePreservingFilter, EpfParams}, header::Encoding, FrameHeader, Result};
+use crate::{
+    filter::{EdgePreservingFilter, EpfParams},
+    header::Encoding,
+    FrameHeader, Result,
+};
 
 #[derive(Debug)]
 pub struct LfGroupParams<'a, 'dest, 'tracker, S: Sample> {

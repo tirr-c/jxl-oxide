@@ -110,7 +110,10 @@ pub(crate) unsafe fn epf_common<'buf>(
                 }
             }
 
-            let it = output0.chunks_exact_mut(width).zip(output1.chunks_exact_mut(width)).zip(output2.chunks_exact_mut(width));
+            let it = output0
+                .chunks_exact_mut(width)
+                .zip(output1.chunks_exact_mut(width))
+                .zip(output2.chunks_exact_mut(width));
             for (dy, ((output0, output1), output2)) in it.enumerate() {
                 let y = base_y + dy;
                 let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
@@ -167,7 +170,8 @@ pub(crate) unsafe fn epf_common<'buf>(
     );
 }
 
-pub(crate) const fn epf_kernel<const STEP: usize>() -> (&'static [(isize, isize)], &'static [(isize, isize)]) {
+pub(crate) const fn epf_kernel<const STEP: usize>(
+) -> (&'static [(isize, isize)], &'static [(isize, isize)]) {
     const EPF_KERNEL_DIST_1: [(isize, isize); 4] = [(0, -1), (-1, 0), (1, 0), (0, 1)];
     #[rustfmt::skip]
     const EPF_KERNEL_DIST_2: [(isize, isize); 12] = [
@@ -283,15 +287,15 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
                     let base_dy = (3 + iy) as usize;
                     let base_dx = mirror(dx as isize + ix, width);
 
-                    dist = scale.mul_add((input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx]).abs(), dist);
+                    dist = scale.mul_add(
+                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
+                            .abs(),
+                        dist,
+                    );
                 }
             }
 
-            let weight = weight(
-                dist,
-                sigma_val,
-                sm[sm_idx],
-            );
+            let weight = weight(dist, sigma_val, sm[sm_idx]);
             sum_weights += weight;
 
             let kernel_dy = kernel_dy as usize;
@@ -336,15 +340,15 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
                     let base_dy = (3 + iy) as usize;
                     let base_dx = (dx as isize + ix) as usize;
 
-                    dist = scale.mul_add((input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx]).abs(), dist);
+                    dist = scale.mul_add(
+                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
+                            .abs(),
+                        dist,
+                    );
                 }
             }
 
-            let weight = weight(
-                dist,
-                sigma_val,
-                sm[sm_idx],
-            );
+            let weight = weight(dist, sigma_val, sm[sm_idx]);
             sum_weights += weight;
 
             let kernel_dy = kernel_dy as usize;
@@ -385,15 +389,15 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
                     let base_dy = (3 + iy) as usize;
                     let base_dx = mirror(dx as isize + ix, width);
 
-                    dist = scale.mul_add((input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx]).abs(), dist);
+                    dist = scale.mul_add(
+                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
+                            .abs(),
+                        dist,
+                    );
                 }
             }
 
-            let weight = weight(
-                dist,
-                sigma_val,
-                sm[sm_idx],
-            );
+            let weight = weight(dist, sigma_val, sm[sm_idx]);
             sum_weights += weight;
 
             let kernel_dy = kernel_dy as usize;

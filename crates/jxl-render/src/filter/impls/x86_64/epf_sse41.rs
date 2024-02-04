@@ -65,8 +65,18 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
         [sm, sm]
     } else {
         [
-            _mm_set_ps(step_multiplier, step_multiplier, step_multiplier, step_multiplier * border_sad_mul),
-            _mm_set_ps(step_multiplier * border_sad_mul, step_multiplier, step_multiplier, step_multiplier),
+            _mm_set_ps(
+                step_multiplier,
+                step_multiplier,
+                step_multiplier,
+                step_multiplier * border_sad_mul,
+            ),
+            _mm_set_ps(
+                step_multiplier * border_sad_mul,
+                step_multiplier,
+                step_multiplier,
+                step_multiplier,
+            ),
         ]
     };
 
@@ -78,10 +88,8 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
         let input_base_idx = 3 * width + dx;
         let sigma_val = sigma_row[sigma_x];
 
-        let originals: [_; 3] = std::array::from_fn(|c| {
-            unsafe {
-                _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx))
-            }
+        let originals: [_; 3] = std::array::from_fn(|c| unsafe {
+            _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx))
         });
 
         if sigma_val < 0.3 {
@@ -119,45 +127,33 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     let v2_right = *rows_ptr.add(input_base_idx + 4);
                     let v3_right = *rows_ptr.add(input_base_idx + width + 4);
 
-                    let v1_left = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v1)),
-                            v1_left.to_bits() as i32,
-                        )
-                    );
-                    let v2_left = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v2)),
-                            v2_left.to_bits() as i32,
-                        )
-                    );
-                    let v3_left = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v3)),
-                            v3_left.to_bits() as i32,
-                        )
-                    );
+                    let v1_left = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v1)),
+                        v1_left.to_bits() as i32,
+                    ));
+                    let v2_left = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v2)),
+                        v2_left.to_bits() as i32,
+                    ));
+                    let v3_left = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v3)),
+                        v3_left.to_bits() as i32,
+                    ));
                     acc0 = acc0.add(v1_left.sub(v2_left).abs());
                     acc1 = acc1.add(v3_left.sub(v2_left).abs());
 
-                    let v1_right = _mm_castsi128_ps(
-                        _mm_insert_epi32::<3>(
-                            _mm_srli_si128::<4>(_mm_castps_si128(v1)),
-                            v1_right.to_bits() as i32,
-                        )
-                    );
-                    let v2_right = _mm_castsi128_ps(
-                        _mm_insert_epi32::<3>(
-                            _mm_srli_si128::<4>(_mm_castps_si128(v2)),
-                            v2_right.to_bits() as i32,
-                        )
-                    );
-                    let v3_right = _mm_castsi128_ps(
-                        _mm_insert_epi32::<3>(
-                            _mm_srli_si128::<4>(_mm_castps_si128(v3)),
-                            v3_right.to_bits() as i32,
-                        )
-                    );
+                    let v1_right = _mm_castsi128_ps(_mm_insert_epi32::<3>(
+                        _mm_srli_si128::<4>(_mm_castps_si128(v1)),
+                        v1_right.to_bits() as i32,
+                    ));
+                    let v2_right = _mm_castsi128_ps(_mm_insert_epi32::<3>(
+                        _mm_srli_si128::<4>(_mm_castps_si128(v2)),
+                        v2_right.to_bits() as i32,
+                    ));
+                    let v3_right = _mm_castsi128_ps(_mm_insert_epi32::<3>(
+                        _mm_srli_si128::<4>(_mm_castps_si128(v3)),
+                        v3_right.to_bits() as i32,
+                    ));
                     acc0 = acc0.add(v1_right.sub(v2_right).abs());
                     acc1 = acc1.add(v3_right.sub(v2_right).abs());
 
@@ -165,26 +161,26 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     dist1 = scale.mul(acc1).add(dist1);
                 }
 
-                let weight = weight_sse41(
-                    dist0,
-                    sigma_val,
-                    sm,
-                );
+                let weight = weight_sse41(dist0, sigma_val, sm);
                 sum_weights = sum_weights.add(weight);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx - width))).add(*sum);
+                    *sum = weight
+                        .mul(_mm_loadu_ps(
+                            merged_input_rows[c].as_ptr().add(input_base_idx - width),
+                        ))
+                        .add(*sum);
                 }
 
-                let weight = weight_sse41(
-                    dist1,
-                    sigma_val,
-                    sm,
-                );
+                let weight = weight_sse41(dist1, sigma_val, sm);
                 sum_weights = sum_weights.add(weight);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx + width))).add(*sum);
+                    *sum = weight
+                        .mul(_mm_loadu_ps(
+                            merged_input_rows[c].as_ptr().add(input_base_idx + width),
+                        ))
+                        .add(*sum);
                 }
             }
 
@@ -197,46 +193,34 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     let rows_ptr = merged_input_rows[c].as_ptr();
 
                     let v0r = _mm_loadu_ps(rows_ptr.add(input_base_idx - width + 1));
-                    let v0 = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v0r)),
-                            (*rows_ptr.add(input_base_idx - width)).to_bits() as i32,
-                        ),
-                    );
-                    let v0l = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v0)),
-                            (*rows_ptr.add(input_base_idx - width - 1)).to_bits() as i32,
-                        ),
-                    );
+                    let v0 = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v0r)),
+                        (*rows_ptr.add(input_base_idx - width)).to_bits() as i32,
+                    ));
+                    let v0l = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v0)),
+                        (*rows_ptr.add(input_base_idx - width - 1)).to_bits() as i32,
+                    ));
                     let mut acc0 = v0l.sub(v0).abs();
                     let mut acc1 = v0r.sub(v0).abs();
 
                     let v1rr = _mm_loadu_ps(rows_ptr.add(input_base_idx + 2));
-                    let v1r = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v1rr)),
-                            (*rows_ptr.add(input_base_idx + 1)).to_bits() as i32,
-                        ),
-                    );
-                    let v1 = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v1r)),
-                            (*rows_ptr.add(input_base_idx)).to_bits() as i32,
-                        ),
-                    );
-                    let v1l = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v1)),
-                            (*rows_ptr.add(input_base_idx - 1)).to_bits() as i32,
-                        ),
-                    );
-                    let v1ll = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v1l)),
-                            (*rows_ptr.add(input_base_idx - 2)).to_bits() as i32,
-                        ),
-                    );
+                    let v1r = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v1rr)),
+                        (*rows_ptr.add(input_base_idx + 1)).to_bits() as i32,
+                    ));
+                    let v1 = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v1r)),
+                        (*rows_ptr.add(input_base_idx)).to_bits() as i32,
+                    ));
+                    let v1l = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v1)),
+                        (*rows_ptr.add(input_base_idx - 1)).to_bits() as i32,
+                    ));
+                    let v1ll = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v1l)),
+                        (*rows_ptr.add(input_base_idx - 2)).to_bits() as i32,
+                    ));
                     acc0 = acc0.add(v1ll.sub(v1l).abs());
                     acc0 = acc0.add(v1.sub(v1l).abs());
                     acc0 = acc0.add(v1.sub(v1r).abs());
@@ -245,18 +229,14 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     acc1 = acc1.add(v1rr.sub(v1r).abs());
 
                     let v2r = _mm_loadu_ps(rows_ptr.add(input_base_idx + width + 1));
-                    let v2 = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v2r)),
-                            (*rows_ptr.add(input_base_idx + width)).to_bits() as i32,
-                        ),
-                    );
-                    let v2l = _mm_castsi128_ps(
-                        _mm_insert_epi32::<0>(
-                            _mm_slli_si128::<4>(_mm_castps_si128(v2)),
-                            (*rows_ptr.add(input_base_idx + width - 1)).to_bits() as i32,
-                        ),
-                    );
+                    let v2 = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v2r)),
+                        (*rows_ptr.add(input_base_idx + width)).to_bits() as i32,
+                    ));
+                    let v2l = _mm_castsi128_ps(_mm_insert_epi32::<0>(
+                        _mm_slli_si128::<4>(_mm_castps_si128(v2)),
+                        (*rows_ptr.add(input_base_idx + width - 1)).to_bits() as i32,
+                    ));
                     acc0 = acc0.add(v2l.sub(v2).abs());
                     acc1 = acc1.add(v2r.sub(v2).abs());
 
@@ -264,26 +244,26 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     dist1 = scale.mul(acc1).add(dist1);
                 }
 
-                let weight = weight_sse41(
-                    dist0,
-                    sigma_val,
-                    sm,
-                );
+                let weight = weight_sse41(dist0, sigma_val, sm);
                 sum_weights = sum_weights.add(weight);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx - 1))).add(*sum);
+                    *sum = weight
+                        .mul(_mm_loadu_ps(
+                            merged_input_rows[c].as_ptr().add(input_base_idx - 1),
+                        ))
+                        .add(*sum);
                 }
 
-                let weight = weight_sse41(
-                    dist1,
-                    sigma_val,
-                    sm,
-                );
+                let weight = weight_sse41(dist1, sigma_val, sm);
                 sum_weights = sum_weights.add(weight);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx + 1))).add(*sum);
+                    *sum = weight
+                        .mul(_mm_loadu_ps(
+                            merged_input_rows[c].as_ptr().add(input_base_idx + 1),
+                        ))
+                        .add(*sum);
                 }
             }
         } else {
@@ -303,15 +283,15 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
                     }
                 }
 
-                let weight = weight_sse41(
-                    dist,
-                    sigma_val,
-                    sm,
-                );
+                let weight = weight_sse41(dist, sigma_val, sm);
                 sum_weights = sum_weights.add(weight);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_kernel_idx))).add(*sum);
+                    *sum = weight
+                        .mul(_mm_loadu_ps(
+                            merged_input_rows[c].as_ptr().add(input_kernel_idx),
+                        ))
+                        .add(*sum);
                 }
             }
         }

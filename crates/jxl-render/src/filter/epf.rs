@@ -12,8 +12,7 @@ pub fn apply_epf<S: Sample>(
     frame_header: &FrameHeader,
     pool: &jxl_threadpool::JxlThreadPool,
 ) -> crate::Result<()> {
-    let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf
-    else {
+    let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf else {
         return Ok(());
     };
     let iters = epf_params.iters;
