@@ -599,7 +599,9 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
                 for (y, matrix_row) in matrix.chunks_exact(width).enumerate() {
                     let row = coeff.get_row_mut(y);
                     for (q, &m) in row.iter_mut().zip(matrix_row) {
-                        if q.abs() <= 1.0f32 {
+                        let qn = q.to_bits() as i32;
+                        *q = qn as f32;
+                        if q.abs() <= 1.0 {
                             *q *= quant_bias;
                         } else {
                             *q -= quant_bias_numerator / *q;

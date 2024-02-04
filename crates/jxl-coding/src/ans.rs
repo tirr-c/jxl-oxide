@@ -265,20 +265,18 @@ impl Histogram {
 }
 
 impl Histogram {
-    /// # Safety
-    ///
-    /// `idx` should be 12 bits.
     #[inline]
-    unsafe fn map_alias(&self, idx: u32) -> (u16, u32, u32) {
+    fn map_alias(&self, state: u32) -> (u16, u32, u32) {
         assert_eq!(std::mem::size_of::<Bucket>(), 8);
         let is_le = usize::from_le(1) == 1;
 
+        let idx = state & 0xfff;
         let i = (idx >> self.log_bucket_size) as usize;
         let pos = (idx & ((1 << self.log_bucket_size) - 1)) as usize;
         // SAFETY: idx is 12 bits, buckets.len() << log_bucket_size == 1 << 12.
-        let bucket = *self.buckets.get_unchecked(i);
+        let bucket = unsafe { *self.buckets.get_unchecked(i) };
         // SAFETY: all bit patterns are valid.
-        let bucket_int = std::mem::transmute::<Bucket, u64>(bucket);
+        let bucket_int = unsafe { std::mem::transmute::<Bucket, u64>(bucket) };
 
         // Ported from libjxl; this makes map_alias branchless.
         let (alias_symbol, alias_cutoff, dist) = if is_le {
@@ -315,11 +313,9 @@ impl Histogram {
 
     #[inline]
     pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u16> {
-        let idx = *state & 0xfff;
-        // SAFETY: idx is 12 bits.
-        let (symbol, offset, dist) = unsafe { self.map_alias(idx) };
+        let (symbol, offset, dist) = self.map_alias(*state);
         let next_state = (*state >> 12) * dist + offset;
-        let appended_state = (next_state << 16) | bitstream.peek_bits(16);
+        let appended_state = (next_state << 16) | bitstream.peek_bits_const::<16>();
         let select_appended = next_state < (1 << 16);
         *state = if select_appended {
             appended_state

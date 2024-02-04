@@ -1,5 +1,5 @@
 use jxl_bitstream::Bitstream;
-use jxl_grid::{AllocTracker, CutGrid, SharedSubgrid, SimpleGrid};
+use jxl_grid::{AllocTracker, CutGrid, SharedSubgrid};
 use jxl_modular::{ChannelShift, Sample};
 
 use crate::{BlockInfo, HfBlockContext, HfPass, Result};
@@ -54,6 +54,7 @@ pub fn write_hf_coeff<S: Sample>(
     } = hf_block_ctx;
     let lf_idx_mul =
         (lf_thresholds[0].len() + 1) * (lf_thresholds[1].len() + 1) * (lf_thresholds[2].len() + 1);
+    let hf_idx_mul = qf_thresholds.len() + 1;
     let upsampling_shifts: [_; 3] =
         std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let hshifts = upsampling_shifts.map(|shift| shift.hshift());
@@ -68,31 +69,21 @@ pub fn write_hf_coeff<S: Sample>(
 
     let width = block_info.width();
     let height = block_info.height();
-    let mut non_zeros_grid = [
-        {
-            let (width, height) = upsampling_shifts[0].shift_size((width as u32, height as u32));
-            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
-        },
-        {
-            let (width, height) = upsampling_shifts[1].shift_size((width as u32, height as u32));
-            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
-        },
-        {
-            let (width, height) = upsampling_shifts[2].shift_size((width as u32, height as u32));
-            SimpleGrid::with_alloc_tracker(width as usize, height as usize, tracker)?
-        },
+    let non_zeros_grid_lengths =
+        upsampling_shifts.map(|shift| shift.shift_size((width as u32, height as u32)).0 as usize);
+
+    let _non_zeros_grid_handle = tracker
+        .map(|tracker| {
+            let len =
+                non_zeros_grid_lengths[0] + non_zeros_grid_lengths[1] + non_zeros_grid_lengths[2];
+            tracker.alloc::<u32>(len)
+        })
+        .transpose()?;
+    let mut non_zeros_grid_row = [
+        vec![0u32; non_zeros_grid_lengths[0]],
+        vec![0u32; non_zeros_grid_lengths[1]],
+        vec![0u32; non_zeros_grid_lengths[2]],
     ];
-    let predict_non_zeros = |grid: &SimpleGrid<u32>, x: usize, y: usize| {
-        if x == 0 && y == 0 {
-            32u32
-        } else if x == 0 {
-            *grid.get(x, y - 1).unwrap()
-        } else if y == 0 {
-            *grid.get(x - 1, y).unwrap()
-        } else {
-            (*grid.get(x, y - 1).unwrap() + *grid.get(x - 1, y).unwrap() + 1) >> 1
-        }
-    };
 
     for y in 0..height {
         for x in 0..width {
@@ -138,21 +129,39 @@ pub fn write_hf_coeff<S: Sample>(
                 idx
             };
 
-            for c in [1, 0, 2] {
-                // y, x, b
+            for c in 0..3 {
+                let ch_idx = c * 13 + order_id as usize;
+                let c = [1, 0, 2][c]; // y, x, b
+
                 let hshift = hshifts[c];
                 let vshift = vshifts[c];
                 let sx = x >> hshift;
                 let sy = y >> vshift;
-                if sx << hshift != x || sy << vshift != y {
-                    continue;
+                if hshift != 0 || vshift != 0 {
+                    if sx << hshift != x || sy << vshift != y {
+                        continue;
+                    }
+                    if !matches!(block_info.get(sx, sy), BlockInfo::Data { .. }) {
+                        continue;
+                    }
                 }
 
-                let ch_idx = [1, 0, 2][c] * 13 + order_id as usize;
-                let idx = (ch_idx * (qf_thresholds.len() + 1) + hf_idx) * lf_idx_mul + lf_idx;
+                let idx = (ch_idx * hf_idx_mul + hf_idx) * lf_idx_mul + lf_idx;
                 let block_ctx = block_ctx_map[idx] as u32;
                 let non_zeros_ctx = {
-                    let predicted = predict_non_zeros(&non_zeros_grid[c], sx, sy).min(64);
+                    let predicted = if sy == 0 {
+                        if sx == 0 {
+                            32
+                        } else {
+                            non_zeros_grid_row[c][sx - 1]
+                        }
+                    } else if sx == 0 {
+                        non_zeros_grid_row[c][sx]
+                    } else {
+                        (non_zeros_grid_row[c][sx] + non_zeros_grid_row[c][sx - 1] + 1) >> 1
+                    };
+                    debug_assert!(predicted < 64);
+
                     let idx = if predicted >= 8 {
                         4 + predicted / 2
                     } else {
@@ -174,31 +183,19 @@ pub fn write_hf_coeff<S: Sample>(
                 }
 
                 let non_zeros_val = (non_zeros + num_blocks - 1) >> num_blocks_log;
-                let non_zeros_grid = &mut non_zeros_grid[c];
-                for dy in 0..h8 as usize {
-                    for dx in 0..w8 as usize {
-                        *non_zeros_grid.get_mut(sx + dx, sy + dy).unwrap() = non_zeros_val;
-                    }
+                for dx in 0..w8 as usize {
+                    non_zeros_grid_row[c][sx + dx] = non_zeros_val;
                 }
 
-                let size = (w8 * 8) * (h8 * 8);
                 let coeff_grid = &mut hf_coeff_output[c];
-                let mut is_prev_coeff_nonzero = non_zeros <= size / 16;
+                let mut is_prev_coeff_nonzero = non_zeros <= num_blocks * 4;
                 let order_it = hf_pass.order(order_id as usize, c);
 
                 let coeff_ctx_base = block_ctx * 458 + 37 * num_block_clusters;
-                let cluster_map = &cluster_map[coeff_ctx_base as usize..];
+                let cluster_map = &cluster_map[coeff_ctx_base as usize..][..458];
                 for (idx, coeff_coord) in order_it.skip(num_blocks as usize).enumerate() {
                     if non_zeros == 0 {
                         break;
-                    }
-                    let hf_left_in_varblock = size - num_blocks - idx as u32;
-                    if non_zeros > hf_left_in_varblock {
-                        tracing::error!("too many zeros in varblock HF coefficient");
-                        return Err(jxl_bitstream::Error::ValidationFailed(
-                            "too many zeros in varblock HF coefficient",
-                        )
-                        .into());
                     }
 
                     let coeff_ctx = {
@@ -209,29 +206,29 @@ pub fn write_hf_coeff<S: Sample>(
                             * 2
                             + prev
                     };
-                    let ucoeff = dist.read_varint_with_multiplier_clustered(
-                        bitstream,
-                        cluster_map[coeff_ctx as usize],
-                        0,
-                    )?;
+                    let cluster = *cluster_map.get(coeff_ctx as usize).ok_or_else(|| {
+                        tracing::error!("too many zeros in varblock HF coefficient");
+                        jxl_bitstream::Error::ValidationFailed(
+                            "too many zeros in varblock HF coefficient",
+                        )
+                    })?;
+                    let ucoeff =
+                        dist.read_varint_with_multiplier_clustered(bitstream, cluster, 0)?;
                     if ucoeff == 0 {
                         is_prev_coeff_nonzero = false;
                         continue;
                     }
 
                     let coeff = jxl_bitstream::unpack_signed(ucoeff) << coeff_shift;
-                    let (x, y) = if dct_select.need_transpose() {
-                        (
-                            sx * 8 + coeff_coord.1 as usize,
-                            sy * 8 + coeff_coord.0 as usize,
-                        )
-                    } else {
-                        (
-                            sx * 8 + coeff_coord.0 as usize,
-                            sy * 8 + coeff_coord.1 as usize,
-                        )
-                    };
-                    *coeff_grid.get_mut(x, y) += coeff as f32;
+                    let (mut dx, mut dy) = coeff_coord;
+                    if dct_select.need_transpose() {
+                        std::mem::swap(&mut dx, &mut dy);
+                    }
+                    let x = sx * 8 + dx as usize;
+                    let y = sy * 8 + dy as usize;
+                    let base_coeff = coeff_grid.get_mut(x, y);
+                    *base_coeff = f32::from_bits((base_coeff.to_bits() as i32 + coeff) as u32);
+
                     is_prev_coeff_nonzero = true;
                     non_zeros -= 1;
                 }
