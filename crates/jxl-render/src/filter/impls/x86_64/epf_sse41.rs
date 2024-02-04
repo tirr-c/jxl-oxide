@@ -1,0 +1,314 @@
+use std::arch::x86_64::*;
+
+use jxl_grid::SimdVector;
+
+use crate::filter::impls::generic::EpfRow;
+
+type Vector = __m128;
+
+#[inline]
+#[target_feature(enable = "sse4.1")]
+unsafe fn weight_sse41(scaled_distance: Vector, sigma: Vector, step_multiplier: Vector) -> Vector {
+    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0))
+        .div(sigma)
+        .mul(step_multiplier);
+    let result = scaled_distance.mul(neg_inv_sigma).add(_mm_set1_ps(1.0));
+    _mm_max_ps(result, Vector::zero())
+}
+
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
+    let EpfRow {
+        merged_input_rows,
+        output_rows,
+        width,
+        x,
+        y,
+        sigma_row,
+        epf_params,
+        ..
+    } = epf_row;
+    let iwidth = width as isize;
+    let merged_input_rows = merged_input_rows.unwrap();
+    let (kernel_offsets, dist_offsets) = super::super::generic::epf_kernel::<STEP>();
+
+    let step_multiplier = if STEP == 0 {
+        epf_params.sigma.pass0_sigma_scale
+    } else if STEP == 2 {
+        epf_params.sigma.pass2_sigma_scale
+    } else {
+        1.0
+    };
+    let border_sad_mul = epf_params.sigma.border_sad_mul;
+    let channel_scale = epf_params.channel_scale;
+
+    let padding = 3 - STEP;
+    if width < padding * 2 {
+        return;
+    }
+    let right_edge_width = ((width - padding * 2) & 7) + padding;
+    let right_edge_start = width - right_edge_width;
+
+    let simd_width = right_edge_start - padding;
+    assert!(simd_width % 8 == 0);
+
+    let is_y_border = (y + 1) & 0b110 == 0;
+    let sm = if is_y_border {
+        [step_multiplier * border_sad_mul; 8]
+    } else {
+        let x = x + padding;
+        let neg_x = 8 - (x & 7);
+        let mut sm = [step_multiplier; 8];
+        sm[neg_x & 7] *= border_sad_mul;
+        sm[(neg_x + 7) & 7] *= border_sad_mul;
+        sm
+    };
+
+    for dx4 in 0..simd_width / 4 {
+        let sm = _mm_loadu_ps(sm.as_ptr().add((dx4 % 2) * 4));
+        let dx = dx4 * 4 + padding;
+        let input_base_idx = 3 * width + dx;
+        let sigma_val = _mm_loadu_ps(sigma_row.as_ptr().add(dx));
+        let mask = _mm_cmplt_ps(sigma_val, _mm_set1_ps(0.3));
+
+        let originals: [_; 3] = std::array::from_fn(|c| {
+            unsafe {
+                _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx))
+            }
+        });
+
+        let mut sum_weights = _mm_set1_ps(1.0);
+        let mut sum_channels = originals;
+
+        if STEP == 1 {
+            // (0, -1), (0, 1)
+            {
+                let mut dist0 = _mm_setzero_ps();
+                let mut dist1 = _mm_setzero_ps();
+                for c in 0..3 {
+                    let scale = _mm_set1_ps(channel_scale[c]);
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+
+                    let v0 = _mm_loadu_ps(rows_ptr.add(input_base_idx - 2 * width));
+                    let v1 = _mm_loadu_ps(rows_ptr.add(input_base_idx - width));
+                    let v2 = _mm_loadu_ps(rows_ptr.add(input_base_idx));
+                    let v3 = _mm_loadu_ps(rows_ptr.add(input_base_idx + width));
+                    let v4 = _mm_loadu_ps(rows_ptr.add(input_base_idx + 2 * width));
+                    let tmp = v1.sub(v2).abs().add(v3.sub(v2).abs());
+                    let mut acc0 = tmp.add(v1.sub(v0).abs());
+                    let mut acc1 = tmp.add(v3.sub(v4).abs());
+
+                    let v1_left = *rows_ptr.add(input_base_idx - width - 1);
+                    let v2_left = *rows_ptr.add(input_base_idx - 1);
+                    let v3_left = *rows_ptr.add(input_base_idx + width - 1);
+                    let v1_right = *rows_ptr.add(input_base_idx - width + 4);
+                    let v2_right = *rows_ptr.add(input_base_idx + 4);
+                    let v3_right = *rows_ptr.add(input_base_idx + width + 4);
+
+                    let v1_left = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v1)),
+                            v1_left.to_bits() as i32,
+                        )
+                    );
+                    let v2_left = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v2)),
+                            v2_left.to_bits() as i32,
+                        )
+                    );
+                    let v3_left = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v3)),
+                            v3_left.to_bits() as i32,
+                        )
+                    );
+                    acc0 = acc0.add(v1_left.sub(v2_left).abs());
+                    acc1 = acc1.add(v3_left.sub(v2_left).abs());
+
+                    let v1_right = _mm_castsi128_ps(
+                        _mm_insert_epi32::<3>(
+                            _mm_srli_si128::<4>(_mm_castps_si128(v1)),
+                            v1_right.to_bits() as i32,
+                        )
+                    );
+                    let v2_right = _mm_castsi128_ps(
+                        _mm_insert_epi32::<3>(
+                            _mm_srli_si128::<4>(_mm_castps_si128(v2)),
+                            v2_right.to_bits() as i32,
+                        )
+                    );
+                    let v3_right = _mm_castsi128_ps(
+                        _mm_insert_epi32::<3>(
+                            _mm_srli_si128::<4>(_mm_castps_si128(v3)),
+                            v3_right.to_bits() as i32,
+                        )
+                    );
+                    acc0 = acc0.add(v1_right.sub(v2_right).abs());
+                    acc1 = acc1.add(v3_right.sub(v2_right).abs());
+
+                    dist0 = scale.mul(acc0).add(dist0);
+                    dist1 = scale.mul(acc1).add(dist1);
+                }
+
+                let weight = weight_sse41(
+                    dist0,
+                    sigma_val,
+                    sm,
+                );
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx - width))).add(*sum);
+                }
+
+                let weight = weight_sse41(
+                    dist1,
+                    sigma_val,
+                    sm,
+                );
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx + width))).add(*sum);
+                }
+            }
+
+            // (-1, 0), (1, 0)
+            {
+                let mut dist0 = _mm_setzero_ps();
+                let mut dist1 = _mm_setzero_ps();
+                for c in 0..3 {
+                    let scale = _mm_set1_ps(channel_scale[c]);
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+
+                    let v0r = _mm_loadu_ps(rows_ptr.add(input_base_idx - width + 1));
+                    let v0 = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v0r)),
+                            (*rows_ptr.add(input_base_idx - width)).to_bits() as i32,
+                        ),
+                    );
+                    let v0l = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v0)),
+                            (*rows_ptr.add(input_base_idx - width - 1)).to_bits() as i32,
+                        ),
+                    );
+                    let mut acc0 = v0l.sub(v0).abs();
+                    let mut acc1 = v0r.sub(v0).abs();
+
+                    let v1rr = _mm_loadu_ps(rows_ptr.add(input_base_idx + 2));
+                    let v1r = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v1rr)),
+                            (*rows_ptr.add(input_base_idx + 1)).to_bits() as i32,
+                        ),
+                    );
+                    let v1 = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v1r)),
+                            (*rows_ptr.add(input_base_idx)).to_bits() as i32,
+                        ),
+                    );
+                    let v1l = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v1)),
+                            (*rows_ptr.add(input_base_idx - 1)).to_bits() as i32,
+                        ),
+                    );
+                    let v1ll = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v1l)),
+                            (*rows_ptr.add(input_base_idx - 2)).to_bits() as i32,
+                        ),
+                    );
+                    acc0 = acc0.add(v1ll.sub(v1l).abs());
+                    acc0 = acc0.add(v1.sub(v1l).abs());
+                    acc0 = acc0.add(v1.sub(v1r).abs());
+                    acc1 = acc1.add(v1.sub(v1l).abs());
+                    acc1 = acc1.add(v1.sub(v1r).abs());
+                    acc1 = acc1.add(v1rr.sub(v1r).abs());
+
+                    let v2r = _mm_loadu_ps(rows_ptr.add(input_base_idx + width + 1));
+                    let v2 = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v2r)),
+                            (*rows_ptr.add(input_base_idx + width)).to_bits() as i32,
+                        ),
+                    );
+                    let v2l = _mm_castsi128_ps(
+                        _mm_insert_epi32::<0>(
+                            _mm_slli_si128::<4>(_mm_castps_si128(v2)),
+                            (*rows_ptr.add(input_base_idx + width - 1)).to_bits() as i32,
+                        ),
+                    );
+                    acc0 = acc0.add(v2l.sub(v2).abs());
+                    acc1 = acc1.add(v2r.sub(v2).abs());
+
+                    dist0 = scale.mul(acc0).add(dist0);
+                    dist1 = scale.mul(acc1).add(dist1);
+                }
+
+                let weight = weight_sse41(
+                    dist0,
+                    sigma_val,
+                    sm,
+                );
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx - 1))).add(*sum);
+                }
+
+                let weight = weight_sse41(
+                    dist1,
+                    sigma_val,
+                    sm,
+                );
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx + 1))).add(*sum);
+                }
+            }
+        } else {
+            for &(kx, ky) in kernel_offsets {
+                let input_kernel_idx = input_base_idx.wrapping_add_signed(ky * iwidth + kx);
+                let mut dist = _mm_setzero_ps();
+                for c in 0..3 {
+                    let scale = _mm_set1_ps(channel_scale[c]);
+                    for &(ix, iy) in dist_offsets {
+                        let offset = iy * iwidth + ix;
+                        let input_kernel_idx = input_kernel_idx.wrapping_add_signed(offset);
+                        let input_base_idx = input_base_idx.wrapping_add_signed(offset);
+
+                        let v0 = _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_kernel_idx));
+                        let v1 = _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx));
+                        dist = scale.mul(v0.sub(v1).abs()).add(dist);
+                    }
+                }
+
+                let weight = weight_sse41(
+                    dist,
+                    sigma_val,
+                    sm,
+                );
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight.mul(_mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_kernel_idx))).add(*sum);
+                }
+            }
+        }
+
+        for (c, sum) in sum_channels.into_iter().enumerate() {
+            let output = _mm_blendv_ps(
+                sum.div(sum_weights),
+                originals[c],
+                mask,
+            );
+            _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), output);
+        }
+    }
+}

@@ -6,7 +6,7 @@ use crate::Region;
 
 use super::generic::epf_common;
 
-mod epf_avx2;
+mod epf_sse41;
 mod epf_sse2;
 
 pub fn epf_step0(
@@ -18,7 +18,7 @@ pub fn epf_step0(
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+    if is_x86_feature_detected!("sse4.1") {
         // SAFETY: Features are checked above.
         unsafe {
             return epf_common(
@@ -29,7 +29,7 @@ pub fn epf_step0(
                 region,
                 epf_params,
                 pool,
-                Some(epf_avx2::epf_row_x86_64_avx2::<0>),
+                Some(epf_sse41::epf_row_x86_64_sse41::<0>),
                 super::generic::epf_row::<0>,
             );
         }
@@ -60,7 +60,7 @@ pub fn epf_step1(
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+    if is_x86_feature_detected!("sse4.1") {
         // SAFETY: Features are checked above.
         unsafe {
             return epf_common(
@@ -71,7 +71,7 @@ pub fn epf_step1(
                 region,
                 epf_params,
                 pool,
-                Some(epf_avx2::epf_row_x86_64_avx2::<1>),
+                Some(epf_sse41::epf_row_x86_64_sse41::<1>),
                 super::generic::epf_row::<1>,
             );
         }
@@ -102,7 +102,7 @@ pub fn epf_step2(
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+    if is_x86_feature_detected!("sse4.1") {
         // SAFETY: Features are checked above.
         unsafe {
             return epf_common(
@@ -113,7 +113,7 @@ pub fn epf_step2(
                 region,
                 epf_params,
                 pool,
-                Some(epf_avx2::epf_row_x86_64_avx2::<2>),
+                Some(epf_sse41::epf_row_x86_64_sse41::<2>),
                 super::generic::epf_row::<2>,
             );
         }
