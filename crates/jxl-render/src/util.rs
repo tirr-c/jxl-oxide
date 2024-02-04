@@ -314,3 +314,15 @@ pub(crate) fn convert_color_for_record(
     // color transform is done
     true
 }
+
+pub(crate) fn mirror(mut offset: isize, len: usize) -> usize {
+    loop {
+        if offset < 0 {
+            offset = -(offset + 1);
+        } else if (offset as usize) >= len {
+            offset = (-(offset + 1)).wrapping_add_unsigned(len * 2);
+        } else {
+            return offset as usize;
+        }
+    }
+}

@@ -4,10 +4,9 @@ use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{Region, Result};
+use crate::{util, Region, Result};
 
 pub(crate) mod epf;
-use epf::weight;
 
 pub(crate) struct EpfRow<'buf, 'epf> {
     pub(crate) input_rows: [[&'buf [f32]; 7]; 3],
@@ -118,7 +117,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                 let y = base_y + dy;
                 let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
                     std::array::from_fn(|idx| {
-                        let y = mirror((y + idx) as isize - 3, height);
+                        let y = util::mirror((y + idx) as isize - 3, height);
                         &input_buf[c][y * width..][..width]
                     })
                 });
@@ -170,249 +169,6 @@ pub(crate) unsafe fn epf_common<'buf>(
     );
 }
 
-pub(crate) const fn epf_kernel<const STEP: usize>(
-) -> (&'static [(isize, isize)], &'static [(isize, isize)]) {
-    const EPF_KERNEL_DIST_1: [(isize, isize); 4] = [(0, -1), (-1, 0), (1, 0), (0, 1)];
-    #[rustfmt::skip]
-    const EPF_KERNEL_DIST_2: [(isize, isize); 12] = [
-        (0, -2), (-1, -1), (0, -1), (1, -1),
-        (-2, 0), (-1, 0), (1, 0), (2, 0),
-        (-1, 1), (0, 1), (1, 1), (0, 2),
-    ];
-    const EPF_KERNEL_SIZE_0: [(isize, isize); 1] = [(0, 0)];
-    const EPF_KERNEL_SIZE_1: [(isize, isize); 5] = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)];
-
-    if STEP == 0 {
-        (&EPF_KERNEL_DIST_2, &EPF_KERNEL_SIZE_1)
-    } else if STEP == 1 {
-        (&EPF_KERNEL_DIST_1, &EPF_KERNEL_SIZE_1)
-    } else if STEP == 2 {
-        (&EPF_KERNEL_DIST_1, &EPF_KERNEL_SIZE_0)
-    } else {
-        panic!()
-    }
-}
-
-fn mirror(mut offset: isize, len: usize) -> usize {
-    loop {
-        if offset < 0 {
-            offset = -(offset + 1);
-        } else if (offset as usize) >= len {
-            offset = (-(offset + 1)).wrapping_add_unsigned(len * 2);
-        } else {
-            return offset as usize;
-        }
-    }
-}
-
-pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
-    let EpfRow {
-        input_rows,
-        output_rows,
-        width,
-        x,
-        y,
-        sigma_row,
-        epf_params,
-        skip_inner,
-        ..
-    } = epf_row;
-    let (kernel_offsets, dist_offsets) = epf_kernel::<STEP>();
-
-    let step_multiplier = if STEP == 0 {
-        epf_params.sigma.pass0_sigma_scale
-    } else if STEP == 2 {
-        epf_params.sigma.pass2_sigma_scale
-    } else {
-        1.0
-    };
-    let border_sad_mul = epf_params.sigma.border_sad_mul;
-    let channel_scale = epf_params.channel_scale;
-
-    let is_y_border = (y + 1) & 0b110 == 0;
-    let sm = if is_y_border {
-        [step_multiplier * border_sad_mul; 8]
-    } else {
-        let neg_x = 8 - (x & 7);
-        let mut sm = [step_multiplier; 8];
-        sm[neg_x & 7] *= border_sad_mul;
-        sm[(neg_x + 7) & 7] *= border_sad_mul;
-        sm
-    };
-
-    let padding = 3 - STEP;
-    let (left_edge_width, right_edge_width) = if width < padding * 2 {
-        let left_edge_width = width.saturating_sub(padding);
-        (left_edge_width, width - left_edge_width)
-    } else {
-        (padding, padding)
-    };
-
-    let simd_range = {
-        let start = (x + left_edge_width + 7) & !7;
-        let end = (x + width - right_edge_width) & !7;
-        if start > end {
-            let start = start - x;
-            start..start
-        } else {
-            let start = start - x;
-            let end = end - x;
-            start..end
-        }
-    };
-
-    for dx in 0..left_edge_width {
-        let sm_idx = dx & 7;
-        let sigma_x = (x + dx) / 8 - x / 8;
-        let sigma_val = sigma_row[sigma_x];
-        if sigma_val < 0.3 {
-            for c in 0..3 {
-                output_rows[c][dx] = input_rows[c][3][dx];
-            }
-            continue;
-        }
-
-        let mut sum_weights = 1.0f32;
-        let mut sum_channels: [f32; 3] = std::array::from_fn(|c| input_rows[c][3][dx]);
-
-        for &(kx, ky) in kernel_offsets {
-            let kernel_dy = 3 + ky;
-            let kernel_dx = dx as isize + kx;
-            let mut dist = 0f32;
-            for c in 0..3 {
-                let scale = channel_scale[c];
-                for &(ix, iy) in dist_offsets {
-                    let kernel_dy = (kernel_dy + iy) as usize;
-                    let kernel_dx = mirror(kernel_dx + ix, width);
-                    let base_dy = (3 + iy) as usize;
-                    let base_dx = mirror(dx as isize + ix, width);
-
-                    dist = scale.mul_add(
-                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
-                            .abs(),
-                        dist,
-                    );
-                }
-            }
-
-            let weight = weight(dist, sigma_val, sm[sm_idx]);
-            sum_weights += weight;
-
-            let kernel_dy = kernel_dy as usize;
-            let kernel_dx = mirror(kernel_dx, width);
-            for (c, sum) in sum_channels.iter_mut().enumerate() {
-                *sum = weight.mul_add(input_rows[c][kernel_dy][kernel_dx], *sum);
-            }
-        }
-
-        for (c, sum) in sum_channels.into_iter().enumerate() {
-            output_rows[c][dx] = sum / sum_weights;
-        }
-    }
-
-    for dx in left_edge_width..width.saturating_sub(padding) {
-        if skip_inner && simd_range.contains(&dx) {
-            continue;
-        }
-
-        let sm_idx = dx & 7;
-        let sigma_x = (x + dx) / 8 - x / 8;
-        let sigma_val = sigma_row[sigma_x];
-        if sigma_val < 0.3 {
-            for c in 0..3 {
-                output_rows[c][dx] = input_rows[c][3][dx];
-            }
-            continue;
-        }
-
-        let mut sum_weights = 1.0f32;
-        let mut sum_channels: [f32; 3] = std::array::from_fn(|c| input_rows[c][3][dx]);
-
-        for &(kx, ky) in kernel_offsets {
-            let kernel_dy = 3 + ky;
-            let kernel_dx = dx as isize + kx;
-            let mut dist = 0f32;
-            for c in 0..3 {
-                let scale = channel_scale[c];
-                for &(ix, iy) in dist_offsets {
-                    let kernel_dy = (kernel_dy + iy) as usize;
-                    let kernel_dx = (kernel_dx + ix) as usize;
-                    let base_dy = (3 + iy) as usize;
-                    let base_dx = (dx as isize + ix) as usize;
-
-                    dist = scale.mul_add(
-                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
-                            .abs(),
-                        dist,
-                    );
-                }
-            }
-
-            let weight = weight(dist, sigma_val, sm[sm_idx]);
-            sum_weights += weight;
-
-            let kernel_dy = kernel_dy as usize;
-            let kernel_dx = kernel_dx as usize;
-            for (c, sum) in sum_channels.iter_mut().enumerate() {
-                *sum = weight.mul_add(input_rows[c][kernel_dy][kernel_dx], *sum);
-            }
-        }
-
-        for (c, sum) in sum_channels.into_iter().enumerate() {
-            output_rows[c][dx] = sum / sum_weights;
-        }
-    }
-
-    for dx in width.saturating_sub(padding)..width {
-        let sm_idx = dx & 7;
-        let sigma_x = (x + dx) / 8 - x / 8;
-        let sigma_val = sigma_row[sigma_x];
-        if sigma_val < 0.3 {
-            for c in 0..3 {
-                output_rows[c][dx] = input_rows[c][3][dx];
-            }
-            continue;
-        }
-
-        let mut sum_weights = 1.0f32;
-        let mut sum_channels: [f32; 3] = std::array::from_fn(|c| input_rows[c][3][dx]);
-
-        for &(kx, ky) in kernel_offsets {
-            let kernel_dy = 3 + ky;
-            let kernel_dx = dx as isize + kx;
-            let mut dist = 0f32;
-            for c in 0..3 {
-                let scale = channel_scale[c];
-                for &(ix, iy) in dist_offsets {
-                    let kernel_dy = (kernel_dy + iy) as usize;
-                    let kernel_dx = mirror(kernel_dx + ix, width);
-                    let base_dy = (3 + iy) as usize;
-                    let base_dx = mirror(dx as isize + ix, width);
-
-                    dist = scale.mul_add(
-                        (input_rows[c][kernel_dy][kernel_dx] - input_rows[c][base_dy][base_dx])
-                            .abs(),
-                        dist,
-                    );
-                }
-            }
-
-            let weight = weight(dist, sigma_val, sm[sm_idx]);
-            sum_weights += weight;
-
-            let kernel_dy = kernel_dy as usize;
-            let kernel_dx = mirror(kernel_dx, width);
-            for (c, sum) in sum_channels.iter_mut().enumerate() {
-                *sum = weight.mul_add(input_rows[c][kernel_dy][kernel_dx], *sum);
-            }
-        }
-
-        for (c, sum) in sum_channels.into_iter().enumerate() {
-            output_rows[c][dx] = sum / sum_weights;
-        }
-    }
-}
-
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
@@ -432,7 +188,7 @@ pub fn epf_step0(
             epf_params,
             pool,
             None,
-            epf_row::<0>,
+            epf::epf_row::<0>,
         )
     }
 }
@@ -456,7 +212,7 @@ pub fn epf_step1(
             epf_params,
             pool,
             None,
-            epf_row::<1>,
+            epf::epf_row::<1>,
         )
     }
 }
@@ -480,7 +236,7 @@ pub fn epf_step2(
             epf_params,
             pool,
             None,
-            epf_row::<2>,
+            epf::epf_row::<2>,
         )
     }
 }

@@ -29,7 +29,7 @@ pub fn epf_step0(
                 epf_params,
                 pool,
                 Some(epf_sse41::epf_row_x86_64_sse41::<0>),
-                super::generic::epf_row::<0>,
+                super::generic::epf::epf_row::<0>,
             );
         }
     }
@@ -44,7 +44,7 @@ pub fn epf_step0(
             epf_params,
             pool,
             None,
-            super::generic::epf_row::<0>,
+            super::generic::epf::epf_row::<0>,
         )
     }
 }
@@ -70,7 +70,7 @@ pub fn epf_step1(
                 epf_params,
                 pool,
                 Some(epf_sse41::epf_row_x86_64_sse41::<1>),
-                super::generic::epf_row::<1>,
+                super::generic::epf::epf_row::<1>,
             );
         }
     }
@@ -85,7 +85,7 @@ pub fn epf_step1(
             epf_params,
             pool,
             None,
-            super::generic::epf_row::<1>,
+            super::generic::epf::epf_row::<1>,
         )
     }
 }
@@ -111,7 +111,7 @@ pub fn epf_step2(
                 epf_params,
                 pool,
                 Some(epf_sse41::epf_row_x86_64_sse41::<2>),
-                super::generic::epf_row::<2>,
+                super::generic::epf::epf_row::<2>,
             );
         }
     }
@@ -126,7 +126,7 @@ pub fn epf_step2(
             epf_params,
             pool,
             None,
-            super::generic::epf_row::<2>,
+            super::generic::epf::epf_row::<2>,
         )
     }
 }

@@ -171,6 +171,7 @@ testcase! {
 testcase_with_crop! {
     crop_sunset_logo_0: sunset_logo[CropInfo { width: 179, height: 258, left: 527, top: 298 }],
     crop_progressive_0: progressive[CropInfo { width: 315, height: 571, left: 1711, top: 800 }],
+    crop_progressive_1: progressive[CropInfo { width: 1159, height: 359, left: 776, top: 1745 }],
     crop_noise_0: noise[CropInfo { width: 195, height: 162, left: 169, top: 194 }],
     crop_blendmodes_0: blendmodes[CropInfo { width: 242, height: 163, left: 81, top: 302 }],
     crop_alpha_triangles_triple: alpha_triangles[
