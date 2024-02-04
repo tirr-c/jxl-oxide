@@ -8,9 +8,8 @@ type Vector = __m128;
 
 #[inline]
 #[target_feature(enable = "sse4.1")]
-unsafe fn weight_sse41(scaled_distance: Vector, sigma: Vector, step_multiplier: Vector) -> Vector {
-    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0))
-        .div(sigma)
+unsafe fn weight_sse41(scaled_distance: Vector, sigma: f32, step_multiplier: Vector) -> Vector {
+    let neg_inv_sigma = Vector::splat_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma)
         .mul(step_multiplier);
     let result = scaled_distance.mul(neg_inv_sigma).add(_mm_set1_ps(1.0));
     _mm_max_ps(result, Vector::zero())
@@ -46,36 +45,51 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
     if width < padding * 2 {
         return;
     }
-    let right_edge_width = ((width - padding * 2) & 7) + padding;
-    let right_edge_start = width - right_edge_width;
 
-    let simd_width = right_edge_start - padding;
-    assert!(simd_width % 8 == 0);
+    let simd_range = {
+        let start = (x + padding + 7) & !7;
+        let end = (x + width - padding) & !7;
+        if start > end {
+            let start = start - x;
+            start..start
+        } else {
+            let start = start - x;
+            let end = end - x;
+            start..end
+        }
+    };
 
     let is_y_border = (y + 1) & 0b110 == 0;
     let sm = if is_y_border {
-        [step_multiplier * border_sad_mul; 8]
+        let sm = _mm_set1_ps(step_multiplier * border_sad_mul);
+        [sm, sm]
     } else {
-        let x = x + padding;
-        let neg_x = 8 - (x & 7);
-        let mut sm = [step_multiplier; 8];
-        sm[neg_x & 7] *= border_sad_mul;
-        sm[(neg_x + 7) & 7] *= border_sad_mul;
-        sm
+        [
+            _mm_set_ps(step_multiplier, step_multiplier, step_multiplier, step_multiplier * border_sad_mul),
+            _mm_set_ps(step_multiplier * border_sad_mul, step_multiplier, step_multiplier, step_multiplier),
+        ]
     };
 
-    for dx4 in 0..simd_width / 4 {
-        let sm = _mm_loadu_ps(sm.as_ptr().add((dx4 % 2) * 4));
-        let dx = dx4 * 4 + padding;
+    for dx in simd_range.step_by(4) {
+        let sigma_x = x + dx;
+        let sm = sm[(sigma_x / 4) & 1];
+        let sigma_x = sigma_x / 8 - x / 8;
+
         let input_base_idx = 3 * width + dx;
-        let sigma_val = _mm_loadu_ps(sigma_row.as_ptr().add(dx));
-        let mask = _mm_cmplt_ps(sigma_val, _mm_set1_ps(0.3));
+        let sigma_val = sigma_row[sigma_x];
 
         let originals: [_; 3] = std::array::from_fn(|c| {
             unsafe {
                 _mm_loadu_ps(merged_input_rows[c].as_ptr().add(input_base_idx))
             }
         });
+
+        if sigma_val < 0.3 {
+            for (c, val) in originals.into_iter().enumerate() {
+                _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), val);
+            }
+            continue;
+        }
 
         let mut sum_weights = _mm_set1_ps(1.0);
         let mut sum_channels = originals;
@@ -303,12 +317,7 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
         }
 
         for (c, sum) in sum_channels.into_iter().enumerate() {
-            let output = _mm_blendv_ps(
-                sum.div(sum_weights),
-                originals[c],
-                mask,
-            );
-            _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), output);
+            _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), sum.div(sum_weights));
         }
     }
 }

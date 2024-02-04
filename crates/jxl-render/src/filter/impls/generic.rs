@@ -93,13 +93,14 @@ pub(crate) unsafe fn epf_common<'buf>(
              output1,
              output2,
          }| {
-            let mut sigma_row = vec![epf_params.sigma_for_modular; width];
+            let sigma_len = (left + width + 7) / 8 - left / 8;
+            let mut sigma_row = vec![epf_params.sigma_for_modular; sigma_len];
             let sigma_y = (top + base_y) / 8;
             let sigma_group_y = sigma_y >> sigma_group_dim_shift;
             let sigma_inner_y = sigma_y & sigma_group_dim_mask;
 
             for (dx, sigma) in sigma_row.iter_mut().enumerate() {
-                let sigma_x = (left + dx) / 8;
+                let sigma_x = left / 8 + dx;
                 let sigma_group_x = sigma_x >> sigma_group_dim_shift;
                 let sigma_inner_x = sigma_x & sigma_group_dim_mask;
                 let sigma_grid_idx = sigma_group_y * groups_per_row + sigma_group_x;
@@ -240,14 +241,26 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         let left_edge_width = width.saturating_sub(padding);
         (left_edge_width, width - left_edge_width)
     } else {
-        let right_edge_width = ((width - padding * 2) & 7) + padding;
-        (padding, right_edge_width)
+        (padding, padding)
     };
-    let right_edge_start = width - right_edge_width;
+
+    let simd_range = {
+        let start = (x + left_edge_width + 7) & !7;
+        let end = (x + width - right_edge_width) & !7;
+        if start > end {
+            let start = start - x;
+            start..start
+        } else {
+            let start = start - x;
+            let end = end - x;
+            start..end
+        }
+    };
 
     for dx in 0..left_edge_width {
         let sm_idx = dx & 7;
-        let sigma_val = sigma_row[dx];
+        let sigma_x = (x + dx) / 8 - x / 8;
+        let sigma_val = sigma_row[sigma_x];
         if sigma_val < 0.3 {
             for c in 0..3 {
                 output_rows[c][dx] = input_rows[c][3][dx];
@@ -294,12 +307,13 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     }
 
     for dx in left_edge_width..width.saturating_sub(padding) {
-        if skip_inner && dx < right_edge_start {
+        if skip_inner && simd_range.contains(&dx) {
             continue;
         }
 
         let sm_idx = dx & 7;
-        let sigma_val = sigma_row[dx];
+        let sigma_x = (x + dx) / 8 - x / 8;
+        let sigma_val = sigma_row[sigma_x];
         if sigma_val < 0.3 {
             for c in 0..3 {
                 output_rows[c][dx] = input_rows[c][3][dx];
@@ -347,7 +361,8 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
 
     for dx in width.saturating_sub(padding)..width {
         let sm_idx = dx & 7;
-        let sigma_val = sigma_row[dx];
+        let sigma_x = (x + dx) / 8 - x / 8;
+        let sigma_val = sigma_row[sigma_x];
         if sigma_val < 0.3 {
             for c in 0..3 {
                 output_rows[c][dx] = input_rows[c][3][dx];
