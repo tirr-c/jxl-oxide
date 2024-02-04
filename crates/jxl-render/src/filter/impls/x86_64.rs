@@ -7,7 +7,6 @@ use crate::Region;
 use super::generic::epf_common;
 
 mod epf_sse41;
-mod epf_sse2;
 
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
@@ -35,7 +34,6 @@ pub fn epf_step0(
         }
     }
 
-    // SAFETY: x86_64 always supports SSE2.
     unsafe {
         epf_common(
             input,
@@ -45,7 +43,7 @@ pub fn epf_step0(
             region,
             epf_params,
             pool,
-            Some(epf_sse2::epf_row_x86_64_sse2::<0>),
+            None,
             super::generic::epf_row::<0>,
         )
     }
@@ -77,7 +75,6 @@ pub fn epf_step1(
         }
     }
 
-    // SAFETY: x86_64 always supports SSE2.
     unsafe {
         epf_common(
             input,
@@ -87,7 +84,7 @@ pub fn epf_step1(
             region,
             epf_params,
             pool,
-            Some(epf_sse2::epf_row_x86_64_sse2::<1>),
+            None,
             super::generic::epf_row::<1>,
         )
     }
@@ -119,7 +116,6 @@ pub fn epf_step2(
         }
     }
 
-    // SAFETY: x86_64 always supports SSE2.
     unsafe {
         epf_common(
             input,
@@ -129,7 +125,7 @@ pub fn epf_step2(
             region,
             epf_params,
             pool,
-            Some(epf_sse2::epf_row_x86_64_sse2::<2>),
+            None,
             super::generic::epf_row::<2>,
         )
     }

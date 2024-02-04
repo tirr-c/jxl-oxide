@@ -34,8 +34,6 @@ pub fn apply_epf<S: Sample>(
         SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
     ];
 
-    let lf_groups_per_row = frame_header.lf_groups_per_row();
-    let lf_group_dim8 = frame_header.group_dim();
     let num_lf_groups = frame_header.num_lf_groups() as usize;
     let mut sigma_grid_map = vec![None::<&SimpleGrid<f32>>; num_lf_groups];
 
