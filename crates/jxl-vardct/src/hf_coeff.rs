@@ -186,25 +186,23 @@ pub fn write_hf_coeff<S: Sample>(
                 for dx in 0..w8 as usize {
                     non_zeros_grid_row[c][sx + dx] = non_zeros_val;
                 }
+                if non_zeros == 0 {
+                    continue;
+                }
 
                 let coeff_grid = &mut hf_coeff_output[c];
-                let mut is_prev_coeff_nonzero = non_zeros <= num_blocks * 4;
-                let order_it = hf_pass.order(order_id as usize, c);
+                let mut is_prev_coeff_nonzero = (non_zeros <= num_blocks * 4) as u32;
+                let order = hf_pass.order(order_id as usize, c);
 
                 let coeff_ctx_base = block_ctx * 458 + 37 * num_block_clusters;
                 let cluster_map = &cluster_map[coeff_ctx_base as usize..][..458];
-                for (idx, coeff_coord) in order_it.skip(num_blocks as usize).enumerate() {
-                    if non_zeros == 0 {
-                        break;
-                    }
-
+                for (idx, &coeff_coord) in order[num_blocks as usize..].iter().enumerate() {
                     let coeff_ctx = {
-                        let prev = is_prev_coeff_nonzero as u32;
                         let non_zeros = (non_zeros - 1) >> num_blocks_log;
                         let idx = idx >> num_blocks_log;
                         (COEFF_NUM_NONZERO_CONTEXT[non_zeros as usize] + COEFF_FREQ_CONTEXT[idx])
                             * 2
-                            + prev
+                            + is_prev_coeff_nonzero
                     };
                     let cluster = *cluster_map.get(coeff_ctx as usize).ok_or_else(|| {
                         tracing::error!("too many zeros in varblock HF coefficient");
@@ -215,7 +213,7 @@ pub fn write_hf_coeff<S: Sample>(
                     let ucoeff =
                         dist.read_varint_with_multiplier_clustered(bitstream, cluster, 0)?;
                     if ucoeff == 0 {
-                        is_prev_coeff_nonzero = false;
+                        is_prev_coeff_nonzero = 0;
                         continue;
                     }
 
@@ -229,8 +227,12 @@ pub fn write_hf_coeff<S: Sample>(
                     let base_coeff = coeff_grid.get_mut(x, y);
                     *base_coeff = f32::from_bits((base_coeff.to_bits() as i32 + coeff) as u32);
 
-                    is_prev_coeff_nonzero = true;
+                    is_prev_coeff_nonzero = 1;
                     non_zeros -= 1;
+
+                    if non_zeros == 0 {
+                        break;
+                    }
                 }
             }
         }

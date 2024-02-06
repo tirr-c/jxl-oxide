@@ -6,7 +6,8 @@ use crate::{Error, Result};
 pub struct Histogram {
     buckets: Vec<Bucket>,
     log_bucket_size: u32,
-    single_symbol: Option<u16>,
+    bucket_mask: u32,
+    single_symbol: Option<u32>,
 }
 
 // Ported from libjxl. log_alphabet_size <= 8 and log_bucket_size <= 7, so u8 is sufficient for
@@ -187,7 +188,8 @@ impl Histogram {
             return Ok(Self {
                 buckets,
                 log_bucket_size,
-                single_symbol: Some(single_sym_idx as u16),
+                bucket_mask: (1 << log_bucket_size) - 1,
+                single_symbol: Some(single_sym_idx as u32),
             });
         }
 
@@ -250,6 +252,7 @@ impl Histogram {
         Ok(Self {
             buckets,
             log_bucket_size,
+            bucket_mask: (1 << log_bucket_size) - 1,
             single_symbol: None,
         })
     }
@@ -266,13 +269,13 @@ impl Histogram {
 
 impl Histogram {
     #[inline]
-    fn map_alias(&self, state: u32) -> (u16, u32, u32) {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u32> {
         assert_eq!(std::mem::size_of::<Bucket>(), 8);
         let is_le = usize::from_le(1) == 1;
 
-        let idx = state & 0xfff;
+        let idx = *state & 0xfff;
         let i = (idx >> self.log_bucket_size) as usize;
-        let pos = (idx & ((1 << self.log_bucket_size) - 1)) as usize;
+        let pos = idx & self.bucket_mask;
         // SAFETY: idx is 12 bits, buckets.len() << log_bucket_size == 1 << 12.
         let bucket = unsafe { *self.buckets.get_unchecked(i) };
         // SAFETY: all bit patterns are valid.
@@ -282,14 +285,14 @@ impl Histogram {
         let (alias_symbol, alias_cutoff, dist) = if is_le {
             (
                 (bucket_int & 0xff) as usize,
-                ((bucket_int >> 8) & 0xff) as usize,
-                ((bucket_int >> 16) & 0xffff) as usize,
+                ((bucket_int >> 8) & 0xff) as u32,
+                ((bucket_int >> 16) & 0xffff) as u32,
             )
         } else {
             (
                 bucket.alias_symbol as usize,
-                bucket.alias_cutoff as usize,
-                bucket.dist as usize,
+                bucket.alias_cutoff as u32,
+                bucket.dist as u32,
             )
         };
 
@@ -297,23 +300,19 @@ impl Histogram {
         let (offset, dist_xor) = if is_le {
             let cond_bucket = if map_to_alias { bucket_int } else { 0 };
             (
-                ((cond_bucket >> 32) & 0xffff) as usize,
-                (cond_bucket >> 48) as usize,
+                (cond_bucket >> 32) as u32 & 0xffff,
+                (cond_bucket >> 48) as u32,
             )
         } else if map_to_alias {
-            (bucket.alias_offset as usize, bucket.alias_dist_xor as usize)
+            (bucket.alias_offset as u32, bucket.alias_dist_xor as u32)
         } else {
             (0, 0)
         };
 
         let dist = dist ^ dist_xor;
         let symbol = if map_to_alias { alias_symbol } else { i };
-        (symbol as u16, (offset + pos) as u32, dist as u32)
-    }
+        let offset = offset + pos;
 
-    #[inline]
-    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u16> {
-        let (symbol, offset, dist) = self.map_alias(*state);
         let next_state = (*state >> 12) * dist + offset;
         let appended_state = (next_state << 16) | bitstream.peek_bits_const::<16>();
         let select_appended = next_state < (1 << 16);
@@ -323,11 +322,11 @@ impl Histogram {
             next_state
         };
         bitstream.consume_bits(if select_appended { 16 } else { 0 })?;
-        Ok(symbol)
+        Ok(symbol as u32)
     }
 
     #[inline]
-    pub fn single_symbol(&self) -> Option<u16> {
+    pub fn single_symbol(&self) -> Option<u32> {
         self.single_symbol
     }
 }

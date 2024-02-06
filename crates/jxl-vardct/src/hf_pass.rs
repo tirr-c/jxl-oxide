@@ -23,7 +23,7 @@ impl<'a> HfPassParams<'a> {
 /// passed as a parameter when [decoding HF coefficients][crate::write_hf_coeff].
 #[derive(Debug)]
 pub struct HfPass {
-    permutation: [[Vec<usize>; 3]; 13],
+    permutation: [[Vec<(u16, u16)>; 3]; 13],
     hf_dist: Decoder,
 }
 
@@ -43,13 +43,17 @@ impl Bundle<HfPassParams<'_>> for HfPass {
         let mut permutation: [_; 13] =
             std::array::from_fn(|_| [Vec::new(), Vec::new(), Vec::new()]);
         if let Some(decoder) = &mut decoder {
-            for (permutation, (bw, bh)) in permutation.iter_mut().zip(BLOCK_SIZES) {
+            let it = permutation.iter_mut().zip(BLOCK_SIZES).enumerate();
+            for (idx, (permutation, (bw, bh))) in it {
                 if used_orders & 1 != 0 {
                     let size = (bw * bh) as u32;
                     let skip = size / 64;
                     for permutation in permutation {
-                        *permutation =
-                            jxl_coding::read_permutation(bitstream, decoder, size, skip)?;
+                        let perm = jxl_coding::read_permutation(bitstream, decoder, size, skip)?;
+                        let nat = natural_order_lazy(idx);
+                        for idx in perm {
+                            permutation.push(nat[idx]);
+                        }
                     }
                 }
 
@@ -77,35 +81,12 @@ impl HfPass {
     }
 
     #[inline]
-    pub(crate) fn order(
-        &self,
-        order_id: usize,
-        channel: usize,
-    ) -> impl Iterator<Item = (u8, u8)> + '_ {
-        struct OrderIter<'a> {
-            permutation: &'a [usize],
-            natural_order: &'static [(u8, u8)],
-            idx: usize,
-        }
-
-        impl Iterator for OrderIter<'_> {
-            type Item = (u8, u8);
-
-            #[inline]
-            fn next(&mut self) -> Option<(u8, u8)> {
-                let idx = self.permutation.get(self.idx).copied().unwrap_or(self.idx);
-                let ret = self.natural_order.get(idx).copied();
-                self.idx += 1;
-                ret
-            }
-        }
-
+    pub(crate) fn order(&self, order_id: usize, channel: usize) -> &[(u16, u16)] {
         let permutation = &self.permutation[order_id][channel];
-        let natural_order = natural_order_lazy(order_id);
-        OrderIter {
-            permutation,
-            natural_order,
-            idx: 0,
+        if permutation.is_empty() {
+            natural_order_lazy(order_id)
+        } else {
+            permutation
         }
     }
 }
@@ -125,7 +106,7 @@ const BLOCK_SIZES: [(usize, usize); 13] = [
     (256, 256),
     (256, 128),
 ];
-const NATURAL_ORDER: [&[(u8, u8)]; 9] = [
+const NATURAL_ORDER: [&[(u16, u16)]; 9] = [
     &const_compute_natural_order::<{ BLOCK_SIZES[0].0 * BLOCK_SIZES[0].1 }>(BLOCK_SIZES[0]),
     &const_compute_natural_order::<{ BLOCK_SIZES[1].0 * BLOCK_SIZES[1].1 }>(BLOCK_SIZES[1]),
     &const_compute_natural_order::<{ BLOCK_SIZES[2].0 * BLOCK_SIZES[2].1 }>(BLOCK_SIZES[2]),
@@ -137,7 +118,7 @@ const NATURAL_ORDER: [&[(u8, u8)]; 9] = [
     &const_compute_natural_order::<{ BLOCK_SIZES[8].0 * BLOCK_SIZES[8].1 }>(BLOCK_SIZES[8]),
 ];
 
-fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
+fn natural_order_lazy(idx: usize) -> &'static [(u16, u16)] {
     if idx >= 13 {
         panic!("Order ID out of bounds");
     }
@@ -152,7 +133,7 @@ fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
         std::sync::Once::new(),
         std::sync::Once::new(),
     ];
-    static mut LARGE_NATURAL_ORDER: [Vec<(u8, u8)>; 4] =
+    static mut LARGE_NATURAL_ORDER: [Vec<(u16, u16)>; 4] =
         [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     // TODO: Replace this with `OnceLock` when it is available in stable.
@@ -168,10 +149,10 @@ fn natural_order_lazy(idx: usize) -> &'static [(u8, u8)] {
     unsafe { &LARGE_NATURAL_ORDER[idx] }
 }
 
-const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -> [(u8, u8); N] {
+const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -> [(u16, u16); N] {
     let y_scale = bw / bh;
 
-    let mut ret = [(0u8, 0u8); N];
+    let mut ret = [(0u16, 0u16); N];
     let mut idx = 0usize;
     let lbw = bw / 8;
     let lbh = bh / 8;
@@ -179,7 +160,7 @@ const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -
     while idx < lbw * lbh {
         let x = idx % lbw;
         let y = idx / lbw;
-        ret[idx] = (x as u8, y as u8);
+        ret[idx] = (x as u16, y as u16);
         idx += 1;
     }
 
@@ -201,7 +182,7 @@ const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -
             if y % y_scale != 0 {
                 continue;
             }
-            ret[idx] = (x as u8, (y / y_scale) as u8);
+            ret[idx] = (x as u16, (y / y_scale) as u16);
             idx += 1;
         }
         dist += 1;
@@ -210,7 +191,7 @@ const fn const_compute_natural_order<const N: usize>((bw, bh): (usize, usize)) -
     ret
 }
 
-fn fill_natural_order((bw, bh): (usize, usize), output: &mut [(u8, u8)]) {
+fn fill_natural_order((bw, bh): (usize, usize), output: &mut [(u16, u16)]) {
     let y_scale = bw / bh;
 
     let mut idx = 0usize;
@@ -220,7 +201,7 @@ fn fill_natural_order((bw, bh): (usize, usize), output: &mut [(u8, u8)]) {
     while idx < lbw * lbh {
         let x = idx % lbw;
         let y = idx / lbw;
-        output[idx] = (x as u8, y as u8);
+        output[idx] = (x as u16, y as u16);
         idx += 1;
     }
 
@@ -239,7 +220,7 @@ fn fill_natural_order((bw, bh): (usize, usize), output: &mut [(u8, u8)]) {
             if y % y_scale != 0 {
                 continue;
             }
-            output[idx] = (x as u8, (y / y_scale) as u8);
+            output[idx] = (x as u16, (y / y_scale) as u16);
             idx += 1;
         }
     }
