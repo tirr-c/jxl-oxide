@@ -59,7 +59,13 @@ impl Bitstream<'_> {
             self.buf |= bits << self.remaining_buf_bits;
             let read_bytes = (63 - self.remaining_buf_bits) >> 3;
             self.remaining_buf_bits |= 56;
-            self.bytes = &self.bytes[read_bytes..];
+            // SAFETY: read_bytes < 8, self.bytes.len() >= 8 (from the pattern).
+            self.bytes = unsafe {
+                std::slice::from_raw_parts(
+                    self.bytes.as_ptr().add(read_bytes),
+                    self.bytes.len() - read_bytes,
+                )
+            };
         } else {
             self.refill_slow()
         }
@@ -88,6 +94,14 @@ impl Bitstream<'_> {
         (self.buf & ((1u64 << n) - 1)) as u32
     }
 
+    /// Peeks bits from bitstream, without consuming them.
+    #[inline]
+    pub fn peek_bits_const<const N: usize>(&mut self) -> u32 {
+        debug_assert!(N <= 32);
+        self.refill();
+        (self.buf & ((1u64 << N) - 1)) as u32
+    }
+
     /// Consumes bits in bit buffer.
     #[inline]
     pub fn consume_bits(&mut self, n: usize) -> Result<()> {
@@ -97,6 +111,18 @@ impl Bitstream<'_> {
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
         self.num_read_bits += n;
         self.buf >>= n;
+        Ok(())
+    }
+
+    /// Consumes bits in bit buffer.
+    #[inline]
+    pub fn consume_bits_const<const N: usize>(&mut self) -> Result<()> {
+        self.remaining_buf_bits = self
+            .remaining_buf_bits
+            .checked_sub(N)
+            .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
+        self.num_read_bits += N;
+        self.buf >>= N;
         Ok(())
     }
 
