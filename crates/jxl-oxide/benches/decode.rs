@@ -26,7 +26,10 @@ fn bench_one(c: &mut Criterion, bench_path: &Path, name: &str, pool: &JxlThreadP
 
     let pixels = {
         let reader = Cursor::new(&data);
-        let image = jxl_oxide::JxlImage::builder().pool(JxlThreadPool::none()).read(reader).unwrap();
+        let image = jxl_oxide::JxlImage::builder()
+            .pool(JxlThreadPool::none())
+            .read(reader)
+            .unwrap();
         image.width() as u64 * image.height() as u64
     };
     g.throughput(criterion::Throughput::Elements(pixels));
@@ -34,7 +37,10 @@ fn bench_one(c: &mut Criterion, bench_path: &Path, name: &str, pool: &JxlThreadP
     g.bench_function("preferred-color", |b| {
         b.iter_with_large_drop(|| {
             let reader = Cursor::new(&data);
-            let image = jxl_oxide::JxlImage::builder().pool(pool.clone()).read(reader).unwrap();
+            let image = jxl_oxide::JxlImage::builder()
+                .pool(pool.clone())
+                .read(reader)
+                .unwrap();
             image.render_frame(black_box(0))
         })
     });
@@ -42,7 +48,10 @@ fn bench_one(c: &mut Criterion, bench_path: &Path, name: &str, pool: &JxlThreadP
     g.bench_function("srgb-relative", |b| {
         b.iter_with_large_drop(|| {
             let reader = Cursor::new(&data);
-            let mut image = jxl_oxide::JxlImage::builder().pool(pool.clone()).read(reader).unwrap();
+            let mut image = jxl_oxide::JxlImage::builder()
+                .pool(pool.clone())
+                .read(reader)
+                .unwrap();
             image.request_color_encoding(EnumColourEncoding::srgb(RenderingIntent::Relative));
             image.render_frame(black_box(0))
         })
