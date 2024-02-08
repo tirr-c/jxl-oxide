@@ -464,6 +464,11 @@ impl DecoderInner {
         } else {
             let token = self.code.read_symbol(bitstream, cluster)?;
             if token >= min_symbol {
+                if state.num_decoded == 0 {
+                    tracing::error!("LZ77 repeat symbol encountered without decoding any symbols");
+                    return Err(Error::UnexpectedLz77Repeat);
+                }
+
                 let lz_dist_cluster = self.lz_dist_cluster();
 
                 state.num_to_copy =
@@ -485,6 +490,7 @@ impl DecoderInner {
                     distance - 119
                 };
 
+                tracing::trace!(num_decoded = state.num_decoded, distance);
                 let distance = (1 << 20).min(distance).min(state.num_decoded);
                 state.copy_pos = state.num_decoded - distance;
 

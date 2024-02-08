@@ -63,4 +63,5 @@ test_by_include!(
     modular_multiply_overflow,
     dequant_matrix_zero,
     spline_coordinate,
+    invalid_lz77,
 );
