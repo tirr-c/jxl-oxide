@@ -459,8 +459,13 @@ impl RenderContext {
             );
             match result {
                 Ok(grid) => FrameRender::Done(grid),
-                Err(Error::IncompleteFrame) => FrameRender::InProgress(cache),
-                Err(e) if e.unexpected_eof() => FrameRender::InProgress(cache),
+                Err(e) if e.unexpected_eof() || matches!(e, Error::IncompleteFrame) => {
+                    if frame.is_loading_done() {
+                        FrameRender::Err(e)
+                    } else {
+                        FrameRender::InProgress(cache)
+                    }
+                }
                 Err(e) => FrameRender::Err(e),
             }
         })
@@ -493,6 +498,11 @@ impl RenderContext {
 
 impl RenderContext {
     fn spawn_renderer(&self, index: usize) {
+        if !self.pool.is_multithreaded() {
+            // Frame rendering will run immediately, this is not we want.
+            return;
+        }
+
         let image_region = self.requested_image_region;
         if self.narrow_modular() {
             let render_handle = Arc::clone(&self.renders_narrow[index]);

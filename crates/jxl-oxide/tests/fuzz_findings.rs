@@ -64,4 +64,5 @@ test_by_include!(
     dequant_matrix_zero,
     spline_coordinate,
     invalid_lz77,
+    noise_out_of_range,
 );

@@ -8,6 +8,7 @@ pub enum Error {
     VarDct(jxl_vardct::Error),
     InvalidTocPermutation,
     IncompleteFrameData { field: &'static str },
+    HadError,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -52,6 +53,7 @@ impl std::fmt::Display for Error {
             Self::IncompleteFrameData { field } => {
                 write!(f, "incomplete frame data: {} is missing", field)
             }
+            Self::HadError => write!(f, "previous parsing errored"),
         }
     }
 }

@@ -9,25 +9,31 @@ pub fn read_permutation(
 ) -> crate::Result<Vec<usize>> {
     let end = decoder.read_varint(bitstream, get_context(size))?;
     if end > size - skip {
+        tracing::error!(size, skip, end, "Invalid permutation");
         return Err(crate::Error::InvalidPermutation);
     }
 
-    let mut lehmer = vec![0u32; size as usize];
+    let mut lehmer = vec![0u32; end as usize];
     let mut prev_val = 0u32;
-    for val in &mut lehmer[skip as usize..][..end as usize] {
+    for (idx, val) in lehmer.iter_mut().enumerate() {
+        let idx = idx as u32;
         *val = decoder.read_varint(bitstream, get_context(prev_val))?;
+        if *val >= size - skip - idx {
+            tracing::error!(idx = idx + skip, size, lehmer = *val, "Invalid permutation");
+            return Err(crate::Error::InvalidPermutation);
+        }
         prev_val = *val;
     }
 
-    let mut temp = (0..(size as usize)).collect::<Vec<_>>();
+    let mut temp = ((skip as usize)..(size as usize)).collect::<Vec<_>>();
     let mut permutation = Vec::with_capacity(size as usize);
-    for idx in lehmer {
-        let idx = idx as usize;
-        if idx >= temp.len() {
-            return Err(crate::Error::InvalidPermutation);
-        }
-        permutation.push(temp.remove(idx));
+    for idx in 0..skip {
+        permutation.push(idx as usize);
     }
+    for idx in lehmer {
+        permutation.push(temp.remove(idx as usize));
+    }
+    permutation.extend(temp);
 
     Ok(permutation)
 }
