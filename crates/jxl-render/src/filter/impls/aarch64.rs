@@ -1,9 +1,11 @@
 use std::arch::aarch64::*;
 use std::arch::is_aarch64_feature_detected;
 
+use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
+use crate::Region;
 use crate::Result;
 
 use super::generic::epf_common;
@@ -13,10 +15,10 @@ mod epf;
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
@@ -25,13 +27,13 @@ pub fn epf_step0(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                frame_header,
+                sigma_grid_map,
+                region,
+                epf_params,
                 pool,
-                Some(epf::epf_row_step0_neon),
-                super::generic::epf_row_step0,
+                Some(epf::epf_row_aarch64_neon::<0>),
+                super::generic::epf::epf_row::<0>,
             );
         }
     }
@@ -41,24 +43,24 @@ pub fn epf_step0(
         epf_common(
             input,
             output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            frame_header,
+            sigma_grid_map,
+            region,
+            epf_params,
             pool,
             None,
-            super::generic::epf_row_step0,
-        );
+            super::generic::epf::epf_row::<0>,
+        )
     }
 }
 
 pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
@@ -67,13 +69,13 @@ pub fn epf_step1(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                frame_header,
+                sigma_grid_map,
+                region,
+                epf_params,
                 pool,
-                Some(epf::epf_row_step1_neon),
-                super::generic::epf_row_step1,
+                Some(epf::epf_row_aarch64_neon::<1>),
+                super::generic::epf::epf_row::<1>,
             );
         }
     }
@@ -83,24 +85,24 @@ pub fn epf_step1(
         epf_common(
             input,
             output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            frame_header,
+            sigma_grid_map,
+            region,
+            epf_params,
             pool,
             None,
-            super::generic::epf_row_step1,
-        );
+            super::generic::epf::epf_row::<1>,
+        )
     }
 }
 
 pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
@@ -109,13 +111,13 @@ pub fn epf_step2(
             return epf_common(
                 input,
                 output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                frame_header,
+                sigma_grid_map,
+                region,
+                epf_params,
                 pool,
-                Some(epf::epf_row_step2_neon),
-                super::generic::epf_row_step2,
+                Some(epf::epf_row_aarch64_neon::<2>),
+                super::generic::epf::epf_row::<2>,
             );
         }
     }
@@ -125,14 +127,14 @@ pub fn epf_step2(
         epf_common(
             input,
             output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            frame_header,
+            sigma_grid_map,
+            region,
+            epf_params,
             pool,
             None,
-            super::generic::epf_row_step2,
-        );
+            super::generic::epf::epf_row::<2>,
+        )
     }
 }
 

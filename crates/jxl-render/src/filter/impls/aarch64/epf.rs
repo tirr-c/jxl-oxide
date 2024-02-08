@@ -2,139 +2,260 @@ use std::arch::aarch64::*;
 
 use jxl_grid::SimdVector;
 
-use crate::filter::impls::generic::EpfRow;
+use crate::filter::impls::{common, generic::EpfRow};
 
 type Vector = float32x4_t;
 
 #[target_feature(enable = "neon")]
 #[inline]
 unsafe fn weight_neon(scaled_distance: Vector, sigma: f32, step_multiplier: Vector) -> Vector {
-    let result = vfmaq_n_f32(
-        Vector::splat_f32(1.0),
-        scaled_distance.mul(step_multiplier),
-        6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma,
-    );
+    let neg_inv_sigma =
+        vdupq_n_f32(6.6 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0) / sigma).mul(step_multiplier);
+    let result = scaled_distance.mul(neg_inv_sigma).add(vdupq_n_f32(1.0));
     vmaxq_f32(result, Vector::zero())
 }
 
-macro_rules! define_epf_neon {
-    { $($v:vis unsafe fn $name:ident ($width:ident, $kernel_offsets:expr, $dist_offsets:expr $(,)?); )* } => {
-        $(
-            #[target_feature(enable = "neon")]
-            $v unsafe fn $name(epf_row: EpfRow<'_>) {
-                let EpfRow {
-                    input_buf,
-                    mut output_buf_rows,
-                    width,
-                    x8,
-                    y8,
-                    dy,
-                    sigma_grid,
-                    channel_scale,
-                    border_sad_mul,
-                    step_multiplier,
-                } = epf_row;
+pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
+    let EpfRow {
+        merged_input_rows,
+        output_rows,
+        width,
+        x,
+        y,
+        sigma_row,
+        epf_params,
+        ..
+    } = epf_row;
+    let iwidth = width as isize;
+    let merged_input_rows = merged_input_rows.unwrap();
+    let kernel_offsets = common::epf_kernel_offsets::<STEP>();
 
-                let y = y8 * 8 + dy;
-                let $width = width as isize;
+    let step_multiplier = if STEP == 0 {
+        epf_params.sigma.pass0_sigma_scale
+    } else if STEP == 2 {
+        epf_params.sigma.pass2_sigma_scale
+    } else {
+        1.0
+    };
+    let border_sad_mul = epf_params.sigma.border_sad_mul;
+    let channel_scale = epf_params.channel_scale;
 
-                let is_y_border = dy == 0 || dy == 7;
-                let sm = if is_y_border {
-                    let sm_y_edge = Vector::splat_f32(border_sad_mul * step_multiplier);
-                    [sm_y_edge, sm_y_edge]
-                } else {
-                    let sm = Vector::splat_f32(step_multiplier);
-                    [
-                        vsetq_lane_f32(border_sad_mul * step_multiplier, sm, 0),
-                        vsetq_lane_f32(border_sad_mul * step_multiplier, sm, 3),
-                    ]
-                };
+    let padding = 3 - STEP;
+    if width < padding * 2 {
+        return;
+    }
 
-                let output_width = output_buf_rows[0].len();
-                for x8 in x8..output_width / 8 {
-                    let Some(&sigma) = sigma_grid.get(x8, y8) else { break; };
+    let simd_range = {
+        let start = (x + padding + 7) & !7;
+        let end = (x + width - padding) & !7;
+        if start > end {
+            let start = start - x;
+            start..start
+        } else {
+            let start = start - x;
+            let end = end - x;
+            start..end
+        }
+    };
 
-                    for (dx, sm) in sm.into_iter().enumerate() {
-                        let base_x = (x8 + 1) * 8 + dx * Vector::SIZE;
-                        let out_base_x = base_x - 8;
-                        let base_idx = (y + 3) * width + base_x;
+    let is_y_border = (y + 1) & 0b110 == 0;
+    let sm = if is_y_border {
+        let sm = vdupq_n_f32(step_multiplier * border_sad_mul);
+        [sm, sm]
+    } else {
+        let base_sm = vdupq_n_f32(step_multiplier);
+        [
+            vsetq_lane_f32::<0>(step_multiplier * border_sad_mul, base_sm),
+            vsetq_lane_f32::<3>(step_multiplier * border_sad_mul, base_sm),
+        ]
+    };
 
-                        // SAFETY: Indexing doesn't go out of bounds since we have padding after image region.
-                        let mut sum_weights = Vector::splat_f32(1.0);
-                        let mut sum_channels = input_buf.map(|buf| {
-                            Vector::load(buf.as_ptr().add(base_idx))
-                        });
+    for dx in simd_range.step_by(4) {
+        let sigma_x = x + dx;
+        let sm = sm[(sigma_x / 4) & 1];
+        let sigma_x = sigma_x / 8 - x / 8;
 
-                        if sigma < 0.3 {
-                            for (buf, sum) in output_buf_rows.iter_mut().zip(sum_channels) {
-                                sum.store(buf.as_mut_ptr().add(out_base_x));
-                            }
-                            continue;
-                        }
+        let input_base_idx = 3 * width + dx;
+        let sigma_val = sigma_row[sigma_x];
 
-                        for offset in $kernel_offsets {
-                            let kernel_idx = base_idx.wrapping_add_signed(offset);
-                            let mut dist = Vector::zero();
-                            for (buf, scale) in input_buf.into_iter().zip(channel_scale) {
-                                let mut acc = Vector::zero();
-                                for offset in $dist_offsets {
-                                    let base_idx = base_idx.wrapping_add_signed(offset);
-                                    let kernel_idx = kernel_idx.wrapping_add_signed(offset);
-                                    acc = acc.add(vabdq_f32(
-                                        Vector::load(buf.as_ptr().add(base_idx)),
-                                        Vector::load(buf.as_ptr().add(kernel_idx)),
-                                    ));
-                                }
-                                dist = vfmaq_n_f32(
-                                    dist,
-                                    acc,
-                                    scale,
-                                );
-                            }
+        let originals: [_; 3] = std::array::from_fn(|c| unsafe {
+            vld1q_f32(merged_input_rows[c].as_ptr().add(input_base_idx))
+        });
 
-                            let weight = weight_neon(
-                                dist,
-                                sigma,
-                                sm,
-                            );
-                            sum_weights = sum_weights.add(weight);
+        if sigma_val < 0.3 {
+            for (c, val) in originals.into_iter().enumerate() {
+                vst1q_f32(output_rows[c].as_mut_ptr().add(dx), val);
+            }
+            continue;
+        }
 
-                            for (sum, buf) in sum_channels.iter_mut().zip(input_buf) {
-                                *sum = weight.muladd(Vector::load(buf.as_ptr().add(kernel_idx)), *sum);
-                            }
-                        }
+        let mut sum_weights = vdupq_n_f32(1.0);
+        let mut sum_channels = originals;
 
-                        for (buf, sum) in output_buf_rows.iter_mut().zip(sum_channels) {
-                            let val = sum.div(sum_weights);
-                            val.store(buf.as_mut_ptr().add(out_base_x));
-                        }
-                    }
+        if STEP == 1 {
+            // (0, -1), (0, 1)
+            {
+                let mut dist0 = vdupq_n_f32(0.0);
+                let mut dist1 = vdupq_n_f32(0.0);
+                for c in 0..3 {
+                    let scale = channel_scale[c];
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+
+                    let v0 = vld1q_f32(rows_ptr.add(input_base_idx - 2 * width));
+
+                    let v1r = vld1q_f32(rows_ptr.add(input_base_idx - width + 1));
+                    let v1lc = vld1_f32(rows_ptr.add(input_base_idx - width - 1));
+                    let v1lcq = vcombine_f32(vdup_n_f32(0.0), v1lc);
+                    let v1 = vextq_f32::<3>(v1lcq, v1r);
+                    let v1l = vcombine_f32(v1lc, vget_low_f32(v1r));
+
+                    let v2r = vld1q_f32(rows_ptr.add(input_base_idx + 1));
+                    let v2lc = vld1_f32(rows_ptr.add(input_base_idx - 1));
+                    let v2lcq = vcombine_f32(vdup_n_f32(0.0), v2lc);
+                    let v2 = vextq_f32::<3>(v2lcq, v2r);
+                    let v2l = vcombine_f32(v2lc, vget_low_f32(v2r));
+
+                    let v3r = vld1q_f32(rows_ptr.add(input_base_idx + width + 1));
+                    let v3lc = vld1_f32(rows_ptr.add(input_base_idx + width - 1));
+                    let v3lcq = vcombine_f32(vdup_n_f32(0.0), v3lc);
+                    let v3 = vextq_f32::<3>(v3lcq, v3r);
+                    let v3l = vcombine_f32(v3lc, vget_low_f32(v3r));
+
+                    let v4 = vld1q_f32(rows_ptr.add(input_base_idx + 2 * width));
+
+                    let tmp = v1.sub(v2).abs().add(v3.sub(v2).abs());
+                    let mut acc0 = tmp.add(v1.sub(v0).abs());
+                    let mut acc1 = tmp.add(v3.sub(v4).abs());
+
+                    acc0 = acc0.add(v1l.sub(v2l).abs());
+                    acc1 = acc1.add(v3l.sub(v2l).abs());
+
+                    acc0 = acc0.add(v1r.sub(v2r).abs());
+                    acc1 = acc1.add(v3r.sub(v2r).abs());
+
+                    dist0 = vmulq_n_f32(acc0, scale).add(dist0);
+                    dist1 = vmulq_n_f32(acc1, scale).add(dist1);
+                }
+
+                let weight0 = weight_neon(dist0, sigma_val, sm);
+                let weight1 = weight_neon(dist1, sigma_val, sm);
+                sum_weights = sum_weights.add(weight0).add(weight1);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let weighted0 = weight0.mul(vld1q_f32(rows_ptr.add(input_base_idx - width)));
+                    let weighted1 = weight1.mul(vld1q_f32(rows_ptr.add(input_base_idx + width)));
+                    *sum = sum.add(weighted0).add(weighted1);
                 }
             }
-        )*
-    };
-}
 
-define_epf_neon! {
-    pub(crate) unsafe fn epf_row_step0_neon(
-        width,
-        [
-            -2 * width,
-            -1 - width, -width, 1 - width,
-            -2, -1, 1, 2,
-            width - 1, width, width + 1,
-            2 * width,
-        ],
-        [-width, -1, 0, 1, width],
-    );
-    pub(crate) unsafe fn epf_row_step1_neon(
-        width,
-        [-width, -1, 1, width],
-        [-width, -1, 0, 1, width],
-    );
-    pub(crate) unsafe fn epf_row_step2_neon(
-        width,
-        [-width, -1, 1, width],
-        [0isize],
-    );
+            // (-1, 0), (1, 0)
+            {
+                let mut dist0 = vdupq_n_f32(0.0);
+                let mut dist1 = vdupq_n_f32(0.0);
+                for c in 0..3 {
+                    let scale = channel_scale[c];
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+
+                    let v0r = vld1q_f32(rows_ptr.add(input_base_idx - width + 1));
+                    let v0lc = vld1_f32(rows_ptr.add(input_base_idx - width - 1));
+                    let v0lcq = vcombine_f32(vdup_n_f32(0.0), v0lc);
+                    let v0 = vextq_f32::<3>(v0lcq, v0r);
+                    let v0l = vcombine_f32(v0lc, vget_low_f32(v0r));
+                    let mut acc0 = v0l.sub(v0).abs();
+                    let mut acc1 = v0r.sub(v0).abs();
+
+                    let v1rr = vld1q_f32(rows_ptr.add(input_base_idx + 2));
+                    let v1ll = vld1q_f32(rows_ptr.add(input_base_idx - 2));
+                    let v1r = vextq_f32::<3>(v1ll, v1rr);
+                    let v1 = vextq_f32::<2>(v1ll, v1rr);
+                    let v1l = vextq_f32::<1>(v1ll, v1rr);
+                    acc0 = acc0.add(v1ll.sub(v1l).abs());
+                    acc0 = acc0.add(v1.sub(v1l).abs());
+                    acc0 = acc0.add(v1.sub(v1r).abs());
+                    acc1 = acc1.add(v1.sub(v1l).abs());
+                    acc1 = acc1.add(v1.sub(v1r).abs());
+                    acc1 = acc1.add(v1rr.sub(v1r).abs());
+
+                    let v2r = vld1q_f32(rows_ptr.add(input_base_idx + width + 1));
+                    let v2lc = vld1_f32(rows_ptr.add(input_base_idx + width - 1));
+                    let v2lcq = vcombine_f32(vdup_n_f32(0.0), v2lc);
+                    let v2 = vextq_f32::<3>(v2lcq, v2r);
+                    let v2l = vcombine_f32(v2lc, vget_low_f32(v2r));
+                    acc0 = acc0.add(v2l.sub(v2).abs());
+                    acc1 = acc1.add(v2r.sub(v2).abs());
+
+                    dist0 = vmulq_n_f32(acc0, scale).add(dist0);
+                    dist1 = vmulq_n_f32(acc1, scale).add(dist1);
+                }
+
+                let weight0 = weight_neon(dist0, sigma_val, sm);
+                let weight1 = weight_neon(dist1, sigma_val, sm);
+                sum_weights = sum_weights.add(weight0).add(weight1);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let weighted0 = weight0.mul(vld1q_f32(rows_ptr.add(input_base_idx - 1)));
+                    let weighted1 = weight1.mul(vld1q_f32(rows_ptr.add(input_base_idx + 1)));
+                    *sum = sum.add(weighted0).add(weighted1);
+                }
+            }
+        } else {
+            for &(kx, ky) in kernel_offsets {
+                let input_kernel_idx = input_base_idx.wrapping_add_signed(ky * iwidth + kx);
+                let mut dist = vdupq_n_f32(0.0);
+                for c in 0..3 {
+                    let scale = channel_scale[c];
+                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    if STEP == 0 {
+                        let vk0 = vld1q_f32(rows_ptr.add(input_kernel_idx - width));
+                        let vb0 = vld1q_f32(rows_ptr.add(input_base_idx - width));
+                        let mut acc = vk0.sub(vb0).abs();
+
+                        let vk1r = vld1q_f32(rows_ptr.add(input_kernel_idx + 1));
+                        let vb1r = vld1q_f32(rows_ptr.add(input_base_idx + 1));
+                        acc = acc.add(vk1r.sub(vb1r).abs());
+
+                        let vk1lc = vld1_f32(rows_ptr.add(input_kernel_idx - 1));
+                        let vb1lc = vld1_f32(rows_ptr.add(input_base_idx - 1));
+
+                        let vk1lcq = vcombine_f32(vdup_n_f32(0.0), vk1lc);
+                        let vb1lcq = vcombine_f32(vdup_n_f32(0.0), vb1lc);
+                        let vk1 = vextq_f32::<3>(vk1lcq, vk1r);
+                        let vb1 = vextq_f32::<3>(vb1lcq, vb1r);
+                        acc = acc.add(vk1.sub(vb1).abs());
+
+                        let vk1l = vcombine_f32(vk1lc, vget_low_f32(vk1r));
+                        let vb1l = vcombine_f32(vb1lc, vget_low_f32(vb1r));
+                        acc = acc.add(vk1l.sub(vb1l).abs());
+
+                        let vk2 = vld1q_f32(rows_ptr.add(input_kernel_idx + width));
+                        let vb2 = vld1q_f32(rows_ptr.add(input_base_idx + width));
+                        acc = acc.add(vk2.sub(vb2).abs());
+
+                        dist = vmulq_n_f32(acc, scale).add(dist);
+                    } else {
+                        let v0 = vld1q_f32(rows_ptr.add(input_kernel_idx));
+                        let v1 = vld1q_f32(rows_ptr.add(input_base_idx));
+                        dist = vmulq_n_f32(v0.sub(v1).abs(), scale).add(dist);
+                    }
+                }
+
+                let weight = weight_neon(dist, sigma_val, sm);
+                sum_weights = sum_weights.add(weight);
+
+                for (c, sum) in sum_channels.iter_mut().enumerate() {
+                    *sum = weight
+                        .mul(vld1q_f32(
+                            merged_input_rows[c].as_ptr().add(input_kernel_idx),
+                        ))
+                        .add(*sum);
+                }
+            }
+        }
+
+        for (c, sum) in sum_channels.into_iter().enumerate() {
+            vst1q_f32(output_rows[c].as_mut_ptr().add(dx), sum.div(sum_weights));
+        }
+    }
 }
