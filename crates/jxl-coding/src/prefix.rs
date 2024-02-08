@@ -319,7 +319,7 @@ impl Histogram {
 
 impl Histogram {
     #[inline]
-    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u16> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u32> {
         let Self {
             toplevel_bits,
             toplevel_mask,
@@ -335,22 +335,22 @@ impl Histogram {
             let second_level_offset = toplevel_entry.symbol_or_offset as u32 + chunk_offset;
             let second_level_entry = second_level_entries[second_level_offset as usize];
             bitstream.consume_bits(second_level_entry.bits_or_mask as usize)?;
-            Ok(second_level_entry.symbol_or_offset)
+            Ok(second_level_entry.symbol_or_offset as u32)
         } else {
             bitstream.consume_bits(toplevel_entry.bits_or_mask as usize)?;
-            Ok(toplevel_entry.symbol_or_offset)
+            Ok(toplevel_entry.symbol_or_offset as u32)
         }
     }
 
     #[inline]
-    pub fn single_symbol(&self) -> Option<u16> {
+    pub fn single_symbol(&self) -> Option<u32> {
         if let &[Entry {
             nested: false,
             bits_or_mask: 0,
             symbol_or_offset: symbol,
         }] = &*self.toplevel_entries
         {
-            Some(symbol)
+            Some(symbol as u32)
         } else {
             None
         }
