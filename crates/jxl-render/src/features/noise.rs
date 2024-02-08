@@ -3,7 +3,7 @@ use std::num::Wrapping;
 use jxl_frame::{data::NoiseParameters, FrameHeader};
 use jxl_grid::{AllocTracker, PaddedGrid, SimpleGrid};
 
-use crate::{ImageWithRegion, Result};
+use crate::{ImageWithRegion, Region, Result};
 
 pub fn render_noise(
     header: &FrameHeader,
@@ -18,12 +18,14 @@ pub fn render_noise(
     let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else {
         panic!()
     };
-    assert!(region.left >= 0 && region.top >= 0);
 
-    let left = region.left as usize;
-    let top = region.top as usize;
-    let width = region.width as usize;
-    let height = region.height as usize;
+    let full_frame_region = Region::with_size(header.width, header.height);
+    let actual_region = region.intersection(full_frame_region);
+
+    let left = actual_region.left as usize;
+    let top = actual_region.top as usize;
+    let width = actual_region.width as usize;
+    let height = actual_region.height as usize;
     let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
 
     // TODO: Initialize smaller noise grid.

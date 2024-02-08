@@ -58,6 +58,7 @@ struct AllGroupOffsets {
     lf_group: AtomicUsize,
     hf_global: AtomicUsize,
     pass_group: AtomicUsize,
+    has_error: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -248,7 +249,12 @@ impl Frame {
 impl Frame {
     pub fn try_parse_lf_global<S: Sample>(&self) -> Option<Result<LfGlobal<S>>> {
         Some(if self.toc.is_single_entry() {
+            if self.all_group_offsets.has_error.load(Ordering::Relaxed) != 0 {
+                return Some(Err(Error::HadError));
+            }
+
             let group = self.data.first()?;
+            let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
             let lf_global = LfGlobal::parse(
                 &mut bitstream,
@@ -259,13 +265,20 @@ impl Frame {
                     false,
                 ),
             );
-            if lf_global.is_ok() {
-                tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
-                self.all_group_offsets
-                    .lf_group
-                    .store(bitstream.num_read_bits(), Ordering::Relaxed);
+            match lf_global {
+                Ok(lf_global) => {
+                    tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
+                    self.all_group_offsets
+                        .lf_group
+                        .store(bitstream.num_read_bits(), Ordering::Relaxed);
+                    Ok(lf_global)
+                }
+                Err(e) if !loaded && e.unexpected_eof() => Err(e),
+                Err(e) => {
+                    self.all_group_offsets.has_error.store(1, Ordering::Relaxed);
+                    Err(e)
+                }
             }
-            lf_global
         } else {
             let idx = self.toc.group_index_bitstream_order(TocGroupKind::LfGlobal);
             let group = self.data.get(idx)?;
@@ -292,11 +305,16 @@ impl Frame {
         lf_group_idx: u32,
     ) -> Option<Result<LfGroup<S>>> {
         if self.toc.is_single_entry() {
+            if self.all_group_offsets.has_error.load(Ordering::Relaxed) != 0 {
+                return Some(Err(Error::HadError));
+            }
+
             if lf_group_idx != 0 {
                 return None;
             }
 
             let group = self.data.first()?;
+            let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
             let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
             if offset == 0 {
@@ -308,7 +326,6 @@ impl Frame {
             let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
             bitstream.skip_bits(offset).unwrap();
 
-            let allow_partial = group.bytes.len() < group.toc_group.size as usize;
             let result = LfGroup::parse(
                 &mut bitstream,
                 LfGroupParams {
@@ -317,19 +334,26 @@ impl Frame {
                     global_ma_config,
                     mlf_group,
                     lf_group_idx,
-                    allow_partial,
+                    allow_partial: !loaded,
                     tracker: self.tracker.as_ref(),
                     pool: &self.pool,
                 },
             );
-            if allow_partial && result.is_err() {
-                return None;
+
+            match result {
+                Ok(result) => {
+                    tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGroup");
+                    self.all_group_offsets
+                        .hf_global
+                        .store(bitstream.num_read_bits(), Ordering::Relaxed);
+                    Some(Ok(result))
+                }
+                Err(e) if !loaded && e.unexpected_eof() => None,
+                Err(e) => {
+                    self.all_group_offsets.has_error.store(2, Ordering::Relaxed);
+                    Some(Err(e))
+                }
             }
-            tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGroup");
-            self.all_group_offsets
-                .hf_global
-                .store(bitstream.num_read_bits(), Ordering::Relaxed);
-            Some(result)
         } else {
             let idx = self
                 .toc
@@ -365,7 +389,12 @@ impl Frame {
         let is_modular = self.header.encoding == header::Encoding::Modular;
 
         if self.toc.is_single_entry() {
+            if self.all_group_offsets.has_error.load(Ordering::Relaxed) != 0 {
+                return Some(Err(Error::HadError));
+            }
+
             let group = self.data.first()?;
+            let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
             let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
             let lf_global = if cached_lf_global.is_none() && (offset == 0 || !is_modular) {
@@ -401,7 +430,10 @@ impl Frame {
                         mlf_group,
                         0,
                     )
-                    .unwrap();
+                    .ok_or(
+                        jxl_bitstream::Error::Io(std::io::ErrorKind::UnexpectedEof.into()).into(),
+                    )
+                    .and_then(|x| x);
                 if let Err(e) = lf_group {
                     return Some(Err(e));
                 }
@@ -427,10 +459,20 @@ impl Frame {
                     &self.pool,
                 ),
             );
-            self.all_group_offsets
-                .pass_group
-                .store(bitstream.num_read_bits(), Ordering::Relaxed);
-            Some(result)
+
+            Some(match result {
+                Ok(result) => {
+                    self.all_group_offsets
+                        .pass_group
+                        .store(bitstream.num_read_bits(), Ordering::Relaxed);
+                    Ok(result)
+                }
+                Err(e) if !loaded && e.unexpected_eof() => Err(e),
+                Err(e) => {
+                    self.all_group_offsets.has_error.store(3, Ordering::Relaxed);
+                    Err(e)
+                }
+            })
         } else {
             if self.header.encoding == header::Encoding::Modular {
                 return None;
@@ -469,11 +511,16 @@ impl Frame {
         group_idx: u32,
     ) -> Option<Result<PassGroupBitstream>> {
         Some(if self.toc.is_single_entry() {
+            if self.all_group_offsets.has_error.load(Ordering::Relaxed) != 0 {
+                return Some(Err(Error::HadError));
+            }
+
             if pass_idx != 0 || group_idx != 0 {
                 return None;
             }
 
             let group = self.data.first()?;
+            let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
             let mut offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
             if offset == 0 {
@@ -487,7 +534,7 @@ impl Frame {
 
             Ok(PassGroupBitstream {
                 bitstream,
-                partial: group.bytes.len() < group.toc_group.size as usize,
+                partial: !loaded,
             })
         } else {
             let idx = self

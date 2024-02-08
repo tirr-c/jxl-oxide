@@ -51,6 +51,7 @@ pub enum FrameRender<S: Sample> {
     InProgress(Box<RenderCache<S>>),
     Done(ImageWithRegion),
     Err(crate::Error),
+    ErrTaken,
 }
 
 impl<S: Sample> std::fmt::Debug for FrameRender<S> {
@@ -61,6 +62,7 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
             Self::InProgress(_) => write!(f, "InProgress(_)"),
             Self::Done(_) => write!(f, "Done(_)"),
             Self::Err(e) => f.debug_tuple("Err").field(e).finish(),
+            Self::ErrTaken => write!(f, "ErrTaken"),
         }
     }
 }
@@ -149,7 +151,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                     return Err(Error::IncompleteFrame);
                 }
                 FrameRender::Err(e) => {
-                    drop(self.done_render(FrameRender::None));
+                    drop(self.done_render(FrameRender::ErrTaken));
                     return Err(e);
                 }
                 _ => {}
@@ -184,16 +186,19 @@ impl<S: Sample> FrameRenderHandle<S> {
         let mut render_ref = self.render.lock().unwrap();
         let render = std::mem::replace(&mut *render_ref, FrameRender::Rendering);
         match render {
-            FrameRender::Done(_) => {
+            FrameRender::None | FrameRender::InProgress(_) => Ok(Some(render)),
+            FrameRender::Err(e) => {
+                *render_ref = FrameRender::ErrTaken;
+                Err(e)
+            }
+            FrameRender::ErrTaken => {
+                *render_ref = FrameRender::ErrTaken;
+                Err(Error::FailedReference)
+            }
+            render => {
                 *render_ref = render;
                 Ok(None)
             }
-            FrameRender::Rendering => Ok(None),
-            FrameRender::Err(e) => {
-                *render_ref = FrameRender::None;
-                Err(e)
-            }
-            render => Ok(Some(render)),
         }
     }
 
@@ -201,13 +206,11 @@ impl<S: Sample> FrameRenderHandle<S> {
         let mut render_ref = self.render.lock().unwrap();
         let render = std::mem::replace(&mut *render_ref, FrameRender::Rendering);
         match render {
-            FrameRender::Done(_) => {
+            FrameRender::None | FrameRender::InProgress(_) => Some(render),
+            render => {
                 *render_ref = render;
                 None
             }
-            FrameRender::Rendering => None,
-            FrameRender::Err(_) => None,
-            render => Some(render),
         }
     }
 
@@ -228,6 +231,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                     return Err(Error::IncompleteFrame)
                 }
                 FrameRender::Err(e) => return Err(e),
+                FrameRender::ErrTaken => return Err(Error::FailedReference),
             }
         }
     }
