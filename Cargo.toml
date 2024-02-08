@@ -2,6 +2,11 @@
 members = ["crates/*"]
 resolver = "2"
 
+[workspace.dependencies.tracing]
+version = "0.1.37"
+default-features = false
+features = ["std"]
+
 [profile.release]
 debug = 1
 # lto = true

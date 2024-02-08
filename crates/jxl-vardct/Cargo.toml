@@ -12,6 +12,7 @@ version = "0.5.0"
 edition = "2021"
 
 [dependencies]
+tracing.workspace = true
 
 [dependencies.jxl-bitstream]
 version = "0.3.1"
@@ -32,8 +33,3 @@ path = "../jxl-modular"
 [dependencies.jxl-threadpool]
 version = "0.1.0"
 path = "../jxl-threadpool"
-
-[dependencies.tracing]
-version = "0.1.37"
-default-features = false
-features = ["std"]

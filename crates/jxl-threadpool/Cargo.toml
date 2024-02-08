@@ -11,6 +11,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tracing.workspace = true
 
 [dependencies.rayon]
 version = "1.8.0"
@@ -19,11 +20,6 @@ optional = true
 [dependencies.rayon-core]
 version = "1.12.0"
 optional = true
-
-[dependencies.tracing]
-version = "0.1.37"
-default-features = false
-features = ["std"]
 
 [features]
 default = []
