@@ -71,7 +71,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         let sigma_val = sigma_row[sigma_x];
         if sigma_val < 0.3 {
             for c in 0..3 {
-                output_rows[c][dx] = input_rows[c][3][dx];
+                output_rows[c][dx].write(input_rows[c][3][dx]);
             }
             continue;
         }
@@ -109,7 +109,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         }
 
         for (c, sum) in sum_channels.into_iter().enumerate() {
-            output_rows[c][dx] = sum / sum_weights;
+            output_rows[c][dx].write(sum / sum_weights);
         }
     }
 
@@ -120,7 +120,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
             let sigma_val = sigma_row[sigma_x];
             if sigma_val < 0.3 {
                 for c in 0..3 {
-                    output_rows[c][dx] = input_rows[c][3][dx];
+                    output_rows[c][dx].write(input_rows[c][3][dx]);
                 }
                 continue;
             }
@@ -159,7 +159,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
             }
 
             for (c, sum) in sum_channels.into_iter().enumerate() {
-                output_rows[c][dx] = sum / sum_weights;
+                output_rows[c][dx].write(sum / sum_weights);
             }
         }
     }
@@ -170,7 +170,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         let sigma_val = sigma_row[sigma_x];
         if sigma_val < 0.3 {
             for c in 0..3 {
-                output_rows[c][dx] = input_rows[c][3][dx];
+                output_rows[c][dx].write(input_rows[c][3][dx]);
             }
             continue;
         }
@@ -208,7 +208,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         }
 
         for (c, sum) in sum_channels.into_iter().enumerate() {
-            output_rows[c][dx] = sum / sum_weights;
+            output_rows[c][dx].write(sum / sum_weights);
         }
     }
 }

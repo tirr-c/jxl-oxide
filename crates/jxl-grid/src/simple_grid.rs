@@ -1,4 +1,4 @@
-use std::{ops::RangeBounds, ptr::NonNull};
+use std::{mem::MaybeUninit, ops::RangeBounds, ptr::NonNull};
 
 use crate::{AllocHandle, AllocTracker, Error, SharedSubgrid, SimdVector};
 
@@ -29,9 +29,11 @@ pub struct SimpleGrid<S> {
     handle: Option<AllocHandle>,
 }
 
-impl<S: Default + Clone> SimpleGrid<S> {
+impl<S> SimpleGrid<S> {
     const ALIGN: usize = compute_align::<S>();
+}
 
+impl<S: Default + Clone> SimpleGrid<S> {
     /// Create a new buffer, recording the allocation if a tracker is given.
     #[inline]
     pub fn with_alloc_tracker(
@@ -72,6 +74,66 @@ impl<S: Default + Clone> SimpleGrid<S> {
         let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
         out.buf_mut().clone_from_slice(self.buf());
         Ok(out)
+    }
+}
+
+impl<S> SimpleGrid<MaybeUninit<S>> {
+    /// Create a new *uninitialized* buffer, recording the allocation if a tracker is given.
+    #[inline]
+    pub fn uninit_with_alloc_tracker(
+        width: usize,
+        height: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, Error> {
+        let len = width * height;
+        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
+        let handle = tracker
+            .map(|tracker| tracker.alloc::<S>(buf_len))
+            .transpose()?;
+        let mut buf = Vec::<MaybeUninit<S>>::with_capacity(buf_len);
+        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
+        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
+        // SAFETY: MaybeUninit<S> doesn't need to be initialized, len + offset <= buf_len.
+        unsafe {
+            buf.set_len(len + offset);
+        }
+
+        Ok(Self {
+            width,
+            height,
+            offset,
+            buf,
+            handle,
+        })
+    }
+
+    pub fn from_grid(grid: SimpleGrid<S>) -> Self {
+        Self {
+            width: grid.width,
+            height: grid.height,
+            offset: grid.offset,
+            buf: unsafe { std::mem::transmute::<Vec<S>, Vec<MaybeUninit<S>>>(grid.buf) },
+            handle: grid.handle,
+        }
+    }
+
+    /// Marks this grid as initialized.
+    ///
+    /// # Safety
+    /// Grid must be initialized.
+    pub unsafe fn assume_init(mut self, padding: impl Fn() -> S) -> SimpleGrid<S> {
+        for v in &mut self.buf[..self.offset] {
+            v.write(padding());
+        }
+
+        // Now self.buf is really initialized.
+        SimpleGrid {
+            width: self.width,
+            height: self.height,
+            offset: self.offset,
+            buf: std::mem::transmute::<Vec<MaybeUninit<S>>, Vec<S>>(self.buf),
+            handle: self.handle,
+        }
     }
 }
 

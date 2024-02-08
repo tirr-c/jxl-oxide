@@ -84,7 +84,7 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
 
         if sigma_val < 0.3 {
             for (c, val) in originals.into_iter().enumerate() {
-                vst1q_f32(output_rows[c].as_mut_ptr().add(dx), val);
+                vst1q_f32(output_rows[c].as_mut_ptr().add(dx) as *mut _, val);
             }
             continue;
         }
@@ -255,7 +255,10 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
         }
 
         for (c, sum) in sum_channels.into_iter().enumerate() {
-            vst1q_f32(output_rows[c].as_mut_ptr().add(dx), sum.div(sum_weights));
+            vst1q_f32(
+                output_rows[c].as_mut_ptr().add(dx) as *mut _,
+                sum.div(sum_weights),
+            );
         }
     }
 }

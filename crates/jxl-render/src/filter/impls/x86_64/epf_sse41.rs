@@ -94,7 +94,7 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
 
         if sigma_val < 0.3 {
             for (c, val) in originals.into_iter().enumerate() {
-                _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), val);
+                _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx) as *mut _, val);
             }
             continue;
         }
@@ -306,7 +306,10 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
         }
 
         for (c, sum) in sum_channels.into_iter().enumerate() {
-            _mm_storeu_ps(output_rows[c].as_mut_ptr().add(dx), sum.div(sum_weights));
+            _mm_storeu_ps(
+                output_rows[c].as_mut_ptr().add(dx) as *mut _,
+                sum.div(sum_weights),
+            );
         }
     }
 }

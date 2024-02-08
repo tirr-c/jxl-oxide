@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
@@ -10,7 +12,7 @@ mod epf_sse41;
 
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
@@ -51,7 +53,7 @@ pub fn epf_step0(
 
 pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
@@ -92,7 +94,7 @@ pub fn epf_step1(
 
 pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
+    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,

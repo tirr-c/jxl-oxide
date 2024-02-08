@@ -28,9 +28,9 @@ pub fn apply_epf<S: Sample>(
     let height = region.height as usize;
     let fb_in = <&mut [_; 3]>::try_from(fb).unwrap();
     let mut fb_out = [
-        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
-        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
-        SimpleGrid::with_alloc_tracker(width, height, tracker.as_ref())?,
+        SimpleGrid::uninit_with_alloc_tracker(width, height, tracker.as_ref())?,
+        SimpleGrid::uninit_with_alloc_tracker(width, height, tracker.as_ref())?,
+        SimpleGrid::uninit_with_alloc_tracker(width, height, tracker.as_ref())?,
     ];
 
     let num_lf_groups = frame_header.num_lf_groups() as usize;
@@ -54,9 +54,18 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
-        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
-        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
+        // SAFETY: fb_out is initialized.
+        unsafe {
+            let [o0, o1, o2] = fb_out;
+            let i0 = std::mem::replace(&mut fb_in[0], o0.assume_init(Default::default));
+            let i1 = std::mem::replace(&mut fb_in[1], o1.assume_init(Default::default));
+            let i2 = std::mem::replace(&mut fb_in[2], o2.assume_init(Default::default));
+            fb_out = [
+                SimpleGrid::from_grid(i0),
+                SimpleGrid::from_grid(i1),
+                SimpleGrid::from_grid(i2),
+            ];
+        }
     }
 
     // Step 1
@@ -71,9 +80,18 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
-        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
-        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
+        // SAFETY: fb_out is initialized.
+        unsafe {
+            let [o0, o1, o2] = fb_out;
+            let i0 = std::mem::replace(&mut fb_in[0], o0.assume_init(Default::default));
+            let i1 = std::mem::replace(&mut fb_in[1], o1.assume_init(Default::default));
+            let i2 = std::mem::replace(&mut fb_in[2], o2.assume_init(Default::default));
+            fb_out = [
+                SimpleGrid::from_grid(i0),
+                SimpleGrid::from_grid(i1),
+                SimpleGrid::from_grid(i2),
+            ];
+        }
     }
 
     // Step 2
@@ -88,9 +106,13 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb_in[0], &mut fb_out[0]);
-        std::mem::swap(&mut fb_in[1], &mut fb_out[1]);
-        std::mem::swap(&mut fb_in[2], &mut fb_out[2]);
+        // SAFETY: fb_out is initialized.
+        unsafe {
+            let [o0, o1, o2] = fb_out;
+            fb_in[0] = o0.assume_init(Default::default);
+            fb_in[1] = o1.assume_init(Default::default);
+            fb_in[2] = o2.assume_init(Default::default);
+        }
     }
 
     Ok(())
