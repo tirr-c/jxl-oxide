@@ -12,6 +12,7 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
+tracing.workspace = true
 
 [dependencies.jxl-bitstream]
 version = "0.3.0"
