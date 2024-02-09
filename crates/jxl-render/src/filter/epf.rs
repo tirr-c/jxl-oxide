@@ -45,7 +45,7 @@ pub fn apply_epf<S: Sample>(
     // Step 0
     if iters == 3 {
         tracing::debug!("Running step 0");
-        super::impls::epf_step0(
+        super::impls::epf::<0>(
             fb_in,
             &mut fb_out,
             frame_header,
@@ -62,7 +62,7 @@ pub fn apply_epf<S: Sample>(
     // Step 1
     {
         tracing::debug!("Running step 1");
-        super::impls::epf_step1(
+        super::impls::epf::<1>(
             fb_in,
             &mut fb_out,
             frame_header,
@@ -79,7 +79,7 @@ pub fn apply_epf<S: Sample>(
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
-        super::impls::epf_step2(
+        super::impls::epf::<2>(
             fb_in,
             &mut fb_out,
             frame_header,

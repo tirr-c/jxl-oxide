@@ -8,7 +8,7 @@ use super::generic::epf_common;
 
 mod epf_sse41;
 
-pub fn epf_step0(
+pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
@@ -28,8 +28,8 @@ pub fn epf_step0(
                 region,
                 epf_params,
                 pool,
-                Some(epf_sse41::epf_row_x86_64_sse41::<0>),
-                super::generic::epf::epf_row::<0>,
+                Some(epf_sse41::epf_row_x86_64_sse41::<STEP>),
+                super::generic::epf::epf_row::<STEP>,
             );
         }
     }
@@ -44,89 +44,7 @@ pub fn epf_step0(
             epf_params,
             pool,
             None,
-            super::generic::epf::epf_row::<0>,
-        )
-    }
-}
-
-pub fn epf_step1(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
-    region: Region,
-    epf_params: &EpfParams,
-    pool: &JxlThreadPool,
-) {
-    if is_x86_feature_detected!("sse4.1") {
-        // SAFETY: Features are checked above.
-        unsafe {
-            return epf_common(
-                input,
-                output,
-                frame_header,
-                sigma_grid_map,
-                region,
-                epf_params,
-                pool,
-                Some(epf_sse41::epf_row_x86_64_sse41::<1>),
-                super::generic::epf::epf_row::<1>,
-            );
-        }
-    }
-
-    unsafe {
-        epf_common(
-            input,
-            output,
-            frame_header,
-            sigma_grid_map,
-            region,
-            epf_params,
-            pool,
-            None,
-            super::generic::epf::epf_row::<1>,
-        )
-    }
-}
-
-pub fn epf_step2(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
-    region: Region,
-    epf_params: &EpfParams,
-    pool: &JxlThreadPool,
-) {
-    if is_x86_feature_detected!("sse4.1") {
-        // SAFETY: Features are checked above.
-        unsafe {
-            return epf_common(
-                input,
-                output,
-                frame_header,
-                sigma_grid_map,
-                region,
-                epf_params,
-                pool,
-                Some(epf_sse41::epf_row_x86_64_sse41::<2>),
-                super::generic::epf::epf_row::<2>,
-            );
-        }
-    }
-
-    unsafe {
-        epf_common(
-            input,
-            output,
-            frame_header,
-            sigma_grid_map,
-            region,
-            epf_params,
-            pool,
-            None,
-            super::generic::epf::epf_row::<2>,
+            super::generic::epf::epf_row::<STEP>,
         )
     }
 }

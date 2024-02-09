@@ -88,7 +88,13 @@ pub(crate) unsafe fn epf_common<'buf>(
     pool.for_each_vec_with(
         jobs,
         vec![epf_params.sigma_for_modular; sigma_len],
-        |sigma_row, EpfJob { base_y, output0, output1, output2 }| {
+        |sigma_row,
+         EpfJob {
+             base_y,
+             output0,
+             output1,
+             output2,
+         }| {
             let sigma_y = (top + base_y) / 8;
             let sigma_group_y = sigma_y >> sigma_group_dim_shift;
             let sigma_inner_y = sigma_y & sigma_group_dim_mask;
@@ -164,7 +170,7 @@ pub(crate) unsafe fn epf_common<'buf>(
     );
 }
 
-pub fn epf_step0(
+pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
@@ -183,55 +189,7 @@ pub fn epf_step0(
             epf_params,
             pool,
             None,
-            epf::epf_row::<0>,
-        )
-    }
-}
-
-pub fn epf_step1(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
-    region: Region,
-    epf_params: &EpfParams,
-    pool: &JxlThreadPool,
-) {
-    unsafe {
-        epf_common(
-            input,
-            output,
-            frame_header,
-            sigma_grid_map,
-            region,
-            epf_params,
-            pool,
-            None,
-            epf::epf_row::<1>,
-        )
-    }
-}
-
-pub fn epf_step2(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
-    region: Region,
-    epf_params: &EpfParams,
-    pool: &JxlThreadPool,
-) {
-    unsafe {
-        epf_common(
-            input,
-            output,
-            frame_header,
-            sigma_grid_map,
-            region,
-            epf_params,
-            pool,
-            None,
-            epf::epf_row::<2>,
+            epf::epf_row::<STEP>,
         )
     }
 }
