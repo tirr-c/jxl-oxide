@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use std::mem::MaybeUninit;
-
 use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
@@ -13,7 +11,7 @@ pub(crate) mod epf;
 pub(crate) struct EpfRow<'buf, 'epf> {
     pub(crate) input_rows: [[&'buf [f32]; 7]; 3],
     pub(crate) merged_input_rows: Option<[&'buf [f32]; 3]>,
-    pub(crate) output_rows: [&'buf mut [MaybeUninit<f32>]; 3],
+    pub(crate) output_rows: [&'buf mut [f32]; 3],
     pub(crate) width: usize,
     pub(crate) x: usize,
     pub(crate) y: usize,
@@ -25,7 +23,7 @@ pub(crate) struct EpfRow<'buf, 'epf> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn epf_common<'buf>(
     input: &'buf [SimpleGrid<f32>; 3],
-    output: &'buf mut [SimpleGrid<MaybeUninit<f32>>; 3],
+    output: &'buf mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
@@ -36,9 +34,9 @@ pub(crate) unsafe fn epf_common<'buf>(
 ) {
     struct EpfJob<'buf> {
         base_y: usize,
-        output0: &'buf mut [MaybeUninit<f32>],
-        output1: &'buf mut [MaybeUninit<f32>],
-        output2: &'buf mut [MaybeUninit<f32>],
+        output0: &'buf mut [f32],
+        output1: &'buf mut [f32],
+        output2: &'buf mut [f32],
     }
 
     let width = region.width as usize;
@@ -173,7 +171,7 @@ pub(crate) unsafe fn epf_common<'buf>(
 
 pub fn epf_step0(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
@@ -197,7 +195,7 @@ pub fn epf_step0(
 
 pub fn epf_step1(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
@@ -221,7 +219,7 @@ pub fn epf_step1(
 
 pub fn epf_step2(
     input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<MaybeUninit<f32>>; 3],
+    output: &mut [SimpleGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&SimpleGrid<f32>>],
     region: Region,
