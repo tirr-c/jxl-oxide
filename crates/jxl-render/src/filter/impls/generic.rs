@@ -84,16 +84,11 @@ pub(crate) unsafe fn epf_common<'buf>(
     let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
     let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
     let groups_per_row = frame_header.lf_groups_per_row() as usize;
-    pool.for_each_vec(
+    let sigma_len = (left + width + 7) / 8 - left / 8;
+    pool.for_each_vec_with(
         jobs,
-        |EpfJob {
-             base_y,
-             output0,
-             output1,
-             output2,
-         }| {
-            let sigma_len = (left + width + 7) / 8 - left / 8;
-            let mut sigma_row = vec![epf_params.sigma_for_modular; sigma_len];
+        vec![epf_params.sigma_for_modular; sigma_len],
+        |sigma_row, EpfJob { base_y, output0, output1, output2 }| {
             let sigma_y = (top + base_y) / 8;
             let sigma_group_y = sigma_y >> sigma_group_dim_shift;
             let sigma_inner_y = sigma_y & sigma_group_dim_mask;
@@ -143,7 +138,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                             width,
                             x: left,
                             y: image_y,
-                            sigma_row: &sigma_row,
+                            sigma_row,
                             epf_params,
                             skip_inner,
                         };
@@ -159,7 +154,7 @@ pub(crate) unsafe fn epf_common<'buf>(
                     width,
                     x: left,
                     y: image_y,
-                    sigma_row: &sigma_row,
+                    sigma_row,
                     epf_params,
                     skip_inner,
                 };
