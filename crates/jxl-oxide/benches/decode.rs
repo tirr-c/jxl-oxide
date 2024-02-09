@@ -14,6 +14,8 @@ fn decode(c: &mut Criterion) {
     bench_one(c, &bench_path, "minecraft.d0-e6", &pool);
     bench_one(c, &bench_path, "nahida-motion.d1-e7", &pool);
     bench_one(c, &bench_path, "starrail.d1-e6", &pool);
+    bench_one(c, &bench_path, "genshin-cafe.d2-e6-epf2", &pool);
+    bench_one(c, &bench_path, "genshin-cafe.d2-e6-epf3", &pool);
 }
 
 fn bench_one(c: &mut Criterion, bench_path: &Path, name: &str, pool: &JxlThreadPool) {
