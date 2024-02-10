@@ -3,7 +3,7 @@ use jxl_color::{
 };
 use jxl_frame::{
     data::{LfGlobalVarDct, LfGroup},
-    filter::EdgePreservingFilter,
+    filter::{EdgePreservingFilter, EpfParams},
     header::FrameType,
     Frame, FrameHeader,
 };
@@ -111,7 +111,9 @@ pub(crate) fn pad_color_region(
     };
 
     // TODO: actual region could be smaller.
-    if let EdgePreservingFilter::Enabled { iters, .. } = frame_header.restoration_filter.epf {
+    if let EdgePreservingFilter::Enabled(EpfParams { iters, .. }) =
+        frame_header.restoration_filter.epf
+    {
         // EPF references adjacent samples.
         color_padded_region = if iters == 1 {
             color_padded_region.pad(2)
@@ -311,4 +313,16 @@ pub(crate) fn convert_color_for_record(
 
     // color transform is done
     true
+}
+
+pub(crate) fn mirror(mut offset: isize, len: usize) -> usize {
+    loop {
+        if offset < 0 {
+            offset = -(offset + 1);
+        } else if (offset as usize) >= len {
+            offset = (-(offset + 1)).wrapping_add_unsigned(len * 2);
+        } else {
+            return offset as usize;
+        }
+    }
 }

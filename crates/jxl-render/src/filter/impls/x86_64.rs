@@ -1,133 +1,50 @@
+use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
+use crate::Region;
+
 use super::generic::epf_common;
 
-mod epf_avx2;
-mod epf_sse2;
+mod epf_sse41;
 
-pub fn epf_step0(
+pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+    if is_x86_feature_detected!("sse4.1") {
         // SAFETY: Features are checked above.
         unsafe {
             return epf_common(
                 input,
                 output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
+                frame_header,
+                sigma_grid_map,
+                region,
+                epf_params,
                 pool,
-                Some(epf_avx2::epf_row_step0_avx2),
-                super::generic::epf_row_step0,
+                Some(epf_sse41::epf_row_x86_64_sse41::<STEP>),
+                super::generic::epf::epf_row::<STEP>,
             );
         }
     }
 
-    // SAFETY: x86_64 always supports SSE2.
     unsafe {
         epf_common(
             input,
             output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            frame_header,
+            sigma_grid_map,
+            region,
+            epf_params,
             pool,
-            Some(epf_sse2::epf_row_step0_sse2),
-            super::generic::epf_row_step0,
-        )
-    }
-}
-
-pub fn epf_step1(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
-    pool: &JxlThreadPool,
-) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-        // SAFETY: Features are checked above.
-        unsafe {
-            return epf_common(
-                input,
-                output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
-                pool,
-                Some(epf_avx2::epf_row_step1_avx2),
-                super::generic::epf_row_step1,
-            );
-        }
-    }
-
-    // SAFETY: x86_64 always supports SSE2.
-    unsafe {
-        epf_common(
-            input,
-            output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
-            pool,
-            Some(epf_sse2::epf_row_step1_sse2),
-            super::generic::epf_row_step1,
-        )
-    }
-}
-
-pub fn epf_step2(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
-    pool: &JxlThreadPool,
-) {
-    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-        // SAFETY: Features are checked above.
-        unsafe {
-            return epf_common(
-                input,
-                output,
-                sigma_grid,
-                channel_scale,
-                border_sad_mul,
-                step_multiplier,
-                pool,
-                Some(epf_avx2::epf_row_step2_avx2),
-                super::generic::epf_row_step2,
-            );
-        }
-    }
-
-    // SAFETY: x86_64 always supports SSE2.
-    unsafe {
-        epf_common(
-            input,
-            output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
-            pool,
-            Some(epf_sse2::epf_row_step2_sse2),
-            super::generic::epf_row_step2,
+            None,
+            super::generic::epf::epf_row::<STEP>,
         )
     }
 }

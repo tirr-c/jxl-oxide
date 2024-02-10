@@ -1,331 +1,197 @@
 #![allow(dead_code)]
 
+use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::Result;
+use crate::{util, Region, Result};
 
-pub(crate) struct EpfRow<'buf> {
-    pub(crate) input_buf: [&'buf [f32]; 3],
-    pub(crate) output_buf_rows: [&'buf mut [f32]; 3],
+pub(crate) mod epf;
+
+pub(crate) struct EpfRow<'buf, 'epf> {
+    pub(crate) input_rows: [[&'buf [f32]; 7]; 3],
+    pub(crate) merged_input_rows: Option<[&'buf [f32]; 3]>,
+    pub(crate) output_rows: [&'buf mut [f32]; 3],
     pub(crate) width: usize,
-    pub(crate) x8: usize,
-    pub(crate) y8: usize,
-    pub(crate) dy: usize,
-    pub(crate) sigma_grid: &'buf SimpleGrid<f32>,
-    pub(crate) channel_scale: [f32; 3],
-    pub(crate) border_sad_mul: f32,
-    pub(crate) step_multiplier: f32,
+    pub(crate) x: usize,
+    pub(crate) y: usize,
+    pub(crate) sigma_row: &'buf [f32],
+    pub(crate) epf_params: &'epf EpfParams,
+    pub(crate) skip_inner: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn epf_common<'buf>(
     input: &'buf [SimpleGrid<f32>; 3],
     output: &'buf mut [SimpleGrid<f32>; 3],
-    sigma_grid: &'buf SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
-    handle_row_simd: Option<for<'a> unsafe fn(EpfRow<'a>)>,
-    handle_row_generic: for<'a> fn(EpfRow<'a>),
+    handle_row_simd: Option<for<'a, 'b> unsafe fn(EpfRow<'a, 'b>)>,
+    handle_row_generic: for<'a, 'b> fn(EpfRow<'a, 'b>),
 ) {
     struct EpfJob<'buf> {
-        y8: usize,
+        base_y: usize,
         output0: &'buf mut [f32],
         output1: &'buf mut [f32],
         output2: &'buf mut [f32],
     }
 
-    let width = input[0].width();
-    let height = input[0].height();
-    assert!(width % 8 == 0);
-
-    let out_width = output[0].width();
-    let out_height = output[0].height();
+    let width = region.width as usize;
+    let height = region.height as usize;
+    assert!(region.left >= 0);
+    assert!(region.top >= 0);
+    let left = region.left as usize;
+    let top = region.top as usize;
 
     let input_buf = [input[0].buf(), input[1].buf(), input[2].buf()];
-    let (output0, output1, output2) = {
+    let (mut output0, mut output1, mut output2) = {
         let [a, b, c] = output;
         (a.buf_mut(), b.buf_mut(), c.buf_mut())
     };
+
     assert_eq!(input_buf[0].len(), width * height);
     assert_eq!(input_buf[1].len(), width * height);
     assert_eq!(input_buf[2].len(), width * height);
-    assert_eq!(output0.len(), out_width * out_height);
-    assert_eq!(output1.len(), out_width * out_height);
-    assert_eq!(output2.len(), out_width * out_height);
+    assert_eq!(output0.len(), width * height);
+    assert_eq!(output1.len(), width * height);
+    assert_eq!(output2.len(), width * height);
 
-    let output0_it = output0.chunks_mut(8 * out_width);
-    let output1_it = output1.chunks_mut(8 * out_width);
-    let output2_it = output2.chunks_mut(8 * out_width);
-    let jobs = output0_it
-        .zip(output1_it)
-        .zip(output2_it)
-        .enumerate()
-        .map(|(y8, ((output0, output1), output2))| EpfJob {
-            y8,
-            output0,
-            output1,
-            output2,
-        })
-        .collect();
+    let mut jobs = Vec::new();
+    let mut image_y = top;
+    while image_y < top + height {
+        let next = ((image_y + 8) & !7).min(top + height);
+        let job_height = next - image_y;
 
-    pool.for_each_vec(
+        let (job_output0, next_output0) = output0.split_at_mut(job_height * width);
+        let (job_output1, next_output1) = output1.split_at_mut(job_height * width);
+        let (job_output2, next_output2) = output2.split_at_mut(job_height * width);
+        jobs.push(EpfJob {
+            base_y: image_y - top,
+            output0: job_output0,
+            output1: job_output1,
+            output2: job_output2,
+        });
+
+        output0 = next_output0;
+        output1 = next_output1;
+        output2 = next_output2;
+        image_y = next;
+    }
+
+    let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
+    let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
+    let groups_per_row = frame_header.lf_groups_per_row() as usize;
+    let sigma_len = (left + width + 7) / 8 - left / 8;
+    pool.for_each_vec_with(
         jobs,
-        |EpfJob {
-             y8,
+        vec![epf_params.sigma_for_modular; sigma_len],
+        |sigma_row,
+         EpfJob {
+             base_y,
              output0,
              output1,
              output2,
          }| {
-            let width_aligned = out_width & !7;
-            for dy in 0..(height - 6 - y8 * 8).min(8) {
-                let x8 = if let Some(handle_row) = handle_row_simd {
-                    let output_buf_rows = [
-                        &mut output0[dy * out_width..][..width_aligned],
-                        &mut output1[dy * out_width..][..width_aligned],
-                        &mut output2[dy * out_width..][..width_aligned],
-                    ];
-                    let row = EpfRow {
-                        input_buf,
-                        output_buf_rows,
-                        width,
-                        x8: 0,
-                        y8,
-                        dy,
-                        sigma_grid,
-                        channel_scale,
-                        border_sad_mul,
-                        step_multiplier,
-                    };
+            let sigma_y = (top + base_y) / 8;
+            let sigma_group_y = sigma_y >> sigma_group_dim_shift;
+            let sigma_inner_y = sigma_y & sigma_group_dim_mask;
 
-                    handle_row(row);
-                    width_aligned / 8
+            for (dx, sigma) in sigma_row.iter_mut().enumerate() {
+                let sigma_x = left / 8 + dx;
+                let sigma_group_x = sigma_x >> sigma_group_dim_shift;
+                let sigma_inner_x = sigma_x & sigma_group_dim_mask;
+                let sigma_grid_idx = sigma_group_y * groups_per_row + sigma_group_x;
+                if let Some(grid) = sigma_grid_map[sigma_grid_idx] {
+                    let width = grid.width();
+                    *sigma = grid.buf()[sigma_inner_y * width + sigma_inner_x];
+                }
+            }
+
+            let it = output0
+                .chunks_exact_mut(width)
+                .zip(output1.chunks_exact_mut(width))
+                .zip(output2.chunks_exact_mut(width));
+            for (dy, ((output0, output1), output2)) in it.enumerate() {
+                let y = base_y + dy;
+                let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
+                    std::array::from_fn(|idx| {
+                        let y = util::mirror((y + idx) as isize - 3, height);
+                        &input_buf[c][y * width..][..width]
+                    })
+                });
+                let merged_input_rows: Option<[_; 3]> = if y >= 3 && y < height - 3 {
+                    Some(std::array::from_fn(|c| {
+                        &input_buf[c][(y - 3) * width..][..7 * width]
+                    }))
                 } else {
-                    0
+                    None
                 };
 
+                let image_y = top + base_y + dy;
+
+                let mut skip_inner = false;
+                if merged_input_rows.is_some() {
+                    if let Some(handle_row_simd) = handle_row_simd {
+                        skip_inner = true;
+                        let output_rows = [&mut *output0, &mut *output1, &mut *output2];
+                        let row = EpfRow {
+                            input_rows,
+                            merged_input_rows,
+                            output_rows,
+                            width,
+                            x: left,
+                            y: image_y,
+                            sigma_row,
+                            epf_params,
+                            skip_inner,
+                        };
+                        handle_row_simd(row);
+                    }
+                }
+
+                let output_rows = [output0, output1, output2];
                 let row = EpfRow {
-                    input_buf,
-                    output_buf_rows: [
-                        &mut output0[dy * out_width..][..out_width],
-                        &mut output1[dy * out_width..][..out_width],
-                        &mut output2[dy * out_width..][..out_width],
-                    ],
+                    input_rows,
+                    output_rows,
+                    merged_input_rows,
                     width,
-                    x8,
-                    y8,
-                    dy,
-                    sigma_grid,
-                    channel_scale,
-                    border_sad_mul,
-                    step_multiplier,
+                    x: left,
+                    y: image_y,
+                    sigma_row,
+                    epf_params,
+                    skip_inner,
                 };
-
                 handle_row_generic(row);
             }
         },
     );
 }
 
-pub fn epf_step0(
+pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
     output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
+    frame_header: &FrameHeader,
+    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    region: Region,
+    epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
-    // SAFETY: row handler is safe.
     unsafe {
         epf_common(
             input,
             output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
+            frame_header,
+            sigma_grid_map,
+            region,
+            epf_params,
             pool,
             None,
-            epf_row_step0,
-        );
+            epf::epf_row::<STEP>,
+        )
     }
-}
-
-pub fn epf_step1(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
-    pool: &JxlThreadPool,
-) {
-    // SAFETY: row handler is safe.
-    unsafe {
-        epf_common(
-            input,
-            output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
-            pool,
-            None,
-            epf_row_step1,
-        );
-    }
-}
-
-pub fn epf_step2(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
-    sigma_grid: &SimpleGrid<f32>,
-    channel_scale: [f32; 3],
-    border_sad_mul: f32,
-    step_multiplier: f32,
-    pool: &JxlThreadPool,
-) {
-    // SAFETY: row handler is safe.
-    unsafe {
-        epf_common(
-            input,
-            output,
-            sigma_grid,
-            channel_scale,
-            border_sad_mul,
-            step_multiplier,
-            pool,
-            None,
-            epf_row_step2,
-        );
-    }
-}
-
-#[inline]
-fn weight(scaled_distance: f32, sigma: f32, step_multiplier: f32) -> f32 {
-    let inv_sigma = step_multiplier * 6.6 * (1.0 - std::f32::consts::FRAC_1_SQRT_2) / sigma;
-    (1.0 - scaled_distance * inv_sigma).max(0.0)
-}
-
-macro_rules! define_epf {
-    { $($v:vis fn $name:ident ($width:ident, $kernel_offsets:expr, $dist_offsets:expr $(,)?); )* } => {
-        $(
-            $v fn $name(epf_row: EpfRow<'_>) {
-                let EpfRow {
-                    input_buf,
-                    mut output_buf_rows,
-                    width,
-                    x8,
-                    y8,
-                    dy,
-                    sigma_grid,
-                    channel_scale,
-                    border_sad_mul,
-                    step_multiplier,
-                } = epf_row;
-
-                let y = y8 * 8 + dy;
-                let $width = width as isize;
-
-                let is_y_border = dy == 0 || dy == 7;
-                let sm = if is_y_border {
-                    [border_sad_mul * step_multiplier; 8]
-                } else {
-                    [
-                        border_sad_mul * step_multiplier,
-                        step_multiplier,
-                        step_multiplier,
-                        step_multiplier,
-                        step_multiplier,
-                        step_multiplier,
-                        step_multiplier,
-                        border_sad_mul * step_multiplier,
-                    ]
-                };
-
-                let output_width = output_buf_rows[0].len();
-                for x8 in x8..(output_width + 7) / 8 {
-                    let base_x = (x8 + 1) * 8;
-                    let out_base_x = x8 * 8;
-                    let block_width = (output_width - out_base_x).min(8);
-                    let base_idx = (y + 3) * width + base_x;
-
-                    let Some(&sigma_val) = sigma_grid.get(x8, y8) else { break; };
-                    if sigma_val < 0.3 {
-                        for (input_ch, output_ch) in input_buf.iter().zip(output_buf_rows.iter_mut()) {
-                            output_ch[out_base_x..][..block_width].copy_from_slice(&input_ch[base_idx..][..block_width]);
-                        }
-                        continue;
-                    }
-
-                    for (dx, sm) in sm.into_iter().enumerate().take(block_width) {
-                        let base_idx = base_idx + dx;
-                        let out_base_x = out_base_x + dx;
-
-                        let mut sum_weights = 1.0f32;
-                        let mut sum_channels = [0.0f32; 3];
-                        for (sum, ch) in sum_channels.iter_mut().zip(input_buf) {
-                            *sum = ch[base_idx];
-                        }
-
-                        for offset in $kernel_offsets {
-                            let kernel_idx = base_idx.wrapping_add_signed(offset);
-                            let mut dist = 0.0f32;
-                            for (ch, scale) in input_buf.iter().zip(channel_scale) {
-                                for offset in $dist_offsets {
-                                    let base_idx = base_idx.wrapping_add_signed(offset);
-                                    let kernel_idx = kernel_idx.wrapping_add_signed(offset);
-                                    dist = scale.mul_add((ch[base_idx] - ch[kernel_idx]).abs(), dist);
-                                }
-                            }
-
-                            let weight = weight(
-                                dist,
-                                sigma_val,
-                                sm,
-                            );
-                            sum_weights += weight;
-
-                            for (sum, ch) in sum_channels.iter_mut().zip(input_buf) {
-                                *sum = weight.mul_add(ch[kernel_idx], *sum);
-                            }
-                        }
-
-                        for (sum, ch) in sum_channels.into_iter().zip(output_buf_rows.iter_mut()) {
-                            ch[out_base_x] = sum / sum_weights;
-                        }
-                    }
-                }
-            }
-        )*
-    };
-}
-
-define_epf! {
-    pub(crate) fn epf_row_step0(
-        width,
-        [
-            -2 * width,
-            -1 - width, -width, 1 - width,
-            -2, -1, 1, 2,
-            width - 1, width, width + 1,
-            2 * width,
-        ],
-        [-width, -1, 0, 1, width],
-    );
-    pub(crate) fn epf_row_step1(
-        width,
-        [-width, -1, 1, width],
-        [-width, -1, 0, 1, width],
-    );
-    pub(crate) fn epf_row_step2(
-        width,
-        [-width, -1, 1, width],
-        [0isize],
-    );
 }
 
 pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) -> Result<()> {
