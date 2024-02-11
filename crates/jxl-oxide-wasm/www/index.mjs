@@ -1,5 +1,45 @@
 import './styles.css';
 
+class WorkerPool {
+  #workerPool = [];
+  #queue = [];
+  #remaining;
+
+  constructor(maxConcurrentWorkers = 8) {
+    this.#remaining = maxConcurrentWorkers;
+  }
+
+  async getWorker() {
+    if (this.#remaining <= 0) {
+      return new Promise(resolve => {
+        this.#queue.push(resolve);
+      });
+    }
+
+    this.#remaining -= 1;
+    let worker = this.#workerPool.shift();
+    if (!worker) {
+      worker = new Worker('jxl-decode-worker.js');
+    }
+    return worker;
+  }
+
+  putWorker(worker) {
+    worker.postMessage({ type: 'reset' });
+
+    const maybeResolve = this.#queue.shift();
+    if (maybeResolve) {
+      maybeResolve(worker);
+      return;
+    }
+
+    this.#workerPool.push(worker);
+    this.#remaining += 1;
+  }
+}
+
+const workerPool = new WorkerPool(8);
+
 const workers = new Map();
 async function registerWorker() {
   if ('serviceWorker' in navigator) {
@@ -10,7 +50,7 @@ async function registerWorker() {
     }
   }
 
-  navigator.serviceWorker.addEventListener('message', ev => {
+  navigator.serviceWorker.addEventListener('message', async ev => {
     const sw = ev.source;
 
     const data = ev.data;
@@ -20,7 +60,7 @@ async function registerWorker() {
     }
 
     if (!workers.has(id)) {
-      const worker = new Worker('jxl-decode-worker.js');
+      const worker = await workerPool.getWorker();
       worker.addEventListener('message', ev => {
         const data = ev.data;
         switch (data.type) {
@@ -41,6 +81,7 @@ async function registerWorker() {
             });
             break;
         }
+        return worker;
       });
       workers.set(id, worker);
     }
@@ -48,8 +89,8 @@ async function registerWorker() {
     const worker = workers.get(id);
     switch (data.type) {
       case 'done':
-        worker.terminate();
         workers.delete(id);
+        workerPool.putWorker(worker);
         break;
       case 'feed':
         worker.postMessage({ type: 'feed', buffer: data.buffer }, [data.buffer.buffer]);
@@ -64,7 +105,7 @@ async function registerWorker() {
 async function decodeIntoImageNode(file, imgNode) {
   imgNode.classList.add('loading');
 
-  const worker = new Worker('jxl-decode-worker.js');
+  const worker = await workerPool.getWorker();
 
   try {
     const blob = await new Promise((resolve, reject) => {
@@ -89,7 +130,7 @@ async function decodeIntoImageNode(file, imgNode) {
     imgNode.src = URL.createObjectURL(blob);
   } finally {
     imgNode.classList.remove('loading');
-    worker.terminate();
+    workerPool.putWorker(worker);
   }
 }
 

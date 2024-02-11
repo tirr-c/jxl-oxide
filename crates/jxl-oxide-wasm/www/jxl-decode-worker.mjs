@@ -3,7 +3,7 @@ const jxlOxidePromise = import('./wasm/jxl-oxide.js').then(jxlOxide => {
   return jxlOxide;
 });
 
-let image;
+let image = null;
 async function feed(buffer) {
   if (!image) {
     const { JxlImage } = await jxlOxidePromise;
@@ -15,13 +15,11 @@ async function feed(buffer) {
 function render() {
   const loadingDone = image.tryInit();
   if (!loadingDone) {
-    image.free();
     throw new Error('Partial image, no frame data');
   }
 
   console.info('Rendering...');
   const renderResult = image.render();
-  image.free();
 
   console.info('Converting to PNG...');
   const output = renderResult.encodeToPng();
@@ -70,6 +68,12 @@ async function handleMessage(ev) {
         );
         break;
       }
+      case 'reset':
+        if (image) {
+          image.free();
+          image = null;
+        }
+        break;
     }
   } catch (err) {
     self.postMessage({
