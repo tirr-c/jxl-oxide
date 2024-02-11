@@ -12,10 +12,10 @@ export default [
     entry: './src/index.mjs',
     target: 'web',
     output: {
-      filename: 'assets-[fullhash]/[name].[contenthash].js',
-      chunkFilename: 'assets-[fullhash]/[chunkhash].js',
-      assetModuleFilename: 'assets-[fullhash]/[name].[hash][ext][query]',
-      webassemblyModuleFilename: 'assets-[fullhash]/[hash].wasm',
+      filename: 'assets/[name].[contenthash].js',
+      chunkFilename: 'assets/[chunkhash].js',
+      assetModuleFilename: 'assets/[name].[hash][ext][query]',
+      webassemblyModuleFilename: 'assets/[hash].wasm',
       path: outputPath,
     },
     module: {
@@ -33,7 +33,7 @@ export default [
             {
               loader: 'file-loader',
               options: {
-                name: 'static/[name].[hash].[ext]',
+                name: 'assets/[name].[hash].[ext]',
               },
             },
           ],
@@ -51,7 +51,7 @@ export default [
       ...(
         isDev
         ? []
-        : [new MiniCssExtractPlugin({ filename: 'assets-[fullhash]/[chunkhash].css' })]
+        : [new MiniCssExtractPlugin({ filename: 'assets/[chunkhash].css' })]
       ),
     ],
   },
@@ -64,9 +64,9 @@ export default [
     target: 'webworker',
     output: {
       filename: '[name].js',
-      chunkFilename: 'assets-[fullhash]/[chunkhash].js',
-      assetModuleFilename: 'assets-[fullhash]/[name].[hash][ext][query]',
-      webassemblyModuleFilename: 'assets-[fullhash]/[hash].wasm',
+      chunkFilename: 'assets/[chunkhash].js',
+      assetModuleFilename: 'assets/[name].[hash][ext][query]',
+      webassemblyModuleFilename: 'assets/[hash].wasm',
       path: outputPath,
     },
     experiments: {
