@@ -134,21 +134,8 @@ async function decodeIntoImageNode(file, imgNode) {
   }
 }
 
-const template = `
-<form class="form">
-<label>
-Attach a file: <input type="file" class="file" accept=".jxl,image/jxl">
-</label>
-<input type="submit" value="Load">
-</form>
-`;
-
 registerWorker().then(async () => {
-  const container = document.createElement('main');
-  container.id = 'container';
-  container.innerHTML = template;
-  document.body.appendChild(container);
-
+  const container = document.getElementById('container');
   const form = container.querySelector('.form');
   const fileInput = container.querySelector('.file');
 

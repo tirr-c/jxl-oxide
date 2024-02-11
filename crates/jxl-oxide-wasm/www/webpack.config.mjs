@@ -11,7 +11,6 @@ export default [
     entry: './index.mjs',
     target: 'web',
     output: {
-      filename: 'app.js',
       path: new URL('./dist', import.meta.url).pathname,
     },
     module: {
@@ -23,11 +22,15 @@ export default [
             'css-loader',
           ],
         },
+        {
+          test: /\.html$/i,
+          use: ['html-loader'],
+        },
       ],
     },
     plugins: [
       new HtmlWebpackPlugin({
-        title: 'jxl-oxide-wasm Demo',
+        template: 'index.html',
       }),
       new CopyPlugin({
         patterns: [
@@ -39,19 +42,12 @@ export default [
   },
   {
     mode,
-    entry: './service-worker.mjs',
-    target: 'webworker',
-    output: {
-      filename: 'service-worker.js',
-      path: new URL('./dist', import.meta.url).pathname,
+    entry: {
+      'service-worker': './service-worker.mjs',
+      'jxl-decode-worker': './jxl-decode-worker.mjs',
     },
-  },
-  {
-    mode,
-    entry: './jxl-decode-worker.mjs',
     target: 'webworker',
     output: {
-      filename: 'jxl-decode-worker.js',
       path: new URL('./dist', import.meta.url).pathname,
     },
     experiments: {
