@@ -28,20 +28,45 @@ function render() {
   return output;
 }
 
+async function decodeFile(file) {
+  const { JxlImage } = await jxlOxidePromise;
+  image = new JxlImage();
+
+  const reader = file.stream().getReader();
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      break;
+    }
+
+    image.feedBytes(chunk.value);
+  }
+
+  const buffer = render();
+  const blob = new File(
+    [buffer],
+    file.name + '.rendered.png',
+    { type: 'image/png' },
+  );
+  self.postMessage({ type: 'blob', blob });
+}
+
 async function handleMessage(ev) {
-  const {type, buffer} = ev.data;
+  const data = ev.data;
   try {
-    switch (type) {
+    switch (data.type) {
+      case 'file':
+        await decodeFile(data.file);
+        break;
       case 'feed':
-        await feed(new Uint8Array(buffer));
+        await feed(data.buffer);
         self.postMessage({ type: 'feed' });
         break;
       case 'decode': {
         const image = render();
-        const buffer = image.buffer;
         self.postMessage(
-          { type: 'image', image: buffer },
-          [buffer],
+          { type: 'image', image },
+          [image.buffer],
         );
         break;
       }

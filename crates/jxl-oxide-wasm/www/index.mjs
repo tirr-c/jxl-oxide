@@ -30,7 +30,7 @@ async function registerWorker() {
           case 'image':
             sw.postMessage(
               { id, type: 'image', image: data.image },
-              [data.image]
+              [data.image.buffer]
             );
             break;
           case 'error':
@@ -52,7 +52,7 @@ async function registerWorker() {
         workers.delete(id);
         break;
       case 'feed':
-        worker.postMessage({ type: 'feed', buffer: data.buffer }, [data.buffer]);
+        worker.postMessage({ type: 'feed', buffer: data.buffer }, [data.buffer.buffer]);
         break;
       case 'decode':
         worker.postMessage({ type: 'decode' });
@@ -61,33 +61,68 @@ async function registerWorker() {
   });
 }
 
-registerWorker().then(() => {
+async function decodeIntoImageNode(file, imgNode) {
+  imgNode.classList.add('loading');
+
+  const worker = new Worker('jxl-decode-worker.js');
+
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      worker.addEventListener('message', ev => {
+        const data = ev.data;
+        switch (data.type) {
+          case 'blob':
+            resolve(data.blob);
+            break;
+          case 'error':
+            reject(new Error(data.message));
+            break;
+        }
+      });
+      worker.postMessage({ type: 'file', file });
+    });
+
+    const prevUrl = imgNode.src;
+    if (prevUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(prevUrl);
+    }
+    imgNode.src = URL.createObjectURL(blob);
+  } finally {
+    imgNode.classList.remove('loading');
+    worker.terminate();
+  }
+}
+
+const template = `
+<form class="form">
+<label>
+Attach a file: <input type="file" class="file" accept=".jxl,image/jxl">
+</label>
+<input type="submit" value="Load">
+</form>
+`;
+
+registerWorker().then(async () => {
   const container = document.createElement('main');
   container.id = 'container';
+  container.innerHTML = template;
+  document.body.appendChild(container);
 
-  const input = document.createElement('input');
-  input.value = '/assets/sunset_logo.jxl';
-  const img = new Image();
+  const form = container.querySelector('.form');
+  const fileInput = container.querySelector('.file');
+
+  const img = document.createElement('img');
   img.className = 'image';
   img.src = '/assets/sunset_logo.jxl';
+  await img.decode().catch(() => {});
 
-  const form = document.createElement('form');
-  form.className = 'form';
-  const label = document.createElement('label');
-  label.appendChild(document.createTextNode('JPEG XL image path: '));
-  label.appendChild(input);
-  form.appendChild(label);
-  const submit = document.createElement('input');
-  submit.type = 'submit';
-  submit.value = 'Load';
-  form.appendChild(submit);
+  container.appendChild(img);
   form.addEventListener('submit', ev => {
     ev.preventDefault();
-    const path = input.value;
-    img.src = path;
-  });
 
-  container.appendChild(form);
-  container.appendChild(img);
-  document.body.appendChild(container);
+    const file = fileInput.files[0];
+    if (file) {
+      decodeIntoImageNode(file, img);
+    }
+  });
 });

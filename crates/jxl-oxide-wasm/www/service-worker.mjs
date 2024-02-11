@@ -31,10 +31,9 @@ async function handleRequest(ev) {
       break;
     }
 
-    const buffer = chunk.value.buffer;
     await new Promise((resolve, reject) => {
       resultPromiseMap.set(id, [resolve, reject]);
-      client.postMessage({ id, type: 'feed', buffer }, [buffer]);
+      client.postMessage({ id, type: 'feed', buffer: chunk.value }, [chunk.value.buffer]);
     });
   }
 
@@ -50,7 +49,9 @@ async function handleRequest(ev) {
   headers.delete('content-length');
   headers.delete('content-encoding');
   headers.delete('transfer-encoding');
-  headers.append('content-type', 'image/png');
+  headers.delete('accept-ranges');
+  headers.delete('etag');
+  headers.set('content-type', 'image/png');
   return new Response(output, {
     status,
     headers,

@@ -19,10 +19,16 @@ html, body {
 
 .form {
   flex: none;
+  display: flex;
+  justify-content: center;
 }
 
 .image {
   flex: 1;
   min-height: 0;
-  object-fit: contain;
+  object-fit: scale-down;
+}
+
+.image.loading {
+  opacity: 0.5;
 }
