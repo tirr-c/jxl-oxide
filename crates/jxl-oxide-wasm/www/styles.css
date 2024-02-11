@@ -1,0 +1,28 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+#container {
+  height: 100vh;
+  padding: 8px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.form {
+  flex: none;
+}
+
+.image {
+  flex: 1;
+  min-height: 0;
+  object-fit: contain;
+}
