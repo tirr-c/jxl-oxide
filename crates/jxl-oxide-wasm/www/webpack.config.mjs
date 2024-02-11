@@ -1,9 +1,10 @@
-import { default as CopyPlugin } from 'copy-webpack-plugin';
 import { default as HtmlWebpackPlugin } from 'html-webpack-plugin';
 import { default as MiniCssExtractPlugin } from 'mini-css-extract-plugin';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const mode = isDev ? 'development' : 'production';
+
+const outputPath = new URL('./dist', import.meta.url).pathname;
 
 export default [
   {
@@ -11,7 +12,11 @@ export default [
     entry: './src/index.mjs',
     target: 'web',
     output: {
-      path: new URL('./dist', import.meta.url).pathname,
+      filename: 'assets-[fullhash]/[name].[contenthash].js',
+      chunkFilename: 'assets-[fullhash]/[chunkhash].js',
+      assetModuleFilename: 'assets-[fullhash]/[name].[hash][ext][query]',
+      webassemblyModuleFilename: 'assets-[fullhash]/[hash].wasm',
+      path: outputPath,
     },
     module: {
       rules: [
@@ -20,6 +25,17 @@ export default [
           use: [
             isDev ? 'style-loader' : MiniCssExtractPlugin.loader,
             'css-loader',
+          ],
+        },
+        {
+          test: /\.jxl$/i,
+          use: [
+            {
+              loader: 'file-loader',
+              options: {
+                name: 'static/[name].[hash].[ext]',
+              },
+            },
           ],
         },
         {
@@ -32,12 +48,11 @@ export default [
       new HtmlWebpackPlugin({
         template: './src/index.html',
       }),
-      new CopyPlugin({
-        patterns: [
-          { from: 'assets/', to: 'assets/' },
-        ],
-      }),
-      ...(isDev ? [] : [new MiniCssExtractPlugin()]),
+      ...(
+        isDev
+        ? []
+        : [new MiniCssExtractPlugin({ filename: 'assets-[fullhash]/[chunkhash].css' })]
+      ),
     ],
   },
   {
@@ -48,7 +63,11 @@ export default [
     },
     target: 'webworker',
     output: {
-      path: new URL('./dist', import.meta.url).pathname,
+      filename: '[name].js',
+      chunkFilename: 'assets-[fullhash]/[chunkhash].js',
+      assetModuleFilename: 'assets-[fullhash]/[name].[hash][ext][query]',
+      webassemblyModuleFilename: 'assets-[fullhash]/[hash].wasm',
+      path: outputPath,
     },
     experiments: {
       asyncWebAssembly: true,

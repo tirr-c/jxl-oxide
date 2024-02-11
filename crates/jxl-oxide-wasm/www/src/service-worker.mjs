@@ -19,7 +19,7 @@ async function handleRequest(ev) {
     return resp;
   }
 
-  console.info(`Loading ${url.pathname}...`);
+  console.info(`Started to decode ${url.pathname}`);
   const client = await self.clients.get(ev.clientId);
   const id = nextId;
   nextId += 1;
@@ -44,7 +44,6 @@ async function handleRequest(ev) {
 
   client.postMessage({ id, type: 'done' });
 
-  console.info('Transferring...');
   const headers = new Headers(resp.headers);
   headers.delete('content-length');
   headers.delete('content-encoding');
@@ -62,7 +61,7 @@ self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
-self.addEventListener('active', ev => {
+self.addEventListener('activate', ev => {
   ev.waitUntil(clients.claim());
 });
 

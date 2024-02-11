@@ -1,4 +1,5 @@
 import './styles.css';
+import sunsetLogoUrl from './assets/sunset_logo.jxl';
 
 class WorkerPool {
   #workerPool = [];
@@ -43,63 +44,93 @@ const workerPool = new WorkerPool(8);
 const workers = new Map();
 async function registerWorker() {
   if ('serviceWorker' in navigator) {
-    try {
-      await navigator.serviceWorker.register('service-worker.js');
-    } catch (error) {
-      console.error(`Registration failed with ${error}`);
-    }
-  }
-
-  navigator.serviceWorker.addEventListener('message', async ev => {
-    const sw = ev.source;
-
-    const data = ev.data;
-    const id = data.id;
-    if (!id) {
-      return;
-    }
-
-    if (!workers.has(id)) {
-      const worker = await workerPool.getWorker();
-      worker.addEventListener('message', ev => {
-        const data = ev.data;
-        switch (data.type) {
-          case 'feed':
-            sw.postMessage({ id, type: 'feed' });
-            break;
-          case 'image':
-            sw.postMessage(
-              { id, type: 'image', image: data.image },
-              [data.image.buffer]
-            );
-            break;
-          case 'error':
-            sw.postMessage({
-              id,
-              type: 'error',
-              message: data.message,
+    const registerPromise = navigator.serviceWorker
+      .register('service-worker.js', { updateViaCache: 'imports' })
+      .then(
+        registration => {
+          if (registration.active) {
+            registration.addEventListener('updatefound', () => {
+              const sw = registration.installing;
+              sw.addEventListener('statechange', () => {
+                const state = sw.state;
+                if (state === 'installed') {
+                  console.info('Service Worker update is available.');
+                }
+              });
             });
-            break;
-        }
-        return worker;
-      });
-      workers.set(id, worker);
+          }
+        },
+        err => {
+          console.error(`Registration failed with ${err}`);
+          throw err;
+        },
+      );
+
+    if (!navigator.serviceWorker.controller) {
+      await Promise.all([
+        registerPromise,
+        new Promise(resolve => {
+          function handle() {
+            resolve();
+            navigator.serviceWorker.removeEventListener('controllerchange', handle);
+          }
+
+          navigator.serviceWorker.addEventListener('controllerchange', handle);
+        }),
+      ]);
     }
 
-    const worker = workers.get(id);
-    switch (data.type) {
-      case 'done':
-        workers.delete(id);
-        workerPool.putWorker(worker);
-        break;
-      case 'feed':
-        worker.postMessage({ type: 'feed', buffer: data.buffer }, [data.buffer.buffer]);
-        break;
-      case 'decode':
-        worker.postMessage({ type: 'decode' });
-        break;
-    }
-  });
+    navigator.serviceWorker.addEventListener('message', async ev => {
+      const sw = ev.source;
+
+      const data = ev.data;
+      const id = data.id;
+      if (id == null) {
+        return;
+      }
+
+      if (!workers.has(id)) {
+        const worker = await workerPool.getWorker();
+        worker.addEventListener('message', ev => {
+          const data = ev.data;
+          switch (data.type) {
+            case 'feed':
+              sw.postMessage({ id, type: 'feed' });
+              break;
+            case 'image':
+              sw.postMessage(
+                { id, type: 'image', image: data.image },
+                [data.image.buffer]
+              );
+              break;
+            case 'error':
+              sw.postMessage({
+                id,
+                type: 'error',
+                message: data.message,
+              });
+              break;
+          }
+          return worker;
+        });
+        workers.set(id, worker);
+      }
+
+      const worker = workers.get(id);
+      switch (data.type) {
+        case 'done':
+          workers.delete(id);
+          workerPool.putWorker(worker);
+          break;
+        case 'feed':
+          worker.postMessage({ type: 'feed', buffer: data.buffer }, [data.buffer.buffer]);
+          break;
+        case 'decode':
+          worker.postMessage({ type: 'decode' });
+          break;
+      }
+    });
+  }
 }
 
 async function decodeIntoImageNode(file, imgNode) {
@@ -141,7 +172,7 @@ registerWorker().then(async () => {
 
   const img = document.createElement('img');
   img.className = 'image';
-  img.src = '/assets/sunset_logo.jxl';
+  img.src = sunsetLogoUrl;
   await img.decode().catch(() => {});
 
   container.appendChild(img);

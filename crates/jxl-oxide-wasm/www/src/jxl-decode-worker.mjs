@@ -13,16 +13,19 @@ async function feed(buffer) {
 }
 
 function render() {
+  console.time('Decode and render');
   const loadingDone = image.tryInit();
   if (!loadingDone) {
     throw new Error('Partial image, no frame data');
   }
 
-  console.info('Rendering...');
+  console.timeLog('Decode and render', 'started rendering');
   const renderResult = image.render();
 
-  console.info('Converting to PNG...');
+  console.timeLog('Decode and render', 'encoding to PNG');
   const output = renderResult.encodeToPng();
+
+  console.timeEnd('Decode and render');
   return output;
 }
 
