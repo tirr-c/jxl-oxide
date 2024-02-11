@@ -39,10 +39,19 @@ export default [
   },
   {
     mode,
-    entry: './service-worker.js',
+    entry: './service-worker.mjs',
     target: 'webworker',
     output: {
       filename: 'service-worker.js',
+      path: new URL('./dist', import.meta.url).pathname,
+    },
+  },
+  {
+    mode,
+    entry: './jxl-decode-worker.mjs',
+    target: 'webworker',
+    output: {
+      filename: 'jxl-decode-worker.js',
       path: new URL('./dist', import.meta.url).pathname,
     },
     experiments: {

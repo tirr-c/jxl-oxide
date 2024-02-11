@@ -1,9 +1,8 @@
-const jxlOxidePromise = import('./wasm/jxl-oxide').then(jxlOxide => {
-  jxlOxide.init();
-  return jxlOxide;
-});
+let nextId = 0;
+const resultPromiseMap = new Map();
 
-async function handleRequest(request) {
+async function handleRequest(ev) {
+  const request = ev.request;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) {
     // Cross-origin request, forward
@@ -20,10 +19,10 @@ async function handleRequest(request) {
     return resp;
   }
 
-  const { JxlImage } = await jxlOxidePromise;
-
   console.info(`Loading ${url.pathname}...`);
-  const image = new JxlImage();
+  const client = await self.clients.get(ev.clientId);
+  const id = nextId;
+  nextId += 1;
 
   const reader = resp.body.getReader();
   while (true) {
@@ -31,29 +30,22 @@ async function handleRequest(request) {
     if (chunk.done) {
       break;
     }
-    image.feedBytes(chunk.value);
-  }
 
-  const loadingDone = image.tryInit();
-  if (!loadingDone) {
-    console.error('Partial image, no frame data');
-    image.free();
-    return new Response(new Uint8Array(), {
-      status,
-      headers: {
-        'content-type': 'application/octet-stream',
-      },
+    const buffer = chunk.value.buffer;
+    await new Promise((resolve, reject) => {
+      resultPromiseMap.set(id, [resolve, reject]);
+      client.postMessage({ id, type: 'feed', buffer }, [buffer]);
     });
   }
 
-  console.info('Rendering...');
-  const renderResult = image.render();
-  image.free();
+  const output = await new Promise((resolve, reject) => {
+    resultPromiseMap.set(id, [resolve, reject]);
+    client.postMessage({ id, type: 'decode' });
+  });
 
-  console.info('Converting to PNG...');
-  const output = renderResult.encodeToPng();
+  client.postMessage({ id, type: 'done' });
 
-  console.info('Done! Transferring...');
+  console.info('Transferring...');
   const headers = new Headers(resp.headers);
   headers.delete('content-length');
   headers.delete('content-encoding');
@@ -65,9 +57,8 @@ async function handleRequest(request) {
   });
 }
 
-self.addEventListener('install', ev => {
+self.addEventListener('install', () => {
   self.skipWaiting();
-  ev.waitUntil(jxlOxidePromise.then(() => {}));
 });
 
 self.addEventListener('active', ev => {
@@ -75,5 +66,29 @@ self.addEventListener('active', ev => {
 });
 
 self.addEventListener('fetch', ev => {
-  ev.respondWith(handleRequest(ev.request));
+  ev.respondWith(handleRequest(ev));
+});
+
+self.addEventListener('message', ev => {
+  const data = ev.data;
+  const id = data.id;
+
+  const cbs = resultPromiseMap.get(id);
+  if (!cbs) {
+    return;
+  }
+  const [resolve, reject] = cbs;
+  resultPromiseMap.delete(id);
+
+  switch (data.type) {
+    case 'feed':
+      resolve();
+      break;
+    case 'image':
+      resolve(data.image);
+      break;
+    case 'error':
+      reject(new Error(data.message));
+      break;
+  }
 });
