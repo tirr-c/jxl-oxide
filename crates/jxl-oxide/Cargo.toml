@@ -52,6 +52,7 @@ optional = true
 default = ["rayon"]
 rayon = ["jxl-threadpool/rayon"]
 lcms2 = ["dep:lcms2"]
+release-reduce-log = ["tracing/release_max_level_warn"]
 
 [dev-dependencies]
 criterion = "0.5.1"

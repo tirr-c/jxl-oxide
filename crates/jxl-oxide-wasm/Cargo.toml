@@ -1,3 +1,6 @@
+[workspace]
+members = ["."]
+
 [package]
 name = "jxl-oxide-wasm"
 description = "WebAssembly bindings of jxl-oxide"
@@ -18,7 +21,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 miniz_oxide = "0.7.1"
 png = "0.17.10"
-tracing.workspace = true
 wasm-bindgen = "0.2.91"
 
 [dependencies.console_error_panic_hook]
@@ -34,6 +36,15 @@ version = "0.6.0"
 path = "../jxl-oxide"
 default-features = false
 
+[dependencies.tracing]
+version = "0.1.37"
+default-features = false
+features = ["std", "max_level_debug", "release_max_level_warn"]
+
 [features]
 default = ["dev"]
 dev = ["dep:console_error_panic_hook", "dep:console_log"]
+
+[profile.release]
+debug = 0
+lto = true

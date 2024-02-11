@@ -8,9 +8,9 @@ pub use pq::*;
 pub use srgb::*;
 
 /// Applies gamma to samples.
-pub fn apply_gamma(mut samples: &mut [f32], gamma: f32) {
+pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
     #[cfg(target_arch = "aarch64")]
-    {
+    let samples = {
         if std::arch::is_aarch64_feature_detected!("neon") {
             let mut it = samples.chunks_exact_mut(4);
             for chunk in &mut it {
@@ -27,16 +27,17 @@ pub fn apply_gamma(mut samples: &mut [f32], gamma: f32) {
                     std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
                 }
             }
-            let remainder = it.into_remainder();
-            samples = remainder;
+            it.into_remainder()
+        } else {
+            samples
         }
-    }
+    };
 
     #[cfg(target_arch = "x86_64")]
-    {
+    let samples = {
         if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
         {
-            samples = unsafe { linear_to_gamma_x86_64_avx2(samples, gamma) };
+            unsafe { linear_to_gamma_x86_64_avx2(samples, gamma) }
         } else {
             let mut it = samples.chunks_exact_mut(4);
             for chunk in &mut it {
@@ -52,10 +53,9 @@ pub fn apply_gamma(mut samples: &mut [f32], gamma: f32) {
                     std::arch::x86_64::_mm_storeu_ps(chunk.as_mut_ptr(), v);
                 }
             }
-            let remainder = it.into_remainder();
-            samples = remainder;
+            it.into_remainder()
         }
-    }
+    };
 
     for x in samples {
         let a = *x;
