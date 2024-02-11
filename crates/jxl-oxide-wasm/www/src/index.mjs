@@ -44,7 +44,7 @@ const workers = new Map();
 async function registerWorker() {
   if ('serviceWorker' in navigator) {
     try {
-      await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+      await navigator.serviceWorker.register('service-worker.js');
     } catch (error) {
       console.error(`Registration failed with ${error}`);
     }

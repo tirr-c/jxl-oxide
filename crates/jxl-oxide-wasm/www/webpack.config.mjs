@@ -8,7 +8,7 @@ const mode = isDev ? 'development' : 'production';
 export default [
   {
     mode,
-    entry: './index.mjs',
+    entry: './src/index.mjs',
     target: 'web',
     output: {
       path: new URL('./dist', import.meta.url).pathname,
@@ -30,7 +30,7 @@ export default [
     },
     plugins: [
       new HtmlWebpackPlugin({
-        template: 'index.html',
+        template: './src/index.html',
       }),
       new CopyPlugin({
         patterns: [
@@ -43,8 +43,8 @@ export default [
   {
     mode,
     entry: {
-      'service-worker': './service-worker.mjs',
-      'jxl-decode-worker': './jxl-decode-worker.mjs',
+      'service-worker': './src/service-worker.mjs',
+      'jxl-decode-worker': './src/jxl-decode-worker.mjs',
     },
     target: 'webworker',
     output: {

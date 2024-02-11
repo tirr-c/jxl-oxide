@@ -1,4 +1,4 @@
-const jxlOxidePromise = import('./wasm/jxl-oxide.js').then(jxlOxide => {
+const jxlOxidePromise = import('../wasm/jxl-oxide.js').then(jxlOxide => {
   jxlOxide.init();
   return jxlOxide;
 });
