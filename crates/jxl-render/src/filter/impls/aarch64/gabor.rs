@@ -1,134 +1,88 @@
 use std::arch::aarch64::*;
 
-use jxl_grid::SimpleGrid;
-
-use crate::Result;
+use crate::filter::gabor::GaborRow;
 
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn run_gabor_inner_neon(
-    fb: &mut SimpleGrid<f32>,
-    weight1: f32,
-    weight2: f32,
-) -> Result<()> {
-    let global_weight = (1.0 + weight1 * 4.0 + weight2 * 4.0).recip();
+pub(super) unsafe fn run_gabor_row_aarch64_neon(row: GaborRow) {
+    let GaborRow {
+        input_rows,
+        input_start: start_x,
+        input_stride: stride,
+        output_row,
+        weights,
+    } = row;
+    let width = output_row.len();
+    assert_eq!(input_rows.len(), 3 * stride);
+    assert!(stride >= start_x + width);
 
-    let width = fb.width();
-    let height = fb.height();
-    if width * height <= 1 {
-        return Ok(());
+    if width == 0 {
+        return;
     }
 
-    let tracker = fb.tracker();
-    let io = fb.buf_mut();
+    let [w0, w1] = weights;
+    let global_weight = (1.0 + w0 * 4.0 + w1 * 4.0).recip();
 
-    let _handle = tracker
-        .as_ref()
-        .map(|x| x.alloc::<f32>(width))
-        .transpose()?;
-    let mut prev_row = io[..width].to_vec();
+    let input_ptr_t = input_rows.as_ptr().add(start_x);
+    let input_ptr_c = input_rows.as_ptr().add(start_x + stride);
+    let input_ptr_b = input_rows.as_ptr().add(start_x + stride * 2);
+    let output_ptr = output_row.as_mut_ptr();
 
-    let input_t = prev_row.as_mut_ptr();
-    let mut input_c = io.as_mut_ptr();
-    let mut input_b = input_c.add(width);
+    let mut tl = vld1_dup_f32(input_ptr_t);
+    let mut cl = vld1_dup_f32(input_ptr_c);
+    let mut bl = vld1_dup_f32(input_ptr_b);
+    for dx2 in 0..(width - 1) / 2 {
+        let x = dx2 * 2;
 
-    for _ in 0..height - 1 {
-        let mut tl = vld1_dup_f32(input_t);
-        let mut cl = vld1_dup_f32(input_c);
-        let mut bl = vld1_dup_f32(input_b);
-        *input_t = *input_c;
+        let tr = vld1_f32(input_ptr_t.add(1 + x));
+        let cr = vld1_f32(input_ptr_c.add(1 + x));
+        let br = vld1_f32(input_ptr_b.add(1 + x));
 
-        for vx in 0..(width - 1) / 2 {
-            let tr = vld1_f32(input_t.add(1 + vx * 2));
-            let cr = vld1_f32(input_c.add(1 + vx * 2));
-            let br = vld1_f32(input_b.add(1 + vx * 2));
-            let t = vext_f32::<1>(tl, tr);
-            let c = vext_f32::<1>(cl, cr);
-            let b = vext_f32::<1>(bl, br);
-
-            let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), b);
-            let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), bl), br);
-            let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
-            let sum = vmul_n_f32(unweighted_sum, global_weight);
-
-            vst1_f32(input_t.add(1 + vx * 2), cr);
-            vst1_f32(input_c.add(vx * 2), sum);
-            tl = tr;
-            cl = cr;
-            bl = br;
-        }
-
-        let tr;
-        let cr;
-        let br;
-        if width % 2 == 0 {
-            tr = vld1_dup_f32(input_t.add(width - 1));
-            cr = vld1_dup_f32(input_c.add(width - 1));
-            br = vld1_dup_f32(input_b.add(width - 1));
-        } else {
-            tr = vdup_lane_f32::<1>(tl);
-            cr = vdup_lane_f32::<1>(cl);
-            br = vdup_lane_f32::<1>(bl);
-        };
         let t = vext_f32::<1>(tl, tr);
         let c = vext_f32::<1>(cl, cr);
         let b = vext_f32::<1>(bl, br);
 
         let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), b);
         let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), bl), br);
-        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
+        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, w0), sum_diag, w1);
         let sum = vmul_n_f32(unweighted_sum, global_weight);
 
-        if width % 2 == 0 {
-            *input_t.add(width - 1) = vget_lane_f32::<0>(cr);
-            vst1_f32(input_c.add(width - 2), sum);
-        } else {
-            *input_c.add(width - 1) = vget_lane_f32::<0>(sum);
-        }
-
-        input_c = input_c.add(width);
-        input_b = input_b.add(width);
-    }
-
-    let mut tl = vld1_dup_f32(input_t);
-    let mut cl = vld1_dup_f32(input_c);
-
-    for vx in 0..(width - 1) / 2 {
-        let tr = vld1_f32(input_t.add(1 + vx * 2));
-        let cr = vld1_f32(input_c.add(1 + vx * 2));
-        let t = vext_f32::<1>(tl, tr);
-        let c = vext_f32::<1>(cl, cr);
-
-        let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), c);
-        let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), cl), cr);
-        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
-        let sum = vmul_n_f32(unweighted_sum, global_weight);
-
-        vst1_f32(input_c.add(vx * 2), sum);
+        vst1_f32(output_ptr.add(x), sum);
         tl = tr;
         cl = cr;
+        bl = br;
     }
 
-    let tr;
-    let cr;
     if width % 2 == 0 {
-        tr = vld1_dup_f32(input_t.add(width - 1));
-        cr = vld1_dup_f32(input_c.add(width - 1));
-    } else {
-        tr = vdup_lane_f32::<1>(tl);
-        cr = vdup_lane_f32::<1>(cl);
-    };
-    let t = vext_f32::<1>(tl, tr);
-    let c = vext_f32::<1>(cl, cr);
+        let x = width - 2;
 
-    let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), c);
-    let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), cl), cr);
-    let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, weight1), sum_diag, weight2);
-    let sum = vmul_n_f32(unweighted_sum, global_weight);
+        let tr = vld1_dup_f32(input_ptr_t.add(1 + x));
+        let cr = vld1_dup_f32(input_ptr_c.add(1 + x));
+        let br = vld1_dup_f32(input_ptr_b.add(1 + x));
 
-    if width % 2 == 0 {
-        vst1_f32(input_c.add(width - 2), sum);
+        let t = vext_f32::<1>(tl, tr);
+        let c = vext_f32::<1>(cl, cr);
+        let b = vext_f32::<1>(bl, br);
+
+        let sum_side = vadd_f32(vadd_f32(vadd_f32(t, cl), cr), b);
+        let sum_diag = vadd_f32(vadd_f32(vadd_f32(tl, tr), bl), br);
+        let unweighted_sum = vfma_n_f32(vfma_n_f32(c, sum_side, w0), sum_diag, w1);
+        let sum = vmul_n_f32(unweighted_sum, global_weight);
+
+        vst1_f32(output_ptr.add(x), sum);
     } else {
-        *input_c.add(width - 1) = vget_lane_f32::<0>(sum);
+        let x = width - 1;
+        // t0 t1 t1
+        // c0 c1 c1
+        // b0 b1 b1
+        let t0 = vget_lane_f32::<0>(tl);
+        let t1 = vget_lane_f32::<1>(tl);
+        let c0 = vget_lane_f32::<0>(cl);
+        let c1 = vget_lane_f32::<1>(cl);
+        let b0 = vget_lane_f32::<0>(bl);
+        let b1 = vget_lane_f32::<1>(bl);
+        let sum_side = t1 + c0 + c1 + b1;
+        let sum_diag = t0 + t1 + b0 + b1;
+        let unweighted_sum = sum_diag.mul_add(w1, sum_side.mul_add(w0, c1));
+        *output_ptr.add(x) = unweighted_sum * global_weight;
     }
-    Ok(())
 }

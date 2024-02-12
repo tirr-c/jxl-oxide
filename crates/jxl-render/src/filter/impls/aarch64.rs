@@ -5,11 +5,13 @@ use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::filter::epf::run_epf_rows;
+use crate::filter::gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe};
 use crate::Region;
-use crate::Result;
 
 mod epf;
 mod gabor;
+
+use gabor::run_gabor_row_aarch64_neon;
 
 pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
@@ -53,19 +55,41 @@ pub fn epf<const STEP: usize>(
     }
 }
 
-pub fn apply_gabor_like(fb: [&mut SimpleGrid<f32>; 3], weights_xyb: [[f32; 2]; 3]) -> Result<()> {
+pub fn apply_gabor_like(
+    fb: &[SimpleGrid<f32>; 3],
+    fb_scratch: &mut [SimpleGrid<f32>; 3],
+    frame_header: &FrameHeader,
+    region: Region,
+    weights: [[f32; 2]; 3],
+    pool: &jxl_threadpool::JxlThreadPool,
+) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
-            for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-                gabor::run_gabor_inner_neon(fb, weight1, weight2)?
+            for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
+                run_gabor_rows_unsafe(
+                    input,
+                    output,
+                    frame_header,
+                    region,
+                    weights,
+                    pool,
+                    run_gabor_row_aarch64_neon,
+                );
             }
         }
-        return Ok(());
+        return;
     }
 
-    for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-        super::generic::run_gabor_inner(fb, weight1, weight2)?;
+    for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
+        run_gabor_rows(
+            input,
+            output,
+            frame_header,
+            region,
+            weights,
+            pool,
+            run_gabor_row_generic,
+        );
     }
-    Ok(())
 }

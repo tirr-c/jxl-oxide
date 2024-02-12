@@ -1,4 +1,4 @@
-use jxl_frame::{data::*, filter::Gabor, header::Encoding, FrameHeader};
+use jxl_frame::{data::*, filter::{EdgePreservingFilter, Gabor}, header::Encoding, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
@@ -69,10 +69,36 @@ pub(crate) fn render_frame<S: Sample>(
     if frame.header().do_ycbcr {
         filter::apply_jpeg_upsampling([a, b, c], frame_header.jpeg_upsampling);
     }
+
+    let mut scratch_buffer = None;
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
-        filter::apply_gabor_like([a, b, c], weights)?;
+        if scratch_buffer.is_none() {
+            let tracker = fb.alloc_tracker();
+            let width = fb.region().width as usize;
+            let height = fb.region().height as usize;
+            scratch_buffer = Some([
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+            ]);
+        }
+        let fb_scratch = scratch_buffer.as_mut().unwrap();
+        filter::apply_gabor_like(&mut fb, fb_scratch, frame_header, weights, &pool);
     }
-    filter::apply_epf(&mut fb, &cache.lf_groups, frame_header, &pool)?;
+    if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
+        if scratch_buffer.is_none() {
+            let tracker = fb.alloc_tracker();
+            let width = fb.region().width as usize;
+            let height = fb.region().height as usize;
+            scratch_buffer = Some([
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+            ]);
+        }
+        let fb_scratch = scratch_buffer.as_mut().unwrap();
+        filter::apply_epf(&mut fb, fb_scratch, &cache.lf_groups, frame_header, epf_params, &pool);
+    }
 
     upsample_color_channels(&mut fb, image_header, frame_header, frame_region)?;
     if let Some(gmodular) = gmodular {
