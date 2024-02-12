@@ -84,10 +84,6 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
     let output_buf = &mut output_buf[start_y * stride..];
 
     if actual_height == 1 {
-        if actual_width == 1 {
-            return;
-        }
-
         let input_buf = &input_buf[start_x..][..actual_width];
         let output_buf = &mut output_buf[start_x..][..actual_width];
         gabor_row_edge(input_buf, None, output_buf, weights);

@@ -58,6 +58,7 @@ pub(crate) fn gabor_row_edge(
     } else {
         // Single row case
         if width == 1 {
+            out[0] = row_c[0];
             return;
         }
 
