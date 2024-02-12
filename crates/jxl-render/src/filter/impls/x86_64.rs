@@ -2,7 +2,13 @@ use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{filter::{epf::run_epf_rows, gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe}}, Region};
+use crate::{
+    filter::{
+        epf::run_epf_rows,
+        gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe},
+    },
+    Region,
+};
 
 mod epf_sse41;
 mod gabor_avx2;

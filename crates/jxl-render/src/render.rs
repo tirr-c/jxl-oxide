@@ -1,4 +1,9 @@
-use jxl_frame::{data::*, filter::{EdgePreservingFilter, Gabor}, header::Encoding, FrameHeader};
+use jxl_frame::{
+    data::*,
+    filter::{EdgePreservingFilter, Gabor},
+    header::Encoding,
+    FrameHeader,
+};
 use jxl_grid::SimpleGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
@@ -97,7 +102,14 @@ pub(crate) fn render_frame<S: Sample>(
             ]);
         }
         let fb_scratch = scratch_buffer.as_mut().unwrap();
-        filter::apply_epf(&mut fb, fb_scratch, &cache.lf_groups, frame_header, epf_params, &pool);
+        filter::apply_epf(
+            &mut fb,
+            fb_scratch,
+            &cache.lf_groups,
+            frame_header,
+            epf_params,
+            &pool,
+        );
     }
 
     upsample_color_channels(&mut fb, image_header, frame_header, frame_region)?;

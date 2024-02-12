@@ -32,10 +32,17 @@ pub(crate) fn gabor_row_edge(
         }
 
         // 0 1 2
-        let it = row_c.windows(3).zip(row_a.windows(3)).zip(&mut out[1..width - 1]);
+        let it = row_c
+            .windows(3)
+            .zip(row_a.windows(3))
+            .zip(&mut out[1..width - 1]);
         for ((window_c, window_a), out) in it {
-            let [a0, a1, a2] = window_a else { unreachable!() };
-            let [c0, c1, c2] = window_c else { unreachable!() };
+            let [a0, a1, a2] = window_a else {
+                unreachable!()
+            };
+            let [c0, c1, c2] = window_c else {
+                unreachable!()
+            };
             *out = (c1 + (a1 + c0 + c1 + c2) * w0 + (a0 + a2 + c0 + c2) * w1) * global_weight;
         }
 
@@ -45,7 +52,8 @@ pub(crate) fn gabor_row_edge(
             let a1 = row_a[width - 1];
             let c0 = row_c[width - 2];
             let c1 = row_c[width - 1];
-            out[width - 1] = (c1 * (1.0 + 2.0 * w0 + w1) + (a1 + c0) * (w0 + w1) + a0 * w1) * global_weight;
+            out[width - 1] =
+                (c1 * (1.0 + 2.0 * w0 + w1) + (a1 + c0) * (w0 + w1) + a0 * w1) * global_weight;
         }
     } else {
         // Single row case

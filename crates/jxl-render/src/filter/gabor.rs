@@ -38,7 +38,15 @@ pub(super) fn run_gabor_rows<'buf>(
     handle_row: for<'a> fn(GaborRow<'a>),
 ) {
     unsafe {
-        run_gabor_rows_unsafe(input, output, frame_header, region, weights, pool, handle_row)
+        run_gabor_rows_unsafe(
+            input,
+            output,
+            frame_header,
+            region,
+            weights,
+            pool,
+            handle_row,
+        )
     }
 }
 
@@ -58,7 +66,10 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
     assert_eq!(input_buf.len(), stride * height);
     assert_eq!(output_buf.len(), stride * height);
 
-    let full_frame_region = Region::with_size(frame_header.color_sample_width(), frame_header.color_sample_height());
+    let full_frame_region = Region::with_size(
+        frame_header.color_sample_width(),
+        frame_header.color_sample_height(),
+    );
     let actual_region = full_frame_region.intersection(region);
     let start_x = region.left.abs_diff(actual_region.left) as usize;
     let start_y = region.top.abs_diff(actual_region.top) as usize;

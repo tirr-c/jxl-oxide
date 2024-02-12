@@ -4,7 +4,10 @@ use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{filter::{epf::run_epf_rows, gabor::run_gabor_rows}, Region};
+use crate::{
+    filter::{epf::run_epf_rows, gabor::run_gabor_rows},
+    Region,
+};
 
 pub(crate) mod epf;
 pub(crate) mod gabor;
