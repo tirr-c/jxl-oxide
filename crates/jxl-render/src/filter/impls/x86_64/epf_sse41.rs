@@ -2,7 +2,7 @@ use std::arch::x86_64::*;
 
 use jxl_grid::SimdVector;
 
-use crate::filter::impls::{common, generic::EpfRow};
+use crate::filter::epf::*;
 
 type Vector = __m128;
 
@@ -16,7 +16,7 @@ unsafe fn weight_sse41(scaled_distance: Vector, sigma: f32, step_multiplier: Vec
 }
 
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
+pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow) {
     let EpfRow {
         merged_input_rows,
         output_rows,
@@ -29,7 +29,7 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow<'_,
     } = epf_row;
     let iwidth = width as isize;
     let merged_input_rows = merged_input_rows.unwrap();
-    let kernel_offsets = common::epf_kernel_offsets::<STEP>();
+    let kernel_offsets = epf_kernel_offsets::<STEP>();
 
     let step_multiplier = if STEP == 0 {
         epf_params.sigma.pass0_sigma_scale
