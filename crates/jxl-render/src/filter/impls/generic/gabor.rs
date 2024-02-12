@@ -76,6 +76,7 @@ pub(crate) fn gabor_row_edge(
     }
 }
 
+#[inline(always)]
 pub(crate) fn run_gabor_row_generic(row: GaborRow) {
     let GaborRow {
         input_rows,

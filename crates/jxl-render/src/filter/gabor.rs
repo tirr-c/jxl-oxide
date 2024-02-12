@@ -5,7 +5,6 @@ use jxl_threadpool::JxlThreadPool;
 use crate::{ImageWithRegion, Region};
 
 use super::impls::generic::gabor::gabor_row_edge;
-pub(crate) use super::impls::generic::gabor::run_gabor_row_generic;
 
 pub fn apply_gabor_like(
     fb: &mut ImageWithRegion,
@@ -120,4 +119,8 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
         let output_buf = &mut bottom_row[start_x..][..actual_width];
         gabor_row_edge(input_buf_c, Some(input_buf_a), output_buf, weights);
     }
+}
+
+pub(crate) fn run_gabor_row_generic(row: GaborRow) {
+    super::impls::generic::gabor::run_gabor_row_generic(row)
 }

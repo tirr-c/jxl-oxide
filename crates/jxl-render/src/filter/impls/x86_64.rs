@@ -2,11 +2,10 @@ use jxl_frame::{filter::EpfParams, FrameHeader};
 use jxl_grid::SimpleGrid;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::Region;
-
-use super::generic::epf_common;
+use crate::{filter::{epf::run_epf_rows, gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe}}, Region};
 
 mod epf_sse41;
+mod gabor_avx2;
 
 pub fn epf<const STEP: usize>(
     input: &[SimpleGrid<f32>; 3],
@@ -20,7 +19,7 @@ pub fn epf<const STEP: usize>(
     if is_x86_feature_detected!("sse4.1") {
         // SAFETY: Features are checked above.
         unsafe {
-            return epf_common(
+            return run_epf_rows(
                 input,
                 output,
                 frame_header,
@@ -35,7 +34,7 @@ pub fn epf<const STEP: usize>(
     }
 
     unsafe {
-        epf_common(
+        run_epf_rows(
             input,
             output,
             frame_header,
@@ -50,31 +49,40 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: [&mut SimpleGrid<f32>; 3],
-    weights_xyb: [[f32; 2]; 3],
-) -> crate::Result<()> {
+    fb: &[SimpleGrid<f32>; 3],
+    fb_scratch: &mut [SimpleGrid<f32>; 3],
+    frame_header: &FrameHeader,
+    region: Region,
+    weights: [[f32; 2]; 3],
+    pool: &jxl_threadpool::JxlThreadPool,
+) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
         unsafe {
-            for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-                run_gabor_inner_avx2(fb, weight1, weight2)?
+            for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
+                run_gabor_rows_unsafe(
+                    input,
+                    output,
+                    frame_header,
+                    region,
+                    weights,
+                    pool,
+                    gabor_avx2::run_gabor_row_x86_64_avx2,
+                );
             }
         }
-        return Ok(());
+        return;
     }
 
-    for (fb, [weight1, weight2]) in fb.into_iter().zip(weights_xyb) {
-        super::generic::run_gabor_inner(fb, weight1, weight2)?;
+    for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
+        run_gabor_rows(
+            input,
+            output,
+            frame_header,
+            region,
+            weights,
+            pool,
+            run_gabor_row_generic,
+        );
     }
-    Ok(())
-}
-
-#[target_feature(enable = "avx2")]
-#[target_feature(enable = "fma")]
-unsafe fn run_gabor_inner_avx2(
-    fb: &mut SimpleGrid<f32>,
-    weight1: f32,
-    weight2: f32,
-) -> crate::Result<()> {
-    super::generic::run_gabor_inner(fb, weight1, weight2)
 }
