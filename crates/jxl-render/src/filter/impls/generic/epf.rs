@@ -1,6 +1,4 @@
-use crate::{filter::impls::common, util};
-
-use super::EpfRow;
+use crate::{filter::epf::*, util};
 
 pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     let EpfRow {
@@ -14,8 +12,8 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         skip_inner,
         ..
     } = epf_row;
-    let kernel_offsets = common::epf_kernel_offsets::<STEP>();
-    let dist_offsets = common::epf_dist_offsets::<STEP>();
+    let kernel_offsets = epf_kernel_offsets::<STEP>();
+    let dist_offsets = epf_dist_offsets::<STEP>();
 
     let step_multiplier = if STEP == 0 {
         epf_params.sigma.pass0_sigma_scale
