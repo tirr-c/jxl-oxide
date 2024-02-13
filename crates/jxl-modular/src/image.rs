@@ -489,19 +489,18 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let value = S::unpack_signed_u32(token)
                             .wrapping_muladd_i32(multiplier as i32, offset);
                         for y in 0..height {
-                            for x in 0..width {
-                                *grid.get_mut(x, y) = value;
-                            }
+                            grid.get_row_mut(y).fill(value);
                         }
                     } else {
                         tracing::trace!("Fast path");
                         for y in 0..height {
-                            for x in 0..width {
+                            let row = grid.get_row_mut(y);
+                            for out in row {
                                 let token =
                                     no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                                 let value = S::unpack_signed_u32(token)
                                     .wrapping_muladd_i32(multiplier as i32, offset);
-                                *grid.get_mut(x, y) = value;
+                                *out = value;
                             }
                         }
                     }
@@ -528,9 +527,15 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let prev_row = prev_row.get_row(y - 1);
                         let out_row = out_row.get_row_mut(0);
 
-                        let mut w = prev_row[0].to_i64();
-                        let mut nw = w;
-                        for (prev, out) in prev_row.iter().zip(out_row) {
+                        let n = prev_row[0].to_i64();
+                        let pred = n;
+                        let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                        let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                        out_row[0] = value;
+
+                        let mut w = value.to_i64();
+                        let mut nw = n;
+                        for (prev, out) in prev_row[1..].iter().zip(&mut out_row[1..]) {
                             let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
@@ -594,7 +599,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 if predictor == Predictor::Zero {
                     tracing::trace!("Fast path");
                     for y in 0..height {
-                        for x in 0..width {
+                        let row = grid.get_row_mut(y);
+                        for out in row {
                             let token = decoder.read_varint_with_multiplier_clustered(
                                 bitstream,
                                 cluster,
@@ -602,7 +608,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                             )?;
                             let value = S::unpack_signed_u32(token)
                                 .wrapping_muladd_i32(multiplier as i32, offset);
-                            *grid.get_mut(x, y) = value;
+                            *out = value;
                         }
                     }
                     return Ok(());
@@ -632,9 +638,19 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let prev_row = prev_row.get_row(y - 1);
                         let out_row = out_row.get_row_mut(0);
 
-                        let mut w = prev_row[0].to_i64();
-                        let mut nw = w;
-                        for (prev, out) in prev_row.iter().zip(out_row) {
+                        let n = prev_row[0].to_i64();
+                        let pred = n;
+                        let token = decoder.read_varint_with_multiplier_clustered(
+                            bitstream,
+                            cluster,
+                            dist_multiplier,
+                        )?;
+                        let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                        out_row[0] = value;
+
+                        let mut w = value.to_i64();
+                        let mut nw = n;
+                        for (prev, out) in prev_row[1..].iter().zip(&mut out_row[1..]) {
                             let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
@@ -697,7 +713,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 if predictor == Predictor::Zero {
                     tracing::trace!("Quite fast path");
                     for y in 0..height {
-                        for x in 0..width {
+                        let row = grid.get_row_mut(y);
+                        for out in row {
                             let token = if rle_left > 0 {
                                 rle_left -= 1;
                                 rle_value
@@ -714,7 +731,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 }
                             };
                             let value = token.wrapping_muladd_i32(multiplier as i32, offset);
-                            *grid.get_mut(x, y) = value;
+                            *out = value;
                         }
                     }
                     return Ok(());
@@ -753,9 +770,29 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let prev_row = prev_row.get_row(y - 1);
                         let out_row = out_row.get_row_mut(0);
 
-                        let mut w = prev_row[0].to_i64();
-                        let mut nw = w;
-                        for (prev, out) in prev_row.iter().zip(out_row) {
+                        let n = prev_row[0].to_i64();
+                        let pred = n;
+                        let token = if rle_left > 0 {
+                            rle_left -= 1;
+                            rle_value
+                        } else {
+                            match decoder.read_varint_clustered(bitstream, cluster)? {
+                                RleToken::Value(v) => {
+                                    rle_value = S::unpack_signed_u32(v);
+                                    rle_value
+                                }
+                                RleToken::Repeat(len) => {
+                                    rle_left = len - 1;
+                                    rle_value
+                                }
+                            }
+                        };
+                        let value = token + S::from_i32(pred as i32);
+                        out_row[0] = value;
+
+                        let mut w = value.to_i64();
+                        let mut nw = n;
+                        for (prev, out) in prev_row[1..].iter().zip(&mut out_row[1..]) {
                             let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
