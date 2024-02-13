@@ -229,6 +229,7 @@ fn is_infinite_tree_dist(decoder: &Decoder) -> bool {
 pub struct FlatMaTree {
     nodes: Vec<FlatMaTreeNode>,
     need_self_correcting: bool,
+    max_prev_channel_depth: usize,
 }
 
 #[derive(Debug)]
@@ -265,9 +266,30 @@ impl FlatMaTree {
             }
         });
 
+        let mut max_prev_channel_depth = 0usize;
+        for node in &nodes {
+            if let FlatMaTreeNode::FusedDecision {
+                prop_level0: p,
+                props_level1: (pl, pr),
+                ..
+            } = *node
+            {
+                if let Some(p) = p.checked_sub(16) {
+                    max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
+                }
+                if let Some(p) = pl.checked_sub(16) {
+                    max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
+                }
+                if let Some(p) = pr.checked_sub(16) {
+                    max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
+                }
+            }
+        }
+
         Self {
             nodes,
             need_self_correcting,
+            max_prev_channel_depth,
         }
     }
 
@@ -303,8 +325,14 @@ impl FlatMaTree {
     ///
     /// The return value of this method can be used to optimize the decoding process, since
     /// self-correcting predictors are computationally heavy.
+    #[inline]
     pub fn need_self_correcting(&self) -> bool {
         self.need_self_correcting
+    }
+
+    #[inline]
+    pub fn max_prev_channel_depth(&self) -> usize {
+        self.max_prev_channel_depth
     }
 
     /// Decode a sample with the given state.
@@ -327,7 +355,7 @@ impl FlatMaTree {
     }
 
     #[inline]
-    pub(crate) fn decode_sample_rle<S: Sample>(
+    pub(crate) fn decode_sample_with_fn<S: Sample>(
         &self,
         next: &mut impl FnMut(u8) -> Result<S>,
         properties: &Properties,

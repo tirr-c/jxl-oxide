@@ -509,19 +509,35 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("Quite fast path");
-                    let mut prev_row = vec![S::default(); width];
-                    for y in 0..height {
+                    {
+                        let mut w = 0i64;
+                        let out_row = grid.get_row_mut(0);
+                        for out in out_row[..width].iter_mut() {
+                            let pred = w;
+
+                            let token =
+                                no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
+                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            *out = value;
+                            w = value.to_i64();
+                        }
+                    }
+
+                    for y in 1..height {
+                        let (prev_row, mut out_row) = grid.split_vertical(y);
+                        let prev_row = prev_row.get_row(y - 1);
+                        let out_row = out_row.get_row_mut(0);
+
                         let mut w = prev_row[0].to_i64();
                         let mut nw = w;
-                        for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { prev.to_i64() };
+                        for (prev, out) in prev_row.iter().zip(out_row) {
+                            let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
                             let token =
                                 no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                             let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
-                            *grid.get_mut(x, y) = value;
-                            *prev = value;
+                            *out = value;
                             nw = n;
                             w = value.to_i64();
                         }
@@ -593,12 +609,33 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("Quite fast path");
-                    let mut prev_row = vec![S::default(); width];
-                    for y in 0..height {
+
+                    {
+                        let mut w = 0i64;
+                        let out_row = grid.get_row_mut(0);
+                        for out in out_row[..width].iter_mut() {
+                            let pred = w;
+
+                            let token = decoder.read_varint_with_multiplier_clustered(
+                                bitstream,
+                                cluster,
+                                dist_multiplier,
+                            )?;
+                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            *out = value;
+                            w = value.to_i64();
+                        }
+                    }
+
+                    for y in 1..height {
+                        let (prev_row, mut out_row) = grid.split_vertical(y);
+                        let prev_row = prev_row.get_row(y - 1);
+                        let out_row = out_row.get_row_mut(0);
+
                         let mut w = prev_row[0].to_i64();
                         let mut nw = w;
-                        for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { prev.to_i64() };
+                        for (prev, out) in prev_row.iter().zip(out_row) {
+                            let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
                             let token = decoder.read_varint_with_multiplier_clustered(
@@ -607,8 +644,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 dist_multiplier,
                             )?;
                             let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
-                            *grid.get_mut(x, y) = value;
-                            *prev = value;
+                            *out = value;
                             nw = n;
                             w = value.to_i64();
                         }
@@ -685,12 +721,42 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 }
                 if predictor == Predictor::Gradient && offset == 0 && multiplier == 1 {
                     tracing::trace!("libjxl fast-lossless: quite fast path");
-                    let mut prev_row = vec![S::default(); width];
-                    for y in 0..height {
+                    {
+                        let mut w = 0i64;
+                        let out_row = grid.get_row_mut(0);
+                        for out in out_row[..width].iter_mut() {
+                            let pred = w;
+
+                            let token = if rle_left > 0 {
+                                rle_left -= 1;
+                                rle_value
+                            } else {
+                                match decoder.read_varint_clustered(bitstream, cluster)? {
+                                    RleToken::Value(v) => {
+                                        rle_value = S::unpack_signed_u32(v);
+                                        rle_value
+                                    }
+                                    RleToken::Repeat(len) => {
+                                        rle_left = len - 1;
+                                        rle_value
+                                    }
+                                }
+                            };
+                            let value = token + S::from_i32(pred as i32);
+                            *out = value;
+                            w = value.to_i64();
+                        }
+                    }
+
+                    for y in 1..height {
+                        let (prev_row, mut out_row) = grid.split_vertical(y);
+                        let prev_row = prev_row.get_row(y - 1);
+                        let out_row = out_row.get_row_mut(0);
+
                         let mut w = prev_row[0].to_i64();
                         let mut nw = w;
-                        for (x, prev) in prev_row.iter_mut().enumerate() {
-                            let n = if y == 0 { w } else { prev.to_i64() };
+                        for (prev, out) in prev_row.iter().zip(out_row) {
+                            let n = prev.to_i64();
                             let pred = (n + w - nw).clamp(w.min(n), w.max(n));
 
                             let token = if rle_left > 0 {
@@ -709,8 +775,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                                 }
                             };
                             let value = token + S::from_i32(pred as i32);
-                            *grid.get_mut(x, y) = value;
-                            *prev = value;
+                            *out = value;
                             nw = n;
                             w = value.to_i64();
                         }
@@ -757,22 +822,31 @@ fn decode_channel_slow<S: Sample>(
     grid: &mut CutGrid<S>,
     prev_rev: &[&CutGrid<S>],
 ) -> Result<()> {
-    let width = grid.width();
     let height = grid.height();
+    let max_prev_channel_depth = ma_tree.max_prev_channel_depth().min(prev_rev.len());
+    let prev_rev = &prev_rev[..max_prev_channel_depth];
 
-    let mut prev_channel_samples_rev = vec![0i32; prev_rev.len()];
-
+    let mut prev_channel_rows_rev = Vec::with_capacity(max_prev_channel_depth);
+    let mut prev_channel_samples_rev = Vec::with_capacity(max_prev_channel_depth);
     for y in 0..height {
-        for x in 0..width {
-            for (grid, sample) in prev_rev.iter().zip(&mut prev_channel_samples_rev) {
-                *sample = grid.get(x, y).to_i32();
+        let row = grid.get_row_mut(y);
+
+        prev_channel_rows_rev.clear();
+        for ch in prev_rev {
+            prev_channel_rows_rev.push(ch.get_row(y));
+        }
+
+        for (x, out) in row.iter_mut().enumerate() {
+            prev_channel_samples_rev.clear();
+            for prev_row in &prev_channel_rows_rev {
+                prev_channel_samples_rev.push(prev_row[x].to_i32());
             }
 
             let properties = predictor.properties(&prev_channel_samples_rev);
-            let (diff, predictor) = ma_tree.decode_sample_rle(next, &properties)?;
+            let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
-            let true_value = diff.add(S::from_i32(sample_prediction as i32));
-            *grid.get_mut(x, y) = true_value;
+            let true_value = diff + S::from_i32(sample_prediction as i32);
+            *out = true_value;
             properties.record(true_value.to_i32());
         }
     }
