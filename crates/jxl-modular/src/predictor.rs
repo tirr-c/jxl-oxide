@@ -1,4 +1,7 @@
 use jxl_bitstream::define_bundle;
+use jxl_grid::CutGrid;
+
+use crate::Sample;
 
 define_bundle! {
     #[derive(Debug, Clone)]
@@ -69,7 +72,7 @@ impl TryFrom<u32> for Predictor {
 }
 
 impl Predictor {
-    pub(super) fn predict(self, properties: &Properties<'_, '_>) -> i64 {
+    pub(super) fn predict<S: Sample>(self, properties: &Properties<S>) -> i64 {
         use Predictor::*;
         let predictor = &*properties.predictor;
 
@@ -127,107 +130,42 @@ pub struct PredictionResult {
 }
 
 #[derive(Debug)]
-pub struct PredictorState {
+pub struct PredictorState<'prev, 'a, S: Sample> {
     width: u32,
-    channel_index: u32,
-    stream_index: u32,
-    second_prev_row: Vec<i32>,
     prev_row: Vec<i32>,
     curr_row: Vec<i32>,
-    prev_channels_rev: Vec<PrevChannelState>,
+    prev_channels_rev: Vec<&'a CutGrid<'prev, S>>,
     self_correcting: Option<SelfCorrectingPredictor>,
     y: u32,
+    x: u32,
     w: i32,
     n: i32,
     nw: i32,
     prev_grad: i32,
 }
 
-#[derive(Debug)]
-struct PrevChannelState {
-    width: u32,
-    prev_row: Vec<i32>,
-    curr_row: Vec<i32>,
+const DIV_LOOKUP: [u32; 65] = compute_div_lookup();
+
+const fn compute_div_lookup() -> [u32; 65] {
+    let mut out = [0u32; 65];
+    let mut i = 1usize;
+    while i <= 64 {
+        out[i] = ((1 << 24) / i) as u32;
+        i += 1;
+    }
+    out
 }
 
-impl PrevChannelState {
-    fn new(width: u32) -> Self {
+impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
+    pub fn new() -> Self {
         Self {
-            width,
-            prev_row: Vec::with_capacity(width as usize),
-            curr_row: Vec::with_capacity(width as usize),
-        }
-    }
-
-    fn w(&self) -> i32 {
-        if let Some(x) = self.curr_row.len().checked_sub(1) {
-            self.curr_row[x]
-        } else {
-            0
-        }
-    }
-
-    fn n(&self) -> i32 {
-        let x = self.curr_row.len();
-        match (x.checked_sub(1), self.prev_row.is_empty()) {
-            (_, false) => self.prev_row[x],
-            (Some(x), true) => self.curr_row[x],
-            (None, true) => 0,
-        }
-    }
-
-    fn nw(&self) -> i32 {
-        let x = self.curr_row.len();
-        match (x.checked_sub(1), self.prev_row.is_empty()) {
-            (Some(x), false) => self.prev_row[x],
-            (Some(x), true) => self.curr_row[x],
-            (None, _) => 0,
-        }
-    }
-
-    fn record(&mut self, sample: i32) {
-        self.curr_row.push(sample);
-        if self.curr_row.len() >= self.width as usize {
-            std::mem::swap(&mut self.prev_row, &mut self.curr_row);
-            self.curr_row.clear();
-        }
-    }
-}
-
-impl PredictorState {
-    const DIV_LOOKUP: [u32; 65] = Self::compute_div_lookup();
-
-    const fn compute_div_lookup() -> [u32; 65] {
-        let mut out = [0u32; 65];
-        let mut i = 1usize;
-        while i <= 64 {
-            out[i] = ((1 << 24) / i) as u32;
-            i += 1;
-        }
-        out
-    }
-
-    pub fn new(
-        width: u32,
-        channel_index: u32,
-        stream_index: u32,
-        prev_channels: usize,
-        wp_header: Option<&WpHeader>,
-    ) -> Self {
-        let self_correcting =
-            wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header.clone()));
-        Self {
-            width,
-            channel_index,
-            stream_index,
-            second_prev_row: Vec::with_capacity(width as usize),
-            prev_row: Vec::with_capacity(width as usize),
-            curr_row: Vec::with_capacity(width as usize),
-            prev_channels_rev: (0..prev_channels)
-                .map(|_| PrevChannelState::new(width))
-                .collect(),
-            self_correcting,
+            width: 0,
+            prev_row: Vec::new(),
+            curr_row: Vec::new(),
+            prev_channels_rev: Vec::new(),
+            self_correcting: None,
             y: 0,
+            x: 0,
             w: 0,
             n: 0,
             nw: 0,
@@ -235,12 +173,35 @@ impl PredictorState {
         }
     }
 
-    pub fn properties<'p, 's>(
-        &'p mut self,
-        prev_channel_samples_rev: &'s [i32],
-    ) -> Properties<'p, 's> {
+    pub fn reset(
+        &mut self,
+        width: u32,
+        prev_channels_rev: &[&'a CutGrid<'prev, S>],
+        wp_header: Option<&WpHeader>,
+    ) {
+        self.self_correcting =
+            wp_header.map(|wp_header| SelfCorrectingPredictor::new(width, wp_header.clone()));
+        self.prev_row.clear();
+        self.curr_row.clear();
+        if let Some(additional) = (width as usize).checked_sub(self.prev_row.capacity()) {
+            self.prev_row.reserve(additional);
+        }
+        if let Some(additional) = (width as usize).checked_sub(self.curr_row.capacity()) {
+            self.curr_row.reserve(additional);
+        }
+        self.prev_channels_rev = prev_channels_rev.to_vec();
+        self.width = width;
+        self.y = 0;
+        self.x = 0;
+        self.w = 0;
+        self.n = 0;
+        self.nw = 0;
+        self.prev_grad = 0;
+    }
+
+    pub fn properties<'p>(&'p mut self) -> Properties<'p, 'prev, 'a, S> {
         let prediction = self.sc_predict();
-        Properties::new(self, prev_channel_samples_rev, prediction)
+        Properties::new(self, prediction)
     }
 
     fn sc_predict(&self) -> Option<PredictionResult> {
@@ -289,7 +250,7 @@ impl PredictorState {
         let mut weight = [0u32; 4];
         for ((w, err_sum), maxweight) in weight.iter_mut().zip(subpred_err_sum).zip(wp_wn) {
             let shift = ((err_sum as u64 + 1) >> 5).checked_ilog2().unwrap_or(0);
-            *w = 4 + ((maxweight * Self::DIV_LOOKUP[(err_sum >> shift) as usize + 1]) >> shift);
+            *w = 4 + ((maxweight * DIV_LOOKUP[(err_sum >> shift) as usize + 1]) >> shift);
         }
 
         let sum_weights: u32 = weight.iter().copied().sum();
@@ -302,7 +263,7 @@ impl PredictorState {
         for (subpred, weight) in subpred.into_iter().zip(weight) {
             s += subpred * weight as i64;
         }
-        let mut prediction = (s * Self::DIV_LOOKUP[sum_weights as usize] as i64) >> 24;
+        let mut prediction = (s * DIV_LOOKUP[sum_weights as usize] as i64) >> 24;
         if (true_err_n ^ true_err_w) | (true_err_n ^ true_err_nw) <= 0 {
             let min = n3.min(w3).min(ne3);
             let max = n3.max(w3).max(ne3);
@@ -325,37 +286,36 @@ impl PredictorState {
     }
 }
 
-impl PredictorState {
+impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     fn nn(&self) -> i32 {
-        if self.second_prev_row.is_empty() {
-            self.n
-        } else {
-            self.second_prev_row[self.curr_row.len()]
-        }
+        self.curr_row
+            .get(self.x as usize)
+            .copied()
+            .unwrap_or(self.n)
     }
 
     fn ne(&self) -> i32 {
-        let x = self.curr_row.len();
-        if self.prev_row.is_empty() || x + 1 >= self.width as usize {
+        let x = self.x;
+        if self.prev_row.is_empty() || x + 1 >= self.width {
             self.n
         } else {
-            self.prev_row[x + 1]
+            self.prev_row[x as usize + 1]
         }
     }
 
     fn nee(&self) -> i32 {
-        let x = self.curr_row.len();
-        if self.prev_row.is_empty() || x + 2 >= self.width as usize {
+        let x = self.x;
+        if self.prev_row.is_empty() || x + 2 >= self.width {
             self.ne()
         } else {
-            self.prev_row[x + 2]
+            self.prev_row[x as usize + 2]
         }
     }
 
     fn ww(&self) -> i32 {
-        let x = self.curr_row.len();
+        let x = self.x;
         if let Some(x) = x.checked_sub(2) {
-            self.curr_row[x]
+            self.curr_row[x as usize]
         } else {
             self.w
         }
@@ -365,10 +325,10 @@ impl PredictorState {
 #[derive(Debug)]
 struct SelfCorrectingPredictor {
     width: u32,
-    true_err_prev_row: Vec<i32>,
-    true_err_curr_row: Vec<i32>,
-    subpred_err_prev_row: Vec<[u32; 4]>,
-    subpred_err_curr_row: Vec<[u32; 4]>,
+    x: u32,
+    y: u32,
+    true_err_row: Vec<i32>,
+    subpred_err_row: Vec<[u32; 4]>,
     wp: WpHeader,
     true_err_w: i32,
     true_err_nw: i32,
@@ -383,10 +343,10 @@ impl SelfCorrectingPredictor {
     fn new(width: u32, wp_header: WpHeader) -> Self {
         Self {
             width,
-            true_err_prev_row: Vec::with_capacity(width as usize),
-            true_err_curr_row: Vec::with_capacity(width as usize),
-            subpred_err_prev_row: Vec::with_capacity(width as usize),
-            subpred_err_curr_row: Vec::with_capacity(width as usize),
+            x: 0,
+            y: 0,
+            true_err_row: vec![0i32; width as usize],
+            subpred_err_row: vec![[0u32; 4]; width as usize],
             wp: wp_header,
             true_err_w: 0,
             true_err_nw: 0,
@@ -406,30 +366,25 @@ impl SelfCorrectingPredictor {
             *err = ((subpred.abs_diff(sample << 3) + 3) >> 3) as u32;
         }
 
-        self.true_err_curr_row.push(true_err as i32);
-        self.subpred_err_curr_row.push(subpred_err);
+        self.true_err_row[self.x as usize] = true_err as i32;
+        self.subpred_err_row[self.x as usize] = subpred_err;
+        self.x += 1;
 
-        let x = self.true_err_curr_row.len();
-        if x >= self.width as usize {
-            std::mem::swap(&mut self.true_err_prev_row, &mut self.true_err_curr_row);
-            std::mem::swap(
-                &mut self.subpred_err_prev_row,
-                &mut self.subpred_err_curr_row,
-            );
-            self.true_err_curr_row.clear();
-            self.subpred_err_curr_row.clear();
+        if self.x >= self.width {
+            self.y += 1;
+            self.x = 0;
 
             self.true_err_w = 0;
-            self.true_err_n = self.true_err_prev_row[0];
+            self.true_err_n = self.true_err_row[0];
             self.true_err_nw = self.true_err_n;
-            self.subpred_err_n_w = self.subpred_err_prev_row[0];
+            self.subpred_err_n_w = self.subpred_err_row[0];
             self.subpred_err_nw_ww = self.subpred_err_n_w;
             if self.width <= 1 {
                 self.true_err_ne = self.true_err_n;
                 self.subpred_err_ne = self.subpred_err_n_w;
             } else {
-                self.true_err_ne = self.true_err_prev_row[1];
-                self.subpred_err_ne = self.subpred_err_prev_row[1];
+                self.true_err_ne = self.true_err_row[1];
+                self.subpred_err_ne = self.subpred_err_row[1];
             }
         } else {
             self.true_err_w = true_err as i32;
@@ -441,34 +396,33 @@ impl SelfCorrectingPredictor {
                 *w0 = w0.wrapping_add(w1);
             }
 
-            if x + 1 >= self.width as usize {
+            if self.x + 1 >= self.width {
                 self.true_err_ne = self.true_err_n;
                 self.subpred_err_ne = self.subpred_err_n_w;
-            } else if !self.true_err_prev_row.is_empty() {
-                self.true_err_ne = self.true_err_prev_row[x + 1];
-                self.subpred_err_ne = self.subpred_err_prev_row[x + 1];
+            } else if self.y != 0 {
+                let x = self.x as usize;
+                self.true_err_ne = self.true_err_row[x + 1];
+                self.subpred_err_ne = self.subpred_err_row[x + 1];
             }
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Properties<'p, 's> {
-    predictor: &'p mut PredictorState,
-    prev_channel_samples_rev: &'s [i32],
+pub struct Properties<'p, 'prev, 'a, S: Sample> {
+    predictor: &'p mut PredictorState<'prev, 'a, S>,
     sc_prediction: Option<PredictionResult>,
     prop_cache: [i32; 16],
 }
 
-impl<'p, 's> Properties<'p, 's> {
+impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
     fn new(
-        pred: &'p mut PredictorState,
-        prev_channel_samples_rev: &'s [i32],
+        pred: &'p mut PredictorState<'prev, 'a, S>,
         sc_prediction: Option<PredictionResult>,
     ) -> Self {
         let prop_cache = [
-            pred.channel_index as i32,
-            pred.stream_index as i32,
+            0,
+            0,
             pred.y as i32,
             pred.curr_row.len() as i32,
             pred.n.abs(),
@@ -490,14 +444,13 @@ impl<'p, 's> Properties<'p, 's> {
         ];
         Self {
             predictor: pred,
-            prev_channel_samples_rev,
             sc_prediction,
             prop_cache,
         }
     }
 }
 
-impl Properties<'_, '_> {
+impl<S: Sample> Properties<'_, '_, '_, S> {
     fn prediction(&self) -> Option<i64> {
         self.sc_prediction.as_ref().map(|pred| pred.prediction)
     }
@@ -507,18 +460,37 @@ impl Properties<'_, '_> {
         let prev_channel_idx = prop_extra / 4;
         let prop_idx = prop_extra % 4;
 
-        let Some(c) = self.prev_channel_samples_rev.get(prev_channel_idx).copied() else {
+        let Some(prev_channel) = self.predictor.prev_channels_rev.get(prev_channel_idx) else {
             return 0;
         };
-        let prev_channel = &self.predictor.prev_channels_rev[prev_channel_idx];
+        let x = self.predictor.x as usize;
+        let y = self.predictor.y as usize;
+
+        let c = prev_channel.get(x, y).to_i32();
         if prop_idx == 0 {
             c.abs()
         } else if prop_idx == 1 {
             c
         } else {
-            let w = prev_channel.w() as i64;
-            let n = prev_channel.n() as i64;
-            let nw = prev_channel.nw() as i64;
+            let x1 = x.checked_sub(1);
+            let y1 = y.checked_sub(1);
+            let (w, n, nw) = match (x1, y1) {
+                (Some(x1), Some(y1)) => {
+                    let w = prev_channel.get(x1, y).to_i64();
+                    let n = prev_channel.get(x, y1).to_i64();
+                    let nw = prev_channel.get(x1, y1).to_i64();
+                    (w, n, nw)
+                }
+                (Some(x1), None) => {
+                    let w = prev_channel.get(x1, y).to_i64();
+                    (w, w, w)
+                }
+                (None, Some(y1)) => {
+                    let n = prev_channel.get(x, y1).to_i64();
+                    (n, n, n)
+                }
+                (None, None) => (0, 0, 0),
+            };
             let g = (w + n - nw).clamp(w.min(n), w.max(n)) as i32;
             if prop_idx == 2 {
                 c.abs_diff(g) as i32
@@ -543,14 +515,18 @@ impl Properties<'_, '_> {
             sc.record(pred, sample);
         }
 
-        pred.curr_row.push(sample);
-        let x = pred.curr_row.len();
-        if x >= pred.width as usize {
-            pred.y += 1;
+        if let Some(out) = pred.curr_row.get_mut(pred.x as usize) {
+            *out = sample;
+        } else {
+            pred.curr_row.push(sample);
+        }
+        pred.x += 1;
 
-            std::mem::swap(&mut pred.second_prev_row, &mut pred.prev_row);
+        if pred.x >= pred.width {
+            pred.y += 1;
+            pred.x = 0;
+
             std::mem::swap(&mut pred.prev_row, &mut pred.curr_row);
-            pred.curr_row.clear();
             pred.prev_grad = 0;
 
             let n = pred.prev_row[0];
@@ -566,16 +542,8 @@ impl Properties<'_, '_> {
                 pred.n = sample;
             } else {
                 pred.nw = pred.n;
-                pred.n = pred.prev_row[x];
+                pred.n = pred.prev_row[pred.x as usize];
             }
-        }
-
-        for (ch, sample) in pred
-            .prev_channels_rev
-            .iter_mut()
-            .zip(self.prev_channel_samples_rev)
-        {
-            ch.record(*sample);
         }
     }
 }

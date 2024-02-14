@@ -294,7 +294,7 @@ impl FlatMaTree {
     }
 
     #[inline]
-    fn get_leaf(&self, properties: &Properties) -> &MaTreeLeafClustered {
+    fn get_leaf<S: Sample>(&self, properties: &Properties<S>) -> &MaTreeLeafClustered {
         let mut current_node = &self.nodes[0];
         loop {
             match current_node {
@@ -340,7 +340,7 @@ impl FlatMaTree {
         &self,
         bitstream: &mut Bitstream,
         decoder: &mut Decoder,
-        properties: &Properties,
+        properties: &Properties<S>,
         dist_multiplier: u32,
     ) -> Result<(S, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
@@ -358,7 +358,7 @@ impl FlatMaTree {
     pub(crate) fn decode_sample_with_fn<S: Sample>(
         &self,
         next: &mut impl FnMut(u8) -> Result<S>,
-        properties: &Properties,
+        properties: &Properties<S>,
     ) -> Result<(S, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = next(leaf.cluster)?;
@@ -390,11 +390,11 @@ impl MaTreeNode {
     fn next_decision_node(&self, channel: u32, stream_idx: u32) -> &MaTreeNode {
         match *self {
             MaTreeNode::Decision {
-                property,
+                property: property @ (0 | 1),
                 value,
                 ref left,
                 ref right,
-            } if property == 0 || property == 1 => {
+            } => {
                 let target = if property == 0 { channel } else { stream_idx };
                 let node = if target as i32 > value { left } else { right };
                 node.next_decision_node(channel, stream_idx)
@@ -411,6 +411,7 @@ impl MaTreeNode {
         let mut out = Vec::new();
         let mut next_base = 1u32;
         while let Some(target) = q.pop_front() {
+            let target = target.next_decision_node(channel, stream_idx);
             match *target {
                 MaTreeNode::Decision {
                     property,

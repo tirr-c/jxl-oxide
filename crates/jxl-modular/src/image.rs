@@ -391,13 +391,12 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
-    fn decode_channel_loop(
-        &mut self,
+    fn decode_channel_loop<'image>(
+        &'image mut self,
         stream_index: u32,
         mut loop_fn: impl FnMut(
-            usize,
             &mut CutGrid<S>,
-            &[&CutGrid<S>],
+            &[&'image CutGrid<S>],
             FlatMaTree,
             &crate::predictor::WpHeader,
         ) -> Result<()>,
@@ -422,7 +421,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             filtered_prev.reverse();
 
             let ma_tree = self.ma_ctx.make_flat_tree(i as u32, stream_index);
-            loop_fn(i, grid.grid_mut(), &filtered_prev, ma_tree, wp_header)?;
+            loop_fn(grid.grid_mut(), &filtered_prev, ma_tree, wp_header)?;
 
             prev.push((info, grid.grid()));
         }
@@ -471,7 +470,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         }
         let mut no_lz77_decoder = decoder.as_no_lz77().unwrap();
 
-        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
+        let mut predictor = PredictorState::new();
+        self.decode_channel_loop(stream_index, |grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
@@ -552,18 +552,12 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(
-                width as u32,
-                i as u32,
-                stream_index,
-                prev_rev.len(),
-                wp_header,
-            );
+            predictor.reset(width as u32, prev_rev, wp_header);
             let mut next = |cluster: u8| -> Result<S> {
                 let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
                 Ok(S::unpack_signed_u32(token))
             };
-            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid)
         })?;
 
         decoder.finalize()?;
@@ -584,7 +578,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             .max()
             .unwrap_or(0);
 
-        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
+        let mut predictor = PredictorState::new();
+        self.decode_channel_loop(stream_index, |grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
@@ -670,13 +665,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             }
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(
-                width as u32,
-                i as u32,
-                stream_index,
-                prev_rev.len(),
-                wp_header,
-            );
+            predictor.reset(width as u32, prev_rev, wp_header);
             let mut next = |cluster: u8| -> Result<S> {
                 let token = decoder.read_varint_with_multiplier_clustered(
                     bitstream,
@@ -685,7 +674,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 )?;
                 Ok(S::unpack_signed_u32(token))
             };
-            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid)
         })
     }
 
@@ -698,7 +687,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         let mut rle_value = S::default();
         let mut rle_left = 0u32;
 
-        self.decode_channel_loop(stream_index, |i, grid, prev_rev, ma_tree, wp_header| {
+        let mut predictor = PredictorState::new();
+        self.decode_channel_loop(stream_index, |grid, prev_rev, ma_tree, wp_header| {
             let width = grid.width();
             let height = grid.height();
 
@@ -840,14 +830,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             };
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
-            let mut predictor = PredictorState::new(
-                width as u32,
-                i as u32,
-                stream_index,
-                prev_rev.len(),
-                wp_header,
-            );
-            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid, prev_rev)
+            predictor.reset(width as u32, prev_rev, wp_header);
+            decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid)
         })
     }
 }
@@ -855,31 +839,15 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 fn decode_channel_slow<S: Sample>(
     next: &mut impl FnMut(u8) -> Result<S>,
     ma_tree: &FlatMaTree,
-    predictor: &mut PredictorState,
+    predictor: &mut PredictorState<S>,
     grid: &mut CutGrid<S>,
-    prev_rev: &[&CutGrid<S>],
 ) -> Result<()> {
     let height = grid.height();
-    let max_prev_channel_depth = ma_tree.max_prev_channel_depth().min(prev_rev.len());
-    let prev_rev = &prev_rev[..max_prev_channel_depth];
-
-    let mut prev_channel_rows_rev = Vec::with_capacity(max_prev_channel_depth);
-    let mut prev_channel_samples_rev = Vec::with_capacity(max_prev_channel_depth);
     for y in 0..height {
         let row = grid.get_row_mut(y);
 
-        prev_channel_rows_rev.clear();
-        for ch in prev_rev {
-            prev_channel_rows_rev.push(ch.get_row(y));
-        }
-
-        for (x, out) in row.iter_mut().enumerate() {
-            prev_channel_samples_rev.clear();
-            for prev_row in &prev_channel_rows_rev {
-                prev_channel_samples_rev.push(prev_row[x].to_i32());
-            }
-
-            let properties = predictor.properties(&prev_channel_samples_rev);
+        for out in row.iter_mut() {
+            let properties = predictor.properties();
             let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
             let true_value = diff + S::from_i32(sample_prediction as i32);

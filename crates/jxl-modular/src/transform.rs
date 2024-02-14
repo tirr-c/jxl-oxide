@@ -355,12 +355,13 @@ impl Palette {
         } else {
             None
         };
-        let mut predictor = PredictorState::new(width as u32, 0, 0, 0, wp_header);
+        let mut predictor = PredictorState::<S>::new();
+        predictor.reset(width as u32, &[], wp_header);
 
         let mut idx = 0;
         for y in 0..height {
             for x in 0..width {
-                let properties = predictor.properties(&[]);
+                let properties = predictor.properties();
                 let sample = grid.get_mut(x, y);
                 let mut sample_value = sample.to_i32();
                 if need_delta[idx] == (x, y) {
