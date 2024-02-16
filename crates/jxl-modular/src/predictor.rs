@@ -424,7 +424,7 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
             0,
             0,
             pred.y as i32,
-            pred.curr_row.len() as i32,
+            pred.x as i32,
             pred.n.abs(),
             pred.w.abs(),
             pred.n,
