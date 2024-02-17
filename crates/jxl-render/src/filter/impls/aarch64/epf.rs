@@ -2,7 +2,7 @@ use std::arch::aarch64::*;
 
 use jxl_grid::SimdVector;
 
-use crate::filter::impls::{common, generic::EpfRow};
+use crate::filter::epf::*;
 
 type Vector = float32x4_t;
 
@@ -28,7 +28,7 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
     } = epf_row;
     let iwidth = width as isize;
     let merged_input_rows = merged_input_rows.unwrap();
-    let kernel_offsets = common::epf_kernel_offsets::<STEP>();
+    let kernel_offsets = epf_kernel_offsets::<STEP>();
 
     let step_multiplier = if STEP == 0 {
         epf_params.sigma.pass0_sigma_scale
