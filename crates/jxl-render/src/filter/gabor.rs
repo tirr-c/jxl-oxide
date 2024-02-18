@@ -128,6 +128,7 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
     }
 }
 
+#[allow(unused)]
 pub(crate) fn run_gabor_row_generic(row: GaborRow) {
     super::impls::generic::gabor::run_gabor_row_generic(row)
 }
