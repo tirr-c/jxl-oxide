@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["crates/jxl-oxide-wasm"]
 resolver = "2"
 
 [workspace.dependencies.tracing]
@@ -10,4 +9,6 @@ features = ["std"]
 
 [profile.release]
 debug = 1
-# lto = true
+
+[profile.release.package.jxl-oxide-wasm]
+debug = 0
