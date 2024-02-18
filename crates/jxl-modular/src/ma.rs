@@ -342,24 +342,23 @@ impl FlatMaTree {
         decoder: &mut Decoder,
         properties: &Properties<S>,
         dist_multiplier: u32,
-    ) -> Result<(S, super::predictor::Predictor)> {
+    ) -> Result<(i32, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = decoder.read_varint_with_multiplier_clustered(
             bitstream,
             leaf.cluster,
             dist_multiplier,
         )?;
-        let diff =
-            S::unpack_signed_u32(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
+        let diff = unpack_signed(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
     #[inline]
     pub(crate) fn decode_sample_with_fn<S: Sample>(
         &self,
-        next: &mut impl FnMut(u8) -> Result<S>,
+        next: &mut impl FnMut(u8) -> Result<i32>,
         properties: &Properties<S>,
-    ) -> Result<(S, super::predictor::Predictor)> {
+    ) -> Result<(i32, super::predictor::Predictor)> {
         let leaf = self.get_leaf(properties);
         let diff = next(leaf.cluster)?;
         let diff = diff.wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);

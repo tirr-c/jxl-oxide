@@ -366,7 +366,7 @@ impl Palette {
                 let mut sample_value = sample.to_i32();
                 if need_delta[idx] == (x, y) {
                     let diff = d_pred.predict(&properties);
-                    sample_value = (sample_value as i64 + diff) as i32;
+                    sample_value = sample_value.wrapping_add(diff);
                     *sample = S::from_i32(sample_value);
                     idx += 1;
                     if idx >= need_delta.len() {

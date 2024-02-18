@@ -72,43 +72,43 @@ impl TryFrom<u32> for Predictor {
 }
 
 impl Predictor {
-    pub(super) fn predict<S: Sample>(self, properties: &Properties<S>) -> i64 {
+    pub(super) fn predict<S: Sample>(self, properties: &Properties<S>) -> i32 {
         use Predictor::*;
         let predictor = &*properties.predictor;
 
         match self {
             Zero => 0,
-            West => predictor.w as i64,
-            North => predictor.n as i64,
-            AvgWestAndNorth => (predictor.w as i64 + predictor.n as i64) / 2,
+            West => predictor.w,
+            North => predictor.n,
+            AvgWestAndNorth => ((predictor.w as i64 + predictor.n as i64) / 2) as i32,
             Select => {
                 let n = predictor.n;
                 let w = predictor.w;
                 let nw = predictor.nw;
                 if n.abs_diff(nw) < w.abs_diff(nw) {
-                    w as i64
+                    w
                 } else {
-                    n as i64
+                    n
                 }
             }
             Gradient => {
                 let n = predictor.n as i64;
                 let w = predictor.w as i64;
                 let nw = predictor.nw as i64;
-                (n + w - nw).clamp(w.min(n), w.max(n))
+                (n + w - nw).clamp(w.min(n), w.max(n)) as i32
             }
             SelfCorrecting => {
                 let prediction = properties
                     .prediction()
                     .expect("predict_non_sc called with SelfCorrecting predictor");
-                (prediction + 3) >> 3
+                ((prediction + 3) >> 3) as i32
             }
-            NorthEast => predictor.ne() as i64,
-            NorthWest => predictor.nw as i64,
-            WestWest => predictor.ww() as i64,
-            AvgWestAndNorthWest => (predictor.w as i64 + predictor.nw as i64) / 2,
-            AvgNorthAndNorthWest => (predictor.n as i64 + predictor.nw as i64) / 2,
-            AvgNorthAndNorthEast => (predictor.n as i64 + predictor.ne() as i64) / 2,
+            NorthEast => predictor.ne(),
+            NorthWest => predictor.nw,
+            WestWest => predictor.ww(),
+            AvgWestAndNorthWest => ((predictor.w as i64 + predictor.nw as i64) / 2) as i32,
+            AvgNorthAndNorthWest => ((predictor.n as i64 + predictor.nw as i64) / 2) as i32,
+            AvgNorthAndNorthEast => ((predictor.n as i64 + predictor.ne() as i64) / 2) as i32,
             AvgAll => {
                 let n = predictor.n as i64;
                 let w = predictor.w as i64;
@@ -116,7 +116,7 @@ impl Predictor {
                 let ww = predictor.ww() as i64;
                 let nee = predictor.nee() as i64;
                 let ne = predictor.ne() as i64;
-                (6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16
+                ((6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16) as i32
             }
         }
     }
@@ -430,7 +430,7 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
             pred.n,
             pred.w,
             pred.w.wrapping_sub(pred.prev_grad),
-            (pred.w as i64 + pred.n as i64 - pred.nw as i64) as i32,
+            pred.w.wrapping_add(pred.n).wrapping_sub(pred.nw),
             pred.w.wrapping_sub(pred.nw),
             pred.nw.wrapping_sub(pred.n),
             pred.n.wrapping_sub(pred.ne()),

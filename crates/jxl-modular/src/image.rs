@@ -1,4 +1,4 @@
-use jxl_bitstream::Bitstream;
+use jxl_bitstream::{unpack_signed, Bitstream};
 use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
@@ -556,9 +556,9 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 
             let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
             predictor.reset(width as u32, prev_rev, wp_header);
-            let mut next = |cluster: u8| -> Result<S> {
+            let mut next = |cluster: u8| -> Result<i32> {
                 let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                Ok(S::unpack_signed_u32(token))
+                Ok(unpack_signed(token))
             };
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid)
         })?;
@@ -580,13 +580,13 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             .map(|info| info.width)
             .max()
             .unwrap_or(0);
-        let mut next = |cluster: u8| -> Result<S> {
+        let mut next = |cluster: u8| -> Result<i32> {
             let token = decoder.read_varint_with_multiplier_clustered(
                 bitstream,
                 cluster,
                 dist_multiplier,
             )?;
-            Ok(S::unpack_signed_u32(token))
+            Ok(unpack_signed(token))
         };
 
         let mut predictor = PredictorState::new();
@@ -609,7 +609,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         for out in row {
                             let token = next(cluster)?;
                             let value = token.wrapping_muladd_i32(multiplier as i32, offset);
-                            *out = value;
+                            *out = S::from_i32(value);
                         }
                     }
                     return Ok(());
@@ -619,16 +619,16 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                     let mut prev_row_cache = Vec::with_capacity(width);
 
                     {
-                        let mut w = 0i64;
+                        let mut w = 0i32;
                         let out_row = grid.get_row_mut(0);
                         for out in out_row[..width].iter_mut() {
                             let pred = w;
 
                             let token = next(cluster)?;
-                            let value = token + S::from_i32(pred as i32);
-                            *out = value;
-                            prev_row_cache.push(value.to_i64());
-                            w = value.to_i64();
+                            let value = token.wrapping_add(pred);
+                            *out = S::from_i32(value);
+                            prev_row_cache.push(value);
+                            w = value;
                         }
                     }
 
@@ -638,22 +638,22 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let n = prev_row_cache[0];
                         let pred = n;
                         let token = next(cluster)?;
-                        let value = token + S::from_i32(pred as i32);
-                        out_row[0] = value;
-                        prev_row_cache[0] = value.to_i64();
+                        let value = token.wrapping_add(pred);
+                        out_row[0] = S::from_i32(value);
+                        prev_row_cache[0] = value;
 
-                        let mut w = value.to_i64();
-                        let mut nw = n;
+                        let mut w = value as i64;
+                        let mut nw = n as i64;
                         for (prev, out) in prev_row_cache[1..].iter_mut().zip(&mut out_row[1..]) {
-                            let n = *prev;
-                            let pred = (n + w - nw).clamp(w.min(n), w.max(n));
+                            let n = *prev as i64;
+                            let pred = (n + w - nw).clamp(w.min(n), w.max(n)) as i32;
 
                             let token = next(cluster)?;
-                            let value = token + S::from_i32(pred as i32);
-                            *out = value;
-                            *prev = value.to_i64();
+                            let value = token.wrapping_add(pred);
+                            *out = S::from_i32(value);
+                            *prev = value;
                             nw = n;
-                            w = value.to_i64();
+                            w = value as i64;
                         }
                     }
                     return Ok(());
@@ -672,17 +672,17 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         stream_index: u32,
         mut decoder: DecoderRleMode<'_>,
     ) -> Result<()> {
-        let mut rle_value = S::default();
+        let mut rle_value = 0i32;
         let mut rle_left = 0u32;
 
-        let mut next = |cluster: u8| -> Result<S> {
+        let mut next = |cluster: u8| -> Result<i32> {
             Ok(if rle_left > 0 {
                 rle_left -= 1;
                 rle_value
             } else {
                 match decoder.read_varint_clustered(bitstream, cluster)? {
                     RleToken::Value(v) => {
-                        rle_value = S::unpack_signed_u32(v);
+                        rle_value = unpack_signed(v);
                         rle_value
                     }
                     RleToken::Repeat(len) => {
@@ -713,7 +713,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         for out in row {
                             let token = next(cluster)?;
                             let value = token.wrapping_muladd_i32(multiplier as i32, offset);
-                            *out = value;
+                            *out = S::from_i32(value);
                         }
                     }
                     return Ok(());
@@ -723,16 +723,16 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                     let mut prev_row_cache = Vec::with_capacity(width);
 
                     {
-                        let mut w = 0i64;
+                        let mut w = 0i32;
                         let out_row = grid.get_row_mut(0);
                         for out in out_row[..width].iter_mut() {
                             let pred = w;
 
                             let token = next(cluster)?;
-                            let value = token + S::from_i32(pred as i32);
-                            *out = value;
-                            prev_row_cache.push(value.to_i64());
-                            w = value.to_i64();
+                            let value = token.wrapping_add(pred);
+                            *out = S::from_i32(value);
+                            prev_row_cache.push(value);
+                            w = value;
                         }
                     }
 
@@ -742,22 +742,22 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let n = prev_row_cache[0];
                         let pred = n;
                         let token = next(cluster)?;
-                        let value = token + S::from_i32(pred as i32);
-                        out_row[0] = value;
-                        prev_row_cache[0] = value.to_i64();
+                        let value = token.wrapping_add(pred);
+                        out_row[0] = S::from_i32(value);
+                        prev_row_cache[0] = value;
 
-                        let mut w = value.to_i64();
-                        let mut nw = n;
+                        let mut w = value as i64;
+                        let mut nw = n as i64;
                         for (prev, out) in prev_row_cache[1..].iter_mut().zip(&mut out_row[1..]) {
-                            let n = *prev;
-                            let pred = (n + w - nw).clamp(w.min(n), w.max(n));
+                            let n = *prev as i64;
+                            let pred = (n + w - nw).clamp(w.min(n), w.max(n)) as i32;
 
                             let token = next(cluster)?;
-                            let value = token + S::from_i32(pred as i32);
-                            *out = value;
-                            *prev = value.to_i64();
+                            let value = token.wrapping_add(pred);
+                            *out = S::from_i32(value);
+                            *prev = value;
                             nw = n;
-                            w = value.to_i64();
+                            w = value as i64;
                         }
                     }
                     return Ok(());
@@ -772,7 +772,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 fn decode_channel_slow<S: Sample>(
-    next: &mut impl FnMut(u8) -> Result<S>,
+    next: &mut impl FnMut(u8) -> Result<i32>,
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState<S>,
     grid: &mut CutGrid<S>,
@@ -785,9 +785,9 @@ fn decode_channel_slow<S: Sample>(
             let properties = predictor.properties();
             let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
             let sample_prediction = predictor.predict(&properties);
-            let true_value = diff + S::from_i32(sample_prediction as i32);
-            *out = true_value;
-            properties.record(true_value.to_i32());
+            let true_value = diff.wrapping_add(sample_prediction);
+            *out = S::from_i32(true_value);
+            properties.record(true_value);
         }
     }
 
