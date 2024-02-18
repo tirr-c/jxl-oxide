@@ -4,9 +4,9 @@ use std::arch::is_aarch64_feature_detected;
 use std::arch::is_x86_feature_detected;
 
 pub(super) fn gamut_map(
-    mut r: &mut [f32],
-    mut g: &mut [f32],
-    mut b: &mut [f32],
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
     luminances: [f32; 3],
     saturation_factor: f32,
 ) {
@@ -14,19 +14,15 @@ pub(super) fn gamut_map(
     assert_eq!(g.len(), b.len());
 
     #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
+    let (r, g, b) = if is_x86_feature_detected!("fma") && is_x86_feature_detected!("sse4.1") {
         if is_x86_feature_detected!("avx2") {
             // AVX2
             // SAFETY: features are checked above.
-            unsafe {
-                (r, g, b) = gamut_map_x86_64_avx2(r, g, b, luminances, saturation_factor);
-            }
-        }
-
-        // SSE4.1 + FMA
-        // SAFETY: features are checked above.
-        unsafe {
-            (r, g, b) = gamut_map_x86_64_fma(r, g, b, luminances, saturation_factor);
+            unsafe { gamut_map_x86_64_avx2(r, g, b, luminances, saturation_factor) }
+        } else {
+            // SSE4.1 + FMA
+            // SAFETY: features are checked above.
+            unsafe { gamut_map_x86_64_fma(r, g, b, luminances, saturation_factor) }
         }
     } else {
         // SAFETY: x86_64 implies SSE2.
@@ -48,20 +44,21 @@ pub(super) fn gamut_map(
                 std::arch::x86_64::_mm_storeu_ps(b.as_mut_ptr(), vb);
             }
 
-            r = r_it.into_remainder();
-            g = g_it.into_remainder();
-            b = b_it.into_remainder();
+            let r = r_it.into_remainder();
+            let g = g_it.into_remainder();
+            let b = b_it.into_remainder();
+            (r, g, b)
         }
-    }
+    };
 
     #[cfg(target_arch = "aarch64")]
-    if is_aarch64_feature_detected!("neon") {
+    let (r, g, b) = if is_aarch64_feature_detected!("neon") {
         // NEON
         // SAFETY: features are checked above.
-        unsafe {
-            (r, g, b) = gamut_map_aarch64_neon(r, g, b, luminances, saturation_factor);
-        }
-    }
+        unsafe { gamut_map_aarch64_neon(r, g, b, luminances, saturation_factor) }
+    } else {
+        (r, g, b)
+    };
 
     // generic
     for ((r, g), b) in r.iter_mut().zip(g).zip(b) {

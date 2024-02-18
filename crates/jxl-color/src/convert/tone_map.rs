@@ -88,8 +88,8 @@ pub(super) fn tone_map(
         b,
         luminances,
         intensity_target,
-        (min_nits, peak_luminance),
-        (0.0, target_display_luminance),
+        from_luminance_range,
+        to_luminance_range,
     );
 }
 

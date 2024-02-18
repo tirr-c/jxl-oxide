@@ -9,4 +9,6 @@ features = ["std"]
 
 [profile.release]
 debug = 1
-# lto = true
+
+[profile.release.package.jxl-oxide-wasm]
+debug = 0
