@@ -86,6 +86,7 @@ pub fn apply_epf<S: Sample>(
 
 pub(super) struct EpfRow<'buf, 'epf> {
     pub input_rows: [[&'buf [f32]; 7]; 3],
+    #[allow(unused)]
     pub merged_input_rows: Option<[&'buf [f32]; 3]>,
     pub output_rows: [&'buf mut [f32]; 3],
     pub width: usize,
