@@ -77,15 +77,16 @@ jobs:
           name: jxl-oxide-cli-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/jxl-oxide
+
   wasm:
-    name: WebAssembly Demo
+    name: WebAssembly
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
-          targets: ${{ matrix.target }}
+          targets: wasm32-unknown-unknown
       - uses: actions/cache@v3
         with:
           path: |
@@ -101,26 +102,14 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.yarn/berry/cache/
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
-            ${{ runner.os }}-yarn-
       - run: cargo install wasm-pack --version 0.12.1
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
-        run: wasm-pack build --no-pack --out-dir www/wasm --out-name jxl-oxide
-      - name: Install demo page packages
-        working-directory: crates/jxl-oxide-wasm/www
-        run: yarn install --immutable
-      - name: Build demo page
-        working-directory: crates/jxl-oxide-wasm/www
-        run: yarn build
+        run: |
+          wasm-pack build --release
+          wasm-pack pack
       - uses: actions/upload-artifact@v3
         with:
-          name: jxl-oxide-wasm-demo
-          path: |
-            crates/jxl-oxide-wasm/www/dist/
+          name: jxl-oxide-wasm
+          path: crates/jxl-oxide-wasm/pkg/jxl-oxide-wasm-*.tgz
+          compression-level: 0
