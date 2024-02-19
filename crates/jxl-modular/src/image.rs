@@ -521,7 +521,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 
                             let token =
                                 no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            let value = S::unpack_signed_u32(token).add(S::from_i32(pred as i32));
                             *out = value;
                             prev_row_cache.push(value.to_i64());
                             w = value.to_i64();
@@ -534,7 +534,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                         let n = prev_row_cache[0];
                         let pred = n;
                         let token = no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                        let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                        let value = S::unpack_signed_u32(token).add(S::from_i32(pred as i32));
                         out_row[0] = value;
                         prev_row_cache[0] = value.to_i64();
 
@@ -546,7 +546,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 
                             let token =
                                 no_lz77_decoder.read_varint_clustered(bitstream, cluster)?;
-                            let value = S::unpack_signed_u32(token) + S::from_i32(pred as i32);
+                            let value = S::unpack_signed_u32(token).add(S::from_i32(pred as i32));
                             *out = value;
                             *prev = value.to_i64();
                             nw = n;

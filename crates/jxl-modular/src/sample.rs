@@ -11,7 +11,7 @@ pub trait Sealed: Copy + Default + Send + Sync {
 }
 
 pub trait Sample:
-    Copy + Default + Send + Sync + Sealed + std::ops::Add<Self, Output = Self> + 'static
+    Copy + Default + Send + Sync + Sealed  + 'static
 {
     fn from_i32(value: i32) -> Self;
     fn from_u32(value: u32) -> Self;
@@ -19,6 +19,7 @@ pub trait Sample:
     fn to_i32(self) -> i32;
     fn to_i64(self) -> i64;
     fn to_f32(self) -> f32;
+    fn add(self, rhs: Self) -> Self;
     fn wrapping_muladd_i32(self, mul: i32, add: i32) -> Self;
     fn grad_clamped(n: Self, w: Self, nw: Self) -> Self;
 }
@@ -52,6 +53,11 @@ impl Sample for i32 {
     #[inline]
     fn to_f32(self) -> f32 {
         self as f32
+    }
+
+    #[inline]
+    fn add(self, rhs: i32) -> i32 {
+        self.wrapping_add(rhs)
     }
 
     #[inline]
@@ -102,6 +108,11 @@ impl Sample for i16 {
     #[inline]
     fn to_f32(self) -> f32 {
         self as f32
+    }
+
+    #[inline]
+    fn add(self, rhs: i16) -> i16 {
+        self.wrapping_add(rhs)
     }
 
     #[inline]
