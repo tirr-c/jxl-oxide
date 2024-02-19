@@ -199,12 +199,97 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         self.prev_grad = 0;
     }
 
+    #[inline]
     pub fn properties<'p>(&'p mut self) -> Properties<'p, 'prev, 'a, S> {
-        let prediction = self.sc_predict();
+        let prediction = self
+            .self_correcting
+            .as_ref()
+            .map(|sc_pred| self.run_sc_pred(sc_pred));
         Properties::new(self, prediction)
     }
 
-    fn sc_predict(&self) -> Option<PredictionResult> {
+    fn run_sc_pred(&self, sc_pred: &SelfCorrectingPredictor) -> PredictionResult {
+        sc_pred.predict(self.n, self.nw, self.ne(), self.w, self.nn())
+    }
+}
+
+impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
+    #[inline]
+    fn nn(&self) -> i32 {
+        self.curr_row
+            .get(self.x as usize)
+            .copied()
+            .unwrap_or(self.n)
+    }
+
+    #[inline]
+    fn ne(&self) -> i32 {
+        let x = self.x;
+        if self.prev_row.is_empty() || x + 1 >= self.width {
+            self.n
+        } else {
+            self.prev_row[x as usize + 1]
+        }
+    }
+
+    #[inline]
+    fn nee(&self) -> i32 {
+        let x = self.x;
+        if self.prev_row.is_empty() || x + 2 >= self.width {
+            self.ne()
+        } else {
+            self.prev_row[x as usize + 2]
+        }
+    }
+
+    #[inline]
+    fn ww(&self) -> i32 {
+        let x = self.x;
+        if let Some(x) = x.checked_sub(2) {
+            self.curr_row[x as usize]
+        } else {
+            self.w
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SelfCorrectingPredictor {
+    width: u32,
+    x: u32,
+    y: u32,
+    true_err_row: Vec<i32>,
+    subpred_err_row: Vec<[u32; 4]>,
+    wp: WpHeader,
+    true_err_w: i32,
+    true_err_nw: i32,
+    true_err_n: i32,
+    true_err_ne: i32,
+    subpred_err_nw_ww: [u32; 4],
+    subpred_err_n_w: [u32; 4],
+    subpred_err_ne: [u32; 4],
+}
+
+impl SelfCorrectingPredictor {
+    fn new(width: u32, wp_header: WpHeader) -> Self {
+        Self {
+            width,
+            x: 0,
+            y: 0,
+            true_err_row: vec![0i32; width as usize],
+            subpred_err_row: vec![[0u32; 4]; width as usize],
+            wp: wp_header,
+            true_err_w: 0,
+            true_err_nw: 0,
+            true_err_n: 0,
+            true_err_ne: 0,
+            subpred_err_nw_ww: [0; 4],
+            subpred_err_n_w: [0; 4],
+            subpred_err_ne: [0; 4],
+        }
+    }
+
+    fn predict(&self, n: i32, nw: i32, ne: i32, w: i32, nn: i32) -> PredictionResult {
         let SelfCorrectingPredictor {
             ref wp,
             true_err_w,
@@ -215,17 +300,17 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
             subpred_err_n_w,
             subpred_err_ne,
             ..
-        } = *self.self_correcting.as_ref()?;
+        } = *self;
         let true_err_w = true_err_w as i64;
         let true_err_nw = true_err_nw as i64;
         let true_err_n = true_err_n as i64;
         let true_err_ne = true_err_ne as i64;
 
-        let n3 = (self.n as i64) << 3;
-        let nw3 = (self.nw as i64) << 3;
-        let ne3 = (self.ne() as i64) << 3;
-        let w3 = (self.w as i64) << 3;
-        let nn3 = (self.nn() as i64) << 3;
+        let n3 = (n as i64) << 3;
+        let nw3 = (nw as i64) << 3;
+        let ne3 = (ne as i64) << 3;
+        let w3 = (w as i64) << 3;
+        let nn3 = (nn as i64) << 3;
 
         let subpred = [
             w3 + ne3 - n3,
@@ -278,83 +363,10 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
             }
         }
 
-        Some(PredictionResult {
+        PredictionResult {
             prediction,
             max_error: max_error as i32,
             subpred,
-        })
-    }
-}
-
-impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
-    fn nn(&self) -> i32 {
-        self.curr_row
-            .get(self.x as usize)
-            .copied()
-            .unwrap_or(self.n)
-    }
-
-    fn ne(&self) -> i32 {
-        let x = self.x;
-        if self.prev_row.is_empty() || x + 1 >= self.width {
-            self.n
-        } else {
-            self.prev_row[x as usize + 1]
-        }
-    }
-
-    fn nee(&self) -> i32 {
-        let x = self.x;
-        if self.prev_row.is_empty() || x + 2 >= self.width {
-            self.ne()
-        } else {
-            self.prev_row[x as usize + 2]
-        }
-    }
-
-    fn ww(&self) -> i32 {
-        let x = self.x;
-        if let Some(x) = x.checked_sub(2) {
-            self.curr_row[x as usize]
-        } else {
-            self.w
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SelfCorrectingPredictor {
-    width: u32,
-    x: u32,
-    y: u32,
-    true_err_row: Vec<i32>,
-    subpred_err_row: Vec<[u32; 4]>,
-    wp: WpHeader,
-    true_err_w: i32,
-    true_err_nw: i32,
-    true_err_n: i32,
-    true_err_ne: i32,
-    subpred_err_nw_ww: [u32; 4],
-    subpred_err_n_w: [u32; 4],
-    subpred_err_ne: [u32; 4],
-}
-
-impl SelfCorrectingPredictor {
-    fn new(width: u32, wp_header: WpHeader) -> Self {
-        Self {
-            width,
-            x: 0,
-            y: 0,
-            true_err_row: vec![0i32; width as usize],
-            subpred_err_row: vec![[0u32; 4]; width as usize],
-            wp: wp_header,
-            true_err_w: 0,
-            true_err_nw: 0,
-            true_err_n: 0,
-            true_err_ne: 0,
-            subpred_err_nw_ww: [0; 4],
-            subpred_err_n_w: [0; 4],
-            subpred_err_ne: [0; 4],
         }
     }
 
@@ -420,6 +432,7 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
         pred: &'p mut PredictorState<'prev, 'a, S>,
         sc_prediction: Option<PredictionResult>,
     ) -> Self {
+        let w_nw = pred.w.wrapping_sub(pred.nw);
         let prop_cache = [
             0,
             0,
@@ -430,18 +443,18 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
             pred.n,
             pred.w,
             pred.w.wrapping_sub(pred.prev_grad),
-            pred.w.wrapping_add(pred.n).wrapping_sub(pred.nw),
-            pred.w.wrapping_sub(pred.nw),
+            w_nw.wrapping_add(pred.n),
+            w_nw,
             pred.nw.wrapping_sub(pred.n),
             pred.n.wrapping_sub(pred.ne()),
             pred.n.wrapping_sub(pred.nn()),
             pred.w.wrapping_sub(pred.ww()),
-            if let Some(prediction) = &sc_prediction {
-                prediction.max_error
-            } else {
-                0
-            },
+            sc_prediction
+                .as_ref()
+                .map(|pred| pred.max_error)
+                .unwrap_or(0),
         ];
+
         Self {
             predictor: pred,
             sc_prediction,
@@ -451,6 +464,7 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
 }
 
 impl<S: Sample> Properties<'_, '_, '_, S> {
+    #[inline]
     fn prediction(&self) -> Option<i64> {
         self.sc_prediction.as_ref().map(|pred| pred.prediction)
     }
@@ -472,26 +486,18 @@ impl<S: Sample> Properties<'_, '_, '_, S> {
         } else if prop_idx == 1 {
             c
         } else {
-            let x1 = x.checked_sub(1);
-            let y1 = y.checked_sub(1);
-            let (w, n, nw) = match (x1, y1) {
-                (Some(x1), Some(y1)) => {
-                    let w = prev_channel.get(x1, y).to_i64();
-                    let n = prev_channel.get(x, y1).to_i64();
-                    let nw = prev_channel.get(x1, y1).to_i64();
-                    (w, n, nw)
+            let g = match (x, y) {
+                (0, 0) => 0,
+                (0, y) => prev_channel.get(0, y - 1).to_i32(),
+                (x, 0) => prev_channel.get(x - 1, 0).to_i32(),
+                (x, y) => {
+                    let rn = prev_channel.get_row(y - 1);
+                    let nw = rn[x - 1];
+                    let n = rn[x];
+                    let w = prev_channel.get(x - 1, y);
+                    S::grad_clamped(n, w, nw).to_i32()
                 }
-                (Some(x1), None) => {
-                    let w = prev_channel.get(x1, y).to_i64();
-                    (w, w, w)
-                }
-                (None, Some(y1)) => {
-                    let n = prev_channel.get(x, y1).to_i64();
-                    (n, n, n)
-                }
-                (None, None) => (0, 0, 0),
             };
-            let g = (w + n - nw).clamp(w.min(n), w.max(n)) as i32;
             if prop_idx == 2 {
                 c.abs_diff(g) as i32
             } else {
