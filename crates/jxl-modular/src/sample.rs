@@ -10,9 +10,7 @@ pub trait Sealed: Copy + Default + Send + Sync {
     ) -> Option<&'a mut CutGrid<'g, i16>>;
 }
 
-pub trait Sample:
-    Copy + Default + Send + Sync + Sealed  + 'static
-{
+pub trait Sample: Copy + Default + Send + Sync + Sealed + 'static {
     fn from_i32(value: i32) -> Self;
     fn from_u32(value: u32) -> Self;
     fn unpack_signed_u32(value: u32) -> Self;
