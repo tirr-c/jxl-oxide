@@ -34,8 +34,8 @@ impl MaConfig {
     ///
     /// The method will evaluate the tree with the given information and prune branches which are
     /// always not taken.
-    pub fn make_flat_tree(&self, channel: u32, stream_idx: u32) -> FlatMaTree {
-        let nodes = self.tree.0.flatten(channel, stream_idx);
+    pub fn make_flat_tree(&self, channel: u32, stream_idx: u32, prev_channels: u32) -> FlatMaTree {
+        let nodes = self.tree.0.flatten(channel, stream_idx, prev_channels);
         FlatMaTree::new(nodes)
     }
 }
@@ -386,7 +386,7 @@ enum MaTreeNode {
 }
 
 impl MaTreeNode {
-    fn next_decision_node(&self, channel: u32, stream_idx: u32) -> &MaTreeNode {
+    fn next_decision_node(&self, channel: u32, stream_idx: u32, prev_channels: u32) -> &MaTreeNode {
         match *self {
             MaTreeNode::Decision {
                 property: property @ (0 | 1),
@@ -396,21 +396,35 @@ impl MaTreeNode {
             } => {
                 let target = if property == 0 { channel } else { stream_idx };
                 let node = if target as i32 > value { left } else { right };
-                node.next_decision_node(channel, stream_idx)
+                node.next_decision_node(channel, stream_idx, prev_channels)
+            }
+            ref node @ MaTreeNode::Decision {
+                property,
+                value,
+                ref left,
+                ref right,
+            } if property >= 16 => {
+                let prev_channel_idx = (property - 16) / 4;
+                if prev_channel_idx >= prev_channels {
+                    let node = if value < 0 { left } else { right };
+                    node.next_decision_node(channel, stream_idx, prev_channels)
+                } else {
+                    node
+                }
             }
             ref node => node,
         }
     }
 
-    fn flatten(&self, channel: u32, stream_idx: u32) -> Vec<FlatMaTreeNode> {
-        let target = self.next_decision_node(channel, stream_idx);
+    fn flatten(&self, channel: u32, stream_idx: u32, prev_channels: u32) -> Vec<FlatMaTreeNode> {
+        let target = self.next_decision_node(channel, stream_idx, prev_channels);
         let mut q = std::collections::VecDeque::new();
         q.push_back(target);
 
         let mut out = Vec::new();
         let mut next_base = 1u32;
         while let Some(target) = q.pop_front() {
-            let target = target.next_decision_node(channel, stream_idx);
+            let target = target.next_decision_node(channel, stream_idx, prev_channels);
             match *target {
                 MaTreeNode::Decision {
                     property,
@@ -418,7 +432,7 @@ impl MaTreeNode {
                     ref left,
                     ref right,
                 } => {
-                    let left = left.next_decision_node(channel, stream_idx);
+                    let left = left.next_decision_node(channel, stream_idx, prev_channels);
                     let (lp, lv, ll, lr) = match left {
                         &MaTreeNode::Decision {
                             property,
@@ -428,7 +442,7 @@ impl MaTreeNode {
                         } => (property, value, &**left, &**right),
                         node => (0, 0, node, node),
                     };
-                    let right = right.next_decision_node(channel, stream_idx);
+                    let right = right.next_decision_node(channel, stream_idx, prev_channels);
                     let (rp, rv, rl, rr) = match right {
                         &MaTreeNode::Decision {
                             property,

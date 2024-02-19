@@ -420,8 +420,11 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 .collect::<Vec<_>>();
             filtered_prev.reverse();
 
-            let ma_tree = self.ma_ctx.make_flat_tree(i as u32, stream_index);
-            loop_fn(grid.grid_mut(), &filtered_prev, ma_tree, wp_header)?;
+            let ma_tree =
+                self.ma_ctx
+                    .make_flat_tree(i as u32, stream_index, filtered_prev.len() as u32);
+            let filtered_prev = &filtered_prev[..ma_tree.max_prev_channel_depth()];
+            loop_fn(grid.grid_mut(), filtered_prev, ma_tree, wp_header)?;
 
             prev.push((info, grid.grid()));
         }
