@@ -1,5 +1,11 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum DctDirection {
+    Forward,
+    Inverse,
+}
+
 #[allow(clippy::excessive_precision)]
 const SEC_HALF_SMALL: [&[f32]; 4] = [
     // n = 4

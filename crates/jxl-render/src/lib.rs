@@ -12,7 +12,6 @@ use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 mod blend;
-mod dct;
 mod error;
 mod features;
 mod filter;

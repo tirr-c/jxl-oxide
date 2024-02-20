@@ -12,12 +12,11 @@ use jxl_vardct::{
 };
 
 use crate::{
-    dct, modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache,
-    Result,
+    modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache, Result,
 };
 
-mod transform;
-pub use transform::transform;
+mod dct_common;
+mod transform_common;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -32,6 +31,8 @@ use aarch64 as impls;
 mod generic;
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 use generic as impls;
+
+use self::dct_common::DctDirection;
 
 pub(crate) fn render_vardct<S: Sample>(
     frame: &IndexedFrame,
@@ -792,7 +793,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
                             *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
                         }
                     }
-                    dct::dct_2d(&mut out, dct::DctDirection::Forward);
+                    impls::dct_2d(&mut out, DctDirection::Forward);
                     for y in 0..bh {
                         for x in 0..bw {
                             *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
@@ -801,7 +802,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
                 }
 
                 let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
-                transform(&mut block, dct_select);
+                impls::transform(&mut block, dct_select);
             },
         );
     }
