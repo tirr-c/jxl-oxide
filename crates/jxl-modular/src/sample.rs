@@ -10,16 +10,16 @@ pub trait Sealed: Copy + Default + Send + Sync {
     ) -> Option<&'a mut CutGrid<'g, i16>>;
 }
 
-pub trait Sample:
-    Copy + Default + Send + Sync + Sealed + std::ops::Add<Self, Output = Self> + 'static
-{
+pub trait Sample: Copy + Default + Send + Sync + Sealed + 'static {
     fn from_i32(value: i32) -> Self;
     fn from_u32(value: u32) -> Self;
     fn unpack_signed_u32(value: u32) -> Self;
     fn to_i32(self) -> i32;
     fn to_i64(self) -> i64;
     fn to_f32(self) -> f32;
+    fn add(self, rhs: Self) -> Self;
     fn wrapping_muladd_i32(self, mul: i32, add: i32) -> Self;
+    fn grad_clamped(n: Self, w: Self, nw: Self) -> Self;
 }
 
 impl Sample for i32 {
@@ -54,8 +54,23 @@ impl Sample for i32 {
     }
 
     #[inline]
+    fn add(self, rhs: i32) -> i32 {
+        self.wrapping_add(rhs)
+    }
+
+    #[inline]
     fn wrapping_muladd_i32(self, mul: i32, add: i32) -> i32 {
         self.wrapping_mul(mul).wrapping_add(add)
+    }
+
+    #[inline]
+    fn grad_clamped(n: i32, w: i32, nw: i32) -> i32 {
+        let (n, w) = if w > n {
+            (w as i64, n as i64)
+        } else {
+            (n as i64, w as i64)
+        };
+        (w + n - nw as i64).clamp(w, n) as i32
     }
 }
 
@@ -94,8 +109,23 @@ impl Sample for i16 {
     }
 
     #[inline]
+    fn add(self, rhs: i16) -> i16 {
+        self.wrapping_add(rhs)
+    }
+
+    #[inline]
     fn wrapping_muladd_i32(self, mul: i32, add: i32) -> i16 {
         self.wrapping_mul(mul as i16).wrapping_add(add as i16)
+    }
+
+    #[inline]
+    fn grad_clamped(n: i16, w: i16, nw: i16) -> i16 {
+        let (n, w) = if w > n {
+            (w as i32, n as i32)
+        } else {
+            (n as i32, w as i32)
+        };
+        (w + n - nw as i32).clamp(w, n) as i16
     }
 }
 
