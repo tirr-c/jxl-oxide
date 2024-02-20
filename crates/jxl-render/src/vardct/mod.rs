@@ -4,7 +4,7 @@ use jxl_frame::{
     data::{GlobalModular, HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
     FrameHeader,
 };
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{CutGrid, SharedSubgrid, SimpleGrid};
 use jxl_image::ImageHeader;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_vardct::{
@@ -562,20 +562,15 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
     for (channel, coeff) in out.iter_mut().enumerate() {
         let quant_bias = oim.quant_bias[channel];
         let shift = shifts_cbycr[channel];
-        let vshift = shift.vshift();
-        let hshift = shift.hshift();
-
-        for by in 0..lf_height {
-            for bx in 0..lf_width {
-                let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else {
-                    continue;
-                };
-                let shifted_bx = bx >> hshift;
-                let shifted_by = by >> vshift;
-                if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
-                    continue;
-                }
-
+        for_each_varblocks(
+            &block_info,
+            shift,
+            |VarblockInfo {
+                 shifted_bx,
+                 shifted_by,
+                 dct_select,
+                 hf_mul,
+             }| {
                 let (bw, bh) = dct_select.dct_select_size();
                 let left = shifted_bx * 8;
                 let top = shifted_by * 8;
@@ -610,8 +605,8 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
                         *q *= mul;
                     }
                 }
-            }
-        }
+            },
+        );
     }
 }
 
@@ -763,25 +758,18 @@ pub fn transform_with_lf_grouped<S: Sample>(
         left_in_lf..(left_in_lf + lf_width as usize),
         top_in_lf..(top_in_lf + lf_height as usize),
     );
-    let w8 = block_info.width();
-    let h8 = block_info.height();
 
     for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
         let shift = shifts_cbycr[channel];
-        let vshift = shift.vshift();
-        let hshift = shift.hshift();
-
-        for by in 0..h8 {
-            for bx in 0..w8 {
-                let &BlockInfo::Data { dct_select, .. } = block_info.get(bx, by) else {
-                    continue;
-                };
-                let shifted_bx = bx >> hshift;
-                let shifted_by = by >> vshift;
-                if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
-                    continue;
-                }
-
+        for_each_varblocks(
+            &block_info,
+            shift,
+            |VarblockInfo {
+                 shifted_bx,
+                 shifted_by,
+                 dct_select,
+                 ..
+             }| {
                 let (bw, bh) = dct_select.dct_select_size();
                 let left = shifted_bx * 8;
                 let top = shifted_by * 8;
@@ -814,7 +802,54 @@ pub fn transform_with_lf_grouped<S: Sample>(
 
                 let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
                 transform(&mut block, dct_select);
+            },
+        );
+    }
+}
+
+#[derive(Debug)]
+struct VarblockInfo {
+    shifted_bx: usize,
+    shifted_by: usize,
+    dct_select: TransformType,
+    hf_mul: i32,
+}
+
+fn for_each_varblocks(
+    block_info: &SharedSubgrid<BlockInfo>,
+    shift: ChannelShift,
+    mut f: impl FnMut(VarblockInfo),
+) {
+    let w8 = block_info.width();
+    let h8 = block_info.height();
+    let vshift = shift.vshift();
+    let hshift = shift.hshift();
+
+    for by in 0..h8 {
+        for bx in 0..w8 {
+            let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else {
+                continue;
+            };
+            let shifted_bx = bx >> hshift;
+            let shifted_by = by >> vshift;
+            if hshift != 0 || vshift != 0 {
+                if (shifted_bx << hshift) != bx || (shifted_by << vshift) != by {
+                    continue;
+                }
+                if !matches!(
+                    block_info.get(shifted_bx, shifted_by),
+                    BlockInfo::Data { .. }
+                ) {
+                    continue;
+                }
             }
+
+            f(VarblockInfo {
+                shifted_bx,
+                shifted_by,
+                dct_select,
+                hf_mul,
+            })
         }
     }
 }
