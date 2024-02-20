@@ -485,7 +485,6 @@ impl DecoderInner {
                     distance - 119
                 };
 
-                tracing::trace!(num_decoded = state.num_decoded, distance);
                 let distance = (1 << 20).min(distance).min(state.num_decoded);
                 state.copy_pos = state.num_decoded - distance;
 
