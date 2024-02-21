@@ -1,12 +1,12 @@
-use std::arch::is_aarch64_feature_detected;
 use std::arch::aarch64::*;
+use std::arch::is_aarch64_feature_detected;
 
 use jxl_grid::{CutGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
-    dct_common::{DctDirection, scale_f},
+    dct_common::{scale_f, DctDirection},
     VarblockInfo,
 };
 

@@ -4,7 +4,7 @@ use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
-    dct_common::{DctDirection, scale_f},
+    dct_common::{scale_f, DctDirection},
     transform_common::AFV_BASIS,
     VarblockInfo,
 };
@@ -96,12 +96,9 @@ pub(crate) fn transform_hornuss(coeff: &mut CutGrid<'_>) {
             }
             let residual_sum: f32 = scratch[1..].iter().copied().sum();
             let avg = scratch[0] - residual_sum / 16.0;
-            scratch[0] = scratch[5] + avg;
-            scratch[5] = avg;
-            for (idx, s) in scratch.iter_mut().enumerate() {
-                if idx == 0 || idx == 5 {
-                    continue;
-                }
+            scratch[0] = scratch[5];
+            scratch[5] = 0.0;
+            for s in scratch.iter_mut() {
                 *s += avg;
             }
         }
