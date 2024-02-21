@@ -195,17 +195,17 @@ impl Rct {
         let c = channels.next().unwrap().grid_mut();
 
         let a = {
-            let g = a.subgrid_mut(.., ..);
+            let g = a.as_mut();
             let width = g.width();
             g.into_groups(width, 8)
         };
         let b = {
-            let g = b.subgrid_mut(.., ..);
+            let g = b.as_mut();
             let width = g.width();
             g.into_groups(width, 8)
         };
         let c = {
-            let g = c.subgrid_mut(.., ..);
+            let g = c.as_mut();
             let width = g.width();
             g.into_groups(width, 8)
         };

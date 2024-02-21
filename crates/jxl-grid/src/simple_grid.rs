@@ -273,6 +273,13 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 }
 
 impl<'g, V: Copy> CutGrid<'g, V> {
+    pub fn as_mut(&mut self) -> CutGrid<V> {
+        // SAFETY: We have unique reference to the grid, and the new grid borrows it.
+        unsafe {
+            CutGrid::new(self.ptr, self.width, self.height, self.stride)
+        }
+    }
+
     pub fn subgrid_mut(
         &mut self,
         range_x: impl RangeBounds<usize>,
@@ -307,9 +314,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         assert!(right <= self.width);
         assert!(bottom <= self.height);
 
-        let base_ptr = NonNull::new(self.get_ptr(left, top)).unwrap();
-        // SAFETY: subgrid is contained in `self`.
-        unsafe { CutGrid::new(base_ptr, right - left, bottom - top, self.stride) }
+        // SAFETY: subgrid region is contained in `self`.
+        unsafe {
+            let base_ptr = NonNull::new(self.get_ptr_unchecked(left, top)).unwrap();
+            CutGrid::new(base_ptr, right - left, bottom - top, self.stride)
+        }
     }
 
     /// Split the grid horizontally at an index.
