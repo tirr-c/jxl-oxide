@@ -273,7 +273,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 }
 
 impl<'g, V: Copy> CutGrid<'g, V> {
-    pub fn as_mut(&mut self) -> CutGrid<V> {
+    pub fn borrow_mut(&mut self) -> CutGrid<V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
         unsafe { CutGrid::new(self.ptr, self.width, self.height, self.stride) }
     }
