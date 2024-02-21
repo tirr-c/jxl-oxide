@@ -1,10 +1,30 @@
-use jxl_grid::CutGrid;
-use jxl_vardct::TransformType;
+#![allow(dead_code)]
+use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_modular::ChannelShift;
+use jxl_vardct::{BlockInfo, TransformType};
 
-use super::super::{dct_common::DctDirection, transform_common::AFV_BASIS};
+use crate::vardct::{
+    dct_common::{DctDirection, scale_f},
+    transform_common::AFV_BASIS,
+    VarblockInfo,
+};
+
 use super::dct_2d;
 
-fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
+#[inline]
+pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
+    let c00 = block.get(0, 0);
+    let c01 = block.get(1, 0);
+    let c10 = block.get(0, 1);
+    let c11 = block.get(1, 1);
+    *block.get_mut(0, 0) = c00 + c01 + c10 + c11;
+    *block.get_mut(1, 0) = c00 + c01 - c10 - c11;
+    *block.get_mut(0, 1) = c00 - c01 + c10 - c11;
+    *block.get_mut(1, 1) = c00 - c01 - c10 + c11;
+}
+
+#[inline]
+pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     debug_assert!(SIZE.is_power_of_two());
 
     let num_2x2 = SIZE / 2;
@@ -28,13 +48,13 @@ fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct2(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct2(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
     aux_idct2_in_place::<4>(coeff);
     aux_idct2_in_place::<8>(coeff);
 }
 
-fn transform_dct4(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct4(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
@@ -62,7 +82,7 @@ fn transform_dct4(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_hornuss(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_hornuss(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
@@ -99,7 +119,7 @@ fn transform_hornuss(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
+pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut CutGrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
@@ -116,7 +136,7 @@ fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
         dct_2d(&mut scratch, DctDirection::Inverse);
     }
 
-    if transpose {
+    if TR {
         for y in 0..8 {
             for x in 0..8 {
                 *coeff.get_mut(y, x) = scratch[y * 8 + x];
@@ -129,7 +149,7 @@ fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
     }
 }
 
-fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
     assert!(N < 4);
     let flip_x = N % 2;
     let flip_y = N / 2;
@@ -206,19 +226,75 @@ fn transform_dct(coeff: &mut CutGrid<'_>) {
     dct_2d(coeff, DctDirection::Inverse);
 }
 
-pub fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
         Dct2 => transform_dct2(coeff),
         Dct4 => transform_dct4(coeff),
         Hornuss => transform_hornuss(coeff),
-        Dct4x8 => transform_dct4x8(coeff, false),
-        Dct8x4 => transform_dct4x8(coeff, true),
+        Dct4x8 => transform_dct4x8::<false>(coeff),
+        Dct8x4 => transform_dct4x8::<true>(coeff),
         Afv0 => transform_afv::<0>(coeff),
         Afv1 => transform_afv::<1>(coeff),
         Afv2 => transform_afv::<2>(coeff),
         Afv3 => transform_afv::<3>(coeff),
         _ => transform_dct(coeff),
+    }
+}
+
+pub fn transform_varblocks(
+    lf: &[SharedSubgrid<f32>; 3],
+    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    shifts_cbycr: [ChannelShift; 3],
+    block_info: &SharedSubgrid<BlockInfo>,
+) {
+    use TransformType::*;
+
+    for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
+        let shift = shifts_cbycr[channel];
+        crate::vardct::for_each_varblocks(
+            block_info,
+            shift,
+            |VarblockInfo {
+                 shifted_bx,
+                 shifted_by,
+                 dct_select,
+                 ..
+             }| {
+                let (bw, bh) = dct_select.dct_select_size();
+                let left = shifted_bx * 8;
+                let top = shifted_by * 8;
+
+                let bw = bw as usize;
+                let bh = bh as usize;
+                let logbw = bw.trailing_zeros() as usize;
+                let logbh = bh.trailing_zeros() as usize;
+
+                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
+                if matches!(
+                    dct_select,
+                    Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
+                ) {
+                    debug_assert_eq!(bw * bh, 1);
+                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
+                } else {
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
+                        }
+                    }
+                    super::dct_2d(&mut out, DctDirection::Forward);
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
+                        }
+                    }
+                }
+
+                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
+                transform(&mut block, dct_select);
+            },
+        );
     }
 }

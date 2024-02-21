@@ -2,8 +2,10 @@ use jxl_grid::{AllocTracker, SimpleGrid};
 
 mod dct;
 mod transform;
+#[allow(unused)]
 pub use dct::dct_2d;
-pub use transform::transform;
+#[allow(unused)]
+pub use transform::*;
 
 #[inline(always)]
 pub fn adaptive_lf_smoothing_impl(

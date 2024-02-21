@@ -1,224 +1,240 @@
-use jxl_grid::CutGrid;
-use jxl_vardct::TransformType;
+use std::arch::is_aarch64_feature_detected;
+use std::arch::aarch64::*;
 
-use super::super::{dct_common::DctDirection, transform_common::AFV_BASIS};
-use super::dct_2d;
+use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_modular::ChannelShift;
+use jxl_vardct::{BlockInfo, TransformType};
 
-fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
-    debug_assert!(SIZE.is_power_of_two());
+use crate::vardct::{
+    dct_common::{DctDirection, scale_f},
+    VarblockInfo,
+};
 
-    let num_2x2 = SIZE / 2;
-    let mut scratch = [[0.0f32; SIZE]; SIZE];
-    for y in 0..num_2x2 {
-        for x in 0..num_2x2 {
-            let c00 = block.get(x, y);
-            let c01 = block.get(x + num_2x2, y);
-            let c10 = block.get(x, y + num_2x2);
-            let c11 = block.get(x + num_2x2, y + num_2x2);
+use super::generic;
 
-            scratch[2 * y][2 * x] = c00 + c01 + c10 + c11;
-            scratch[2 * y][2 * x + 1] = c00 + c01 - c10 - c11;
-            scratch[2 * y + 1][2 * x] = c00 - c01 + c10 - c11;
-            scratch[2 * y + 1][2 * x + 1] = c00 - c01 - c10 + c11;
-        }
+#[target_feature(enable = "neon")]
+unsafe fn transform_dct4_aarch64_neon(coeff: &mut CutGrid<'_>) {
+    generic::aux_idct2_in_place_2(coeff);
+
+    let mut scratch_0 = [vdupq_n_f32(0.0); 4];
+    let mut scratch_1 = [vdupq_n_f32(0.0); 4];
+    for y2 in 0..4 {
+        let row_ptr = coeff.get_row(y2 * 2).as_ptr();
+        let float32x4x2_t(a, b) = vld2q_f32(row_ptr);
+        scratch_0[y2] = a;
+        scratch_1[y2] = b;
     }
 
-    for (y, scratch_row) in scratch.into_iter().enumerate() {
-        block.get_row_mut(y)[..SIZE].copy_from_slice(&scratch_row);
-    }
-}
+    let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_0);
+    let mut scratch_0 = super::dct::dct4_inverse([v0, v1, v2, v3]);
+    let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_1);
+    let mut scratch_1 = super::dct::dct4_inverse([v0, v1, v2, v3]);
+    for y2 in 0..4 {
+        let row_ptr = coeff.get_row_mut(y2).as_mut_ptr();
+        vst1q_f32(row_ptr, super::dct::dct4_vec_inverse(scratch_0[y2]));
+        vst1q_f32(row_ptr.add(4), super::dct::dct4_vec_inverse(scratch_1[y2]));
 
-fn transform_dct2(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place::<2>(coeff);
-    aux_idct2_in_place::<4>(coeff);
-    aux_idct2_in_place::<8>(coeff);
-}
-
-fn transform_dct4(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place::<2>(coeff);
-
-    let mut scratch = [0.0f32; 64];
-    for y in 0..2 {
-        for x in 0..2 {
-            let mut scratch = CutGrid::from_buf(&mut scratch[(y * 2 + x) * 16..], 4, 4, 4);
-            for iy in 0..4 {
-                for ix in 0..4 {
-                    *scratch.get_mut(iy, ix) = coeff.get(x + ix * 2, y + iy * 2);
-                }
-            }
-            dct_2d(&mut scratch, DctDirection::Inverse);
-        }
+        let row_ptr = coeff.get_row(y2 * 2 + 1).as_ptr();
+        let float32x4x2_t(a, b) = vld2q_f32(row_ptr);
+        scratch_0[y2] = a;
+        scratch_1[y2] = b;
     }
 
-    for y in 0..2 {
-        for x in 0..2 {
-            let scratch = &scratch[(y * 2 + x) * 16..][..16];
-            for iy in 0..4 {
-                for ix in 0..4 {
-                    *coeff.get_mut(x * 4 + ix, y * 4 + iy) = scratch[iy * 4 + ix];
-                }
-            }
-        }
+    let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_0);
+    let scratch_0 = super::dct::dct4_inverse([v0, v1, v2, v3]);
+    let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_1);
+    let scratch_1 = super::dct::dct4_inverse([v0, v1, v2, v3]);
+    for y in 0..4 {
+        let row_ptr = coeff.get_row_mut(y + 4).as_mut_ptr();
+        vst1q_f32(row_ptr, super::dct::dct4_vec_inverse(scratch_0[y]));
+        vst1q_f32(row_ptr.add(4), super::dct::dct4_vec_inverse(scratch_1[y]));
     }
 }
 
-fn transform_hornuss(coeff: &mut CutGrid<'_>) {
-    aux_idct2_in_place::<2>(coeff);
-
-    let mut scratch = [0.0f32; 64];
-    for y in 0..2 {
-        for x in 0..2 {
-            let scratch = &mut scratch[(y * 2 + x) * 16..][..16];
-            for iy in 0..4 {
-                for ix in 0..4 {
-                    scratch[iy * 4 + ix] = coeff.get(x + ix * 2, y + iy * 2);
-                }
-            }
-            let residual_sum: f32 = scratch[1..].iter().copied().sum();
-            let avg = scratch[0] - residual_sum / 16.0;
-            scratch[0] = scratch[5] + avg;
-            scratch[5] = avg;
-            for (idx, s) in scratch.iter_mut().enumerate() {
-                if idx == 0 || idx == 5 {
-                    continue;
-                }
-                *s += avg;
-            }
-        }
-    }
-
-    for y in 0..2 {
-        for x in 0..2 {
-            let scratch = &mut scratch[(y * 2 + x) * 16..][..16];
-            for iy in 0..4 {
-                for ix in 0..4 {
-                    *coeff.get_mut(x * 4 + ix, y * 4 + iy) = scratch[iy * 4 + ix];
-                }
-            }
-        }
-    }
-}
-
-fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
+#[target_feature(enable = "neon")]
+unsafe fn transform_dct4x8_aarch64_neon<const TR: bool>(coeff: &mut CutGrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
     *coeff.get_mut(0, 1) = coeff0 - coeff1;
 
-    let mut scratch = [0.0f32; 64];
-    for idx in [0, 1] {
-        let mut scratch = CutGrid::from_buf(&mut scratch[(idx * 32)..], 8, 4, 8);
-        for iy in 0..4 {
-            for ix in 0..8 {
-                *scratch.get_mut(ix, iy) = coeff.get(ix, iy * 2 + idx);
-            }
+    if TR {
+        let mut scratch_0 = [vdupq_n_f32(0.0); 4];
+        let mut scratch_1 = [vdupq_n_f32(0.0); 4];
+        for y2 in 0..4 {
+            let row_ptr = coeff.get_row(y2 * 2).as_ptr();
+            let a = vld1q_f32(row_ptr);
+            let b = vld1q_f32(row_ptr.add(4));
+            let (l, r) = super::dct::dct8_vec_inverse(a, b);
+            scratch_0[y2] = l;
+            scratch_1[y2] = r;
         }
-        dct_2d(&mut scratch, DctDirection::Inverse);
-    }
 
-    if transpose {
-        for y in 0..8 {
-            for x in 0..8 {
-                *coeff.get_mut(y, x) = scratch[y * 8 + x];
-            }
+        let scratch_0 = super::dct::dct4_inverse(scratch_0);
+        let scratch_1 = super::dct::dct4_inverse(scratch_1);
+        let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_0);
+        let mut scratch_0 = [v0, v1, v2, v3];
+        let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_1);
+        let mut scratch_1 = [v0, v1, v2, v3];
+        for y2 in 0..4 {
+            let y = [1, 5, 3, 7][y2];
+            let row_ptr = coeff.get_row(y).as_ptr();
+            let a = vld1q_f32(row_ptr);
+            let b = vld1q_f32(row_ptr.add(4));
+            let (l, r) = super::dct::dct8_vec_inverse(a, b);
+
+            let row_ptr = coeff.get_row_mut(y2).as_mut_ptr();
+            vst1q_f32(row_ptr, scratch_0[y2]);
+            let row_ptr = coeff.get_row_mut(y2 + 4).as_mut_ptr();
+            vst1q_f32(row_ptr, scratch_1[y2]);
+
+            scratch_0[y2] = l;
+            scratch_1[y2] = r;
+        }
+        scratch_0.swap(1, 2);
+        scratch_1.swap(1, 2);
+
+        let scratch_0 = super::dct::dct4_inverse(scratch_0);
+        let scratch_1 = super::dct::dct4_inverse(scratch_1);
+        let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_0);
+        let scratch_0 = [v0, v1, v2, v3];
+        let float32x4x4_t(v0, v1, v2, v3) = super::dct::transpose_lane(&scratch_1);
+        let scratch_1 = [v0, v1, v2, v3];
+        for y in 0..4 {
+            let row_ptr = coeff.get_row_mut(y).as_mut_ptr().add(4);
+            vst1q_f32(row_ptr, scratch_0[y]);
+            let row_ptr = coeff.get_row_mut(y + 4).as_mut_ptr().add(4);
+            vst1q_f32(row_ptr, scratch_1[y]);
         }
     } else {
-        for y in 0..8 {
-            coeff.get_row_mut(y)[..8].copy_from_slice(&scratch[y * 8..][..8]);
+        let mut scratch_0 = [vdupq_n_f32(0.0); 4];
+        let mut scratch_1 = [vdupq_n_f32(0.0); 4];
+        for y2 in 0..4 {
+            let row_ptr = coeff.get_row(y2 * 2).as_ptr();
+            let a = vld1q_f32(row_ptr);
+            let b = vld1q_f32(row_ptr.add(4));
+            let (l, r) = super::dct::dct8_vec_inverse(a, b);
+            scratch_0[y2] = l;
+            scratch_1[y2] = r;
+        }
+
+        let mut scratch_0 = super::dct::dct4_inverse(scratch_0);
+        let mut scratch_1 = super::dct::dct4_inverse(scratch_1);
+        for y2 in 0..4 {
+            let row_ptr = coeff.get_row_mut(y2).as_mut_ptr();
+            vst1q_f32(row_ptr, scratch_0[y2]);
+            vst1q_f32(row_ptr.add(4), scratch_1[y2]);
+
+            let row_ptr = coeff.get_row(y2 * 2 + 1).as_ptr();
+            let a = vld1q_f32(row_ptr);
+            let b = vld1q_f32(row_ptr.add(4));
+            let (l, r) = super::dct::dct8_vec_inverse(a, b);
+            scratch_0[y2] = l;
+            scratch_1[y2] = r;
+        }
+
+        let scratch_0 = super::dct::dct4_inverse(scratch_0);
+        let scratch_1 = super::dct::dct4_inverse(scratch_1);
+        for y in 0..4 {
+            let row_ptr = coeff.get_row_mut(y + 4).as_mut_ptr();
+            vst1q_f32(row_ptr, scratch_0[y]);
+            vst1q_f32(row_ptr.add(4), scratch_1[y]);
         }
     }
 }
 
-fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
-    assert!(N < 4);
-    let flip_x = N % 2;
-    let flip_y = N / 2;
-
-    let mut coeff_afv = [0.0f32; 16];
-    coeff_afv[0] = (coeff.get(0, 0) + coeff.get(1, 0) + coeff.get(0, 1)) * 4.0;
-    for (idx, v) in coeff_afv.iter_mut().enumerate().skip(1) {
-        let iy = idx / 4;
-        let ix = idx % 4;
-        *v = coeff.get(2 * ix, 2 * iy);
-    }
-
-    let mut samples_afv = [0.0f32; 16];
-    for (coeff, basis) in coeff_afv.into_iter().zip(AFV_BASIS) {
-        for (sample, basis) in samples_afv.iter_mut().zip(basis) {
-            *sample = coeff.mul_add(basis, *sample);
-        }
-    }
-
-    let mut scratch_4x4 = [0.0f32; 16];
-    let mut scratch_4x8 = [0.0f32; 32];
-
-    scratch_4x4[0] = coeff.get(0, 0) - coeff.get(1, 0) + coeff.get(0, 1);
-    for iy in 0..4 {
-        for ix in 0..4 {
-            if ix | iy == 0 {
-                continue;
-            }
-            scratch_4x4[ix * 4 + iy] = coeff.get(2 * ix + 1, 2 * iy);
-        }
-    }
-    dct_2d(
-        &mut CutGrid::from_buf(&mut scratch_4x4, 4, 4, 4),
-        DctDirection::Inverse,
-    );
-
-    scratch_4x8[0] = coeff.get(0, 0) - coeff.get(0, 1);
-    for iy in 0..4 {
-        for ix in 0..8 {
-            if ix | iy == 0 {
-                continue;
-            }
-            scratch_4x8[iy * 8 + ix] = coeff.get(ix, 2 * iy + 1);
-        }
-    }
-    dct_2d(
-        &mut CutGrid::from_buf(&mut scratch_4x8, 8, 4, 8),
-        DctDirection::Inverse,
-    );
-
-    for iy in 0..4 {
-        let afv_y = if flip_y == 0 { iy } else { 3 - iy };
-        for ix in 0..4 {
-            let afv_x = if flip_x == 0 { ix } else { 3 - ix };
-            *coeff.get_mut(flip_x * 4 + ix, flip_y * 4 + iy) = samples_afv[afv_y * 4 + afv_x];
-        }
-    }
-
-    for iy in 0..4 {
-        let y = flip_y * 4 + iy;
-        for ix in 0..4 {
-            let x = (1 - flip_x) * 4 + ix;
-            *coeff.get_mut(x, y) = scratch_4x4[iy * 4 + ix];
-        }
-    }
-
-    for iy in 0..4 {
-        let y = (1 - flip_y) * 4 + iy;
-        coeff.get_row_mut(y)[..8].copy_from_slice(&scratch_4x8[iy * 8..][..8]);
-    }
+#[target_feature(enable = "neon")]
+unsafe fn transform_dct_aarch64_neon(coeff: &mut CutGrid<'_>) {
+    super::dct::dct_2d_aarch64_neon(coeff, DctDirection::Inverse);
 }
 
-fn transform_dct(coeff: &mut CutGrid<'_>) {
-    dct_2d(coeff, DctDirection::Inverse);
-}
-
-pub fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+#[target_feature(enable = "neon")]
+unsafe fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
-        Dct2 => transform_dct2(coeff),
-        Dct4 => transform_dct4(coeff),
-        Hornuss => transform_hornuss(coeff),
-        Dct4x8 => transform_dct4x8(coeff, false),
-        Dct8x4 => transform_dct4x8(coeff, true),
-        Afv0 => transform_afv::<0>(coeff),
-        Afv1 => transform_afv::<1>(coeff),
-        Afv2 => transform_afv::<2>(coeff),
-        Afv3 => transform_afv::<3>(coeff),
-        _ => transform_dct(coeff),
+        Dct2 => generic::transform_dct2(coeff),
+        Dct4 => transform_dct4_aarch64_neon(coeff),
+        Hornuss => generic::transform_hornuss(coeff),
+        Dct4x8 => transform_dct4x8_aarch64_neon::<false>(coeff),
+        Dct8x4 => transform_dct4x8_aarch64_neon::<true>(coeff),
+        Afv0 => generic::transform_afv::<0>(coeff),
+        Afv1 => generic::transform_afv::<1>(coeff),
+        Afv2 => generic::transform_afv::<2>(coeff),
+        Afv3 => generic::transform_afv::<3>(coeff),
+        _ => transform_dct_aarch64_neon(coeff),
     }
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn transform_varblocks_aarch64_neon(
+    lf: &[SharedSubgrid<f32>; 3],
+    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    shifts_cbycr: [ChannelShift; 3],
+    block_info: &SharedSubgrid<BlockInfo>,
+) {
+    use TransformType::*;
+
+    for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
+        let shift = shifts_cbycr[channel];
+        crate::vardct::for_each_varblocks(
+            block_info,
+            shift,
+            |VarblockInfo {
+                 shifted_bx,
+                 shifted_by,
+                 dct_select,
+                 ..
+             }| {
+                let (bw, bh) = dct_select.dct_select_size();
+                let left = shifted_bx * 8;
+                let top = shifted_by * 8;
+
+                let bw = bw as usize;
+                let bh = bh as usize;
+                let logbw = bw.trailing_zeros() as usize;
+                let logbh = bh.trailing_zeros() as usize;
+
+                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
+                if matches!(
+                    dct_select,
+                    Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
+                ) {
+                    debug_assert_eq!(bw * bh, 1);
+                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
+                } else {
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
+                        }
+                    }
+                    super::dct::dct_2d_aarch64_neon(&mut out, DctDirection::Forward);
+                    for y in 0..bh {
+                        for x in 0..bw {
+                            *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
+                        }
+                    }
+                }
+
+                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
+                transform(&mut block, dct_select);
+            },
+        );
+    }
+}
+
+#[inline]
+pub fn transform_varblocks(
+    lf: &[SharedSubgrid<f32>; 3],
+    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    shifts_cbycr: [ChannelShift; 3],
+    block_info: &SharedSubgrid<BlockInfo>,
+) {
+    if is_aarch64_feature_detected!("neon") {
+        unsafe {
+            return transform_varblocks_aarch64_neon(lf, coeff_out, shifts_cbycr, block_info);
+        }
+    }
+
+    generic::transform_varblocks(lf, coeff_out, shifts_cbycr, block_info);
 }

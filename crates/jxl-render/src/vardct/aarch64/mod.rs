@@ -6,8 +6,7 @@ use super::generic;
 
 mod dct;
 mod transform;
-pub use dct::dct_2d;
-pub use transform::transform;
+pub use transform::transform_varblocks;
 
 pub fn adaptive_lf_smoothing_impl(
     width: usize,
