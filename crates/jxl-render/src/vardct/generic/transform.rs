@@ -4,9 +4,8 @@ use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
-    dct_common::{scale_f, DctDirection},
-    transform_common::AFV_BASIS,
-    VarblockInfo,
+    dct_common::DctDirection,
+    transform_common::{transform_varblocks_inner, AFV_BASIS},
 };
 
 use super::dct_2d;
@@ -246,52 +245,14 @@ pub fn transform_varblocks(
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {
-    use TransformType::*;
-
-    for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
-        let shift = shifts_cbycr[channel];
-        crate::vardct::for_each_varblocks(
+    unsafe {
+        transform_varblocks_inner(
+            lf,
+            coeff_out,
+            shifts_cbycr,
             block_info,
-            shift,
-            |VarblockInfo {
-                 shifted_bx,
-                 shifted_by,
-                 dct_select,
-                 ..
-             }| {
-                let (bw, bh) = dct_select.dct_select_size();
-                let left = shifted_bx * 8;
-                let top = shifted_by * 8;
-
-                let bw = bw as usize;
-                let bh = bh as usize;
-                let logbw = bw.trailing_zeros() as usize;
-                let logbh = bh.trailing_zeros() as usize;
-
-                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
-                if matches!(
-                    dct_select,
-                    Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
-                ) {
-                    debug_assert_eq!(bw * bh, 1);
-                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
-                } else {
-                    for y in 0..bh {
-                        for x in 0..bw {
-                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
-                        }
-                    }
-                    super::dct_2d(&mut out, DctDirection::Forward);
-                    for y in 0..bh {
-                        for x in 0..bw {
-                            *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
-                        }
-                    }
-                }
-
-                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
-                transform(&mut block, dct_select);
-            },
+            super::dct::dct_2d,
+            transform,
         );
     }
 }
