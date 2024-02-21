@@ -7,7 +7,7 @@ use crate::vardct::{
     VarblockInfo,
 };
 
-#[inline]
+#[inline(always)]
 pub unsafe fn transform_varblocks_inner(
     lf: &[SharedSubgrid<f32>; 3],
     coeff_out: &mut [CutGrid<'_, f32>; 3],

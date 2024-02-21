@@ -11,110 +11,10 @@ use super::generic;
 
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse3")]
-unsafe fn aux_idct2_in_place_4_x86_64_sse41(block: &mut CutGrid) {
-    let v0 = _mm_loadu_ps(block.get_row(0).as_ptr());
-    let v1 = _mm_loadu_ps(block.get_row(1).as_ptr());
-    let v2 = _mm_loadu_ps(block.get_row(2).as_ptr());
-    let v3 = _mm_loadu_ps(block.get_row(3).as_ptr());
-
-    let a01b01 = _mm_shuffle_ps::<0b11011000>(v0, v0);
-    let a23b23 = _mm_shuffle_ps::<0b11011000>(v2, v2);
-    let add0123 = _mm_hadd_ps(a01b01, a23b23);
-    let sub0123 = _mm_hsub_ps(a01b01, a23b23);
-    let add0123 = _mm_shuffle_ps::<0b11011000>(add0123, add0123);
-    let sub0123 = _mm_shuffle_ps::<0b11011000>(sub0123, sub0123);
-    let o02 = _mm_hadd_ps(add0123, sub0123);
-    let o13 = _mm_hsub_ps(add0123, sub0123);
-    let o01 = _mm_unpacklo_ps(o02, o13);
-    let o23 = _mm_unpackhi_ps(o02, o13);
-    _mm_storeu_ps(block.get_row_mut(0).as_mut_ptr(), o01);
-    _mm_storeu_ps(block.get_row_mut(1).as_mut_ptr(), o23);
-
-    let a01b01 = _mm_shuffle_ps::<0b11011000>(v1, v1);
-    let a23b23 = _mm_shuffle_ps::<0b11011000>(v3, v3);
-    let add0123 = _mm_hadd_ps(a01b01, a23b23);
-    let sub0123 = _mm_hsub_ps(a01b01, a23b23);
-    let add0123 = _mm_shuffle_ps::<0b11011000>(add0123, add0123);
-    let sub0123 = _mm_shuffle_ps::<0b11011000>(sub0123, sub0123);
-    let o02 = _mm_hadd_ps(add0123, sub0123);
-    let o13 = _mm_hsub_ps(add0123, sub0123);
-    let o01 = _mm_unpacklo_ps(o02, o13);
-    let o23 = _mm_unpackhi_ps(o02, o13);
-    _mm_storeu_ps(block.get_row_mut(2).as_mut_ptr(), o01);
-    _mm_storeu_ps(block.get_row_mut(3).as_mut_ptr(), o23);
-}
-
-fn aux_idct2_in_place_8_x86_64_sse2(block: &mut CutGrid) {
-    unsafe {
-        for (y0, y1) in [(1, 2), (5, 6)] {
-            // Two rows are disjoint.
-            let row0 = block.get_row_mut(y0).as_mut_ptr();
-            let row1 = block.get_row_mut(y1).as_mut_ptr();
-            std::slice::from_raw_parts_mut(row0, 8)
-                .swap_with_slice(std::slice::from_raw_parts_mut(row1, 8));
-        }
-
-        for dy in 0..2 {
-            // Two rows are disjoint.
-            let row0 = block.get_row_mut(dy * 2).as_mut_ptr();
-            let row1 = block.get_row_mut(dy * 2 + 4).as_mut_ptr();
-            let c00 = _mm_loadu_ps(row0);
-            let c01 = _mm_loadu_ps(row0.add(4));
-            let c10 = _mm_loadu_ps(row1);
-            let c11 = _mm_loadu_ps(row1.add(4));
-
-            let add01 = _mm_add_ps(c00, c01);
-            let sub01 = _mm_sub_ps(c00, c01);
-            let add23 = _mm_add_ps(c10, c11);
-            let sub23 = _mm_sub_ps(c10, c11);
-
-            let o00 = _mm_add_ps(add01, add23);
-            let o01 = _mm_sub_ps(add01, add23);
-            let o10 = _mm_add_ps(sub01, sub23);
-            let o11 = _mm_sub_ps(sub01, sub23);
-
-            _mm_storeu_ps(row0, _mm_unpacklo_ps(o00, o01));
-            _mm_storeu_ps(row0.add(4), _mm_unpackhi_ps(o00, o01));
-            let row2 = block.get_row_mut(dy * 2 + 1).as_mut_ptr();
-            let c00 = _mm_loadu_ps(row2);
-            let c01 = _mm_loadu_ps(row2.add(4));
-            _mm_storeu_ps(row2, _mm_unpacklo_ps(o10, o11));
-            _mm_storeu_ps(row2.add(4), _mm_unpackhi_ps(o10, o11));
-            let row0 = row1;
-            let row1 = block.get_row_mut(dy * 2 + 5).as_mut_ptr();
-            let c10 = _mm_loadu_ps(row1);
-            let c11 = _mm_loadu_ps(row1.add(4));
-
-            let add01 = _mm_add_ps(c00, c01);
-            let sub01 = _mm_sub_ps(c00, c01);
-            let add23 = _mm_add_ps(c10, c11);
-            let sub23 = _mm_sub_ps(c10, c11);
-
-            let o00 = _mm_add_ps(add01, add23);
-            let o01 = _mm_sub_ps(add01, add23);
-            let o10 = _mm_add_ps(sub01, sub23);
-            let o11 = _mm_sub_ps(sub01, sub23);
-
-            _mm_storeu_ps(row0, _mm_unpacklo_ps(o00, o01));
-            _mm_storeu_ps(row0.add(4), _mm_unpackhi_ps(o00, o01));
-            _mm_storeu_ps(row1, _mm_unpacklo_ps(o10, o11));
-            _mm_storeu_ps(row1.add(4), _mm_unpackhi_ps(o10, o11));
-        }
-    }
-}
-
-#[target_feature(enable = "sse4.1")]
-#[target_feature(enable = "sse3")]
 unsafe fn transform_dct2_x86_64_sse41(coeff: &mut CutGrid<'_>) {
     generic::aux_idct2_in_place_2(coeff);
-    aux_idct2_in_place_4_x86_64_sse41(coeff);
-    aux_idct2_in_place_8_x86_64_sse2(coeff);
-}
-
-fn transform_dct2_x86_64_sse2(coeff: &mut CutGrid<'_>) {
-    generic::aux_idct2_in_place_2(coeff);
     generic::aux_idct2_in_place::<4>(coeff);
-    aux_idct2_in_place_8_x86_64_sse2(coeff);
+    generic::aux_idct2_in_place::<8>(coeff);
 }
 
 fn transform_dct4_x86_64_sse2(coeff: &mut CutGrid<'_>) {
@@ -275,7 +175,7 @@ fn transform_x86_64_sse2(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
-        Dct2 => transform_dct2_x86_64_sse2(coeff),
+        Dct2 => generic::transform_dct2(coeff),
         Dct4 => transform_dct4_x86_64_sse2(coeff),
         Hornuss => generic::transform_hornuss(coeff),
         Dct4x8 => transform_dct4x8_x86_64_sse2::<false>(coeff),

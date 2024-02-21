@@ -10,7 +10,7 @@ use crate::vardct::{
 
 use super::dct_2d;
 
-#[inline]
+#[inline(always)]
 pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
     let c00 = block.get(0, 0);
     let c01 = block.get(1, 0);
@@ -22,7 +22,7 @@ pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
     *block.get_mut(1, 1) = c00 - c01 - c10 + c11;
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     debug_assert!(SIZE.is_power_of_two());
 

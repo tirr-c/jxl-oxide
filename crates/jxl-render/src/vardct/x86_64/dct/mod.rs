@@ -7,6 +7,7 @@ use super::super::dct_common::{self, DctDirection};
 const LANE_SIZE: usize = 4;
 type Lane = __m128;
 
+#[inline(always)]
 pub(crate) fn transpose_lane(lanes: &mut [Lane]) {
     let [row0, row1, row2, row3] = lanes else {
         panic!()
@@ -16,6 +17,7 @@ pub(crate) fn transpose_lane(lanes: &mut [Lane]) {
     }
 }
 
+#[inline(always)]
 pub(crate) fn dct_2d_x86_64_sse2(io: &mut CutGrid<'_>, direction: DctDirection) {
     if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
         return super::generic::dct_2d(io, direction);
@@ -44,6 +46,7 @@ fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     }
 }
 
+#[inline]
 unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
@@ -69,6 +72,7 @@ unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     a.muladd(mul_a, b.mul(mul_b))
 }
 
+#[inline]
 pub(crate) unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
@@ -84,6 +88,7 @@ pub(crate) unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     tmp_b.muladd(mul, tmp_a)
 }
 
+#[inline]
 unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
@@ -106,6 +111,7 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     })
 }
 
+#[inline]
 pub(crate) unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
@@ -194,7 +200,8 @@ unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], directi
     }
 }
 
-pub(crate) unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
+#[inline]
+unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961 / 4.0);
     let sec1 = Lane::splat_f32(1.306563 / 4.0);
     let quarter = Lane::splat_f32(0.25);
@@ -215,6 +222,7 @@ pub(crate) unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
+#[inline]
 pub(crate) unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961);
     let sec1 = Lane::splat_f32(1.306563);
@@ -235,6 +243,7 @@ pub(crate) unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
+#[inline]
 unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let half = Lane::splat_f32(0.5);
@@ -273,6 +282,7 @@ unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     *io.get_mut(0, 7) = output1[3];
 }
 
+#[inline]
 unsafe fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);

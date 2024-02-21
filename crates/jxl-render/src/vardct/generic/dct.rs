@@ -140,6 +140,7 @@ pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
     }
 }
 
+#[inline]
 fn dct4(input: [f32; 4], direction: DctDirection) -> [f32; 4] {
     let sec0 = 0.5411961;
     let sec1 = 1.306563;

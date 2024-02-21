@@ -767,6 +767,7 @@ struct VarblockInfo {
     hf_mul: i32,
 }
 
+#[inline(always)]
 fn for_each_varblocks(
     block_info: &SharedSubgrid<BlockInfo>,
     shift: ChannelShift,
