@@ -75,6 +75,7 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
         b1 = *b;
     }
 
+    decoder.finalize()?;
     Ok(encoded_icc)
 }
 
