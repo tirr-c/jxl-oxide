@@ -16,10 +16,10 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index/
@@ -35,7 +35,7 @@ jobs:
         run: |
           rustc -vV | sed -ne 's/^host: /host=/p' >> "$GITHUB_OUTPUT"
       - run: cargo build --release
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: jxl-oxide-cli-${{ steps.detect-host.outputs.host }}
           path: |
@@ -50,12 +50,12 @@ jobs:
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
           targets: ${{ matrix.target }}
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -72,7 +72,7 @@ jobs:
             ${{ runner.os }}-dot-cargo-
       - run: cargo install cross --version 0.2.5
       - run: cross build --release --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: jxl-oxide-cli-${{ matrix.target }}
           path: |
@@ -82,12 +82,12 @@ jobs:
     name: WebAssembly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
           targets: wasm32-unknown-unknown
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -108,7 +108,7 @@ jobs:
         run: |
           wasm-pack build --release
           wasm-pack pack
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: jxl-oxide-wasm
           path: crates/jxl-oxide-wasm/pkg/jxl-oxide-wasm-*.tgz

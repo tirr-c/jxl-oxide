@@ -14,13 +14,13 @@ edition = "2021"
 default-run = "jxl-oxide"
 
 [dependencies]
-lcms2 = "6.0.0"
-miniz_oxide = "0.7.1"
-png = "0.17.10"
+lcms2 = "6.0.4"
+miniz_oxide = "0.7.2"
+png = "0.17.13"
 tracing.workspace = true
 
 [dependencies.clap]
-version = "4.4.18"
+version = "4.5.1"
 features = ["derive"]
 
 [dependencies.jxl-oxide]
@@ -30,11 +30,11 @@ default-features = false
 features = ["lcms2"]
 
 [dependencies.rayon]
-version = "1.8.0"
+version = "1.8.1"
 optional = true
 
 [dependencies.tracing-subscriber]
-version = "0.3.17"
+version = "0.3.18"
 features = ["env-filter"]
 
 [features]
