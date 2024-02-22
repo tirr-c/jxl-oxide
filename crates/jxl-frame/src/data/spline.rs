@@ -57,6 +57,8 @@ impl Bundle<&FrameHeader> for Splines {
             splines.push(spline);
         }
 
+        decoder.finalize()?;
+
         Ok(Self {
             quant_adjust,
             quant_splines: splines,
