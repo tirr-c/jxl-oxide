@@ -65,4 +65,5 @@ test_by_include!(
     spline_coordinate,
     invalid_lz77,
     noise_out_of_range,
+    zero_sized_squeeze,
 );
