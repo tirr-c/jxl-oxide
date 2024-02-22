@@ -56,12 +56,12 @@ jobs:
             -timeout=5 \
             -max_total_time=1200
       - uses: actions/upload-artifact@v4
-        if: ${{ steps.fuzz.outcome == 'failure' }}
+        if: ${{ !cancelled() && steps.fuzz.outcome == 'failure' }}
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
       - uses: actions/cache/save@v4
-        if: ${{ steps.fuzz.outcome != 'cancelled' }}
+        if: ${{ !cancelled() && steps.fuzz.outcome != 'cancelled' }}
         with:
           path: fuzz/corpus/
           key: fuzz-corpus-0-${{ github.run_id }}-${{ github.run_attempt }}
