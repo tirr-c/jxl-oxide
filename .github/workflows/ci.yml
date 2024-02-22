@@ -20,14 +20,14 @@ jobs:
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
           targets: ${{ matrix.target }}
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index/
@@ -43,7 +43,7 @@ jobs:
         run: cargo install cross --version 0.2.5
       - name: Run tests
         run: cross test --release --all-features --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: images
@@ -57,7 +57,7 @@ jobs:
         target:
           - x86_64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@nightly
@@ -65,7 +65,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: 'llvm-tools-preview'
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -100,13 +100,13 @@ jobs:
           zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" -or -name "crop-*.gc*" -or -name "fuzz_findings-*.gc*" \) -print`
           grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore '../**' --ignore "/*" -o coverage.lcov
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: ./coverage.lcov
           flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: images
@@ -116,12 +116,12 @@ jobs:
     name: Rustfmt and Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
           components: clippy
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index/
