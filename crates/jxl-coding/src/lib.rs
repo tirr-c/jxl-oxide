@@ -476,16 +476,16 @@ impl DecoderInner {
                 let distance =
                     self.read_uint(bitstream, &self.configs[lz_dist_cluster as usize], token);
                 let distance = if dist_multiplier == 0 {
-                    distance + 1
+                    distance
                 } else if distance < 120 {
                     let [offset, dist] = SPECIAL_DISTANCES[distance as usize];
                     let dist = offset as i32 + dist_multiplier as i32 * dist as i32;
-                    dist.max(1) as u32
+                    (dist - 1).max(0) as u32
                 } else {
-                    distance - 119
+                    distance - 120
                 };
 
-                let distance = (1 << 20).min(distance).min(state.num_decoded);
+                let distance = (((1 << 20) - 1).min(distance) + 1).min(state.num_decoded);
                 state.copy_pos = state.num_decoded - distance;
 
                 r = state.window[(state.copy_pos & 0xfffff) as usize];
