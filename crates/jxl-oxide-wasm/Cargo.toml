@@ -16,8 +16,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-miniz_oxide = "0.7.1"
-png = "0.17.10"
+miniz_oxide = "0.7.2"
+png = "0.17.13"
 wasm-bindgen = "0.2.91"
 
 [dependencies.console_error_panic_hook]
