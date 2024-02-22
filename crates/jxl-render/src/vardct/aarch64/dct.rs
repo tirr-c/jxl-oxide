@@ -1,21 +1,21 @@
 use jxl_grid::{CutGrid, SimdVector};
 
-use super::{consts, DctDirection};
+use super::super::dct_common::{self, DctDirection};
 use std::arch::aarch64::*;
 
 const LANE_SIZE: usize = 4;
 type Lane = float32x4_t;
 
-fn transpose_lane(lanes: &[Lane]) -> float32x4x4_t {
+#[inline(always)]
+pub(crate) unsafe fn transpose_lane(lanes: &[Lane]) -> float32x4x4_t {
     assert_eq!(lanes.len(), 4);
-    unsafe {
-        let ptr = lanes.as_ptr() as *mut f32;
-        vld4q_f32(ptr as *const _)
-    }
+    let ptr = lanes.as_ptr() as *mut f32;
+    vld4q_f32(ptr as *const _)
 }
 
-pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
-    if !Lane::available() || io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
+#[inline(always)]
+pub(crate) unsafe fn dct_2d_aarch64_neon(io: &mut CutGrid<'_>, direction: DctDirection) {
+    if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
         return super::generic::dct_2d(io, direction);
     }
 
@@ -42,6 +42,7 @@ fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     }
 }
 
+#[inline]
 unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
@@ -74,7 +75,8 @@ unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     a.muladd(mul_a, b.mul(mul_b))
 }
 
-unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
+#[inline]
+pub(crate) unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
 
@@ -88,6 +90,7 @@ unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     tmp_b.muladd(mul, tmp_a)
 }
 
+#[inline]
 unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
@@ -107,7 +110,8 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     (vzip1q_f32(output0, output1), vzip2q_f32(output0, output1))
 }
 
-unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
+#[inline]
+pub(crate) unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
         0.5097955791041592,
@@ -194,6 +198,7 @@ unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], directi
     }
 }
 
+#[inline]
 unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = 0.5411961 / 4.0;
     let sec1 = 1.306563 / 4.0;
@@ -213,7 +218,8 @@ unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
-unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
+#[inline]
+pub(crate) unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = 0.5411961;
     let sec1 = 1.306563;
 
@@ -232,9 +238,10 @@ unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
+#[inline]
 unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
-    let sec = consts::sec_half_small(8);
+    let sec = dct_common::sec_half_small(8);
 
     let input0 = [
         vmulq_n_f32(io.get(0, 0).add(io.get(0, 7)), 0.5),
@@ -260,9 +267,10 @@ unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     *io.get_mut(0, 7) = output1[3];
 }
 
+#[inline]
 unsafe fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
-    let sec = consts::sec_half_small(8);
+    let sec = dct_common::sec_half_small(8);
 
     let input0 = [io.get(0, 0), io.get(0, 2), io.get(0, 4), io.get(0, 6)];
     let input1 = [
@@ -326,7 +334,7 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
 
     if direction == DctDirection::Forward {
         let (input0, input1) = scratch.split_at_mut(n / 2);
-        for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
+        for (idx, &sec) in dct_common::sec_half(n).iter().enumerate() {
             input0[0] = vmulq_n_f32(io[idx].add(io[n - idx - 1]), 0.5);
             input1[idx] = vmulq_n_f32(io[idx].sub(io[n - idx - 1]), sec / 2.0);
         }
@@ -353,7 +361,7 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
         let (output0, output1) = io.split_at_mut(n / 2);
         dct(input0, output0, DctDirection::Inverse);
         dct(input1, output1, DctDirection::Inverse);
-        for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
+        for (idx, &sec) in dct_common::sec_half(n).iter().enumerate() {
             let r = vmulq_n_f32(input1[idx], sec);
             output0[idx] = input0[idx].add(r);
             output1[n / 2 - idx - 1] = input0[idx].sub(r);

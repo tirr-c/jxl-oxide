@@ -1,6 +1,6 @@
 use jxl_grid::CutGrid;
 
-use super::{consts, DctDirection};
+use super::super::dct_common::{self, DctDirection};
 
 pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
     let width = io.width();
@@ -140,6 +140,7 @@ pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
     }
 }
 
+#[inline]
 fn dct4(input: [f32; 4], direction: DctDirection) -> [f32; 4] {
     let sec0 = 0.5411961;
     let sec1 = 1.306563;
@@ -201,7 +202,7 @@ fn dct(input_output: &mut [f32], scratch: &mut [f32], direction: DctDirection) {
 
     if n == 8 {
         let io = input_output;
-        let sec = consts::sec_half_small(8);
+        let sec = dct_common::sec_half_small(8);
         if direction == DctDirection::Forward {
             let input0 = [
                 (io[0] + io[7]) / 2.0,
@@ -253,7 +254,7 @@ fn dct(input_output: &mut [f32], scratch: &mut [f32], direction: DctDirection) {
             input1[idx] = (input_output[idx] - input_output[n - idx - 1]) / 2.0;
         }
         let (output0, output1) = input_output.split_at_mut(n / 2);
-        for (v, &sec) in input1.iter_mut().zip(consts::sec_half(n)) {
+        for (v, &sec) in input1.iter_mut().zip(dct_common::sec_half(n)) {
             *v *= sec;
         }
         dct(input0, output0, DctDirection::Forward);
@@ -281,7 +282,7 @@ fn dct(input_output: &mut [f32], scratch: &mut [f32], direction: DctDirection) {
         let (output0, output1) = input_output.split_at_mut(n / 2);
         dct(input0, output0, DctDirection::Inverse);
         dct(input1, output1, DctDirection::Inverse);
-        for (v, &sec) in input1.iter_mut().zip(consts::sec_half(n)) {
+        for (v, &sec) in input1.iter_mut().zip(dct_common::sec_half(n)) {
             *v *= sec;
         }
         for idx in 0..(n / 2) {
@@ -293,7 +294,7 @@ fn dct(input_output: &mut [f32], scratch: &mut [f32], direction: DctDirection) {
 
 #[cfg(test)]
 mod tests {
-    use crate::dct::DctDirection;
+    use super::DctDirection;
 
     #[test]
     fn forward_dct_2() {

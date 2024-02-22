@@ -1,12 +1,14 @@
+use std::arch::x86_64::*;
+
 use jxl_grid::{CutGrid, SimdVector};
 
-use super::{consts, DctDirection};
-use std::arch::x86_64::*;
+use super::super::dct_common::{self, DctDirection};
 
 const LANE_SIZE: usize = 4;
 type Lane = __m128;
 
-fn transpose_lane(lanes: &mut [Lane]) {
+#[inline(always)]
+pub(crate) fn transpose_lane(lanes: &mut [Lane]) {
     let [row0, row1, row2, row3] = lanes else {
         panic!()
     };
@@ -15,7 +17,8 @@ fn transpose_lane(lanes: &mut [Lane]) {
     }
 }
 
-pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
+#[inline(always)]
+pub(crate) fn dct_2d_x86_64_sse2(io: &mut CutGrid<'_>, direction: DctDirection) {
     if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
         return super::generic::dct_2d(io, direction);
     }
@@ -43,6 +46,7 @@ fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
     }
 }
 
+#[inline]
 unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
@@ -68,7 +72,8 @@ unsafe fn dct4_vec_forward(v: Lane) -> Lane {
     a.muladd(mul_a, b.mul(mul_b))
 }
 
-unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
+#[inline]
+pub(crate) unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
 
@@ -83,6 +88,7 @@ unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     tmp_b.muladd(mul, tmp_a)
 }
 
+#[inline]
 unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
@@ -105,7 +111,8 @@ unsafe fn dct8_vec_forward(vl: Lane, vr: Lane) -> (Lane, Lane) {
     })
 }
 
-unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
+#[inline]
+pub(crate) unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     #[allow(clippy::excessive_precision)]
     let sec_vec = Lane::set([
         0.5097955791041592,
@@ -193,6 +200,7 @@ unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], directi
     }
 }
 
+#[inline]
 unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961 / 4.0);
     let sec1 = Lane::splat_f32(1.306563 / 4.0);
@@ -214,7 +222,8 @@ unsafe fn dct4_forward(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
-unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
+#[inline]
+pub(crate) unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     let sec0 = Lane::splat_f32(0.5411961);
     let sec1 = Lane::splat_f32(1.306563);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
@@ -234,11 +243,12 @@ unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
     ]
 }
 
+#[inline]
 unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let half = Lane::splat_f32(0.5);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
-    let sec = consts::sec_half_small(8);
+    let sec = dct_common::sec_half_small(8);
 
     let input0 = [
         io.get(0, 0).add(io.get(0, 7)).mul(half),
@@ -272,10 +282,11 @@ unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
     *io.get_mut(0, 7) = output1[3];
 }
 
+#[inline]
 unsafe fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
     assert!(io.height() == 8);
     let sqrt2 = Lane::splat_f32(std::f32::consts::SQRT_2);
-    let sec = consts::sec_half_small(8);
+    let sec = dct_common::sec_half_small(8);
 
     let input0 = [io.get(0, 0), io.get(0, 2), io.get(0, 4), io.get(0, 6)];
     let input1 = [
@@ -341,7 +352,7 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
 
     if direction == DctDirection::Forward {
         let (input0, input1) = scratch.split_at_mut(n / 2);
-        for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
+        for (idx, &sec) in dct_common::sec_half(n).iter().enumerate() {
             input0[idx] = io[idx].add(io[n - idx - 1]).mul(half);
             input1[idx] = io[idx].sub(io[n - idx - 1]).mul(Lane::splat_f32(sec / 2.0));
         }
@@ -368,7 +379,7 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
         let (output0, output1) = io.split_at_mut(n / 2);
         dct(input0, output0, DctDirection::Inverse);
         dct(input1, output1, DctDirection::Inverse);
-        for (idx, &sec) in consts::sec_half(n).iter().enumerate() {
+        for (idx, &sec) in dct_common::sec_half(n).iter().enumerate() {
             let r = input1[idx].mul(Lane::splat_f32(sec));
             output0[idx] = input0[idx].add(r);
             output1[n / 2 - idx - 1] = input0[idx].sub(r);

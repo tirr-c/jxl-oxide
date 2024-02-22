@@ -1,9 +1,29 @@
-use jxl_grid::CutGrid;
-use jxl_vardct::TransformType;
+#![allow(dead_code)]
+use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_modular::ChannelShift;
+use jxl_vardct::{BlockInfo, TransformType};
 
-use crate::dct::{dct_2d, DctDirection};
+use crate::vardct::{
+    dct_common::DctDirection,
+    transform_common::{transform_varblocks_inner, AFV_BASIS},
+};
 
-fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
+use super::dct_2d;
+
+#[inline(always)]
+pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
+    let c00 = block.get(0, 0);
+    let c01 = block.get(1, 0);
+    let c10 = block.get(0, 1);
+    let c11 = block.get(1, 1);
+    *block.get_mut(0, 0) = c00 + c01 + c10 + c11;
+    *block.get_mut(1, 0) = c00 + c01 - c10 - c11;
+    *block.get_mut(0, 1) = c00 - c01 + c10 - c11;
+    *block.get_mut(1, 1) = c00 - c01 - c10 + c11;
+}
+
+#[inline(always)]
+pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     debug_assert!(SIZE.is_power_of_two());
 
     let num_2x2 = SIZE / 2;
@@ -27,13 +47,13 @@ fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct2(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct2(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
     aux_idct2_in_place::<4>(coeff);
     aux_idct2_in_place::<8>(coeff);
 }
 
-fn transform_dct4(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct4(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
@@ -61,7 +81,7 @@ fn transform_dct4(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_hornuss(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_hornuss(coeff: &mut CutGrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
@@ -75,12 +95,9 @@ fn transform_hornuss(coeff: &mut CutGrid<'_>) {
             }
             let residual_sum: f32 = scratch[1..].iter().copied().sum();
             let avg = scratch[0] - residual_sum / 16.0;
-            scratch[0] = scratch[5] + avg;
-            scratch[5] = avg;
-            for (idx, s) in scratch.iter_mut().enumerate() {
-                if idx == 0 || idx == 5 {
-                    continue;
-                }
+            scratch[0] = scratch[5];
+            scratch[5] = 0.0;
+            for s in scratch.iter_mut() {
                 *s += avg;
             }
         }
@@ -98,7 +115,7 @@ fn transform_hornuss(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
+pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut CutGrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
@@ -115,7 +132,7 @@ fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
         dct_2d(&mut scratch, DctDirection::Inverse);
     }
 
-    if transpose {
+    if TR {
         for y in 0..8 {
             for x in 0..8 {
                 *coeff.get_mut(y, x) = scratch[y * 8 + x];
@@ -128,7 +145,7 @@ fn transform_dct4x8(coeff: &mut CutGrid<'_>, transpose: bool) {
     }
 }
 
-fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
     assert!(N < 4);
     let flip_x = N % 2;
     let flip_y = N / 2;
@@ -205,15 +222,15 @@ fn transform_dct(coeff: &mut CutGrid<'_>) {
     dct_2d(coeff, DctDirection::Inverse);
 }
 
-pub fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
         Dct2 => transform_dct2(coeff),
         Dct4 => transform_dct4(coeff),
         Hornuss => transform_hornuss(coeff),
-        Dct4x8 => transform_dct4x8(coeff, false),
-        Dct8x4 => transform_dct4x8(coeff, true),
+        Dct4x8 => transform_dct4x8::<false>(coeff),
+        Dct8x4 => transform_dct4x8::<true>(coeff),
         Afv0 => transform_afv::<0>(coeff),
         Afv1 => transform_afv::<1>(coeff),
         Afv2 => transform_afv::<2>(coeff),
@@ -222,103 +239,20 @@ pub fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
     }
 }
 
-#[allow(clippy::excessive_precision)]
-#[rustfmt::skip]
-const AFV_BASIS: [[f32; 16]; 16] = [
-    [
-        0.25, 0.25, 0.25, 0.25,
-        0.25, 0.25, 0.25, 0.25,
-        0.25, 0.25, 0.25, 0.25,
-        0.25, 0.25, 0.25, 0.25,
-    ],
-    [
-        0.876902929799142, 0.2206518106944235, -0.10140050393753763, -0.1014005039375375,
-        0.2206518106944236, -0.10140050393753777, -0.10140050393753772, -0.10140050393753763,
-        -0.10140050393753758, -0.10140050393753769, -0.1014005039375375, -0.10140050393753768,
-        -0.10140050393753768, -0.10140050393753759, -0.10140050393753763, -0.10140050393753741,
-    ],
-    [
-        0.0, 0.0, 0.40670075830260755, 0.44444816619734445,
-        0.0, 0.0, 0.19574399372042936, 0.2929100136981264,
-        -0.40670075830260716, -0.19574399372042872, 0.0, 0.11379074460448091,
-        -0.44444816619734384, -0.29291001369812636, -0.1137907446044814, 0.0,
-    ],
-    [
-        0.0, 0.0, -0.21255748058288748, 0.3085497062849767,
-        0.0, 0.4706702258572536, -0.1621205195722993, 0.0,
-        -0.21255748058287047, -0.16212051957228327, -0.47067022585725277, -0.1464291867126764,
-        0.3085497062849487, 0.0, -0.14642918671266536, 0.4251149611657548,
-    ],
-    [
-        0.0, -0.7071067811865474, 0.0, 0.0,
-        std::f32::consts::FRAC_1_SQRT_2, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0,
-    ],
-    [
-        -0.4105377591765233, 0.6235485373547691, -0.06435071657946274, -0.06435071657946266,
-        0.6235485373547694, -0.06435071657946284, -0.0643507165794628, -0.06435071657946274,
-        -0.06435071657946272, -0.06435071657946279, -0.06435071657946266, -0.06435071657946277,
-        -0.06435071657946277, -0.06435071657946273, -0.06435071657946274, -0.0643507165794626,
-    ],
-    [
-        0.0, 0.0, -0.4517556589999482, 0.15854503551840063,
-        0.0, -0.04038515160822202, 0.0074182263792423875, 0.39351034269210167,
-        -0.45175565899994635, 0.007418226379244351, 0.1107416575309343, 0.08298163094882051,
-        0.15854503551839705, 0.3935103426921022, 0.0829816309488214, -0.45175565899994796,
-    ],
-    [
-        0.0, 0.0, -0.304684750724869, 0.5112616136591823,
-        0.0, 0.0, -0.290480129728998, -0.06578701549142804,
-        0.304684750724884, 0.2904801297290076, 0.0, -0.23889773523344604,
-        -0.5112616136592012, 0.06578701549142545, 0.23889773523345467, 0.0,
-    ],
-    [
-        0.0, 0.0, 0.3017929516615495, 0.25792362796341184,
-        0.0, 0.16272340142866204, 0.09520022653475037, 0.0,
-        0.3017929516615503, 0.09520022653475055, -0.16272340142866173, -0.35312385449816297,
-        0.25792362796341295, 0.0, -0.3531238544981624, -0.6035859033230976,
-    ],
-    [
-        0.0, 0.0, 0.40824829046386274, 0.0,
-        0.0, 0.0, 0.0, -0.4082482904638628,
-        -0.4082482904638635, 0.0, 0.0, -0.40824829046386296,
-        0.0, 0.4082482904638634, 0.408248290463863, 0.0,
-    ],
-    [
-        0.0, 0.0, 0.1747866975480809, 0.0812611176717539,
-        0.0, 0.0, -0.3675398009862027, -0.307882213957909,
-        -0.17478669754808135, 0.3675398009862011, 0.0, 0.4826689115059883,
-        -0.08126111767175039, 0.30788221395790305, -0.48266891150598584, 0.0,
-    ],
-    [
-        0.0, 0.0, -0.21105601049335784, 0.18567180916109802,
-        0.0, 0.0, 0.49215859013738733, -0.38525013709251915,
-        0.21105601049335806, -0.49215859013738905, 0.0, 0.17419412659916217,
-        -0.18567180916109904, 0.3852501370925211, -0.1741941265991621, 0.0,
-    ],
-    [
-        0.0, 0.0, -0.14266084808807264, -0.3416446842253372,
-        0.0, 0.7367497537172237, 0.24627107722075148, -0.08574019035519306,
-        -0.14266084808807344, 0.24627107722075137, 0.14883399227113567, -0.04768680350229251,
-        -0.3416446842253373, -0.08574019035519267, -0.047686803502292804, -0.14266084808807242,
-    ],
-    [
-        0.0, 0.0, -0.13813540350758585, 0.3302282550303788,
-        0.0, 0.08755115000587084, -0.07946706605909573, -0.4613374887461511,
-        -0.13813540350758294, -0.07946706605910261, 0.49724647109535086, 0.12538059448563663,
-        0.3302282550303805, -0.4613374887461554, 0.12538059448564315, -0.13813540350758452,
-    ],
-    [
-        0.0, 0.0, -0.17437602599651067, 0.0702790691196284,
-        0.0, -0.2921026642334881, 0.3623817333531167, 0.0,
-        -0.1743760259965108, 0.36238173335311646, 0.29210266423348785, -0.4326608024727445,
-        0.07027906911962818, 0.0, -0.4326608024727457, 0.34875205199302267,
-    ],
-    [
-        0.0, 0.0, 0.11354987314994337, -0.07417504595810355,
-        0.0, 0.19402893032594343, -0.435190496523228, 0.21918684838857466,
-        0.11354987314994257, -0.4351904965232251, 0.5550443808910661, -0.25468277124066463,
-        -0.07417504595810233, 0.2191868483885728, -0.25468277124066413, 0.1135498731499429,
-    ],
-];
+pub fn transform_varblocks(
+    lf: &[SharedSubgrid<f32>; 3],
+    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    shifts_cbycr: [ChannelShift; 3],
+    block_info: &SharedSubgrid<BlockInfo>,
+) {
+    unsafe {
+        transform_varblocks_inner(
+            lf,
+            coeff_out,
+            shifts_cbycr,
+            block_info,
+            super::dct::dct_2d,
+            transform,
+        );
+    }
+}

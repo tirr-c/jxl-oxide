@@ -4,6 +4,10 @@ use jxl_grid::AllocTracker;
 
 use super::generic;
 
+mod dct;
+mod transform;
+pub use transform::transform_varblocks;
+
 pub fn adaptive_lf_smoothing_impl(
     width: usize,
     height: usize,

@@ -12,12 +12,11 @@ use jxl_vardct::{
 };
 
 use crate::{
-    dct, modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache,
-    Result,
+    modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache, Result,
 };
 
-mod transform;
-pub use transform::transform;
+mod dct_common;
+mod transform_common;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -697,8 +696,6 @@ pub fn transform_with_lf_grouped<S: Sample>(
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup<S>>,
 ) {
-    use TransformType::*;
-
     let lf_region = lf.region();
     let lf = lf.buffer();
     let [lf_x, lf_y, lf_b, ..] = lf else { panic!() };
@@ -759,52 +756,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
         top_in_lf..(top_in_lf + lf_height as usize),
     );
 
-    for (channel, (coeff, lf)) in coeff_out.iter_mut().zip(lf).enumerate() {
-        let shift = shifts_cbycr[channel];
-        for_each_varblocks(
-            &block_info,
-            shift,
-            |VarblockInfo {
-                 shifted_bx,
-                 shifted_by,
-                 dct_select,
-                 ..
-             }| {
-                let (bw, bh) = dct_select.dct_select_size();
-                let left = shifted_bx * 8;
-                let top = shifted_by * 8;
-
-                let bw = bw as usize;
-                let bh = bh as usize;
-                let logbw = bw.trailing_zeros() as usize;
-                let logbh = bh.trailing_zeros() as usize;
-
-                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
-                if matches!(
-                    dct_select,
-                    Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
-                ) {
-                    debug_assert_eq!(bw * bh, 1);
-                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
-                } else {
-                    for y in 0..bh {
-                        for x in 0..bw {
-                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
-                        }
-                    }
-                    dct::dct_2d(&mut out, dct::DctDirection::Forward);
-                    for y in 0..bh {
-                        for x in 0..bw {
-                            *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
-                        }
-                    }
-                }
-
-                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
-                transform(&mut block, dct_select);
-            },
-        );
-    }
+    impls::transform_varblocks(&lf, coeff_out, shifts_cbycr, &block_info);
 }
 
 #[derive(Debug)]
@@ -815,6 +767,7 @@ struct VarblockInfo {
     hf_mul: i32,
 }
 
+#[inline(always)]
 fn for_each_varblocks(
     block_info: &SharedSubgrid<BlockInfo>,
     shift: ChannelShift,
@@ -852,44 +805,4 @@ fn for_each_varblocks(
             })
         }
     }
-}
-
-fn scale_f(c: usize, logb: usize) -> f32 {
-    // Precomputed for c = 0..32, b = 256
-    #[allow(clippy::excessive_precision)]
-    const SCALE_F: [f32; 32] = [
-        1.0000000000000000,
-        0.9996047255830407,
-        0.9984194528776054,
-        0.9964458326264695,
-        0.9936866130906366,
-        0.9901456355893141,
-        0.9858278282666936,
-        0.9807391980963174,
-        0.9748868211368796,
-        0.9682788310563117,
-        0.9609244059440204,
-        0.9528337534340876,
-        0.9440180941651672,
-        0.9344896436056892,
-        0.9242615922757944,
-        0.9133480844001980,
-        0.9017641950288744,
-        0.8895259056651056,
-        0.8766500784429904,
-        0.8631544288990163,
-        0.8490574973847023,
-        0.8343786191696513,
-        0.8191378932865928,
-        0.8033561501721485,
-        0.7870549181591013,
-        0.7702563888779096,
-        0.7529833816270532,
-        0.7352593067735488,
-        0.7171081282466044,
-        0.6985543251889097,
-        0.6796228528314652,
-        0.6603391026591464,
-    ];
-    SCALE_F[c << logb]
 }
