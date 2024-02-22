@@ -29,21 +29,22 @@ dependencies = [
 
 [[package]]
 name = "jxl-bitstream"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-coding"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "jxl-bitstream",
+ "tracing",
 ]
 
 [[package]]
 name = "jxl-color"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -54,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-frame"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -68,14 +69,14 @@ dependencies = [
 
 [[package]]
 name = "jxl-grid"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-image"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-color",
@@ -85,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -96,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-color",
@@ -125,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -141,14 +142,14 @@ dependencies = [
 
 [[package]]
 name = "jxl-threadpool"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-vardct"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
