@@ -8,7 +8,7 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 
 exclude = ["tests/"]
@@ -17,31 +17,31 @@ exclude = ["tests/"]
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "0.3.1"
+version = "0.3.2"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
-version = "0.5.0"
+version = "0.6.0"
 path = "../jxl-color"
 
 [dependencies.jxl-frame]
-version = "0.7.0"
+version = "0.8.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
-version = "0.3.0"
+version = "0.4.0"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
-version = "0.7.0"
+version = "0.8.0"
 path = "../jxl-image"
 
 [dependencies.jxl-render]
-version = "0.6.0"
+version = "0.7.0"
 path = "../jxl-render"
 
 [dependencies.jxl-threadpool]
-version = "0.1.0"
+version = "0.1.1"
 path = "../jxl-threadpool"
 
 [dependencies.lcms2]
