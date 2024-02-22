@@ -38,7 +38,10 @@ jobs:
         id: restore-corpus
         with:
           path: fuzz/corpus/
-          key: fuzz-corpus-0
+          key: fuzz-corpus-0-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-0-${{ github.run_id }}-
+            fuzz-corpus-0-
           enableCrossOsArchive: true
       - name: Populate initial corpus
         if: steps.restore-corpus.outputs.cache-hit != 'true'
@@ -61,5 +64,5 @@ jobs:
         if: ${{ steps.fuzz.outcome != 'cancelled' }}
         with:
           path: fuzz/corpus/
-          key: fuzz-corpus-0
+          key: fuzz-corpus-0-${{ github.run_id }}-${{ github.run_attempt }}
           enableCrossOsArchive: true
