@@ -55,8 +55,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ steps.fuzz.outcome == 'failure' }}
         with:
-          name: fuzz-artifact
-          path: fuzz/artifact/
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
       - uses: actions/cache/save@v4
         if: ${{ steps.fuzz.outcome != 'cancelled' }}
         with:
