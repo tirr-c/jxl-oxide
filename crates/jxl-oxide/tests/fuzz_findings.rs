@@ -66,4 +66,6 @@ test_by_include!(
     invalid_lz77,
     noise_out_of_range,
     zero_sized_squeeze,
+    lz77_distance_overflow,
+    lz77_distance_overflow_2,
 );
