@@ -1,8 +1,10 @@
 on:
-  pull_request:
+  push:
     branches:
       - main
       - v*.x
+  schedule:
+    - cron: '11 15 * * *' # every day at 15:11 UTC
 name: Fuzz
 env:
   FUZZ_CORPUS_URL: 'https://jxl-oxide-fixtures.tirr.dev/fuzz-corpus.tar.zst'
