@@ -1,0 +1,70 @@
+on:
+  push:
+    branches:
+      - main
+      - v*.x
+  schedule:
+    - cron: '11 15 * * *' # every day at 15:11 UTC
+name: Fuzz
+env:
+  FUZZ_CORPUS_URL: 'https://jxl-oxide-fixtures.tirr.dev/fuzz-corpus.tar.zst'
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - uses: dtolnay/rust-toolchain@nightly
+        id: toolchain
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cargo-fuzz-0.12.0-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cargo-fuzz-0.12.0-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
+            ${{ runner.os }}-dot-cargo-
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.12.0
+      - uses: actions/cache/restore@v4
+        id: restore-corpus
+        with:
+          path: fuzz/corpus/
+          key: fuzz-corpus-0-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-0-${{ github.run_id }}-
+            fuzz-corpus-0-
+          enableCrossOsArchive: true
+      - name: Populate initial corpus
+        if: steps.restore-corpus.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p fuzz/corpus/
+          curl -sSfL "${FUZZ_CORPUS_URL}" | zstd -d | tar -xvC fuzz/corpus/
+      - name: Run fuzzer
+        id: fuzz
+        run: |
+          cargo fuzz run libfuzzer-decode -- \
+            -max_len=4096 \
+            -timeout=5 \
+            -max_total_time=1200
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.fuzz.outcome == 'failure' }}
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.fuzz.outcome != 'cancelled' }}
+        with:
+          path: fuzz/corpus/
+          key: fuzz-corpus-0-${{ github.run_id }}-${{ github.run_attempt }}
+          enableCrossOsArchive: true
