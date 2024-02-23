@@ -169,8 +169,15 @@ impl ChannelShift {
                 };
                 (width, height)
             }
-            Self::Shifts(s) => (width >> s, height >> s),
-            Self::Raw(h, v) => (width >> h, height >> v),
+            Self::Shifts(s) => {
+                let add = (1 << s) - 1;
+                ((width + add) >> s, (height + add) >> s)
+            }
+            Self::Raw(h, v) => {
+                let add_h = (1 << h) - 1;
+                let add_v = (1 << v) - 1;
+                ((width + add_h) >> h, (height + add_v) >> v)
+            }
         }
     }
 }

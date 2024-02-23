@@ -213,48 +213,56 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
             .then(|| bitstream.read_bundle_with_ctx::<MaConfig, _>(ma_config_params))
             .transpose()?;
 
+        let color_width = header.color_sample_width();
+        let color_height = header.color_sample_height();
+
         let mut shifts = Vec::new();
         if header.encoding == Encoding::Modular {
-            let width = header.color_sample_width();
-            let height = header.color_sample_height();
             if header.do_ycbcr {
                 // Cb, Y, Cr
                 shifts.push(ModularChannelParams::jpeg(
-                    width,
-                    height,
+                    color_width,
+                    color_height,
                     header.jpeg_upsampling,
                     0,
                 ));
                 shifts.push(ModularChannelParams::jpeg(
-                    width,
-                    height,
+                    color_width,
+                    color_height,
                     header.jpeg_upsampling,
                     1,
                 ));
                 shifts.push(ModularChannelParams::jpeg(
-                    width,
-                    height,
+                    color_width,
+                    color_height,
                     header.jpeg_upsampling,
                     2,
                 ));
             } else {
-                let channel_param = ModularChannelParams::new(width, height);
+                let channel_param = ModularChannelParams::new(color_width, color_height);
                 let channels = image_header.metadata.encoded_color_channels();
                 shifts.extend(std::iter::repeat(channel_param).take(channels));
             }
         }
 
         let extra_channel_from = shifts.len();
+        let color_upsampling_shift = header.upsampling.trailing_zeros();
 
         for (&ec_upsampling, ec_info) in header
             .ec_upsampling
             .iter()
             .zip(image_header.metadata.ec_info.iter())
         {
-            let width = header.sample_width(ec_upsampling);
-            let height = header.sample_height(ec_upsampling);
-            let shift = ChannelShift::from_shift(ec_info.dim_shift);
-            shifts.push(ModularChannelParams::with_shift(width, height, shift));
+            let ec_upsampling_shift = ec_upsampling.trailing_zeros();
+            let dim_shift = ec_info.dim_shift;
+            let actual_dim_shift = ec_upsampling_shift + dim_shift - color_upsampling_shift;
+
+            let shift = ChannelShift::from_shift(actual_dim_shift);
+            shifts.push(ModularChannelParams::with_shift(
+                color_width,
+                color_height,
+                shift,
+            ));
         }
 
         let group_dim = header.group_dim();

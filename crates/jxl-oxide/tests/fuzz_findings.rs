@@ -71,4 +71,5 @@ test_by_include!(
     icc_curve_overflow,
     squeeze_tendency_overflow,
     timeout_dim_shift,
+    ec_upsampling,
 );
