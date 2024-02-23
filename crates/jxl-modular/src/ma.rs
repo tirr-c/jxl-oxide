@@ -6,7 +6,7 @@ use jxl_coding::Decoder;
 use jxl_grid::{AllocHandle, AllocTracker};
 
 use super::predictor::{Predictor, Properties};
-use crate::{Result, Sample};
+use crate::{sample::Sealed, Result, Sample};
 
 /// Meta-adaptive tree configuration.
 ///
@@ -54,9 +54,12 @@ impl MaConfig {
     }
 }
 
+/// Parameters for decoding [`MaConfig`].
 #[derive(Debug, Copy, Clone)]
 pub struct MaConfigParams<'a> {
+    /// Allocation tracker.
     pub tracker: Option<&'a AllocTracker>,
+    /// Maximum number of meta-adaptive tree nodes.
     pub node_limit: usize,
 }
 
@@ -222,9 +225,7 @@ fn is_infinite_tree_dist(decoder: &Decoder) -> bool {
     token != 0
 }
 
-/// A "flat" meta-adaptive tree suitable for decoding samples.
-///
-/// This is constructed from [MaConfig::make_flat_tree].
+/// A "flat" meta-adaptive tree, constructed with [`MaConfig::make_flat_tree`].
 #[derive(Debug)]
 pub struct FlatMaTree {
     nodes: Vec<FlatMaTreeNode>,
@@ -330,6 +331,7 @@ impl FlatMaTree {
         self.need_self_correcting
     }
 
+    /// Returns the number of previously decoded channels needed in order to traverse the MA tree.
     #[inline]
     pub fn max_prev_channel_depth(&self) -> usize {
         self.max_prev_channel_depth

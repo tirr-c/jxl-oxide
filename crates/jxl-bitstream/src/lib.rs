@@ -11,7 +11,7 @@ pub use container::*;
 pub use error::{Error, Result};
 pub use macros::{unpack_signed, unpack_signed_u64};
 pub use memory::Bitstream;
-pub use reader::ContainerDetectingReader;
+pub use reader::{BitstreamKind, ContainerDetectingReader};
 
 pub trait Bundle<Ctx = ()>: Sized {
     type Error;

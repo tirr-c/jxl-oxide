@@ -138,6 +138,10 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! # Feature flags
+//! - `rayon`: Enable multithreading with Rayon. (*default*)
+//! - `lcms2`: Enable integration with Little CMS 2.
 use std::sync::Arc;
 
 use jxl_bitstream::ContainerDetectingReader;
