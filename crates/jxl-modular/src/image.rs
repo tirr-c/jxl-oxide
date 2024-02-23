@@ -228,6 +228,14 @@ impl<S: Sample> ModularImageDestination<S> {
                 TransformedGrid::Single(g) => g,
                 TransformedGrid::Merged { leader, .. } => leader,
             };
+            tracing::trace!(
+                i,
+                width = grid.width(),
+                height = grid.height(),
+                hshift,
+                vshift
+            );
+
             let (groups, grids) = if hshift < 3 || vshift < 3 {
                 let shift = hshift.min(vshift); // shift < 3
                 let pass_idx = *pass_shifts
@@ -283,20 +291,12 @@ impl<S: Sample> ModularImageDestination<S> {
         let mut meta_channel_grids = self
             .meta_channels
             .iter_mut()
-            .map(|g| {
-                let width = g.width();
-                let height = g.height();
-                CutGrid::from_buf(g.buf_mut(), width, height, width)
-            })
+            .map(CutGrid::from_simple_grid)
             .collect::<Vec<_>>();
         let mut grids = self
             .image_channels
             .iter_mut()
-            .map(|g| {
-                let width = g.width();
-                let height = g.height();
-                CutGrid::from_buf(g.buf_mut(), width, height, width).into()
-            })
+            .map(|g| CutGrid::from_simple_grid(g).into())
             .collect::<Vec<_>>();
         for tr in &self.header.transform {
             tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
