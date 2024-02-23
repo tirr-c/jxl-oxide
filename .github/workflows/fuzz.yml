@@ -9,6 +9,10 @@ name: Fuzz
 env:
   FUZZ_CORPUS_URL: 'https://jxl-oxide-fixtures.tirr.dev/fuzz-corpus.tar.zst'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fuzz:
     name: Fuzz
