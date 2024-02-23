@@ -1,6 +1,7 @@
-# CLI tools of jxl-oxide
+# jxl-oxide-cli
 
-This binary crate provides useful programs that makes use of jxl-oxide.
+This binary crate provides command line interface of jxl-oxide.
 
-- `jxl-dec`: Decodes JPEG XL image.
-- `jxl-info`: Prints information about JPEG XL image.
+## Feature flags
+- `rayon`: Enable multithreading. (*default*)
+- `__devtools`: Enable devtool subcommands. (*unstable*)

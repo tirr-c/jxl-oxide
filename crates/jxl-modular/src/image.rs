@@ -5,7 +5,7 @@ use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 use crate::{
     ma::{FlatMaTree, MaTreeLeafClustered},
     predictor::{Predictor, PredictorState},
-    sample::Sample,
+    sample::{Sample, Sealed},
     MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
 };
 

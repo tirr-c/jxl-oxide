@@ -17,10 +17,13 @@ pub struct HfCoeffParams<'a, 'b, S: Sample> {
     pub tracker: Option<&'b AllocTracker>,
 }
 
+/// Decode and write HF coefficients from the bitstream.
+///
+/// Note that `hf_coeff_output` is treated as `i32` buffer, despite the type being `CutGrid<f32>`.
 pub fn write_hf_coeff<S: Sample>(
     bitstream: &mut Bitstream,
     params: HfCoeffParams<S>,
-    hf_coeff_output: &mut [CutGrid<'_, f32>; 3],
+    hf_coeff_output: &mut [CutGrid<f32>; 3],
 ) -> Result<()> {
     const COEFF_FREQ_CONTEXT: [u32; 63] = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19,

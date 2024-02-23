@@ -14,7 +14,7 @@ mod sample;
 mod transform;
 pub use error::{Error, Result};
 use jxl_grid::AllocTracker;
-pub use ma::{MaConfig, MaConfigParams};
+pub use ma::{FlatMaTree, MaConfig, MaConfigParams};
 pub use param::*;
 pub use sample::Sample;
 

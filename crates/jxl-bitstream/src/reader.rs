@@ -113,7 +113,8 @@ impl ContainerDetectingReader {
                                     std::io::ErrorKind::InvalidData,
                                     "Duplicate jxlc box found",
                                 ));
-                            } else if self.next_jxlp_index != 0 {
+                            }
+                            if self.next_jxlp_index != 0 {
                                 tracing::error!("Found jxlc box instead of jxlp box");
                                 return Err(std::io::Error::new(
                                     std::io::ErrorKind::InvalidData,
