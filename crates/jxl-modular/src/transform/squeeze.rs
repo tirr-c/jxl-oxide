@@ -2,6 +2,7 @@
 use std::arch::is_aarch64_feature_detected;
 #[cfg(target_arch = "x86_64")]
 use std::arch::is_x86_feature_detected;
+use std::num::Wrapping;
 
 use jxl_grid::CutGrid;
 
@@ -62,12 +63,13 @@ fn inverse_h_i32_base(merged: &mut CutGrid<'_, i32>) {
         for (x, pair) in (&mut row_out_it).enumerate() {
             let residu = residu_row[x];
             let next_avg = avg_row.get(x + 1).copied().unwrap_or(avg);
-            let diff = residu + tendency_i32(left, avg, next_avg);
-            let first = avg + diff / 2;
+            let diff = residu.wrapping_add(tendency_i32(left, avg, next_avg));
+            let first = avg.wrapping_add(diff / 2);
+            let second = first.wrapping_sub(diff);
             pair[0] = first;
-            pair[1] = first - diff;
+            pair[1] = second;
             avg = next_avg;
-            left = first - diff;
+            left = second;
         }
 
         if let [v] = row_out_it.into_remainder() {
@@ -93,12 +95,13 @@ fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
         for (x, pair) in (&mut row_out_it).enumerate() {
             let residu = residu_row[x];
             let next_avg = avg_row.get(x + 1).copied().unwrap_or(avg);
-            let diff = residu + tendency_i16(left, avg, next_avg);
-            let first = avg + diff / 2;
+            let diff = residu.wrapping_add(tendency_i16(left, avg, next_avg));
+            let first = avg.wrapping_add(diff / 2);
+            let second = first.wrapping_sub(diff);
             pair[0] = first;
-            pair[1] = first - diff;
+            pair[1] = second;
             avg = next_avg;
-            left = first - diff;
+            left = second;
         }
 
         if let [v] = row_out_it.into_remainder() {
@@ -651,12 +654,13 @@ fn inverse_v_i32_base(merged: &mut CutGrid<'_, i32>) {
         let mut top = avg;
         for (y, &residu) in residu_col.iter().enumerate() {
             let next_avg = avg_col.get(y + 1).copied().unwrap_or(avg);
-            let diff = residu + tendency_i32(top, avg, next_avg);
-            let first = avg + diff / 2;
+            let diff = residu.wrapping_add(tendency_i32(top, avg, next_avg));
+            let first = avg.wrapping_add(diff / 2);
+            let second = first.wrapping_sub(diff);
             *merged.get_mut(x, 2 * y) = first;
-            *merged.get_mut(x, 2 * y + 1) = first - diff;
+            *merged.get_mut(x, 2 * y + 1) = second;
             avg = next_avg;
-            top = first - diff;
+            top = second;
         }
 
         if height % 2 == 1 {
@@ -681,12 +685,13 @@ fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
         let mut top = avg;
         for (y, &residu) in residu_col.iter().enumerate() {
             let next_avg = avg_col.get(y + 1).copied().unwrap_or(avg);
-            let diff = residu + tendency_i16(top, avg, next_avg);
-            let first = avg + diff / 2;
+            let diff = residu.wrapping_add(tendency_i16(top, avg, next_avg));
+            let first = avg.wrapping_add(diff / 2);
+            let second = first.wrapping_sub(diff);
             *merged.get_mut(x, 2 * y) = first;
-            *merged.get_mut(x, 2 * y + 1) = first - diff;
+            *merged.get_mut(x, 2 * y + 1) = second;
             avg = next_avg;
-            top = first - diff;
+            top = second;
         }
 
         if height % 2 == 1 {
@@ -878,48 +883,70 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
 }
 
 fn tendency_i32(a: i32, b: i32, c: i32) -> i32 {
+    let a = Wrapping(a);
+    let b = Wrapping(b);
+    let c = Wrapping(c);
+
+    let n1 = Wrapping(1);
+    let n2 = Wrapping(2);
+    let n3 = Wrapping(3);
+    let n4 = Wrapping(4);
+    let n6 = Wrapping(6);
+    let n12 = Wrapping(12);
+
     if a >= b && b >= c {
-        let mut x = (4 * a - 3 * c - b + 6) / 12;
-        if x - (x & 1) > 2 * (a - b) {
-            x = 2 * (a - b) + 1;
+        let mut x = (n4 * a - n3 * c - b + n6) / n12;
+        if x - (x & n1) > n2 * (a - b) {
+            x = n2 * (a - b) + n1;
         }
-        if x + (x & 1) > 2 * (b - c) {
-            x = 2 * (b - c);
+        if x + (x & n1) > n2 * (b - c) {
+            x = n2 * (b - c);
         }
-        x
+        x.0
     } else if a <= b && b <= c {
-        let mut x = (4 * a - 3 * c - b - 6) / 12;
-        if x + (x & 1) < 2 * (a - b) {
-            x = 2 * (a - b) - 1;
+        let mut x = (n4 * a - n3 * c - b - n6) / n12;
+        if x + (x & n1) < n2 * (a - b) {
+            x = n2 * (a - b) - n1;
         }
-        if x - (x & 1) < 2 * (b - c) {
-            x = 2 * (b - c);
+        if x - (x & n1) < n2 * (b - c) {
+            x = n2 * (b - c);
         }
-        x
+        x.0
     } else {
         0
     }
 }
 
 fn tendency_i16(a: i16, b: i16, c: i16) -> i16 {
+    let a = Wrapping(a);
+    let b = Wrapping(b);
+    let c = Wrapping(c);
+
+    let n1 = Wrapping(1);
+    let n2 = Wrapping(2);
+    let n3 = Wrapping(3);
+    let n4 = Wrapping(4);
+    let n6 = Wrapping(6);
+    let n12 = Wrapping(12);
+
     if a >= b && b >= c {
-        let mut x = (4 * a - 3 * c - b + 6) / 12;
-        if x - (x & 1) > 2 * (a - b) {
-            x = 2 * (a - b) + 1;
+        let mut x = (n4 * a - n3 * c - b + n6) / n12;
+        if x - (x & n1) > n2 * (a - b) {
+            x = n2 * (a - b) + n1;
         }
-        if x + (x & 1) > 2 * (b - c) {
-            x = 2 * (b - c);
+        if x + (x & n1) > n2 * (b - c) {
+            x = n2 * (b - c);
         }
-        x
+        x.0
     } else if a <= b && b <= c {
-        let mut x = (4 * a - 3 * c - b - 6) / 12;
-        if x + (x & 1) < 2 * (a - b) {
-            x = 2 * (a - b) - 1;
+        let mut x = (n4 * a - n3 * c - b - n6) / n12;
+        if x + (x & n1) < n2 * (a - b) {
+            x = n2 * (a - b) - n1;
         }
-        if x - (x & 1) < 2 * (b - c) {
-            x = 2 * (b - c);
+        if x - (x & n1) < n2 * (b - c) {
+            x = n2 * (b - c);
         }
-        x
+        x.0
     } else {
         0
     }
