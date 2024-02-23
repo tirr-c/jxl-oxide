@@ -189,6 +189,8 @@ fn shuffle4(bytes: &[u8]) -> Vec<u8> {
 
 /// Decodes the given ICC profile stream.
 pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
+    use std::num::Wrapping;
+
     const COMMON_TAGS: [&[u8]; 19] = [
         b"rTRC", b"rXYZ", b"cprt", b"wtpt", b"bkpt", b"rXYZ", b"gXYZ", b"bXYZ", b"kXYZ", b"rTRC",
         b"gTRC", b"bTRC", b"kTRC", b"chad", b"desc", b"chrm", b"dmnd", b"dmdd", b"lumi",
@@ -376,26 +378,23 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                 };
 
                 for i in (0..num).step_by(width) {
-                    let mut prev = [0u32; 3];
+                    let mut prev = [Wrapping(0u32); 3];
                     for (j, p) in prev[..=order as usize].iter_mut().enumerate() {
                         let offset = out.len() - stride * (j + 1);
                         let mut bytes = [0u8; 4];
                         bytes[(4 - width)..].copy_from_slice(&out[offset..][..width]);
-                        *p = u32::from_be_bytes(bytes);
+                        p.0 = u32::from_be_bytes(bytes);
                     }
                     let p = match order {
                         0 => prev[0],
-                        1 => (2 * prev[0]).wrapping_sub(prev[1]),
-                        2 => (3 * prev[0])
-                            .wrapping_sub(3 * prev[1])
-                            .wrapping_add(prev[2]),
+                        1 => Wrapping(2) * prev[0] - prev[1],
+                        2 => Wrapping(3) * (prev[0] - prev[1]) + prev[2],
                         _ => unreachable!(),
                     };
 
                     for j in 0..width.min(num - i) {
-                        let val =
-                            (bytes[i + j] as u32).wrapping_add(p >> (8 * (width - 1 - j))) as u8;
-                        out.push(val);
+                        let val = Wrapping(bytes[i + j] as u32) + (p >> (8 * (width - 1 - j)));
+                        out.push(val.0 as u8);
                     }
                 }
             }

@@ -68,4 +68,5 @@ test_by_include!(
     zero_sized_squeeze,
     lz77_distance_overflow,
     lz77_distance_overflow_2,
+    icc_curve_overflow,
 );
