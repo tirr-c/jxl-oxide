@@ -247,12 +247,30 @@ impl<S: Sample> ModularImageDestination<S> {
 
                 let group_width = group_dim >> hshift;
                 let group_height = group_dim >> vshift;
+                if group_width == 0 || group_height == 0 {
+                    tracing::error!(
+                        group_dim,
+                        hshift,
+                        vshift,
+                        "Channel shift value too large after transform"
+                    );
+                    return Err(crate::Error::InvalidSqueezeParams);
+                }
                 let grids = grid.into_groups(group_width as usize, group_height as usize);
                 (&mut pass_groups[pass_idx], grids)
             } else {
                 // hshift >= 3 && vshift >= 3
                 let lf_group_width = group_dim >> (hshift - 3);
                 let lf_group_height = group_dim >> (vshift - 3);
+                if lf_group_width == 0 || lf_group_height == 0 {
+                    tracing::error!(
+                        group_dim,
+                        hshift,
+                        vshift,
+                        "Channel shift value too large after transform"
+                    );
+                    return Err(crate::Error::InvalidSqueezeParams);
+                }
                 let grids = grid.into_groups(lf_group_width as usize, lf_group_height as usize);
                 (&mut lf_groups, grids)
             };

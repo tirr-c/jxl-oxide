@@ -72,4 +72,5 @@ test_by_include!(
     squeeze_tendency_overflow,
     timeout_dim_shift,
     ec_upsampling,
+    too_many_squeezes,
 );
