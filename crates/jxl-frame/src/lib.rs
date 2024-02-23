@@ -138,18 +138,28 @@ impl Bundle<FrameContext<'_>> for Frame {
             }
         }
 
-        if header.upsampling > 1 {
-            for (ec_upsampling, ec_info) in header
-                .ec_upsampling
-                .iter()
-                .zip(image_header.metadata.ec_info.iter())
-            {
-                if (ec_upsampling << ec_info.dim_shift) < header.upsampling {
-                    return Err(jxl_bitstream::Error::ValidationFailed(
-                        "EC upsampling < color upsampling, which is invalid",
-                    )
-                    .into());
-                }
+        for (ec_upsampling, ec_info) in header
+            .ec_upsampling
+            .iter()
+            .zip(image_header.metadata.ec_info.iter())
+        {
+            let effective_ec_upsampling = ec_upsampling << ec_info.dim_shift;
+            if effective_ec_upsampling > 64 {
+                tracing::error!(
+                    ec_upsampling,
+                    dim_shift = ec_info.dim_shift,
+                    "Cumulative EC upsampling factor is too large"
+                );
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "cumulative EC upsampling factor is too large",
+                )
+                .into());
+            }
+            if effective_ec_upsampling < header.upsampling {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "EC upsampling < color upsampling, which is invalid",
+                )
+                .into());
             }
         }
 
