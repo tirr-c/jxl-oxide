@@ -5,16 +5,10 @@ use jxl_oxide::{
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "dev")]
-#[wasm_bindgen]
-pub fn init() {
+#[wasm_bindgen(start)]
+fn start() {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().ok();
-}
-
-#[cfg(not(feature = "dev"))]
-#[wasm_bindgen]
-pub fn init() {
-    // do nothing
 }
 
 #[wasm_bindgen(js_name = JxlImage)]
@@ -34,6 +28,29 @@ impl Default for WasmJxlImage {
     }
 }
 
+#[cfg(feature = "web")]
+fn is_hdr_supported() -> bool {
+    let global_scope = web_sys::js_sys::global();
+    let user_agent = if let Some(window) = global_scope.dyn_ref::<web_sys::Window>() {
+        window.navigator().user_agent()
+    } else if let Some(window) = global_scope.dyn_ref::<web_sys::WorkerGlobalScope>() {
+        window.navigator().user_agent()
+    } else {
+        return true;
+    };
+
+    let Ok(user_agent) = user_agent else {
+        return true;
+    };
+
+    !user_agent.contains(" Firefox/")
+}
+
+#[cfg(not(feature = "web"))]
+fn is_hdr_supported() -> bool {
+    true
+}
+
 #[wasm_bindgen(js_class = JxlImage)]
 impl WasmJxlImage {
     #[wasm_bindgen(constructor)]
@@ -41,7 +58,7 @@ impl WasmJxlImage {
         let inner = WasmJxlImageInner::Uninit(JxlImage::builder().build_uninit());
         Self {
             inner,
-            force_srgb: false,
+            force_srgb: !is_hdr_supported(),
         }
     }
 
@@ -100,13 +117,74 @@ impl WasmJxlImage {
         }
     }
 
-    pub fn render(&self) -> Result<RenderResult, String> {
-        let image = match &self.inner {
+    #[wasm_bindgen(getter = loaded)]
+    pub fn is_loading_done(&self) -> bool {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => false,
+            WasmJxlImageInner::Init(image) => image.is_loading_done(),
+        }
+    }
+
+    #[wasm_bindgen(getter = numLoadedKeyframes)]
+    pub fn num_loaded_keyframes(&self) -> u32 {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => 0,
+            WasmJxlImageInner::Init(image) => image.num_loaded_keyframes() as u32,
+        }
+    }
+
+    #[wasm_bindgen(getter = animated)]
+    pub fn is_animation(&self) -> Option<bool> {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => None,
+            WasmJxlImageInner::Init(image) => {
+                Some(image.image_header().metadata.animation.is_some())
+            }
+        }
+    }
+
+    #[wasm_bindgen(getter = numLoops)]
+    pub fn num_loops(&self) -> Option<u32> {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => None,
+            WasmJxlImageInner::Init(image) => Some(
+                image
+                    .image_header()
+                    .metadata
+                    .animation
+                    .as_ref()
+                    .map(|anim| anim.num_loops)
+                    .unwrap_or(0),
+            ),
+        }
+    }
+
+    pub fn render(&mut self, keyframe_idx: Option<u32>) -> Result<RenderResult, String> {
+        let image = match &mut self.inner {
             WasmJxlImageInner::Uninit(_) => return Err(String::from("image not initialized")),
             WasmJxlImageInner::Init(image) => image,
         };
+        let (tps_numer, tps_denom) =
+            if let Some(animation) = &image.image_header().metadata.animation {
+                (animation.tps_numerator, animation.tps_denominator)
+            } else {
+                (0, 0)
+            };
 
-        let frame = image.render_frame(0).map_err(|e| e.to_string())?;
+        let frame_idx = keyframe_idx.unwrap_or(0) as usize;
+        let frame = if image.num_loaded_keyframes() == frame_idx {
+            image.render_loading_frame()
+        } else {
+            image.render_frame(frame_idx)
+        }
+        .map_err(|e| e.to_string())?;
+
+        let duration = frame.duration();
+        let (frame_duration_numer, frame_duration_denom) = if frame.duration() == 0xffffffff {
+            (duration, 0)
+        } else {
+            (tps_numer * duration, tps_denom)
+        };
 
         let pixfmt = image.pixel_format();
         let cicp = image.rendered_cicp();
@@ -126,6 +204,8 @@ impl WasmJxlImage {
             need_high_precision,
             icc,
             cicp,
+            frame_duration_numer,
+            frame_duration_denom,
         })
     }
 }
@@ -137,10 +217,35 @@ pub struct RenderResult {
     need_high_precision: bool,
     icc: Vec<u8>,
     cicp: Option<[u8; 4]>,
+    frame_duration_numer: u32,
+    frame_duration_denom: u32,
 }
 
 #[wasm_bindgen]
 impl RenderResult {
+    #[wasm_bindgen(getter = durationNumerator)]
+    pub fn frame_duration_numer(&self) -> u32 {
+        self.frame_duration_numer
+    }
+
+    #[wasm_bindgen(getter = durationDenominator)]
+    pub fn frame_duration_denom(&self) -> u32 {
+        self.frame_duration_denom
+    }
+
+    #[wasm_bindgen(getter = duration)]
+    pub fn frame_duration(&self) -> f64 {
+        if self.frame_duration_denom == 0 {
+            if self.frame_duration_numer == 0 {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            self.frame_duration_numer as f64 / self.frame_duration_denom as f64
+        }
+    }
+
     #[wasm_bindgen(getter = iccProfile)]
     pub fn icc_profile(&self) -> Vec<u8> {
         self.icc.clone()
