@@ -788,6 +788,7 @@ dependencies = [
  "miniz_oxide",
  "png",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
