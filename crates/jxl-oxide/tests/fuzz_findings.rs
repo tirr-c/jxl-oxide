@@ -73,4 +73,5 @@ test_by_include!(
     timeout_dim_shift,
     ec_upsampling,
     too_many_squeezes,
+    prop_abs_overflow,
 );
