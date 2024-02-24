@@ -132,19 +132,21 @@ impl Bundle<FrameContext<'_>> for Frame {
             return Err(jxl_bitstream::Error::ValidationFailed("lf_level out of range").into());
         }
 
-        for ec_info in &image_header.metadata.ec_info {
-            if ec_info.dim_shift > 7 + header.group_size_shift {
-                return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large").into());
-            }
-        }
-
+        let color_upsampling_shift = header.upsampling.trailing_zeros();
         for (ec_upsampling, ec_info) in header
             .ec_upsampling
             .iter()
             .zip(image_header.metadata.ec_info.iter())
         {
-            let effective_ec_upsampling = ec_upsampling << ec_info.dim_shift;
-            if effective_ec_upsampling > 64 {
+            let ec_upsampling_shift = ec_upsampling.trailing_zeros();
+            let dim_shift = ec_info.dim_shift;
+            let actual_dim_shift = ec_upsampling_shift + dim_shift - color_upsampling_shift;
+
+            if actual_dim_shift > 7 + header.group_size_shift {
+                return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large").into());
+            }
+
+            if ec_upsampling_shift + dim_shift > 6 {
                 tracing::error!(
                     ec_upsampling,
                     dim_shift = ec_info.dim_shift,
@@ -155,7 +157,8 @@ impl Bundle<FrameContext<'_>> for Frame {
                 )
                 .into());
             }
-            if effective_ec_upsampling < header.upsampling {
+
+            if ec_upsampling_shift + dim_shift < color_upsampling_shift {
                 return Err(jxl_bitstream::Error::ValidationFailed(
                     "EC upsampling < color upsampling, which is invalid",
                 )

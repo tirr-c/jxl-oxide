@@ -507,6 +507,11 @@ impl Squeeze {
                     vshift,
                 } = ch;
                 if *w == 0 || *h == 0 {
+                    tracing::error!(?ch, "Cannot squeeze zero-sized channel");
+                    return Err(Error::InvalidSqueezeParams);
+                }
+                if *hshift > 30 || *vshift > 30 {
+                    tracing::error!(?ch, "Channel is sqeezed too much");
                     return Err(Error::InvalidSqueezeParams);
                 }
 
