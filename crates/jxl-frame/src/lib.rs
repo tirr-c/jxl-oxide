@@ -140,10 +140,12 @@ impl Bundle<FrameContext<'_>> for Frame {
         {
             let ec_upsampling_shift = ec_upsampling.trailing_zeros();
             let dim_shift = ec_info.dim_shift;
-            let actual_dim_shift = ec_upsampling_shift + dim_shift - color_upsampling_shift;
 
-            if actual_dim_shift > 7 + header.group_size_shift {
-                return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large").into());
+            if ec_upsampling_shift + dim_shift < color_upsampling_shift {
+                return Err(jxl_bitstream::Error::ValidationFailed(
+                    "EC upsampling < color upsampling, which is invalid",
+                )
+                .into());
             }
 
             if ec_upsampling_shift + dim_shift > 6 {
@@ -158,11 +160,10 @@ impl Bundle<FrameContext<'_>> for Frame {
                 .into());
             }
 
-            if ec_upsampling_shift + dim_shift < color_upsampling_shift {
-                return Err(jxl_bitstream::Error::ValidationFailed(
-                    "EC upsampling < color upsampling, which is invalid",
-                )
-                .into());
+            let actual_dim_shift = ec_upsampling_shift + dim_shift - color_upsampling_shift;
+
+            if actual_dim_shift > 7 + header.group_size_shift {
+                return Err(jxl_bitstream::Error::ValidationFailed("dim_shift too large").into());
             }
         }
 
