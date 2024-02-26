@@ -223,7 +223,15 @@ impl<S: Sample> ModularImageDestination<S> {
         let mut pass_groups = Vec::with_capacity(num_passes);
         pass_groups.resize_with(num_passes, Vec::new);
         for (i, (info, grid)) in it {
-            let ModularChannelInfo { hshift, vshift, .. } = info;
+            let ModularChannelInfo {
+                original_width,
+                original_height,
+                hshift,
+                vshift,
+                ..
+            } = info;
+            assert!(hshift >= 0 && vshift >= 0);
+
             let grid = match grid {
                 TransformedGrid::Single(g) => g,
                 TransformedGrid::Merged { leader, .. } => leader,
@@ -256,7 +264,14 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups(group_width as usize, group_height as usize);
+                let grids = grid.into_groups_with_downsample(
+                    original_width as usize,
+                    original_height as usize,
+                    group_dim as usize,
+                    group_dim as usize,
+                    hshift as u32,
+                    vshift as u32,
+                );
                 (&mut pass_groups[pass_idx], grids)
             } else {
                 // hshift >= 3 && vshift >= 3
@@ -271,7 +286,14 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups(lf_group_width as usize, lf_group_height as usize);
+                let grids = grid.into_groups_with_downsample(
+                    original_width as usize,
+                    original_height as usize,
+                    group_dim as usize,
+                    group_dim as usize,
+                    (hshift - 3) as u32,
+                    (vshift - 3) as u32,
+                );
                 (&mut lf_groups, grids)
             };
 
@@ -289,6 +311,8 @@ impl<S: Sample> ModularImageDestination<S> {
                 subimage.channel_info.push(ModularChannelInfo {
                     width,
                     height,
+                    original_width: width << hshift,
+                    original_height: height << vshift,
                     hshift,
                     vshift,
                 });
