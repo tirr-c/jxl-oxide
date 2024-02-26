@@ -306,6 +306,10 @@ impl<S: Sample> ModularImageDestination<S> {
             for (subimage, grid) in groups.iter_mut().zip(grids) {
                 let width = grid.width() as u32;
                 let height = grid.height() as u32;
+                if width == 0 || height == 0 {
+                    continue;
+                }
+
                 subimage.channel_info.push(ModularChannelInfo {
                     width,
                     height,
@@ -391,6 +395,10 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
+    pub fn is_empty(&self) -> bool {
+        self.channel_info.is_empty()
+    }
+
     pub fn recursive(
         self,
         bitstream: &mut Bitstream,
