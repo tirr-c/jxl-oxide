@@ -207,6 +207,7 @@ impl<S: Sample> ModularImageDestination<S> {
         let num_passes = *pass_shifts.last_key_value().unwrap().0 as usize + 1;
 
         let group_dim = self.group_dim;
+        let group_dim_shift = group_dim.trailing_zeros();
         let bit_depth = self.bit_depth;
         let subimage = self.prepare_subimage()?;
         let it = subimage
@@ -264,13 +265,12 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups_with_downsample(
-                    original_width as usize,
-                    original_height as usize,
-                    group_dim as usize,
-                    group_dim as usize,
-                    hshift as u32,
-                    vshift as u32,
+
+                let grids = grid.into_groups_with_fixed_count(
+                    group_width as usize,
+                    group_height as usize,
+                    (original_width + group_dim - 1) as usize >> group_dim_shift,
+                    (original_height + group_dim - 1) as usize >> group_dim_shift,
                 );
                 (&mut pass_groups[pass_idx], grids)
             } else {
@@ -286,13 +286,11 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups_with_downsample(
-                    original_width as usize,
-                    original_height as usize,
-                    group_dim as usize,
-                    group_dim as usize,
-                    (hshift - 3) as u32,
-                    (vshift - 3) as u32,
+                let grids = grid.into_groups_with_fixed_count(
+                    lf_group_width as usize,
+                    lf_group_height as usize,
+                    (original_width + (group_dim << 3) - 1) as usize >> (group_dim_shift + 3),
+                    (original_height + (group_dim << 3) - 1) as usize >> (group_dim_shift + 3),
                 );
                 (&mut lf_groups, grids)
             };

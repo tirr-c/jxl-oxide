@@ -436,25 +436,18 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
 impl<'g, V: Copy> CutGrid<'g, V> {
     pub fn into_groups(self, group_width: usize, group_height: usize) -> Vec<CutGrid<'g, V>> {
-        let width = self.width;
-        let height = self.height;
-        self.into_groups_with_downsample(width, height, group_width, group_height, 0, 0)
+        let num_cols = (self.width + group_width - 1) / group_width;
+        let num_rows = (self.height + group_height - 1) / group_height;
+        self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
     }
 
-    pub fn into_groups_with_downsample(
+    pub fn into_groups_with_fixed_count(
         self,
-        original_width: usize,
-        original_height: usize,
         group_width: usize,
         group_height: usize,
-        hshift: u32,
-        vshift: u32,
+        num_cols: usize,
+        num_rows: usize,
     ) -> Vec<CutGrid<'g, V>> {
-        let group_width_shifted = group_width >> hshift;
-        let group_height_shifted = group_height >> vshift;
-        debug_assert!(group_width_shifted << hshift == group_width);
-        debug_assert!(group_height_shifted << vshift == group_height);
-
         let CutGrid {
             ptr,
             split_base,
@@ -465,16 +458,14 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         } = self;
         let split_base = split_base.unwrap_or(ptr.cast());
 
-        let groups_x = (original_width + group_width - 1) / group_width;
-        let groups_y = (original_height + group_height - 1) / group_height;
-        let mut groups = Vec::with_capacity(groups_x * groups_y);
-        for gy in 0..groups_y {
-            let y = (gy * group_height_shifted).min(height);
-            let gh = (height - y).min(group_height_shifted);
+        let mut groups = Vec::with_capacity(num_cols * num_rows);
+        for gy in 0..num_rows {
+            let y = (gy * group_height).min(height);
+            let gh = (height - y).min(group_height);
             let row_ptr = unsafe { ptr.as_ptr().add(y * stride) };
-            for gx in 0..groups_x {
-                let x = (gx * group_width_shifted).min(width);
-                let gw = (width - x).min(group_width_shifted);
+            for gx in 0..num_cols {
+                let x = (gx * group_width).min(width);
+                let gw = (width - x).min(group_width);
                 let ptr = unsafe { row_ptr.add(x) };
 
                 let mut grid = unsafe { CutGrid::new(NonNull::new(ptr).unwrap(), gw, gh, stride) };
