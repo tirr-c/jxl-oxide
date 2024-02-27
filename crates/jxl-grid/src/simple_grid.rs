@@ -436,6 +436,18 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
 impl<'g, V: Copy> CutGrid<'g, V> {
     pub fn into_groups(self, group_width: usize, group_height: usize) -> Vec<CutGrid<'g, V>> {
+        let num_cols = (self.width + group_width - 1) / group_width;
+        let num_rows = (self.height + group_height - 1) / group_height;
+        self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
+    }
+
+    pub fn into_groups_with_fixed_count(
+        self,
+        group_width: usize,
+        group_height: usize,
+        num_cols: usize,
+        num_rows: usize,
+    ) -> Vec<CutGrid<'g, V>> {
         let CutGrid {
             ptr,
             split_base,
@@ -446,15 +458,13 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         } = self;
         let split_base = split_base.unwrap_or(ptr.cast());
 
-        let groups_x = (width + group_width - 1) / group_width;
-        let groups_y = (height + group_height - 1) / group_height;
-        let mut groups = Vec::with_capacity(groups_x * groups_y);
-        for gy in 0..groups_y {
-            let y = gy * group_height;
+        let mut groups = Vec::with_capacity(num_cols * num_rows);
+        for gy in 0..num_rows {
+            let y = (gy * group_height).min(height);
             let gh = (height - y).min(group_height);
             let row_ptr = unsafe { ptr.as_ptr().add(y * stride) };
-            for gx in 0..groups_x {
-                let x = gx * group_width;
+            for gx in 0..num_cols {
+                let x = (gx * group_width).min(width);
                 let gw = (width - x).min(group_width);
                 let ptr = unsafe { row_ptr.add(x) };
 
