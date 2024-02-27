@@ -56,8 +56,7 @@ fn run_test(
     mut image: JxlImage,
     target_icc: Option<Vec<u8>>,
     expected: Vec<Vec<f32>>,
-    expected_peak_error: f32,
-    expected_max_rmse: f32,
+    expected_error_list: &[(f32, f32)],
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
@@ -87,10 +86,12 @@ fn run_test(
         let channels = fb.channels();
 
         let mut sum_se = vec![0.0f32; channels];
-        let mut peak_error = 0.0f32;
+        let mut peak_error = vec![0.0f32; channels];
         for y in 0..height {
             for x in 0..width {
                 for c in 0..channels {
+                    let expected_peak_error = expected_error_list[c].0;
+
                     let reference = expected[c + (x + y * width) * channels];
                     let mut output = interleaved_buffer[c + (x + y * width) * channels];
                     if let Some(idx_black) = idx_black {
@@ -99,29 +100,35 @@ fn run_test(
                             output = 1.0 - output;
                         }
                     }
+
                     let sum_se = &mut sum_se[c];
+                    let peak_error = &mut peak_error[c];
 
                     let abs_error = (output - reference).abs();
                     if debug && abs_error >= expected_peak_error {
                         eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}");
                     }
-                    peak_error = peak_error.max(abs_error);
+                    *peak_error = peak_error.max(abs_error);
                     *sum_se += abs_error * abs_error;
                 }
             }
         }
 
-        let mut max_rmse = 0.0f32;
-        for se in sum_se {
-            let rmse = (se / (width * height) as f32).sqrt();
-            max_rmse = max_rmse.max(rmse);
+        let rmse = sum_se
+            .into_iter()
+            .map(|se| (se / (width * height) as f32).sqrt())
+            .collect::<Vec<_>>();
+
+        for c in 0..channels {
+            eprintln!("Channel {c}:");
+            eprintln!("  peak_error = {}", peak_error[c]);
+            eprintln!("  rmse = {}", rmse[c]);
         }
 
-        eprintln!("peak_error = {}", peak_error);
-        eprintln!("max_rmse = {}", max_rmse);
-
-        assert!(peak_error <= expected_peak_error);
-        assert!(max_rmse <= expected_max_rmse);
+        for c in 0..channels {
+            assert!(peak_error[c] <= expected_error_list[c].0);
+            assert!(rmse[c] <= expected_error_list[c].1);
+        }
     }
 
     assert_eq!(expected.len(), num_keyframes);
@@ -129,23 +136,31 @@ fn run_test(
 }
 
 macro_rules! conformance_test {
-    ($($(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:expr, $max_rmse:expr $(,)? )),* $(,)?) => {
+    (@single $(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:literal, $max_rmse:literal $(,)? )) => {
+        conformance_test!(@single $(#[$attr])* $name ($npy_hash, $icc_hash, $frames, $channels, [($peak_error, $max_rmse); $channels]));
+    };
+
+    (@single $(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, [$($error_list:tt)*] $(,)? )) => {
+        #[test]
+        $(#[$attr])*
+        fn $name() {
+            let perform_ct = $icc_hash != "skip";
+
+            let buf = download_object_with_cache($npy_hash, "npy");
+            let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
+
+            let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
+
+            let path = util::conformance_path(stringify!($name));
+            let image = JxlImage::builder().open(path).expect("Failed to open file");
+
+            run_test(image, target_icc, expected, &[$($error_list)*]);
+        }
+    };
+
+    ($($(#[$attr:meta])* $name:ident ($($params:tt)*)),* $(,)?) => {
         $(
-            #[test]
-            $(#[$attr])*
-            fn $name() {
-                let perform_ct = $icc_hash != "skip";
-
-                let buf = download_object_with_cache($npy_hash, "npy");
-                let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
-
-                let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
-
-                let path = util::conformance_path(stringify!($name));
-                let image = JxlImage::builder().open(path).expect("Failed to open file");
-
-                run_test(image, target_icc, expected, $peak_error, $max_rmse);
-            }
+            conformance_test!(@single $(#[$attr])* $name ($($params)*));
         )*
     };
 }
@@ -180,8 +195,14 @@ conformance_test! {
         "956c9b6ecfef8ef1420e8e93e30a89d3c1d4f7ce5c2f3e2612f95c05a7097064",
         1,
         4,
-        0.004,
-        0.0001,
+        [
+            // VarDCT with filters
+            (0.004, 0.0001),
+            (0.004, 0.0001),
+            (0.004, 0.0001),
+            // Modular, 8-bit
+            (0.000976562, 0.000976562),
+        ],
     ),
     patches_lossless(
         "806201a2c99d27a54c400134b3db7bfc57476f9bc0775e59eea802d28aba75de",
@@ -228,8 +249,14 @@ conformance_test! {
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
         48,
         4,
-        0.005,
-        0.0001,
+        [
+            // VarDCT with filters
+            (0.005, 0.0001),
+            (0.005, 0.0001),
+            (0.005, 0.0001),
+            // Modular, 8-bit
+            (0.000976562, 0.000976562),
+        ],
     ),
     animation_spline(
         "a571c5cbba58affeeb43c44c13f81e2b1962727eb9d4e017e4f25d95c7388f10",
@@ -284,6 +311,7 @@ conformance_test! {
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
         1,
         4,
+        // VarDCT and Modular with filters
         0.004,
         0.0001,
     ),
@@ -327,14 +355,19 @@ conformance_test! {
         6.1035e-5,
         6.1035e-5,
     ),
-    #[ignore]
     alpha_premultiplied(
         "073c1d942ba408f94f6c0aed2fef3d442574899901c616afa060dbd8044bbdb9",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
         1,
         4,
-        3.815e-06,
-        3.815e-06,
+        [
+            // VarDCT with filters (Gabor-like filter, edge-preserving filter)
+            (0.004, 0.0001),
+            (0.004, 0.0001),
+            (0.004, 0.0001),
+            // Modular, 16-bit
+            (3.815e-06, 3.815e-06),
+        ],
     ),
     bench_oriented_brg(
         "eac8c30907e41e53a73a0c002bc39e998e0ceb021bd523f5bff4580b455579e6",
