@@ -74,4 +74,5 @@ test_by_include!(
     ec_upsampling,
     too_many_squeezes,
     prop_abs_overflow,
+    squeeze_groups_off_by_one,
 );

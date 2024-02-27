@@ -74,14 +74,16 @@ impl<S: Sample> Bundle<LfGroupParams<'_, '_, '_, S>> for LfGroup<S> {
 
         let mut is_mlf_complete = true;
         if let Some(image) = mlf_group {
-            let mut subimage = image.recursive(bitstream, global_ma_config, tracker)?;
-            let mut subimage = subimage.prepare_subimage()?;
-            subimage.decode(
-                bitstream,
-                1 + frame_header.num_lf_groups() + lf_group_idx,
-                allow_partial,
-            )?;
-            is_mlf_complete = subimage.finish(pool);
+            if !image.is_empty() {
+                let mut subimage = image.recursive(bitstream, global_ma_config, tracker)?;
+                let mut subimage = subimage.prepare_subimage()?;
+                subimage.decode(
+                    bitstream,
+                    1 + frame_header.num_lf_groups() + lf_group_idx,
+                    allow_partial,
+                )?;
+                is_mlf_complete = subimage.finish(pool);
+            }
         }
 
         let hf_meta = (frame_header.encoding == Encoding::VarDct && is_mlf_complete)

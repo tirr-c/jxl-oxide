@@ -207,6 +207,7 @@ impl<S: Sample> ModularImageDestination<S> {
         let num_passes = *pass_shifts.last_key_value().unwrap().0 as usize + 1;
 
         let group_dim = self.group_dim;
+        let group_dim_shift = group_dim.trailing_zeros();
         let bit_depth = self.bit_depth;
         let subimage = self.prepare_subimage()?;
         let it = subimage
@@ -223,7 +224,15 @@ impl<S: Sample> ModularImageDestination<S> {
         let mut pass_groups = Vec::with_capacity(num_passes);
         pass_groups.resize_with(num_passes, Vec::new);
         for (i, (info, grid)) in it {
-            let ModularChannelInfo { hshift, vshift, .. } = info;
+            let ModularChannelInfo {
+                original_width,
+                original_height,
+                hshift,
+                vshift,
+                ..
+            } = info;
+            assert!(hshift >= 0 && vshift >= 0);
+
             let grid = match grid {
                 TransformedGrid::Single(g) => g,
                 TransformedGrid::Merged { leader, .. } => leader,
@@ -256,7 +265,13 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups(group_width as usize, group_height as usize);
+
+                let grids = grid.into_groups_with_fixed_count(
+                    group_width as usize,
+                    group_height as usize,
+                    (original_width + group_dim - 1) as usize >> group_dim_shift,
+                    (original_height + group_dim - 1) as usize >> group_dim_shift,
+                );
                 (&mut pass_groups[pass_idx], grids)
             } else {
                 // hshift >= 3 && vshift >= 3
@@ -271,7 +286,12 @@ impl<S: Sample> ModularImageDestination<S> {
                     );
                     return Err(crate::Error::InvalidSqueezeParams);
                 }
-                let grids = grid.into_groups(lf_group_width as usize, lf_group_height as usize);
+                let grids = grid.into_groups_with_fixed_count(
+                    lf_group_width as usize,
+                    lf_group_height as usize,
+                    (original_width + (group_dim << 3) - 1) as usize >> (group_dim_shift + 3),
+                    (original_height + (group_dim << 3) - 1) as usize >> (group_dim_shift + 3),
+                );
                 (&mut lf_groups, grids)
             };
 
@@ -286,9 +306,15 @@ impl<S: Sample> ModularImageDestination<S> {
             for (subimage, grid) in groups.iter_mut().zip(grids) {
                 let width = grid.width() as u32;
                 let height = grid.height() as u32;
+                if width == 0 || height == 0 {
+                    continue;
+                }
+
                 subimage.channel_info.push(ModularChannelInfo {
                     width,
                     height,
+                    original_width: width << hshift,
+                    original_height: height << vshift,
                     hshift,
                     vshift,
                 });
@@ -369,6 +395,10 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
+    pub fn is_empty(&self) -> bool {
+        self.channel_info.is_empty()
+    }
+
     pub fn recursive(
         self,
         bitstream: &mut Bitstream,

@@ -147,6 +147,10 @@ pub fn decode_pass_group_modular<S: Sample>(
     tracker: Option<&AllocTracker>,
     pool: &JxlThreadPool,
 ) -> Result<()> {
+    if modular.is_empty() {
+        return Ok(());
+    }
+
     let mut modular = modular.recursive(bitstream, global_ma_config, tracker)?;
     let mut subimage = modular.prepare_subimage()?;
     subimage.decode(

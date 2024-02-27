@@ -156,27 +156,33 @@ impl ModularChannels {
 pub struct ModularChannelInfo {
     width: u32,
     height: u32,
+    original_width: u32,
+    original_height: u32,
     hshift: i32,
     vshift: i32,
 }
 
 impl ModularChannelInfo {
-    fn new(width: u32, height: u32, shift: ChannelShift) -> Self {
-        let (width, height) = shift.shift_size((width, height));
+    fn new(original_width: u32, original_height: u32, shift: ChannelShift) -> Self {
+        let (width, height) = shift.shift_size((original_width, original_height));
         Self {
             width,
             height,
+            original_width,
+            original_height,
             hshift: shift.hshift(),
             vshift: shift.vshift(),
         }
     }
 
-    fn new_shifted(width: u32, height: u32, hshift: i32, vshift: i32) -> Self {
+    fn new_unshiftable(width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            hshift,
-            vshift,
+            original_width: width,
+            original_height: height,
+            hshift: -1,
+            vshift: -1,
         }
     }
 }

@@ -270,7 +270,7 @@ impl Palette {
             .drain((begin_c as usize + 1)..(end_c as usize));
         channels.info.insert(
             0,
-            ModularChannelInfo::new_shifted(self.nb_colours, self.num_c, -1, -1),
+            ModularChannelInfo::new_unshiftable(self.nb_colours, self.num_c),
         );
 
         if let Some(grids) = grids {
@@ -505,6 +505,7 @@ impl Squeeze {
                     height: h,
                     hshift,
                     vshift,
+                    ..
                 } = ch;
                 if *w == 0 || *h == 0 {
                     tracing::error!(?ch, "Cannot squeeze zero-sized channel");
