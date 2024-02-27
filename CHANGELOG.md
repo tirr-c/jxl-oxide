@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `jxl-modular`: Fix Squeeze bug when image dimension is slightly larger than group boundary (#258).
+
 ## [0.7.0] - 2024-02-24
 
 ### Added
