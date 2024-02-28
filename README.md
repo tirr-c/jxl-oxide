@@ -17,7 +17,7 @@ which covers various components of jxl-oxide.
 
 ```toml
 [dependencies]
-jxl-oxide = "0.7.0"
+jxl-oxide = "0.7.1"
 ```
 
 ---
