@@ -75,4 +75,5 @@ test_by_include!(
     too_many_squeezes,
     prop_abs_overflow,
     squeeze_groups_off_by_one,
+    cluster_hole,
 );
