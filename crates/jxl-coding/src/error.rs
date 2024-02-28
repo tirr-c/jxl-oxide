@@ -8,6 +8,7 @@ pub enum Error {
     InvalidIntegerConfig,
     InvalidPermutation,
     InvalidPrefixHistogram,
+    InvalidCluster,
     UnexpectedLz77Repeat,
 }
 
@@ -30,6 +31,7 @@ impl std::fmt::Display for Error {
             Self::InvalidIntegerConfig => write!(f, "invalid hybrid integer configuration"),
             Self::InvalidPermutation => write!(f, "invalid permutation"),
             Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
+            Self::InvalidCluster => write!(f, "invalid cluster"),
             Self::UnexpectedLz77Repeat => write!(
                 f,
                 "LZ77 repeat symbol encountered without decoding any symbols"
