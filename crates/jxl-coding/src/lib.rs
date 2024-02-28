@@ -622,14 +622,12 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
         return Ok((1, vec![0u8]));
     }
 
-    Ok(if bitstream.read_bool()? {
+    let cluster = if bitstream.read_bool()? {
         // simple dist
         let nbits = bitstream.read_bits(2)? as usize;
-        let ret = (0..num_dist)
+        (0..num_dist)
             .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
-        (num_clusters, ret)
+            .collect::<std::result::Result<Vec<_>, _>>()?
     } else {
         let use_mtf = read_bits!(bitstream, Bool)?;
         let mut decoder = if num_dist <= 2 {
@@ -639,7 +637,10 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
         };
         decoder.begin(bitstream)?;
         let mut ret = (0..num_dist)
-            .map(|_| decoder.read_varint(bitstream, 0).map(|b| b as u8))
+            .map(|_| -> Result<_> {
+                let b = decoder.read_varint(bitstream, 0)?;
+                u8::try_from(b).map_err(|_| Error::InvalidCluster)
+            })
             .collect::<Result<Vec<_>>>()?;
         decoder.finalize()?;
         if use_mtf {
@@ -654,7 +655,18 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
                 mtfmap[0] = *cluster;
             }
         }
-        let num_clusters = *ret.iter().max().unwrap() as u32 + 1;
-        (num_clusters, ret)
-    })
+        ret
+    };
+
+    let num_clusters = *cluster.iter().max().unwrap() as u32 + 1;
+    let set = cluster
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    if set.len() != num_clusters as usize {
+        tracing::error!("distribution cluster has a hole");
+        Err(Error::InvalidCluster)
+    } else {
+        Ok((num_clusters, cluster))
+    }
 }

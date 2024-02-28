@@ -58,7 +58,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     };
 
     let (left_padding_end, right_padding_start) = if skip_inner {
-        (simd_range.start, simd_range.end)
+        (simd_range.start.min(width), simd_range.end.min(width))
     } else {
         (left_edge_width, width.saturating_sub(padding))
     };
