@@ -772,7 +772,36 @@ mod tests {
             intensity_target: 10000.0,
             min_nits: 0.0,
         };
-        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0);
+        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0, false);
+
+        dbg!(r);
+        dbg!(g);
+        dbg!(b);
+
+        for (idx, ((r, g), b)) in r.into_iter().zip(b).zip(b).enumerate() {
+            let expected = (idx / 5) as f32 * 0.8714331;
+            assert!((r - expected).abs() < 2e-5);
+            assert!((g - expected).abs() < 2e-5);
+            assert!((b - expected).abs() < 2e-5);
+        }
+    }
+
+    #[test]
+    fn tone_map_range_detect_peak() {
+        let mut samples = [0f32; 10];
+        for (idx, v) in samples.iter_mut().enumerate() {
+            *v = (idx / 5) as f32 * 0.1;
+        }
+        let mut r = samples;
+        let mut g = samples;
+        let mut b = samples;
+
+        let hdr_params = HdrParams {
+            luminances: [0.2126, 0.7152, 0.0722],
+            intensity_target: 10000.0,
+            min_nits: 0.0,
+        };
+        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0, true);
 
         dbg!(r);
         dbg!(g);
