@@ -12,6 +12,7 @@ pub(super) fn tone_map(
     b: &mut [f32],
     hdr_params: &HdrParams,
     target_display_luminance: f32,
+    detect_peak: bool,
 ) {
     assert_eq!(r.len(), g.len());
     assert_eq!(g.len(), b.len());
@@ -19,7 +20,11 @@ pub(super) fn tone_map(
     let luminances = hdr_params.luminances;
     let intensity_target = hdr_params.intensity_target;
     let min_nits = hdr_params.min_nits;
-    let detected_peak_luminance = detect_peak_luminance(r, g, b, luminances) * intensity_target;
+    let detected_peak_luminance = if detect_peak {
+        detect_peak_luminance(r, g, b, luminances) * intensity_target
+    } else {
+        intensity_target
+    };
     let peak_luminance = intensity_target.min(detected_peak_luminance);
 
     let from_luminance_range = (min_nits, peak_luminance);
@@ -98,17 +103,20 @@ pub(super) fn tone_map_luma(
     luma: &mut [f32],
     hdr_params: &HdrParams,
     target_display_luminance: f32,
+    detect_peak: bool,
 ) {
     let intensity_target = hdr_params.intensity_target;
     let min_nits = hdr_params.min_nits;
-    let detected_peak_luminance = {
+    let detected_peak_luminance = if detect_peak {
         let max_luma = luma.iter().copied().fold(0f32, |max, v| max.max(v));
         if max_luma == 0.0 {
-            1.0
+            intensity_target
         } else {
-            max_luma
+            max_luma * intensity_target
         }
-    } * intensity_target;
+    } else {
+        intensity_target
+    };
     let peak_luminance = intensity_target.min(detected_peak_luminance);
 
     let from_luminance_range = (min_nits, peak_luminance);
@@ -764,7 +772,36 @@ mod tests {
             intensity_target: 10000.0,
             min_nits: 0.0,
         };
-        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0);
+        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0, false);
+
+        dbg!(r);
+        dbg!(g);
+        dbg!(b);
+
+        for (idx, ((r, g), b)) in r.into_iter().zip(b).zip(b).enumerate() {
+            let expected = (idx / 5) as f32 * 0.8714331;
+            assert!((r - expected).abs() < 2e-5);
+            assert!((g - expected).abs() < 2e-5);
+            assert!((b - expected).abs() < 2e-5);
+        }
+    }
+
+    #[test]
+    fn tone_map_range_detect_peak() {
+        let mut samples = [0f32; 10];
+        for (idx, v) in samples.iter_mut().enumerate() {
+            *v = (idx / 5) as f32 * 0.1;
+        }
+        let mut r = samples;
+        let mut g = samples;
+        let mut b = samples;
+
+        let hdr_params = HdrParams {
+            luminances: [0.2126, 0.7152, 0.0722],
+            intensity_target: 10000.0,
+            min_nits: 0.0,
+        };
+        tone_map(&mut r, &mut g, &mut b, &hdr_params, 255.0, true);
 
         dbg!(r);
         dbg!(g);

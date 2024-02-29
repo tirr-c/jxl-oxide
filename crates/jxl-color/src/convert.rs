@@ -109,6 +109,48 @@ impl ColorEncodingWithProfile {
     }
 }
 
+#[derive(Debug)]
+pub struct ColorTransformBuilder {
+    detect_peak: bool,
+    srgb_icc: bool,
+}
+
+impl Default for ColorTransformBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ColorTransformBuilder {
+    /// Creates a new `ColorTransform` builder.
+    pub fn new() -> Self {
+        Self {
+            detect_peak: false,
+            srgb_icc: false,
+        }
+    }
+
+    pub fn set_detect_peak(&mut self, value: bool) -> &mut Self {
+        self.detect_peak = value;
+        self
+    }
+
+    pub fn set_srgb_icc(&mut self, value: bool) -> &mut Self {
+        self.srgb_icc = value;
+        self
+    }
+
+    pub fn build(
+        self,
+        from: &ColorEncodingWithProfile,
+        to: &ColorEncodingWithProfile,
+        oim: &OpsinInverseMatrix,
+        tone_mapping: &ToneMapping,
+    ) -> Result<ColorTransform> {
+        ColorTransform::with_builder(self, from, to, oim, tone_mapping)
+    }
+}
+
 /// Color transformation from a color encoding to another.
 #[derive(Debug, Clone)]
 pub struct ColorTransform {
@@ -117,6 +159,11 @@ pub struct ColorTransform {
 }
 
 impl ColorTransform {
+    /// Creates a new `ColorTransform` builder.
+    pub fn builder() -> ColorTransformBuilder {
+        ColorTransformBuilder::new()
+    }
+
     /// Prepares a color transformation.
     ///
     /// # Errors
@@ -127,6 +174,32 @@ impl ColorTransform {
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
     ) -> Result<Self> {
+        Self::with_builder(
+            ColorTransformBuilder::default(),
+            from,
+            to,
+            oim,
+            tone_mapping,
+        )
+    }
+
+    fn with_builder(
+        builder: ColorTransformBuilder,
+        from: &ColorEncodingWithProfile,
+        to: &ColorEncodingWithProfile,
+        oim: &OpsinInverseMatrix,
+        tone_mapping: &ToneMapping,
+    ) -> Result<Self> {
+        let ColorTransformBuilder {
+            detect_peak,
+            srgb_icc,
+        } = builder;
+        let connecting_tf = if srgb_icc {
+            TransferFunction::Srgb
+        } else {
+            TransferFunction::Linear
+        };
+
         let intensity_target = tone_mapping.intensity_target;
         let min_nits = tone_mapping.min_nits;
 
@@ -159,7 +232,7 @@ impl ColorTransform {
 
         let mut ops = Vec::new();
 
-        let current_encoding = match from.encoding {
+        let mut current_encoding = match from.encoding {
             ColourEncoding::IccProfile(_) => {
                 let rendering_intent = crate::icc::parse_icc_raw(&from.icc_profile)?
                     .header
@@ -179,7 +252,7 @@ impl ColorTransform {
                     }
                     ColourEncoding::Enum(encoding) => {
                         let mut target_encoding = encoding.clone();
-                        target_encoding.tf = TransferFunction::Linear;
+                        target_encoding.tf = connecting_tf;
                         ops.push(ColorTransformOp::IccToIcc {
                             inputs: 0,
                             outputs: 0,
@@ -287,7 +360,20 @@ impl ColorTransform {
             }
         };
 
-        debug_assert_eq!(current_encoding.tf, TransferFunction::Linear);
+        if current_encoding.tf != TransferFunction::Linear {
+            debug_assert_ne!(current_encoding.tf, TransferFunction::Hlg);
+
+            ops.push(ColorTransformOp::TransferFunction {
+                tf: current_encoding.tf,
+                hdr_params: HdrParams {
+                    luminances: [0.0, 0.0, 0.0],
+                    intensity_target,
+                    min_nits,
+                },
+                inverse: true,
+            });
+            current_encoding.tf = TransferFunction::Linear;
+        }
 
         if current_encoding.colour_space != target_encoding.colour_space
             || current_encoding.white_point != target_encoding.white_point
@@ -361,11 +447,13 @@ impl ColorTransform {
                 ops.push(ColorTransformOp::ToneMapLumaRec2408 {
                     hdr_params,
                     target_display_luminance: 255.0,
+                    detect_peak,
                 });
             } else {
                 ops.push(ColorTransformOp::ToneMapRec2408 {
                     hdr_params,
                     target_display_luminance: 255.0,
+                    detect_peak,
                 });
 
                 if current_encoding.rendering_intent == RenderingIntent::Perceptual {
@@ -537,10 +625,12 @@ enum ColorTransformOp {
     ToneMapRec2408 {
         hdr_params: HdrParams,
         target_display_luminance: f32,
+        detect_peak: bool,
     },
     ToneMapLumaRec2408 {
         hdr_params: HdrParams,
         target_display_luminance: f32,
+        detect_peak: bool,
     },
     GamutMap {
         luminances: [f32; 3],
@@ -585,18 +675,22 @@ impl std::fmt::Debug for ColorTransformOp {
             Self::ToneMapRec2408 {
                 hdr_params,
                 target_display_luminance,
+                detect_peak,
             } => f
                 .debug_struct("ToneMapRec2408")
                 .field("hdr_params", hdr_params)
                 .field("target_display_luminance", target_display_luminance)
+                .field("detect_peak", detect_peak)
                 .finish(),
             Self::ToneMapLumaRec2408 {
                 hdr_params,
                 target_display_luminance,
+                detect_peak,
             } => f
                 .debug_struct("ToneMapLumaRec2408")
                 .field("hdr_params", hdr_params)
                 .field("target_display_luminance", target_display_luminance)
+                .field("detect_peak", detect_peak)
                 .finish(),
             Self::GamutMap {
                 luminances,
@@ -744,19 +838,21 @@ impl ColorTransformOp {
             Self::ToneMapRec2408 {
                 hdr_params,
                 target_display_luminance,
+                detect_peak,
             } => {
                 let [r, g, b, ..] = channels else {
                     unreachable!()
                 };
-                tone_map::tone_map(r, g, b, hdr_params, *target_display_luminance);
+                tone_map::tone_map(r, g, b, hdr_params, *target_display_luminance, *detect_peak);
                 3
             }
             Self::ToneMapLumaRec2408 {
                 hdr_params,
                 target_display_luminance,
+                detect_peak,
             } => {
                 let [y, ..] = channels else { unreachable!() };
-                tone_map::tone_map_luma(y, hdr_params, *target_display_luminance);
+                tone_map::tone_map_luma(y, hdr_params, *target_display_luminance, *detect_peak);
                 1
             }
             Self::GamutMap {

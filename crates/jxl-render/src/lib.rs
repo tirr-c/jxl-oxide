@@ -793,7 +793,9 @@ impl RenderContext {
                     jxl_color::ycbcr_to_rgb([cb, y, cr]);
                 }
 
-                let transform = jxl_color::ColorTransform::new(
+                let mut transform = jxl_color::ColorTransform::builder();
+                transform.set_srgb_icc(!self.cms.supports_linear_tf());
+                let transform = transform.build(
                     &frame_color_encoding,
                     &self.requested_color_encoding,
                     &metadata.opsin_inverse_matrix,

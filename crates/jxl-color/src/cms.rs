@@ -26,6 +26,14 @@ pub trait ColorManagementSystem {
         self.transform_impl(from, to, intent, channels)
             .map_err(crate::Error::CmsFailure)
     }
+
+    /// Returns whether the CMS supports linear transfer function.
+    ///
+    /// This method will return `false` if it doesn't support (or it lacks precision to handle)
+    /// linear transfer function.
+    fn supports_linear_tf(&self) -> bool {
+        true
+    }
 }
 
 /// "Null" color management system that fails on every operation.
