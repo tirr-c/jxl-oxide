@@ -627,7 +627,6 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         let dist_multiplier = self
             .channel_info
             .iter()
-            .skip_while(|ch| ch.hshift == -1 || ch.vshift == -1)
             .map(|info| info.width)
             .max()
             .unwrap_or(0);
