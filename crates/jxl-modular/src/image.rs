@@ -514,8 +514,26 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             decoder.finalize()?;
             return Ok(());
         }
-        if let Some(lz77_decoder) = decoder.as_with_lz77() {
-            self.decode_image_lz77(bitstream, stream_index, lz77_decoder)?;
+        if decoder.as_with_lz77().is_some() {
+            let tmp_bitstream = bitstream.clone();
+            let tmp_decoder = decoder.clone();
+
+            let lz77_decoder = decoder.as_with_lz77().unwrap();
+            let result = self.decode_image_lz77(bitstream, stream_index, lz77_decoder);
+            if let Err(error) = result {
+                if !error.unexpected_eof() {
+                    return Err(error);
+                }
+            } else if decoder.finalize().is_ok() {
+                return Ok(());
+            }
+
+            tracing::warn!("Invalid LZ77 stream, trying legacy method");
+            *bitstream = tmp_bitstream;
+            let mut decoder = tmp_decoder;
+
+            let lz77_decoder = decoder.as_with_lz77().unwrap();
+            self.decode_image_lz77_legacy(bitstream, stream_index, lz77_decoder)?;
             decoder.finalize()?;
             return Ok(());
         }
@@ -618,18 +636,13 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         Ok(())
     }
 
-    fn decode_image_lz77(
+    fn decode_image_lz77_inner(
         &mut self,
         bitstream: &mut Bitstream,
         stream_index: u32,
         mut decoder: DecoderWithLz77<'_>,
+        dist_multiplier: u32,
     ) -> Result<()> {
-        let dist_multiplier = self
-            .channel_info
-            .iter()
-            .map(|info| info.width)
-            .max()
-            .unwrap_or(0);
         let mut next = |cluster: u8| -> Result<i32> {
             let token = decoder.read_varint_with_multiplier_clustered(
                 bitstream,
@@ -714,6 +727,37 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             predictor.reset(width as u32, prev_rev, wp_header);
             decode_channel_slow(&mut next, &ma_tree, &mut predictor, grid)
         })
+    }
+
+    fn decode_image_lz77(
+        &mut self,
+        bitstream: &mut Bitstream,
+        stream_index: u32,
+        decoder: DecoderWithLz77<'_>,
+    ) -> Result<()> {
+        let dist_multiplier = self
+            .channel_info
+            .iter()
+            .skip(self.nb_meta_channels)
+            .map(|info| info.width)
+            .max()
+            .unwrap_or(0);
+        self.decode_image_lz77_inner(bitstream, stream_index, decoder, dist_multiplier)
+    }
+
+    fn decode_image_lz77_legacy(
+        &mut self,
+        bitstream: &mut Bitstream,
+        stream_index: u32,
+        decoder: DecoderWithLz77<'_>,
+    ) -> Result<()> {
+        let dist_multiplier = self
+            .channel_info
+            .iter()
+            .map(|info| info.width)
+            .max()
+            .unwrap_or(0);
+        self.decode_image_lz77_inner(bitstream, stream_index, decoder, dist_multiplier)
     }
 
     fn decode_image_rle(
