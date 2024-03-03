@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `jxl-modular`: Include meta channels when computing LZ77 `dist_multiplier` (#269).
+
 ## [0.7.1] - 2024-02-29
 
 ### Fixed
