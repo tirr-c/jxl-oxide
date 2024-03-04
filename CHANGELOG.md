@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.2] - 2024-03-03
 
+### Added
+- `jxl-oxide-cli`: Add decode argument `--lz77-mode` (#272).
+
 ### Fixed
-- `jxl-modular`: Include meta channels when computing LZ77 `dist_multiplier` (#269).
+- `jxl-modular`: Support "legacy" method of computing LZ77 `dist_multiplier` (#269, #271).
 
 ## [0.7.1] - 2024-02-29
 
