@@ -70,7 +70,7 @@ pub struct DecodeArgs {
     #[cfg(feature = "rayon")]
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
-    /// (unstable) LZ77 `dist_multiplier` mode to use.
+    /// (unstable) LZ77 mode to use.
     #[arg(value_enum, long, default_value_t = Lz77ModeArg::Auto)]
     pub lz77_mode: Lz77ModeArg,
 }
@@ -134,9 +134,9 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
 pub enum Lz77ModeArg {
     /// Try both Standard and Legacy method.
     Auto,
-    /// Use Standard method.
+    /// Use spec-conforming Standard method.
     Std,
-    /// Use Legacy method that simulates libjxl.
+    /// Use Legacy method that emulates old libjxl.
     Legacy,
 }
 
