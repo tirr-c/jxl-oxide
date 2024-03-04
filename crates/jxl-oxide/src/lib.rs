@@ -150,6 +150,7 @@ use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::FrameContext;
 use jxl_render::{IndexedFrame, RenderContext};
 
+pub use jxl_bitstream::Lz77Mode;
 pub use jxl_color::header as color;
 pub use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms, RenderingIntent,
@@ -186,6 +187,7 @@ fn default_pool() -> JxlThreadPool {
 pub struct JxlImageBuilder {
     pool: Option<JxlThreadPool>,
     tracker: Option<AllocTracker>,
+    lz77_mode: Lz77Mode,
 }
 
 impl JxlImageBuilder {
@@ -201,6 +203,12 @@ impl JxlImageBuilder {
         self
     }
 
+    /// Sets LZ77 `dist_multiplier` mode to use.
+    pub fn lz77_mode(mut self, lz77_mode: Lz77Mode) -> Self {
+        self.lz77_mode = lz77_mode;
+        self
+    }
+
     /// Consumes the builder, and creates an empty, uninitialized JPEG XL image decoder.
     pub fn build_uninit(self) -> UninitializedJxlImage {
         UninitializedJxlImage {
@@ -208,6 +216,7 @@ impl JxlImageBuilder {
             tracker: self.tracker,
             reader: ContainerDetectingReader::new(),
             buffer: Vec::new(),
+            lz77_mode: self.lz77_mode,
         }
     }
 
@@ -285,6 +294,7 @@ pub struct UninitializedJxlImage {
     tracker: Option<AllocTracker>,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
+    lz77_mode: Lz77Mode,
 }
 
 impl UninitializedJxlImage {
@@ -310,6 +320,7 @@ impl UninitializedJxlImage {
     ///   was given.
     pub fn try_init(mut self) -> Result<InitializeResult> {
         let mut bitstream = Bitstream::new(&self.buffer);
+        bitstream.set_lz77_mode(self.lz77_mode);
         let image_header = match ImageHeader::parse(&mut bitstream, ()) {
             Ok(x) => x,
             Err(e) if e.unexpected_eof() => {
@@ -395,6 +406,7 @@ impl UninitializedJxlImage {
             buffer: Vec::new(),
             buffer_offset: bytes_read,
             frame_offsets: Vec::new(),
+            lz77_mode: self.lz77_mode,
         };
         image.feed_bytes_inner(&self.buffer)?;
 
@@ -422,6 +434,7 @@ pub struct JxlImage {
     buffer: Vec<u8>,
     buffer_offset: usize,
     frame_offsets: Vec<usize>,
+    lz77_mode: Lz77Mode,
 }
 
 impl JxlImage {
@@ -473,6 +486,7 @@ impl JxlImage {
         let mut buf = &*self.buffer;
         while !buf.is_empty() {
             let mut bitstream = Bitstream::new(buf);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let frame = match self.ctx.load_frame_header(&mut bitstream) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
