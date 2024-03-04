@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2024-03-03
+
 ### Fixed
 - `jxl-modular`: Include meta channels when computing LZ77 `dist_multiplier` (#269).
 
@@ -91,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
-[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.7.1...HEAD
+[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.7.2...HEAD
+[0.7.2]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.7.2
 [0.7.1]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.7.1
 [0.7.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.7.0
 [0.6.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.6.0
