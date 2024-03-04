@@ -1,4 +1,4 @@
-use crate::{Bundle, Error, Result};
+use crate::{Bundle, Error, Lz77Mode, Result};
 
 /// Bitstream reader with borrowed in-memory buffer.
 ///
@@ -11,6 +11,10 @@ pub struct Bitstream<'buf> {
     buf: u64,
     num_read_bits: usize,
     remaining_buf_bits: usize,
+    /// LZ77 dist_multiplier mode.
+    ///
+    /// It shouldn't be here, this is a hack to avoid API breakage.
+    lz77_mode: Lz77Mode,
 }
 
 impl std::fmt::Debug for Bitstream<'_> {
@@ -40,6 +44,7 @@ impl<'buf> Bitstream<'buf> {
             buf: 0,
             num_read_bits: 0,
             remaining_buf_bits: 0,
+            lz77_mode: Lz77Mode::Auto,
         }
     }
 
@@ -47,6 +52,16 @@ impl<'buf> Bitstream<'buf> {
     #[inline]
     pub fn num_read_bits(&self) -> usize {
         self.num_read_bits
+    }
+
+    #[inline]
+    pub fn lz77_mode(&self) -> Lz77Mode {
+        self.lz77_mode
+    }
+
+    #[inline]
+    pub fn set_lz77_mode(&mut self, lz77_mode: Lz77Mode) {
+        self.lz77_mode = lz77_mode;
     }
 }
 

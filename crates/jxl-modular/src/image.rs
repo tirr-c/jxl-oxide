@@ -1,4 +1,4 @@
-use jxl_bitstream::{unpack_signed, Bitstream};
+use jxl_bitstream::{unpack_signed, Bitstream, Lz77Mode};
 use jxl_coding::{DecoderRleMode, DecoderWithLz77, RleToken};
 use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 
@@ -529,39 +529,61 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 .max()
                 .unwrap_or(0);
 
-            if dist_multiplier == dist_multiplier_legacy {
-                let lz77_decoder = decoder.as_with_lz77().unwrap();
-                self.decode_image_lz77(bitstream, stream_index, lz77_decoder, dist_multiplier)?;
-                decoder.finalize()?;
-                return Ok(());
-            }
+            let lz77_mode = if dist_multiplier == dist_multiplier_legacy {
+                Lz77Mode::Standard
+            } else {
+                bitstream.lz77_mode()
+            };
 
             let tmp_bitstream = bitstream.clone();
             let tmp_decoder = decoder.clone();
 
-            // Try standard method first
             let lz77_decoder = decoder.as_with_lz77().unwrap();
-            let result =
-                self.decode_image_lz77(bitstream, stream_index, lz77_decoder, dist_multiplier);
-            if result.is_ok() && decoder.finalize().is_ok() {
-                return Ok(());
+            match lz77_mode {
+                Lz77Mode::Standard => {
+                    self.decode_image_lz77(bitstream, stream_index, lz77_decoder, dist_multiplier)?;
+                    decoder.finalize()?;
+                }
+                Lz77Mode::Legacy => {
+                    self.decode_image_lz77(
+                        bitstream,
+                        stream_index,
+                        lz77_decoder,
+                        dist_multiplier_legacy,
+                    )?;
+                    decoder.finalize()?;
+                }
+                Lz77Mode::Auto => {
+                    // Try standard method first
+                    let result = self.decode_image_lz77(
+                        bitstream,
+                        stream_index,
+                        lz77_decoder,
+                        dist_multiplier,
+                    );
+                    if result.is_ok() && decoder.finalize().is_ok() {
+                        return Ok(());
+                    }
+
+                    // Decode error with standard method
+                    tracing::warn!("Invalid LZ77 stream, trying legacy method");
+                    *bitstream = tmp_bitstream;
+                    let mut decoder = tmp_decoder;
+
+                    let lz77_decoder = decoder.as_with_lz77().unwrap();
+                    self.decode_image_lz77(
+                        bitstream,
+                        stream_index,
+                        lz77_decoder,
+                        dist_multiplier_legacy,
+                    )?;
+                    decoder.finalize()?;
+                }
             }
 
-            // Decode error with standard method
-            tracing::warn!("Invalid LZ77 stream, trying legacy method");
-            *bitstream = tmp_bitstream;
-            let mut decoder = tmp_decoder;
-
-            let lz77_decoder = decoder.as_with_lz77().unwrap();
-            self.decode_image_lz77(
-                bitstream,
-                stream_index,
-                lz77_decoder,
-                dist_multiplier_legacy,
-            )?;
-            decoder.finalize()?;
             return Ok(());
         }
+
         let mut no_lz77_decoder = decoder.as_no_lz77().unwrap();
 
         let mut predictor = PredictorState::new();
