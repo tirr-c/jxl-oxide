@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-bitstream"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "tracing",
 ]
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-frame"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "criterion",
  "jxl-bitstream",
@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "clap",
  "jxl-oxide",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-vardct"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
