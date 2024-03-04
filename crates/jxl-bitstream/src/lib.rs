@@ -76,3 +76,11 @@ impl std::ops::DerefMut for Name {
         &mut self.0
     }
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub enum Lz77Mode {
+    #[default]
+    Auto,
+    Standard,
+    Legacy,
+}

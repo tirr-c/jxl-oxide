@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use jxl_oxide::{CropInfo, EnumColourEncoding};
+use jxl_oxide::{CropInfo, EnumColourEncoding, Lz77Mode};
 
 #[derive(Debug, Parser)]
 #[non_exhaustive]
@@ -70,6 +70,9 @@ pub struct DecodeArgs {
     #[cfg(feature = "rayon")]
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
+    /// (unstable) LZ77 `dist_multiplier` mode to use.
+    #[arg(value_enum, long, default_value_t = Lz77ModeArg::Auto)]
+    pub lz77_mode: Lz77ModeArg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -125,4 +128,24 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
         left: x,
         top: y,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Lz77ModeArg {
+    /// Try both Standard and Legacy method.
+    Auto,
+    /// Use Standard method.
+    Std,
+    /// Use Legacy method that simulates libjxl.
+    Legacy,
+}
+
+impl From<Lz77ModeArg> for Lz77Mode {
+    fn from(value: Lz77ModeArg) -> Self {
+        match value {
+            Lz77ModeArg::Auto => Lz77Mode::Auto,
+            Lz77ModeArg::Std => Lz77Mode::Standard,
+            Lz77ModeArg::Legacy => Lz77Mode::Legacy,
+        }
+    }
 }
