@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use jxl_bitstream::{read_bits, Bitstream, Bundle};
+use jxl_bitstream::{read_bits, Bitstream, Bundle, Lz77Mode};
 use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
 
@@ -51,6 +51,7 @@ pub struct Frame {
     all_group_offsets: AllGroupOffsets,
     reading_data_index: usize,
     pass_shifts: BTreeMap<u32, (i32, i32)>,
+    lz77_mode: Lz77Mode,
 }
 
 #[derive(Debug, Default)]
@@ -198,6 +199,7 @@ impl Bundle<FrameContext<'_>> for Frame {
             all_group_offsets: AllGroupOffsets::default(),
             reading_data_index: 0,
             pass_shifts,
+            lz77_mode: bitstream.lz77_mode(),
         })
     }
 }
@@ -270,6 +272,7 @@ impl Frame {
             let group = self.data.first()?;
             let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let lf_global = LfGlobal::parse(
                 &mut bitstream,
                 LfGlobalParams::new(
@@ -299,6 +302,7 @@ impl Frame {
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
 
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             LfGlobal::parse(
                 &mut bitstream,
                 LfGlobalParams::new(
@@ -330,6 +334,7 @@ impl Frame {
             let group = self.data.first()?;
             let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let offset = self.all_group_offsets.lf_group.load(Ordering::Relaxed);
             if offset == 0 {
                 let lf_global = self.try_parse_lf_global::<S>().unwrap();
@@ -376,6 +381,7 @@ impl Frame {
             let allow_partial = group.bytes.len() < group.toc_group.size as usize;
 
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let result = LfGroup::parse(
                 &mut bitstream,
                 LfGroupParams {
@@ -410,6 +416,7 @@ impl Frame {
             let group = self.data.first()?;
             let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let offset = self.all_group_offsets.hf_global.load(Ordering::Relaxed);
             let lf_global = if cached_lf_global.is_none() && (offset == 0 || !is_modular) {
                 match self.try_parse_lf_global()? {
@@ -499,6 +506,7 @@ impl Frame {
             }
 
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let lf_global = if cached_lf_global.is_none() {
                 match self.try_parse_lf_global()? {
                     Ok(lf_global) => Some(lf_global),
@@ -536,6 +544,7 @@ impl Frame {
             let group = self.data.first()?;
             let loaded = self.reading_data_index != 0;
             let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
             let mut offset = self.all_group_offsets.pass_group.load(Ordering::Relaxed);
             if offset == 0 {
                 let hf_global = self.try_parse_hf_global::<i32>(None)?;
@@ -560,10 +569,9 @@ impl Frame {
             let group = self.data.get(idx)?;
             let partial = group.bytes.len() < group.toc_group.size as usize;
 
-            Ok(PassGroupBitstream {
-                bitstream: Bitstream::new(&group.bytes),
-                partial,
-            })
+            let mut bitstream = Bitstream::new(&group.bytes);
+            bitstream.set_lz77_mode(self.lz77_mode);
+            Ok(PassGroupBitstream { bitstream, partial })
         })
     }
 }
