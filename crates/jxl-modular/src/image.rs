@@ -514,8 +514,51 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             decoder.finalize()?;
             return Ok(());
         }
-        if let Some(lz77_decoder) = decoder.as_with_lz77() {
-            self.decode_image_lz77(bitstream, stream_index, lz77_decoder)?;
+        if decoder.as_with_lz77().is_some() {
+            let dist_multiplier = self
+                .channel_info
+                .iter()
+                .skip(self.nb_meta_channels)
+                .map(|info| info.width)
+                .max()
+                .unwrap_or(0);
+            let dist_multiplier_legacy = self
+                .channel_info
+                .iter()
+                .map(|info| info.width)
+                .max()
+                .unwrap_or(0);
+
+            if dist_multiplier == dist_multiplier_legacy {
+                let lz77_decoder = decoder.as_with_lz77().unwrap();
+                self.decode_image_lz77(bitstream, stream_index, lz77_decoder, dist_multiplier)?;
+                decoder.finalize()?;
+                return Ok(());
+            }
+
+            let tmp_bitstream = bitstream.clone();
+            let tmp_decoder = decoder.clone();
+
+            // Try standard method first
+            let lz77_decoder = decoder.as_with_lz77().unwrap();
+            let result =
+                self.decode_image_lz77(bitstream, stream_index, lz77_decoder, dist_multiplier);
+            if result.is_ok() && decoder.finalize().is_ok() {
+                return Ok(());
+            }
+
+            // Decode error with standard method
+            tracing::warn!("Invalid LZ77 stream, trying legacy method");
+            *bitstream = tmp_bitstream;
+            let mut decoder = tmp_decoder;
+
+            let lz77_decoder = decoder.as_with_lz77().unwrap();
+            self.decode_image_lz77(
+                bitstream,
+                stream_index,
+                lz77_decoder,
+                dist_multiplier_legacy,
+            )?;
             decoder.finalize()?;
             return Ok(());
         }
@@ -623,13 +666,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         bitstream: &mut Bitstream,
         stream_index: u32,
         mut decoder: DecoderWithLz77<'_>,
+        dist_multiplier: u32,
     ) -> Result<()> {
-        let dist_multiplier = self
-            .channel_info
-            .iter()
-            .map(|info| info.width)
-            .max()
-            .unwrap_or(0);
         let mut next = |cluster: u8| -> Result<i32> {
             let token = decoder.read_varint_with_multiplier_clustered(
                 bitstream,
