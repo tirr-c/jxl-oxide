@@ -401,3 +401,95 @@ impl SimdVector for std::arch::aarch64::float32x4_t {
         std::arch::aarch64::vfmsq_f32(sub, self, mul)
     }
 }
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+impl SimdVector for std::arch::wasm32::v128 {
+    const SIZE: usize = 4;
+
+    #[inline]
+    fn available() -> bool {
+        true
+    }
+
+    #[inline]
+    unsafe fn zero() -> Self {
+        std::arch::wasm32::f32x4_splat(0f32)
+    }
+
+    #[inline]
+    unsafe fn set<const N: usize>(val: [f32; N]) -> Self {
+        assert_eq!(N, Self::SIZE);
+        std::arch::wasm32::f32x4(val[0], val[1], val[2], val[3])
+    }
+
+    #[inline]
+    unsafe fn splat_f32(val: f32) -> Self {
+        std::arch::wasm32::f32x4_splat(val)
+    }
+
+    #[inline]
+    unsafe fn load(ptr: *const f32) -> Self {
+        std::arch::wasm32::v128_load(ptr as *const _)
+    }
+
+    #[inline]
+    unsafe fn load_aligned(ptr: *const f32) -> Self {
+        std::arch::wasm32::v128_load(ptr as *const _)
+    }
+
+    #[inline]
+    unsafe fn extract_f32<const N: i32>(self) -> f32 {
+        match N {
+            0 => std::arch::wasm32::f32x4_extract_lane::<0>(self),
+            1 => std::arch::wasm32::f32x4_extract_lane::<1>(self),
+            2 => std::arch::wasm32::f32x4_extract_lane::<2>(self),
+            3 => std::arch::wasm32::f32x4_extract_lane::<3>(self),
+            _ => panic!(),
+        }
+    }
+
+    #[inline]
+    unsafe fn store(self, ptr: *mut f32) {
+        std::arch::wasm32::v128_store(ptr as *mut _, self)
+    }
+
+    #[inline]
+    unsafe fn store_aligned(self, ptr: *mut f32) {
+        std::arch::wasm32::v128_store(ptr as *mut _, self)
+    }
+
+    #[inline]
+    unsafe fn add(self, lhs: Self) -> Self {
+        std::arch::wasm32::f32x4_add(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn sub(self, lhs: Self) -> Self {
+        std::arch::wasm32::f32x4_sub(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn mul(self, lhs: Self) -> Self {
+        std::arch::wasm32::f32x4_mul(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn div(self, lhs: Self) -> Self {
+        std::arch::wasm32::f32x4_div(self, lhs)
+    }
+
+    #[inline]
+    unsafe fn abs(self) -> Self {
+        std::arch::wasm32::f32x4_abs(self)
+    }
+
+    #[inline]
+    unsafe fn muladd(self, mul: Self, add: Self) -> Self {
+        self.mul(mul).add(add)
+    }
+
+    #[inline]
+    unsafe fn mulsub(self, mul: Self, sub: Self) -> Self {
+        self.mul(mul).sub(sub)
+    }
+}
