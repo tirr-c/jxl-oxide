@@ -736,14 +736,14 @@ unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
         for (dx, v) in chunks_it.remainder().iter().enumerate() {
             let x = width / 8 * 8 + dx;
             let v = v.assume_init_read();
-            *rows[0x0].add(x) = i16x8_extract_lane::<0x0>(v) as i16;
-            *rows[0x1].add(x) = i16x8_extract_lane::<0x1>(v) as i16;
-            *rows[0x2].add(x) = i16x8_extract_lane::<0x2>(v) as i16;
-            *rows[0x3].add(x) = i16x8_extract_lane::<0x3>(v) as i16;
-            *rows[0x4].add(x) = i16x8_extract_lane::<0x4>(v) as i16;
-            *rows[0x5].add(x) = i16x8_extract_lane::<0x5>(v) as i16;
-            *rows[0x6].add(x) = i16x8_extract_lane::<0x6>(v) as i16;
-            *rows[0x7].add(x) = i16x8_extract_lane::<0x7>(v) as i16;
+            *rows[0x0].add(x) = i16x8_extract_lane::<0x0>(v);
+            *rows[0x1].add(x) = i16x8_extract_lane::<0x1>(v);
+            *rows[0x2].add(x) = i16x8_extract_lane::<0x2>(v);
+            *rows[0x3].add(x) = i16x8_extract_lane::<0x3>(v);
+            *rows[0x4].add(x) = i16x8_extract_lane::<0x4>(v);
+            *rows[0x5].add(x) = i16x8_extract_lane::<0x5>(v);
+            *rows[0x6].add(x) = i16x8_extract_lane::<0x6>(v);
+            *rows[0x7].add(x) = i16x8_extract_lane::<0x7>(v);
         }
     }
 

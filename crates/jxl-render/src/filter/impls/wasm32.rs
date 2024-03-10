@@ -17,7 +17,7 @@ pub fn epf<const STEP: usize>(
     pool: &JxlThreadPool,
 ) {
     unsafe {
-        return run_epf_rows(
+        run_epf_rows(
             input,
             output,
             frame_header,
@@ -27,7 +27,7 @@ pub fn epf<const STEP: usize>(
             pool,
             Some(epf::epf_row_wasm32_simd128::<STEP>),
             super::generic::epf::epf_row::<STEP>,
-        );
+        )
     }
 }
 
