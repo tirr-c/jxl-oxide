@@ -28,8 +28,17 @@ mod aarch64;
 #[cfg(target_arch = "aarch64")]
 use aarch64 as impls;
 
+#[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+mod wasm32;
+#[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+use wasm32 as impls;
+
 mod generic;
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_family = "wasm", target_feature = "simd128")
+)))]
 use generic as impls;
 
 pub(crate) fn render_vardct<S: Sample>(
