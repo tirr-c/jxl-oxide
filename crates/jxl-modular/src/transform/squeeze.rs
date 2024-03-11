@@ -20,6 +20,7 @@ fn inverse_h_i32(merged: &mut CutGrid<i32>) {
     inverse_h_i32_base(merged)
 }
 
+#[allow(unreachable_code)]
 fn inverse_h_i16(merged: &mut CutGrid<i16>) {
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
@@ -40,6 +41,14 @@ fn inverse_h_i16(merged: &mut CutGrid<i16>) {
     if is_aarch64_feature_detected!("neon") {
         unsafe {
             inverse_h_i16_aarch64_neon(merged);
+            return;
+        }
+    }
+
+    #[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+    {
+        unsafe {
+            inverse_h_i16_wasm32_simd128(merged);
             return;
         }
     }
@@ -600,6 +609,149 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
     }
 }
 
+#[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::wasm32::*;
+    use std::mem::MaybeUninit;
+
+    #[inline]
+    unsafe fn transpose(vs: [v128; 8]) -> [v128; 8] {
+        let vs = [
+            i16x8_shuffle::<0x0, 0x8, 0x1, 0x9, 0x2, 0xa, 0x3, 0xb>(vs[0], vs[1]),
+            i16x8_shuffle::<0x0, 0x8, 0x1, 0x9, 0x2, 0xa, 0x3, 0xb>(vs[2], vs[3]),
+            i16x8_shuffle::<0x0, 0x8, 0x1, 0x9, 0x2, 0xa, 0x3, 0xb>(vs[4], vs[5]),
+            i16x8_shuffle::<0x0, 0x8, 0x1, 0x9, 0x2, 0xa, 0x3, 0xb>(vs[6], vs[7]),
+            i16x8_shuffle::<0x4, 0xc, 0x5, 0xd, 0x6, 0xe, 0x7, 0xf>(vs[0], vs[1]),
+            i16x8_shuffle::<0x4, 0xc, 0x5, 0xd, 0x6, 0xe, 0x7, 0xf>(vs[2], vs[3]),
+            i16x8_shuffle::<0x4, 0xc, 0x5, 0xd, 0x6, 0xe, 0x7, 0xf>(vs[4], vs[5]),
+            i16x8_shuffle::<0x4, 0xc, 0x5, 0xd, 0x6, 0xe, 0x7, 0xf>(vs[6], vs[7]),
+        ];
+
+        let vs = [
+            i32x4_shuffle::<0, 4, 1, 5>(vs[0], vs[1]),
+            i32x4_shuffle::<0, 4, 1, 5>(vs[2], vs[3]),
+            i32x4_shuffle::<0, 4, 1, 5>(vs[4], vs[5]),
+            i32x4_shuffle::<0, 4, 1, 5>(vs[6], vs[7]),
+            i32x4_shuffle::<2, 6, 3, 7>(vs[0], vs[1]),
+            i32x4_shuffle::<2, 6, 3, 7>(vs[2], vs[3]),
+            i32x4_shuffle::<2, 6, 3, 7>(vs[4], vs[5]),
+            i32x4_shuffle::<2, 6, 3, 7>(vs[6], vs[7]),
+        ];
+
+        [
+            i64x2_shuffle::<0, 2>(vs[0], vs[1]),
+            i64x2_shuffle::<1, 3>(vs[0], vs[1]),
+            i64x2_shuffle::<0, 2>(vs[4], vs[5]),
+            i64x2_shuffle::<1, 3>(vs[4], vs[5]),
+            i64x2_shuffle::<0, 2>(vs[2], vs[3]),
+            i64x2_shuffle::<1, 3>(vs[2], vs[3]),
+            i64x2_shuffle::<0, 2>(vs[6], vs[7]),
+            i64x2_shuffle::<1, 3>(vs[6], vs[7]),
+        ]
+    }
+
+    let height = merged.height();
+    let width = merged.width();
+
+    if width <= 8 {
+        return inverse_h_i16_base(merged);
+    }
+
+    // SAFETY: v128 doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<v128>::uninit(); width];
+    let avg_width = (width + 1) / 2;
+
+    let h8 = height / 8;
+    for y8 in 0..h8 {
+        let y = y8 * 8;
+
+        // SAFETY: Rows are disjoint.
+        let rows: [_; 8] = std::array::from_fn(|dy| merged.get_row_mut(y + dy).as_mut_ptr());
+
+        let mut avg = i16x8(
+            *rows[0], *rows[1], *rows[2], *rows[3], *rows[4], *rows[5], *rows[6], *rows[7],
+        );
+        let mut left = avg;
+        for x8 in 0..(avg_width - 1) / 8 {
+            let x = x8 * 8 + 1;
+            let avgs = transpose(std::array::from_fn(|idx| unsafe {
+                v128_load(rows[idx].add(x) as *const _)
+            }));
+            let residuals = transpose(std::array::from_fn(|idx| unsafe {
+                v128_load(rows[idx].add(avg_width - 1 + x) as *const _)
+            }));
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate() {
+                let diff = i16x8_add(residual, tendency_i16_wasm32_simd128(left, avg, next_avg));
+                let diff_2 = i16x8_shr(i16x8_add(diff, u16x8_shr(diff, 15)), 1);
+                let first = i16x8_add(avg, diff_2);
+                let second = i16x8_sub(first, diff);
+                scratch[x8 * 16 + dx * 2].write(first);
+                scratch[x8 * 16 + dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        // Check if we have more data to process.
+        if (avg_width - 1) % 8 != 0 || width % 2 == 0 {
+            let mut avgs = transpose(std::array::from_fn(|idx| unsafe {
+                v128_load(rows[idx].add(avg_width - 8) as *const _)
+            }));
+            if width % 2 == 0 {
+                avgs = std::array::from_fn(|idx| if idx == 7 { avgs[7] } else { avgs[idx + 1] });
+            }
+            let residuals = transpose(std::array::from_fn(|idx| unsafe {
+                v128_load(rows[idx].add(width - 8) as *const _)
+            }));
+            let from = (!(width / 2) + 1) % 8;
+            for (dx, (residual, next_avg)) in residuals.into_iter().zip(avgs).enumerate().skip(from)
+            {
+                let dx = 8 - dx;
+                let diff = i16x8_add(residual, tendency_i16_wasm32_simd128(left, avg, next_avg));
+                let diff_2 = i16x8_shr(i16x8_add(diff, u16x8_shr(diff, 15)), 1);
+                let first = i16x8_add(avg, diff_2);
+                let second = i16x8_sub(first, diff);
+                scratch[width / 2 * 2 - dx * 2].write(first);
+                scratch[width / 2 * 2 - dx * 2 + 1].write(second);
+                avg = next_avg;
+                left = second;
+            }
+        }
+
+        if width % 2 == 1 {
+            scratch.last_mut().unwrap().write(avg);
+        }
+
+        let mut chunks_it = scratch.chunks_exact(8);
+        for (x8, chunk) in (&mut chunks_it).enumerate() {
+            let x = x8 * 8;
+            let v = transpose(std::array::from_fn(|idx| unsafe {
+                chunk[idx].assume_init_read()
+            }));
+            for (row, v) in rows.iter().zip(v) {
+                v128_store(row.add(x) as *mut _, v);
+            }
+        }
+
+        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+            let x = width / 8 * 8 + dx;
+            let v = v.assume_init_read();
+            *rows[0x0].add(x) = i16x8_extract_lane::<0x0>(v);
+            *rows[0x1].add(x) = i16x8_extract_lane::<0x1>(v);
+            *rows[0x2].add(x) = i16x8_extract_lane::<0x2>(v);
+            *rows[0x3].add(x) = i16x8_extract_lane::<0x3>(v);
+            *rows[0x4].add(x) = i16x8_extract_lane::<0x4>(v);
+            *rows[0x5].add(x) = i16x8_extract_lane::<0x5>(v);
+            *rows[0x6].add(x) = i16x8_extract_lane::<0x6>(v);
+            *rows[0x7].add(x) = i16x8_extract_lane::<0x7>(v);
+        }
+    }
+
+    if height % 8 != 0 {
+        inverse_h_i16_base(&mut merged.split_vertical(h8 * 8).1);
+    }
+}
+
 pub fn inverse_v<S: Sample>(merged: &mut CutGrid<'_, S>) {
     if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
         inverse_v_i16(merged)
@@ -612,6 +764,7 @@ fn inverse_v_i32(merged: &mut CutGrid<i32>) {
     inverse_v_i32_base(merged)
 }
 
+#[allow(unreachable_code)]
 fn inverse_v_i16(merged: &mut CutGrid<i16>) {
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
@@ -632,6 +785,14 @@ fn inverse_v_i16(merged: &mut CutGrid<i16>) {
     if is_aarch64_feature_detected!("neon") {
         unsafe {
             inverse_v_i16_aarch64_neon(merged);
+            return;
+        }
+    }
+
+    #[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+    {
+        unsafe {
+            inverse_v_i16_wasm32_simd128(merged);
             return;
         }
     }
@@ -882,6 +1043,64 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
     }
 }
 
+#[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
+    use std::arch::wasm32::*;
+    use std::mem::MaybeUninit;
+
+    let width = merged.width();
+    let height = merged.height();
+
+    if height <= 1 {
+        return;
+    }
+
+    // SAFETY: v128 doesn't need to be dropped.
+    let mut scratch = vec![MaybeUninit::<v128>::uninit(); height];
+    let avg_height = (height + 1) / 2;
+
+    let w8 = width / 8;
+    for x8 in 0..w8 {
+        let x = x8 * 8;
+
+        let mut avg = v128_load(merged.get_mut(x, 0) as *mut _ as *const _);
+        let mut top = avg;
+        let mut chunks_it = scratch.chunks_exact_mut(2);
+        for (y, pair) in (&mut chunks_it).enumerate() {
+            let residual = v128_load(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
+            let next_avg = if y + 1 < avg_height {
+                v128_load(merged.get_mut(x, y + 1) as *mut _ as *const _)
+            } else {
+                avg
+            };
+
+            let diff = i16x8_add(residual, tendency_i16_wasm32_simd128(top, avg, next_avg));
+            let diff_2 = i16x8_shr(i16x8_add(diff, u16x8_shr(diff, 15)), 1);
+            let first = i16x8_add(avg, diff_2);
+            let second = i16x8_sub(first, diff);
+            pair[0].write(first);
+            pair[1].write(second);
+            avg = next_avg;
+            top = second;
+        }
+
+        if let [v] = chunks_it.into_remainder() {
+            v.write(avg);
+        }
+
+        for (y, v) in scratch.iter().enumerate() {
+            v128_store(
+                merged.get_mut(x, y) as *mut i16 as *mut _,
+                v.assume_init_read(),
+            );
+        }
+    }
+
+    if width % 8 != 0 {
+        inverse_v_i16_base(&mut merged.split_horizontal(w8 * 8).1);
+    }
+}
+
 fn tendency_i32(a: i32, b: i32, c: i32) -> i32 {
     let a = Wrapping(a);
     let b = Wrapping(b);
@@ -1105,4 +1324,50 @@ unsafe fn tendency_i16_neon(
     let neg_x = vneg_s16(x);
     let x = vbsl_s16(need_neg, neg_x, x);
     vand_s16(no_skip, x)
+}
+
+#[cfg(all(target_family = "wasm", target_feature = "simd128"))]
+fn tendency_i16_wasm32_simd128(
+    a: std::arch::wasm32::v128,
+    b: std::arch::wasm32::v128,
+    c: std::arch::wasm32::v128,
+) -> std::arch::wasm32::v128 {
+    use std::arch::wasm32::*;
+
+    let a_b = i16x8_sub(a, b);
+    let b_c = i16x8_sub(b, c);
+    let a_c = i16x8_sub(a, c);
+    let abs_a_b = i16x8_abs(a_b);
+    let abs_b_c = i16x8_abs(b_c);
+    let abs_a_c = i16x8_abs(a_c);
+
+    let monotonic = i16x8_ge(v128_xor(a_b, b_c), i16x8_splat(0));
+    let no_skip = v128_or(monotonic, i16x8_eq(a_b, i16x8_splat(0)));
+    let no_skip = v128_or(no_skip, i16x8_eq(b_c, i16x8_splat(0)));
+
+    let mul_const = i32x4_splat(0x5556);
+    let mul_low = i32x4_mul(i32x4_extend_low_i16x8(abs_a_b), mul_const);
+    let mul_high = i32x4_mul(i32x4_extend_high_i16x8(abs_a_b), mul_const);
+    let abs_a_b_3 = i16x8_shuffle::<0x1, 0x3, 0x5, 0x7, 0x9, 0xb, 0xd, 0xf>(mul_low, mul_high);
+
+    let x = i16x8_shr(i16x8_add(abs_a_b_3, i16x8_add(abs_a_c, i16x8_splat(2))), 2);
+
+    let abs_a_b_2_add_x = i16x8_add(i16x8_shl(abs_a_b, 1), v128_and(x, i16x8_splat(1)));
+    let x = v128_bitselect(
+        i16x8_add(i16x8_shl(abs_a_b, 1), i16x8_splat(1)),
+        x,
+        i16x8_gt(x, abs_a_b_2_add_x),
+    );
+
+    let abs_b_c_2 = i16x8_shl(abs_b_c, 1);
+    let x = v128_bitselect(
+        abs_b_c_2,
+        x,
+        i16x8_gt(i16x8_add(x, v128_and(x, i16x8_splat(1))), abs_b_c_2),
+    );
+
+    let need_neg = i16x8_lt(a_c, i16x8_splat(0));
+    let neg_x = i16x8_neg(x);
+    let x = v128_bitselect(neg_x, x, need_neg);
+    v128_and(no_skip, x)
 }
