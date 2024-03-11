@@ -70,8 +70,8 @@ pub struct DecodeArgs {
     #[cfg(feature = "rayon")]
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
-    /// (unstable) LZ77 mode to use.
-    #[arg(value_enum, long, default_value_t = Lz77ModeArg::IncludeMeta)]
+    #[arg(value_enum, hide = true, long, default_value_t = Lz77ModeArg::IncludeMeta)]
+    #[doc(hidden)]
     pub lz77_mode: Lz77ModeArg,
 }
 
@@ -131,10 +131,9 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[doc(hidden)]
 pub enum Lz77ModeArg {
-    /// Include meta channels when computing distance multiplier.
     IncludeMeta,
-    /// Exclude meta channels when computing distance multiplier.
     ExcludeMeta,
 }
 
