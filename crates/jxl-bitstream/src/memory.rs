@@ -44,7 +44,7 @@ impl<'buf> Bitstream<'buf> {
             buf: 0,
             num_read_bits: 0,
             remaining_buf_bits: 0,
-            lz77_mode: Lz77Mode::Auto,
+            lz77_mode: Lz77Mode::IncludeMeta,
         }
     }
 

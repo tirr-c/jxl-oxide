@@ -71,7 +71,7 @@ pub struct DecodeArgs {
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
     /// (unstable) LZ77 mode to use.
-    #[arg(value_enum, long, default_value_t = Lz77ModeArg::Auto)]
+    #[arg(value_enum, long, default_value_t = Lz77ModeArg::IncludeMeta)]
     pub lz77_mode: Lz77ModeArg,
 }
 
@@ -132,20 +132,17 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Lz77ModeArg {
-    /// Try both Standard and Legacy method.
-    Auto,
-    /// Use spec-conforming Standard method.
-    Std,
-    /// Use Legacy method that emulates old libjxl.
-    Legacy,
+    /// Include meta channels when computing distance multiplier.
+    IncludeMeta,
+    /// Exclude meta channels when computing distance multiplier.
+    ExcludeMeta,
 }
 
 impl From<Lz77ModeArg> for Lz77Mode {
     fn from(value: Lz77ModeArg) -> Self {
         match value {
-            Lz77ModeArg::Auto => Lz77Mode::Auto,
-            Lz77ModeArg::Std => Lz77Mode::Standard,
-            Lz77ModeArg::Legacy => Lz77Mode::Legacy,
+            Lz77ModeArg::IncludeMeta => Lz77Mode::IncludeMeta,
+            Lz77ModeArg::ExcludeMeta => Lz77Mode::ExcludeMeta,
         }
     }
 }
