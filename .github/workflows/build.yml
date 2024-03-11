@@ -83,10 +83,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
         with:
           targets: wasm32-unknown-unknown
+          components: 'rust-src'
       - uses: actions/cache@v4
         with:
           path: |
@@ -106,8 +107,8 @@ jobs:
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
-          wasm-pack build --release --target web
-          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web -d pkg/simd128 --no-pack --no-typescript
+          wasm-pack build --release --target web . -- -Z build-std=panic_abort,std
+          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web -d pkg/simd128 --no-pack --no-typescript . -- -Z build-std=panic_abort,std
           node ./update-package-json.mjs
           wasm-pack pack
       - uses: actions/upload-artifact@v4
