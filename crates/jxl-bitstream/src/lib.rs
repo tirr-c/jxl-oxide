@@ -78,9 +78,9 @@ impl std::ops::DerefMut for Name {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[doc(hidden)]
 pub enum Lz77Mode {
     #[default]
-    Auto,
-    Standard,
-    Legacy,
+    IncludeMeta,
+    ExcludeMeta,
 }

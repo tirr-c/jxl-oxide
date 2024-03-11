@@ -203,7 +203,7 @@ impl JxlImageBuilder {
         self
     }
 
-    /// Sets LZ77 `dist_multiplier` mode to use.
+    #[doc(hidden)]
     pub fn lz77_mode(mut self, lz77_mode: Lz77Mode) -> Self {
         self.lz77_mode = lz77_mode;
         self

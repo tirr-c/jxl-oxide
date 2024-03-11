@@ -44,7 +44,7 @@ impl<'buf> Bitstream<'buf> {
             buf: 0,
             num_read_bits: 0,
             remaining_buf_bits: 0,
-            lz77_mode: Lz77Mode::Auto,
+            lz77_mode: Lz77Mode::IncludeMeta,
         }
     }
 
@@ -55,11 +55,13 @@ impl<'buf> Bitstream<'buf> {
     }
 
     #[inline]
+    #[doc(hidden)]
     pub fn lz77_mode(&self) -> Lz77Mode {
         self.lz77_mode
     }
 
     #[inline]
+    #[doc(hidden)]
     pub fn set_lz77_mode(&mut self, lz77_mode: Lz77Mode) {
         self.lz77_mode = lz77_mode;
     }
