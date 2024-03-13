@@ -4,6 +4,12 @@ use jxl_oxide::{
 };
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "rayon")]
+mod thread_pool;
+
+#[cfg(feature = "rayon")]
+pub use thread_pool::*;
+
 #[cfg(feature = "dev")]
 #[wasm_bindgen(start)]
 fn start() {
@@ -22,6 +28,14 @@ enum WasmJxlImageInner {
     Init(JxlImage),
 }
 
+#[cfg(feature = "rayon")]
+impl Default for WasmJxlImage {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
 impl Default for WasmJxlImage {
     fn default() -> Self {
         Self::new()
@@ -53,9 +67,29 @@ fn is_hdr_supported() -> bool {
 
 #[wasm_bindgen(js_class = JxlImage)]
 impl WasmJxlImage {
+    #[cfg(not(feature = "rayon"))]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         let inner = WasmJxlImageInner::Uninit(JxlImage::builder().build_uninit());
+        Self {
+            inner,
+            force_srgb: !is_hdr_supported(),
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[wasm_bindgen(constructor)]
+    pub fn new(pool: Option<ThreadPool>) -> Self {
+        use jxl_oxide::JxlThreadPool;
+
+        let pool = if let Some(pool) = pool {
+            pool.inner
+        } else {
+            JxlThreadPool::none()
+        };
+
+        let builder = JxlImage::builder().pool(pool);
+        let inner = WasmJxlImageInner::Uninit(builder.build_uninit());
         Self {
             inner,
             force_srgb: !is_hdr_supported(),

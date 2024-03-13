@@ -35,10 +35,16 @@ default-features = false
 
 [dependencies.web-sys]
 version = "0.3.68"
-features = ["Window", "WorkerGlobalScope", "Navigator", "WorkerNavigator"]
+features = ["Window", "WorkerGlobalScope", "Navigator", "WorkerNavigator", "Worker"]
+optional = true
+
+[dependencies.rayon]
+version = "1.9.0"
+features = ["web_spin_lock"]
 optional = true
 
 [features]
-default = ["web"]
+default = ["web", "rayon"]
 dev = ["dep:console_error_panic_hook", "dep:console_log"]
 web = ["dep:web-sys"]
+rayon = ["web", "jxl-oxide/rayon", "dep:rayon"]
