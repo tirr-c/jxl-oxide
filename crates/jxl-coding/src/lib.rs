@@ -110,9 +110,7 @@ impl Decoder {
         };
         let lz_cluster = self.inner.lz_dist_cluster();
         let lz_conf = &self.inner.configs[lz_cluster as usize];
-        let Some(sym) = self.inner.code.single_symbol(lz_cluster) else {
-            return None;
-        };
+        let sym = self.inner.code.single_symbol(lz_cluster)?;
         (sym == 1 && lz_conf.split_exponent == 0).then_some(DecoderRleMode {
             inner: &mut self.inner,
             min_symbol,

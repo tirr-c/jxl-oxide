@@ -310,9 +310,7 @@ pub(crate) fn render_vardct<S: Sample>(
             .into_iter()
             .filter_map(|(group_idx, grid_xyb)| {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let Some(lf_group) = lf_groups.get(&lf_group_idx) else {
-                    return None;
-                };
+                let lf_group = lf_groups.get(&lf_group_idx)?;
 
                 Some(PassGroupJob {
                     group_idx,
