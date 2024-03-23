@@ -76,4 +76,5 @@ test_by_include!(
     prop_abs_overflow,
     squeeze_groups_off_by_one,
     cluster_hole,
+    invalid_alpha_ref,
 );

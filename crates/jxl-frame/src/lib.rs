@@ -120,15 +120,29 @@ impl Bundle<FrameContext<'_>> for Frame {
 
         for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info)
         {
-            if blending_info.mode.use_alpha()
-                && blending_info.alpha_channel as usize >= image_header.metadata.ec_info.len()
-            {
-                return Err(jxl_bitstream::Error::ValidationFailed(
-                    "blending_info.alpha_channel out of range",
-                )
-                .into());
+            if blending_info.mode.use_alpha() {
+                let alpha_idx = blending_info.alpha_channel as usize;
+                let Some(alpha_ec_info) = image_header.metadata.ec_info.get(alpha_idx) else {
+                    tracing::error!(?blending_info, "blending_info.alpha_channel out of range");
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "blending_info.alpha_channel out of range",
+                    )
+                    .into());
+                };
+                if !alpha_ec_info.is_alpha() {
+                    tracing::error!(
+                        ?blending_info,
+                        ?alpha_ec_info,
+                        "blending_info.alpha_channel is not the type of Alpha",
+                    );
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "blending_info.alpha_channel is not the type of Alpha",
+                    )
+                    .into());
+                }
             }
         }
+
         if header.flags.use_lf_frame() && header.lf_level >= 4 {
             return Err(jxl_bitstream::Error::ValidationFailed("lf_level out of range").into());
         }
