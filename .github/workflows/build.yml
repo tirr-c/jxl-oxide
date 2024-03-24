@@ -103,10 +103,11 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - run: cargo install wasm-pack --version 0.12.1
+      - run: cargo install wasm-bindgen-cli --version 0.2.92
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
-          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web --weak-refs --reference-types
+          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web --reference-types
           node ./update-package-json.mjs
           wasm-pack pack
       - uses: actions/upload-artifact@v4
