@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.8.0-alpha.0"
+version = "0.8.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
