@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `jxl-color`: Add an option to pass sRGB samples to CMS (#267).
+- `jxl-oxide-wasm`: Port SIMD routines (#274).
+
+### Changed
+- `jxl-color`: Make peak detection non-default (#267).
+- Rename `Lz77Mode` variants, make `IncludeMeta` the default (#275).
+
+### Removed
+- `jxl-oxide-cli`: Hide `--lz77-mode` (#275).
+
 ## [0.7.2] - 2024-03-03
 
 ### Added
