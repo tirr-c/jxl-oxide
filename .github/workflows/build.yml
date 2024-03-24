@@ -106,8 +106,7 @@ jobs:
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
-          wasm-pack build --release --target web
-          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web -d pkg/simd128 --no-pack --no-typescript
+          RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web --weak-refs --reference-types
           node ./update-package-json.mjs
           wasm-pack pack
       - uses: actions/upload-artifact@v4

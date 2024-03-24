@@ -13,7 +13,3 @@ await init();
 // Use `JxlImage` after initialization.
 const image = new JxlImage();
 ```
-
-## WebAssembly SIMD support
-This package also provides WebAssembly module with SIMD enabled. Import `jxl-oxide-wasm/simd128`
-instead.
