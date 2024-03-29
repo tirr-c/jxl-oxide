@@ -49,14 +49,10 @@ unsafe fn dct4_vec_forward(v: Lane) -> Lane {
 
     let v01 = vget_low_f32(v);
     let v23 = vget_high_f32(v);
-    let addsub = vcombine_f32(
-        vadd_f32(v01, vrev64_f32(v23)),
-        vfma_n_f32(vrev64_f32(v01), v23, -1f32),
-    );
-
-    let addsub3012 = vextq_f32(addsub, addsub, 3);
-    let addsub03 = vrev64_f32(vget_low_f32(addsub3012));
-    let addsub12 = vget_high_f32(addsub3012);
+    let addsub01 = vadd_f32(v01, vrev64_f32(v23));
+    let addsub32 = vsub_f32(v01, vrev64_f32(v23));
+    let addsub03 = vzip1_f32(addsub01, addsub32);
+    let addsub12 = vzip2_f32(addsub01, addsub32);
 
     let a = vcombine_f32(addsub03, addsub12);
     let mul_a = Lane::set([
@@ -80,14 +76,21 @@ pub(crate) unsafe fn dct4_vec_inverse(v: Lane) -> Lane {
     const SEC0: f32 = 0.5411961;
     const SEC1: f32 = 1.306563;
 
-    let v_flip = vextq_f32(v, v, 2);
-    let mul_a = Lane::set([1.0, (std::f32::consts::SQRT_2 + 1.0) * SEC0, -1.0, -SEC1]);
-    let mul_b = Lane::set([1.0, SEC0, 1.0, (std::f32::consts::SQRT_2 - 1.0) * SEC1]);
-    let tmp = v.muladd(mul_a, v_flip.mul(mul_b));
+    let v01 = vget_low_f32(v);
+    let v23 = vget_high_f32(v);
 
-    let float32x4x2_t(tmp_a, tmp_b) = vuzpq_f32(tmp, vextq_f32(tmp, tmp, 2));
-    let mul = vcombine_f32(vdup_n_f32(1.0), vdup_n_f32(-1.0));
-    tmp_b.muladd(mul, tmp_a)
+    let one = vdup_n_f32(1.0);
+    let a01 = vset_lane_f32::<1>((std::f32::consts::SQRT_2 + 1.0) * SEC0, one);
+    let a23 = vneg_f32(vset_lane_f32::<1>(SEC1, one));
+    let b01 = vset_lane_f32::<1>(SEC0, one);
+    let b23 = vset_lane_f32::<1>((std::f32::consts::SQRT_2 - 1.0) * SEC1, one);
+
+    let tmp01 = vadd_f32(vmul_f32(v01, a01), vmul_f32(v23, b01));
+    let tmp23 = vadd_f32(vmul_f32(v23, a23), vmul_f32(v01, b23));
+
+    let tmp02 = vzip1_f32(tmp01, tmp23);
+    let tmp13 = vzip2_f32(tmp01, tmp23);
+    vcombine_f32(vadd_f32(tmp02, tmp13), vrev64_f32(vsub_f32(tmp02, tmp13)))
 }
 
 #[inline]
@@ -121,7 +124,7 @@ pub(crate) unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     ]);
     let float32x4x2_t(input0, input1) = vuzpq_f32(vl, vr);
     let input1_shifted = vextq_f32(Lane::zero(), input1, 3);
-    let input1_mul = vsetq_lane_f32(std::f32::consts::SQRT_2, Lane::splat_f32(1.0), 0);
+    let input1_mul = vsetq_lane_f32::<0>(std::f32::consts::SQRT_2, Lane::splat_f32(1.0));
     let input1 = input1.muladd(input1_mul, input1_shifted);
     let output0 = dct4_vec_inverse(input0);
     let output1 = dct4_vec_inverse(input1);
