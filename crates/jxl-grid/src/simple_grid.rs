@@ -197,6 +197,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 
     #[inline]
+    pub fn into_ptr(self) -> NonNull<V> {
+        self.ptr
+    }
+
+    #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
@@ -276,6 +281,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     pub fn borrow_mut(&mut self) -> CutGrid<V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
         unsafe { CutGrid::new(self.ptr, self.width, self.height, self.stride) }
+    }
+
+    pub fn as_shared(&self) -> SharedSubgrid<V> {
+        // SAFETY: We have unique reference to the grid.
+        unsafe { SharedSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
     pub fn subgrid_mut(
