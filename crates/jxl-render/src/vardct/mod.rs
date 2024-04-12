@@ -139,120 +139,141 @@ pub(crate) fn render_vardct<S: Sample>(
         ret
     });
 
-    let lf_groups = &mut cache.lf_groups;
-    tracing::trace_span!("Load LF groups").in_scope(|| {
-        util::load_lf_groups(
-            frame,
-            lf_global.vardct.as_ref(),
-            lf_groups,
-            gmodular.ma_config.as_ref(),
-            lf_group_image,
-            modular_lf_region,
-            pool,
-        )
-    })?;
-
     let group_dim = frame_header.group_dim();
-    let mut lf_xyb = tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
-        let mut lf_xyb =
-            ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
+    let lf_groups = &mut cache.lf_groups;
+    let mut lf_xyb =
+        ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
 
-        if let Some(x) = lf_frame {
-            let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
-            let lf_frame = lf_frame.blend(None, pool)?;
-            lf_frame.clone_region_channel(modular_lf_region, 0, &mut lf_xyb.buffer_mut()[0]);
-            lf_frame.clone_region_channel(modular_lf_region, 1, &mut lf_xyb.buffer_mut()[1]);
-            lf_frame.clone_region_channel(modular_lf_region, 2, &mut lf_xyb.buffer_mut()[2]);
-        }
-
-        let lf_groups_per_row = frame_header.lf_groups_per_row();
-        for idx in 0..frame_header.num_lf_groups() {
-            let Some(lf_group) = lf_groups.get(&idx) else {
-                continue;
-            };
-
-            let lf_group_x = idx % lf_groups_per_row;
-            let lf_group_y = idx / lf_groups_per_row;
-            let left = lf_group_x * frame_header.group_dim();
-            let top = lf_group_y * frame_header.group_dim();
-            let lf_group_region = Region {
-                left: left as i32,
-                top: top as i32,
-                width: group_dim,
-                height: group_dim,
-            };
-            if modular_lf_region.intersection(lf_group_region).is_empty() {
-                continue;
+    let result = std::sync::RwLock::new(Result::Ok(()));
+    pool.scope(|scope| {
+        scope.spawn(|_| {
+            let r = tracing::trace_span!("Load LF groups").in_scope(|| {
+                util::load_lf_groups(
+                    frame,
+                    lf_global.vardct.as_ref(),
+                    lf_groups,
+                    gmodular.ma_config.as_ref(),
+                    lf_group_image,
+                    modular_lf_region,
+                    pool,
+                )
+            });
+            if r.is_err() {
+                *result.write().unwrap() = r;
+                return;
             }
 
-            let left = left - modular_lf_region.left as u32;
-            let top = top - modular_lf_region.top as u32;
+            let r = if let Some(x) = lf_frame {
+                tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
+                    let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
+                        panic!()
+                    };
 
-            if lf_frame.is_none() {
-                let quantizer = &lf_global_vardct.quantizer;
-                let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
-                let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
-                let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
-                    panic!()
-                };
-                copy_lf_dequant(
-                    lf_x,
-                    left as usize >> shifts_cbycr[0].hshift(),
-                    top as usize >> shifts_cbycr[0].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_x_lf,
-                    &channel_data[1],
-                    lf_coeff.extra_precision,
-                );
-                copy_lf_dequant(
-                    lf_y,
-                    left as usize >> shifts_cbycr[1].hshift(),
-                    top as usize >> shifts_cbycr[1].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_y_lf,
-                    &channel_data[0],
-                    lf_coeff.extra_precision,
-                );
-                copy_lf_dequant(
-                    lf_b,
-                    left as usize >> shifts_cbycr[2].hshift(),
-                    top as usize >> shifts_cbycr[2].vshift(),
-                    quantizer,
-                    lf_global.lf_dequant.m_b_lf,
-                    &channel_data[2],
-                    lf_coeff.extra_precision,
-                );
+                    let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
+                    let lf_frame = lf_frame.blend(None, pool)?;
+                    lf_frame.clone_region_channel(modular_lf_region, 0, lf_x);
+                    lf_frame.clone_region_channel(modular_lf_region, 1, lf_y);
+                    lf_frame.clone_region_channel(modular_lf_region, 2, lf_b);
+                    Ok(())
+                })
+            } else {
+                tracing::trace_span!("Dequant LF image").in_scope(|| -> Result<_> {
+                    let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
+                        panic!()
+                    };
+
+                    let lf_groups_per_row = frame_header.lf_groups_per_row();
+                    for idx in 0..frame_header.num_lf_groups() {
+                        let Some(lf_group) = lf_groups.get(&idx) else {
+                            continue;
+                        };
+
+                        let lf_group_x = idx % lf_groups_per_row;
+                        let lf_group_y = idx / lf_groups_per_row;
+                        let left = lf_group_x * frame_header.group_dim();
+                        let top = lf_group_y * frame_header.group_dim();
+                        let lf_group_region = Region {
+                            left: left as i32,
+                            top: top as i32,
+                            width: group_dim,
+                            height: group_dim,
+                        };
+                        if modular_lf_region.intersection(lf_group_region).is_empty() {
+                            continue;
+                        }
+
+                        let left = left - modular_lf_region.left as u32;
+                        let top = top - modular_lf_region.top as u32;
+
+                        let quantizer = &lf_global_vardct.quantizer;
+                        let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
+                        let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
+                        copy_lf_dequant(
+                            lf_x,
+                            left as usize >> shifts_cbycr[0].hshift(),
+                            top as usize >> shifts_cbycr[0].vshift(),
+                            quantizer,
+                            lf_global.lf_dequant.m_x_lf,
+                            &channel_data[1],
+                            lf_coeff.extra_precision,
+                        );
+                        copy_lf_dequant(
+                            lf_y,
+                            left as usize >> shifts_cbycr[1].hshift(),
+                            top as usize >> shifts_cbycr[1].vshift(),
+                            quantizer,
+                            lf_global.lf_dequant.m_y_lf,
+                            &channel_data[0],
+                            lf_coeff.extra_precision,
+                        );
+                        copy_lf_dequant(
+                            lf_b,
+                            left as usize >> shifts_cbycr[2].hshift(),
+                            top as usize >> shifts_cbycr[2].vshift(),
+                            quantizer,
+                            lf_global.lf_dequant.m_b_lf,
+                            &channel_data[2],
+                            lf_coeff.extra_precision,
+                        );
+                    }
+
+                    if !subsampled {
+                        chroma_from_luma_lf(lf_xyb.buffer_mut(), &lf_global_vardct.lf_chan_corr);
+                    }
+
+                    if !frame_header.flags.skip_adaptive_lf_smoothing() {
+                        adaptive_lf_smoothing(
+                            lf_xyb.buffer_mut(),
+                            &lf_global.lf_dequant,
+                            &lf_global_vardct.quantizer,
+                        )?;
+                    }
+
+                    Ok(())
+                })
+            };
+
+            if r.is_err() {
+                *result.write().unwrap() = r;
             }
-        }
+        });
 
-        Ok(lf_xyb)
-    })?;
+        let hf_global = &mut cache.hf_global;
+        if hf_global.is_none() {
+            scope.spawn(|_| {
+                let r = tracing::trace_span!("Parse HfGlobal").in_scope(|| -> Result<_> {
+                    *hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
+                    Ok(())
+                });
 
-    if lf_frame.is_none() {
-        if !subsampled {
-            tracing::trace_span!("LF CfL").in_scope(|| {
-                chroma_from_luma_lf(lf_xyb.buffer_mut(), &lf_global_vardct.lf_chan_corr);
+                if r.is_err() {
+                    *result.write().unwrap() = r;
+                }
             });
         }
+    });
+    result.into_inner().unwrap()?;
 
-        if !frame_header.flags.skip_adaptive_lf_smoothing() {
-            tracing::trace_span!("Adaptive LF smoothing").in_scope(|| {
-                adaptive_lf_smoothing(
-                    lf_xyb.buffer_mut(),
-                    &lf_global.lf_dequant,
-                    &lf_global_vardct.quantizer,
-                )
-            })?;
-        }
-    }
-
-    let hf_global = &mut cache.hf_global;
-    if hf_global.is_none() {
-        tracing::trace_span!("Parse HfGlobal").in_scope(|| -> Result<_> {
-            *hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
-            Ok(())
-        })?;
-    }
     let hf_global = cache.hf_global.as_ref();
 
     let it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
