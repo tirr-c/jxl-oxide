@@ -57,8 +57,6 @@ pub(crate) fn render_vardct<S: Sample>(
     let tracker = frame.alloc_tracker();
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let shifts_cbycr: [_; 3] =
-        std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
 
     let lf_global = if let Some(x) = &cache.lf_global {
@@ -141,9 +139,8 @@ pub(crate) fn render_vardct<S: Sample>(
 
     let group_dim = frame_header.group_dim();
     let lf_groups = &mut cache.lf_groups;
-    let mut lf_xyb =
-        ImageWithRegion::from_region_and_tracker(3, modular_lf_region, false, tracker)?;
 
+    let mut lf_xyb = None;
     let result = std::sync::RwLock::new(Result::Ok(()));
     pool.scope(|scope| {
         let hf_global = &mut cache.hf_global;
@@ -154,8 +151,8 @@ pub(crate) fn render_vardct<S: Sample>(
                     Ok(())
                 });
 
-                if r.is_err() {
-                    *result.write().unwrap() = r;
+                if let Err(e) = r {
+                    *result.write().unwrap() = Err(e);
                 }
             });
         }
@@ -163,116 +160,55 @@ pub(crate) fn render_vardct<S: Sample>(
         let r = tracing::trace_span!("Load LF groups").in_scope(|| {
             util::load_lf_groups(
                 frame,
-                lf_global.vardct.as_ref(),
+                lf_global,
                 lf_groups,
-                gmodular.ma_config.as_ref(),
                 lf_group_image,
                 modular_lf_region,
                 pool,
             )
         });
-        if r.is_err() {
-            *result.write().unwrap() = r;
-            return;
-        }
-
-        let r = if let Some(x) = lf_frame {
-            tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
-                let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
-                    panic!()
-                };
-
-                let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
-                let lf_frame = lf_frame.blend(None, pool)?;
-                lf_frame.clone_region_channel(modular_lf_region, 0, lf_x);
-                lf_frame.clone_region_channel(modular_lf_region, 1, lf_y);
-                lf_frame.clone_region_channel(modular_lf_region, 2, lf_b);
-                Ok(())
-            })
-        } else {
-            tracing::trace_span!("Dequant LF image").in_scope(|| -> Result<_> {
-                let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
-                    panic!()
-                };
-
-                let lf_groups_per_row = frame_header.lf_groups_per_row();
-                for idx in 0..frame_header.num_lf_groups() {
-                    let Some(lf_group) = lf_groups.get(&idx) else {
-                        continue;
-                    };
-
-                    let lf_group_x = idx % lf_groups_per_row;
-                    let lf_group_y = idx / lf_groups_per_row;
-                    let left = lf_group_x * frame_header.group_dim();
-                    let top = lf_group_y * frame_header.group_dim();
-                    let lf_group_region = Region {
-                        left: left as i32,
-                        top: top as i32,
-                        width: group_dim,
-                        height: group_dim,
-                    };
-                    if modular_lf_region.intersection(lf_group_region).is_empty() {
-                        continue;
-                    }
-
-                    let left = left - modular_lf_region.left as u32;
-                    let top = top - modular_lf_region.top as u32;
-
-                    let quantizer = &lf_global_vardct.quantizer;
-                    let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
-                    let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
-                    copy_lf_dequant(
-                        lf_x,
-                        left as usize >> shifts_cbycr[0].hshift(),
-                        top as usize >> shifts_cbycr[0].vshift(),
-                        quantizer,
-                        lf_global.lf_dequant.m_x_lf,
-                        &channel_data[1],
-                        lf_coeff.extra_precision,
-                    );
-                    copy_lf_dequant(
-                        lf_y,
-                        left as usize >> shifts_cbycr[1].hshift(),
-                        top as usize >> shifts_cbycr[1].vshift(),
-                        quantizer,
-                        lf_global.lf_dequant.m_y_lf,
-                        &channel_data[0],
-                        lf_coeff.extra_precision,
-                    );
-                    copy_lf_dequant(
-                        lf_b,
-                        left as usize >> shifts_cbycr[2].hshift(),
-                        top as usize >> shifts_cbycr[2].vshift(),
-                        quantizer,
-                        lf_global.lf_dequant.m_b_lf,
-                        &channel_data[2],
-                        lf_coeff.extra_precision,
-                    );
-                }
-
-                if !subsampled {
-                    chroma_from_luma_lf(lf_xyb.buffer_mut(), &lf_global_vardct.lf_chan_corr);
-                }
-
-                if !frame_header.flags.skip_adaptive_lf_smoothing() {
-                    adaptive_lf_smoothing(
-                        lf_xyb.buffer_mut(),
-                        &lf_global.lf_dequant,
-                        &lf_global_vardct.quantizer,
-                    )?;
-                }
-
-                Ok(())
-            })
-        };
-
-        if r.is_err() {
-            *result.write().unwrap() = r;
-        }
+        lf_xyb = Some(match r {
+            Ok(x) => x.unwrap(),
+            Err(e) => {
+                *result.write().unwrap() = Err(e);
+                return;
+            }
+        });
     });
     result.into_inner().unwrap()?;
-
+    let mut lf_xyb = lf_xyb.unwrap();
     let hf_global = cache.hf_global.as_ref();
+
+    if let Some(x) = lf_frame {
+        tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
+            let [lf_x, lf_y, lf_b] = lf_xyb.buffer_mut() else {
+                panic!()
+            };
+
+            let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
+            let lf_frame = lf_frame.blend(None, pool)?;
+            lf_frame.clone_region_channel(modular_lf_region, 0, lf_x);
+            lf_frame.clone_region_channel(modular_lf_region, 1, lf_y);
+            lf_frame.clone_region_channel(modular_lf_region, 2, lf_b);
+            Ok(())
+        })?;
+    } else {
+        if !subsampled {
+            tracing::trace_span!("LF CfL").in_scope(|| {
+                chroma_from_luma_lf(lf_xyb.buffer_mut(), &lf_global_vardct.lf_chan_corr);
+            });
+        }
+
+        if !frame_header.flags.skip_adaptive_lf_smoothing() {
+            tracing::trace_span!("Adaptive LF smoothing").in_scope(|| {
+                adaptive_lf_smoothing(
+                    lf_xyb.buffer_mut(),
+                    &lf_global.lf_dequant,
+                    &lf_global_vardct.quantizer,
+                )
+            })?;
+        }
+    }
 
     let it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
         fb_xyb
@@ -432,24 +368,22 @@ pub(crate) fn render_vardct<S: Sample>(
 }
 
 pub fn copy_lf_dequant<S: Sample>(
-    out: &mut SimpleGrid<f32>,
-    left: usize,
-    top: usize,
+    grid: &mut CutGrid<f32>,
     quantizer: &Quantizer,
     m_lf: f32,
     channel_data: &SimpleGrid<S>,
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
+    assert!(grid.width() >= channel_data.width());
+    assert!(grid.height() >= channel_data.height());
+
     let precision_scale = 1i32 << (9 - extra_precision);
     let scale_inv = quantizer.global_scale as u64 * quantizer.quant_lf as u64;
     let scale = (m_lf as f64 * precision_scale as f64 / scale_inv as f64) as f32;
 
     let width = channel_data.width();
     let height = channel_data.height();
-    let stride = out.width();
-    let buf = &mut out.buf_mut()[top * stride + left..];
-    let mut grid = CutGrid::from_buf(buf, width, height, stride);
     let buf = channel_data.buf();
     for y in 0..height {
         let row = grid.get_row_mut(y);

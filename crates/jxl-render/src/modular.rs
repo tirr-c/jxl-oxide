@@ -50,15 +50,14 @@ pub(crate) fn render_modular<S: Sample>(
             scope.spawn(|_| {
                 let r = util::load_lf_groups(
                     frame,
-                    lf_global.vardct.as_ref(),
+                    lf_global,
                     lf_groups,
-                    gmodular.ma_config.as_ref(),
                     lf_group_image,
                     modular_region.downsample(3),
                     pool,
                 );
-                if r.is_err() {
-                    *result.write().unwrap() = r;
+                if let Err(e) = r {
+                    *result.write().unwrap() = Err(e);
                 }
             });
 

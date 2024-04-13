@@ -166,6 +166,17 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            ptr: NonNull::dangling(),
+            split_base: None,
+            width: 0,
+            height: 0,
+            stride: 0,
+            _marker: Default::default(),
+        }
+    }
+
     /// Create a `CutGrid` from buffer slice, width, height and stride.
     ///
     /// # Panic
