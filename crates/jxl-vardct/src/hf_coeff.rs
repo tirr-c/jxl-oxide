@@ -20,12 +20,10 @@ pub struct HfCoeffParams<'a, 'b, S: Sample> {
 }
 
 /// Decode and write HF coefficients from the bitstream.
-///
-/// Note that `hf_coeff_output` is treated as `i32` buffer, despite the type being `CutGrid<f32>`.
 pub fn write_hf_coeff<S: Sample>(
     bitstream: &mut Bitstream,
     params: HfCoeffParams<S>,
-    hf_coeff_output: &[SharedSubgrid<f32>; 3],
+    hf_coeff_output: &[SharedSubgrid<AtomicI32>; 3],
 ) -> Result<()> {
     const COEFF_FREQ_CONTEXT: [u32; 63] = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19,
@@ -230,13 +228,10 @@ pub fn write_hf_coeff<S: Sample>(
                     let x = sx * 8 + dx as usize;
                     let y = sy * 8 + dy as usize;
 
-                    // SAFETY: AtomicI32 has same memory layout with f32. There is no mutable alias
-                    // of the memory region, because coeff_grid.get() is a shared reference.
-                    let coeff_ref = unsafe {
-                        &*(coeff_grid.get(x, y) as *const f32 as *const AtomicI32)
-                    };
                     // We only need atomicity here.
-                    coeff_ref.fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
+                    coeff_grid
+                        .get(x, y)
+                        .fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
 
                     is_prev_coeff_nonzero = 1;
                     non_zeros -= 1;

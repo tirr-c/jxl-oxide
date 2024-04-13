@@ -237,6 +237,13 @@ pub(crate) fn render_vardct<S: Sample>(
                 let pass_idx = pass_idx as u32;
                 let mut image_it = pass_image.into_iter().enumerate();
                 for &(group_idx, ref grid_xyb, lf_group) in &it {
+                    // SAFETY: All accesses to `grid_xyb` are atomic in this Rayon scope. The scope
+                    // captures `fb_xyb` as a unique reference (via `it`), so `grid_xyb` is
+                    // accessed exclusively in this scope.
+                    let grid_xyb = grid_xyb
+                        .each_ref()
+                        .map(|grid| unsafe { grid.as_shared().as_atomic_i32() });
+
                     if lf_group.hf_meta.is_none() {
                         continue;
                     }
@@ -258,11 +265,6 @@ pub(crate) fn render_vardct<S: Sample>(
 
                     let result = &result;
                     scope.spawn(move |_| {
-                        let grid_xyb = {
-                            let [x, y, b] = grid_xyb;
-                            [x.as_shared(), y.as_shared(), b.as_shared()]
-                        };
-
                         let vardct = Some(PassGroupParamsVardct {
                             lf_vardct: lf_global_vardct,
                             hf_global,

@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicI32;
+
 use jxl_bitstream::Bitstream;
 use jxl_grid::{AllocTracker, SharedSubgrid};
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, MaConfig, Sample};
@@ -25,7 +27,7 @@ pub struct PassGroupParams<'frame, 'buf, 'g, 'tracker, S: Sample> {
 pub struct PassGroupParamsVardct<'frame, 'buf, 'g> {
     pub lf_vardct: &'frame LfGlobalVarDct,
     pub hf_global: &'frame HfGlobal,
-    pub hf_coeff_output: &'buf [SharedSubgrid<'g, f32>; 3],
+    pub hf_coeff_output: &'buf [SharedSubgrid<'g, AtomicI32>; 3],
 }
 
 pub fn decode_pass_group<S: Sample>(
