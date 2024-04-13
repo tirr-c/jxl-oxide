@@ -1,6 +1,7 @@
 use clap::Parser;
 use jxl_oxide_cli::{Args, Subcommands};
 
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
