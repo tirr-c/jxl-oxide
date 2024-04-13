@@ -15,6 +15,7 @@ default-run = "jxl-oxide"
 
 [dependencies]
 lcms2 = "6.0.4"
+mimalloc = "0.1.39"
 miniz_oxide = "0.7.2"
 png = "0.17.13"
 tracing.workspace = true

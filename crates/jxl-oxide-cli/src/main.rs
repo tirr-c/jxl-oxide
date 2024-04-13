@@ -1,6 +1,9 @@
 use clap::Parser;
 use jxl_oxide_cli::{Args, Subcommands};
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> std::process::ExitCode {
     let Args {
         subcommand,
