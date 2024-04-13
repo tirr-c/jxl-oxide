@@ -15,7 +15,6 @@ default-run = "jxl-oxide"
 
 [dependencies]
 lcms2 = "6.0.4"
-mimalloc = "0.1.39"
 miniz_oxide = "0.7.2"
 png = "0.17.13"
 tracing.workspace = true
@@ -30,6 +29,10 @@ path = "../jxl-oxide"
 default-features = false
 features = ["lcms2"]
 
+[dependencies.mimalloc]
+version = "0.1.39"
+optional = true
+
 [dependencies.rayon]
 version = "1.8.1"
 optional = true
@@ -39,7 +42,8 @@ version = "0.3.18"
 features = ["env-filter"]
 
 [features]
-default = ["rayon"]
+default = ["rayon", "mimalloc"]
+mimalloc = ["dep:mimalloc"]
 rayon = ["dep:rayon", "jxl-oxide/rayon"]
 __devtools = []
 
