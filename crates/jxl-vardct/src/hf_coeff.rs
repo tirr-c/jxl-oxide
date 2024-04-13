@@ -229,10 +229,14 @@ pub fn write_hf_coeff<S: Sample>(
                     }
                     let x = sx * 8 + dx as usize;
                     let y = sy * 8 + dy as usize;
-                    unsafe {
-                        let base_coeff = coeff_grid.get(x, y) as *const f32 as *const AtomicI32;
-                        (*base_coeff).fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
-                    }
+
+                    // SAFETY: AtomicI32 has same memory layout with f32. There is no mutable alias
+                    // of the memory region, because coeff_grid.get() is a shared reference.
+                    let coeff_ref = unsafe {
+                        &*(coeff_grid.get(x, y) as *const f32 as *const AtomicI32)
+                    };
+                    // We only need atomicity here.
+                    coeff_ref.fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
 
                     is_prev_coeff_nonzero = 1;
                     non_zeros -= 1;
