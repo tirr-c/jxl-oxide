@@ -257,6 +257,7 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
+        let mut ref_render_results = [None, None, None, None];
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
@@ -264,9 +265,24 @@ fn render_features<S: Sample>(
             let ref_header = ref_grid.frame.f.header();
             let oriented_image_region = Region::with_size(ref_header.width, ref_header.height)
                 .translate(ref_header.x0, ref_header.y0);
-            let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
-            let ref_grid_image = ref_grid_image.blend(Some(oriented_image_region), pool)?;
-            blend::patch(image_header, grid, &ref_grid_image, patch);
+
+            let ref_grid_image = &mut ref_render_results[patch.ref_idx as usize];
+            if ref_grid_image.is_none() {
+                let image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
+                *ref_grid_image = Some((image, oriented_image_region));
+            }
+        }
+
+        let mut ref_blend_results = [None, None, None, None];
+        for idx in 0..4 {
+            if let Some((render, oriented_image_region)) = &ref_render_results[idx] {
+                ref_blend_results[idx] = Some(render.blend(Some(*oriented_image_region), pool)?);
+            }
+        }
+
+        for patch in &patches.patches {
+            let ref_grid_image = ref_blend_results[patch.ref_idx as usize].as_ref().unwrap();
+            blend::patch(image_header, grid, ref_grid_image, patch);
         }
     }
 

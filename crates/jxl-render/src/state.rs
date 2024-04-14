@@ -143,23 +143,27 @@ impl<S: Sample> FrameRenderHandle<S> {
     pub fn run_with_image(self: Arc<Self>) -> Result<RenderedImage<S>> {
         let _guard = tracing::trace_span!("Run with image", index = self.frame.idx).entered();
 
-        let render = if let Some(state) = self.start_render()? {
-            let render_result = (self.render_op)(state, self.image_region);
-            match render_result {
-                FrameRender::InProgress(_) => {
-                    drop(self.done_render(render_result));
-                    return Err(Error::IncompleteFrame);
+        let render = match self.start_render()? {
+            StartRenderResult::Success(state) => {
+                let render_result = (self.render_op)(state, self.image_region);
+                match render_result {
+                    FrameRender::InProgress(_) => {
+                        drop(self.done_render(render_result));
+                        return Err(Error::IncompleteFrame);
+                    }
+                    FrameRender::Err(e) => {
+                        drop(self.done_render(FrameRender::ErrTaken));
+                        return Err(e);
+                    }
+                    _ => {}
                 }
-                FrameRender::Err(e) => {
-                    drop(self.done_render(FrameRender::ErrTaken));
-                    return Err(e);
-                }
-                _ => {}
+                self.done_render(render_result)
             }
-            self.done_render(render_result)
-        } else {
-            tracing::trace!("Another thread has started rendering");
-            self.wait_until_render()?
+            StartRenderResult::InProgress => {
+                tracing::trace!("Another thread has started rendering");
+                self.wait_until_render()?
+            }
+            StartRenderResult::AlreadyFinished(render) => render,
         };
         drop(render);
 
@@ -182,11 +186,13 @@ impl<S: Sample> FrameRenderHandle<S> {
         std::mem::replace(&mut *render_ref, FrameRender::None)
     }
 
-    fn start_render(&self) -> Result<Option<FrameRender<S>>> {
+    fn start_render(&self) -> Result<StartRenderResult<S>> {
         let mut render_ref = self.render.lock().unwrap();
         let render = std::mem::replace(&mut *render_ref, FrameRender::Rendering);
         match render {
-            FrameRender::None | FrameRender::InProgress(_) => Ok(Some(render)),
+            FrameRender::None | FrameRender::InProgress(_) => {
+                Ok(StartRenderResult::Success(render))
+            }
             FrameRender::Err(e) => {
                 *render_ref = FrameRender::ErrTaken;
                 Err(e)
@@ -195,9 +201,13 @@ impl<S: Sample> FrameRenderHandle<S> {
                 *render_ref = FrameRender::ErrTaken;
                 Err(Error::FailedReference)
             }
+            FrameRender::Done(_) => {
+                *render_ref = render;
+                Ok(StartRenderResult::AlreadyFinished(render_ref))
+            }
             render => {
                 *render_ref = render;
-                Ok(None)
+                Ok(StartRenderResult::InProgress)
             }
         }
     }
@@ -243,4 +253,10 @@ impl<S: Sample> FrameRenderHandle<S> {
         self.condvar.notify_all();
         guard
     }
+}
+
+enum StartRenderResult<'render, S: Sample> {
+    Success(FrameRender<S>),
+    InProgress,
+    AlreadyFinished(MutexGuard<'render, FrameRender<S>>),
 }
