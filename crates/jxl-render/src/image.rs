@@ -353,17 +353,20 @@ impl<S: Sample> RenderedImage<S> {
                 return Ok(BlendResult(grid_lock));
             }
 
-            let mut out = ImageWithRegion::from_region_and_tracker(
-                grid.channels(),
-                frame_region,
-                grid.ct_done(),
-                grid.alloc_tracker(),
-            )?;
-            for (idx, channel) in out.buffer_mut().iter_mut().enumerate() {
-                grid.clone_region_channel(frame_region, idx, channel);
+            if grid.region() != frame_region {
+                tracing::trace!(render_region = ?grid.region(), ?frame_region);
+                let mut out = ImageWithRegion::from_region_and_tracker(
+                    grid.channels(),
+                    frame_region,
+                    grid.ct_done(),
+                    grid.alloc_tracker(),
+                )?;
+                for (idx, channel) in out.buffer_mut().iter_mut().enumerate() {
+                    grid.clone_region_channel(frame_region, idx, channel);
+                }
+                out.blend_done = true;
+                *grid = out;
             }
-            out.blend_done = true;
-            *grid = out;
             return Ok(BlendResult(grid_lock));
         }
 

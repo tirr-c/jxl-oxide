@@ -59,18 +59,55 @@ impl<S: Default + Clone> SimpleGrid<S> {
         })
     }
 
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            offset: 0,
+            buf: Vec::new(),
+            handle: None,
+        }
+    }
+
+    #[inline]
+    fn empty_aligned(
+        width: usize,
+        height: usize,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self, Error> {
+        let len = width * height;
+        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
+        let handle = tracker
+            .map(|tracker| tracker.alloc::<S>(buf_len))
+            .transpose()?;
+        let mut buf = Vec::with_capacity(buf_len);
+
+        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
+        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
+        buf.resize_with(offset, S::default);
+
+        Ok(Self {
+            width,
+            height,
+            offset,
+            buf,
+            handle,
+        })
+    }
+
     /// Clones the buffer without recording an allocation.
     pub fn clone_untracked(&self) -> Self {
-        let mut out = Self::with_alloc_tracker(self.width, self.height, None).unwrap();
-        out.buf_mut().clone_from_slice(self.buf());
+        let mut out = Self::empty_aligned(self.width, self.height, None).unwrap();
+        out.buf.extend_from_slice(self.buf());
         out
     }
 
     /// Tries to clone the buffer, and records the allocation in the same tracker as the original
     /// buffer.
     pub fn try_clone(&self) -> Result<Self, Error> {
-        let mut out = Self::with_alloc_tracker(self.width, self.height, self.tracker().as_ref())?;
-        out.buf_mut().clone_from_slice(self.buf());
+        let mut out = Self::empty_aligned(self.width, self.height, self.tracker().as_ref())?;
+        out.buf.extend_from_slice(self.buf());
         Ok(out)
     }
 }
