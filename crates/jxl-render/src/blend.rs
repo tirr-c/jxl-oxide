@@ -248,11 +248,12 @@ pub(crate) fn blend<S: Sample>(
                 let base_frame_header = grid.frame.header();
                 let base_frame_region =
                     output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
-                target_grid = if base_grid.region() == base_frame_region && can_overwrite {
-                    std::mem::replace(
-                        &mut base_grid.buffer_mut()[idx],
-                        SimpleGrid::with_alloc_tracker(0, 0, tracker)?,
-                    )
+                target_grid = if base_grid.region() == base_frame_region {
+                    if can_overwrite {
+                        std::mem::replace(&mut base_grid.buffer_mut()[idx], SimpleGrid::empty())
+                    } else {
+                        base_grid.buffer()[idx].try_clone()?
+                    }
                 } else {
                     let mut output_grid = SimpleGrid::with_alloc_tracker(
                         output_frame_region.width as usize,
@@ -265,16 +266,20 @@ pub(crate) fn blend<S: Sample>(
 
                 if let Some(alpha_idx) = alpha_idx {
                     if alpha_idx + 3 != idx {
-                        base_alpha_grid = SimpleGrid::with_alloc_tracker(
-                            output_frame_region.width as usize,
-                            output_frame_region.height as usize,
-                            tracker,
-                        )?;
-                        base_grid.clone_region_channel(
-                            base_frame_region,
-                            alpha_idx + 3,
-                            &mut base_alpha_grid,
-                        );
+                        if base_grid.region() == base_frame_region {
+                            base_alpha_grid = base_grid.buffer()[alpha_idx + 3].try_clone()?;
+                        } else {
+                            base_alpha_grid = SimpleGrid::with_alloc_tracker(
+                                output_frame_region.width as usize,
+                                output_frame_region.height as usize,
+                                tracker,
+                            )?;
+                            base_grid.clone_region_channel(
+                                base_frame_region,
+                                alpha_idx + 3,
+                                &mut base_alpha_grid,
+                            );
+                        }
                         base_alpha = Some(&base_alpha_grid)
                     }
                 }
