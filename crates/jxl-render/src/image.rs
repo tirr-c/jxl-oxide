@@ -340,17 +340,32 @@ impl<S: Sample> RenderedImage<S> {
         };
 
         let mut grid_lock = self.image.render.lock().unwrap();
-        let grid = grid_lock.as_grid_mut().unwrap();
-        if grid.blend_done {
-            return Ok(BlendResult(grid_lock));
-        }
+        let grid = match &mut *grid_lock {
+            FrameRender::Done(grid) => {
+                if grid.blend_done {
+                    return Ok(BlendResult::Exclusive(BlendResultExclusive(grid_lock)));
+                }
+                grid
+            }
+            FrameRender::DoneShared(image) => {
+                return Ok(BlendResult::Shared(Arc::clone(image)));
+            }
+            _ => unreachable!(),
+        };
+
+        let sharing_allowed = frame_header.is_keyframe();
 
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
             grid.blend_done = true;
             if frame_header.frame_type == FrameType::ReferenceOnly
                 || grid.region().contains(frame_region)
             {
-                return Ok(BlendResult(grid_lock));
+                return Ok(if sharing_allowed {
+                    let image = grid_lock.make_shared();
+                    BlendResult::Shared(image)
+                } else {
+                    BlendResult::Exclusive(BlendResultExclusive(grid_lock))
+                });
             }
 
             let mut out = ImageWithRegion::from_region_and_tracker(
@@ -364,7 +379,13 @@ impl<S: Sample> RenderedImage<S> {
             }
             out.blend_done = true;
             *grid = out;
-            return Ok(BlendResult(grid_lock));
+
+            return Ok(if sharing_allowed {
+                let image = grid_lock.make_shared();
+                BlendResult::Shared(image)
+            } else {
+                BlendResult::Exclusive(BlendResultExclusive(grid_lock))
+            });
         }
 
         if !grid.ct_done() {
@@ -386,13 +407,45 @@ impl<S: Sample> RenderedImage<S> {
             pool,
         )?;
         *grid = out;
-        Ok(BlendResult(grid_lock))
+
+        Ok(if sharing_allowed {
+            let image = grid_lock.make_shared();
+            BlendResult::Shared(image)
+        } else {
+            BlendResult::Exclusive(BlendResultExclusive(grid_lock))
+        })
     }
 }
 
-pub struct BlendResult<'r, S: Sample>(std::sync::MutexGuard<'r, FrameRender<S>>);
+pub(crate) enum BlendResult<'r, S: Sample> {
+    Exclusive(BlendResultExclusive<'r, S>),
+    Shared(Arc<ImageWithRegion>),
+}
+
+pub(crate) struct BlendResultExclusive<'r, S: Sample>(std::sync::MutexGuard<'r, FrameRender<S>>);
+
+impl<'r, S: Sample> BlendResult<'r, S> {
+    pub(crate) fn unwrap_exclusive(self) -> BlendResultExclusive<'r, S> {
+        match self {
+            BlendResult::Exclusive(result) => result,
+            BlendResult::Shared(_) => panic!(),
+        }
+    }
+}
 
 impl<S: Sample> std::ops::Deref for BlendResult<'_, S> {
+    type Target = ImageWithRegion;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            BlendResult::Exclusive(result) => result,
+            BlendResult::Shared(image) => image,
+        }
+    }
+}
+
+impl<S: Sample> std::ops::Deref for BlendResultExclusive<'_, S> {
     type Target = ImageWithRegion;
 
     #[inline]
@@ -401,7 +454,7 @@ impl<S: Sample> std::ops::Deref for BlendResult<'_, S> {
     }
 }
 
-impl<S: Sample> std::ops::DerefMut for BlendResult<'_, S> {
+impl<S: Sample> std::ops::DerefMut for BlendResultExclusive<'_, S> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0.as_grid_mut().unwrap()

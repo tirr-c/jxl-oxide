@@ -50,6 +50,7 @@ pub enum FrameRender<S: Sample> {
     Rendering,
     InProgress(Box<RenderCache<S>>),
     Done(ImageWithRegion),
+    DoneShared(Arc<ImageWithRegion>),
     Err(crate::Error),
     ErrTaken,
 }
@@ -61,6 +62,7 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
             Self::Rendering => write!(f, "Rendering"),
             Self::InProgress(_) => write!(f, "InProgress(_)"),
             Self::Done(_) => write!(f, "Done(_)"),
+            Self::DoneShared(_) => write!(f, "DoneShared(_)"),
             Self::Err(e) => f.debug_tuple("Err").field(e).finish(),
             Self::ErrTaken => write!(f, "ErrTaken"),
         }
@@ -69,10 +71,10 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
 
 impl<S: Sample> FrameRender<S> {
     pub(crate) fn as_grid(&self) -> Option<&ImageWithRegion> {
-        if let Self::Done(grid) = self {
-            Some(grid)
-        } else {
-            None
+        match self {
+            FrameRender::Done(image) => Some(image),
+            FrameRender::DoneShared(image) => Some(image),
+            _ => None,
         }
     }
 
@@ -81,6 +83,26 @@ impl<S: Sample> FrameRender<S> {
             Some(grid)
         } else {
             None
+        }
+    }
+
+    pub(crate) fn make_shared(&mut self) -> Arc<ImageWithRegion> {
+        let render = std::mem::take(self);
+        match render {
+            FrameRender::Done(image) => {
+                let image = Arc::new(image);
+                *self = Self::DoneShared(Arc::clone(&image));
+                image
+            }
+            FrameRender::DoneShared(ref image) => {
+                let image = Arc::clone(image);
+                *self = render;
+                image
+            }
+            _ => {
+                *self = render;
+                panic!("rendering not done")
+            }
         }
     }
 }
@@ -201,7 +223,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                 *render_ref = FrameRender::ErrTaken;
                 Err(Error::FailedReference)
             }
-            FrameRender::Done(_) => {
+            FrameRender::Done(_) | FrameRender::DoneShared(_) => {
                 *render_ref = render;
                 Ok(StartRenderResult::AlreadyFinished(render_ref))
             }
@@ -233,7 +255,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                     tracing::trace!(index = self.frame.idx, "Waiting...");
                     render_ref = self.condvar.wait(render_ref).unwrap();
                 }
-                FrameRender::Done(_) => {
+                FrameRender::Done(_) | FrameRender::DoneShared(_) => {
                     *render_ref = render;
                     return Ok(render_ref);
                 }
