@@ -55,6 +55,7 @@ lcms2 = ["dep:lcms2"]
 
 [dev-dependencies]
 criterion = "0.5.1"
+mimalloc = "0.1.39"
 zstd = "0.13.0"
 
 [dev-dependencies.rand]
