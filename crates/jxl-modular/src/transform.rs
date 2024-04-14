@@ -361,11 +361,11 @@ impl Palette {
         let mut idx = 0;
         for y in 0..height {
             for x in 0..width {
-                let properties = predictor.properties();
+                let properties = predictor.properties::<true>();
                 let sample = grid.get_mut(x, y);
                 let mut sample_value = sample.to_i32();
                 if need_delta[idx] == (x, y) {
-                    let diff = d_pred.predict(&properties);
+                    let diff = d_pred.predict::<_, true>(&properties);
                     sample_value = sample_value.wrapping_add(diff);
                     *sample = S::from_i32(sample_value);
                     idx += 1;
