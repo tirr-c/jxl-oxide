@@ -2,17 +2,17 @@ use jxl_color::{
     ColorEncodingWithProfile, ColorTransform, ColourEncoding, ColourSpace, EnumColourEncoding,
 };
 use jxl_frame::{
-    data::{LfGlobalVarDct, LfGroup},
+    data::{LfGlobal, LfGroup},
     filter::{EdgePreservingFilter, EpfParams},
     header::FrameType,
     Frame, FrameHeader,
 };
-use jxl_grid::SimpleGrid;
+use jxl_grid::{CutGrid, SimpleGrid};
 use jxl_image::ImageHeader;
-use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
+use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{ImageWithRegion, IndexedFrame, Region, Result};
+use crate::{vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result};
 
 pub(crate) fn image_region_to_frame(
     frame: &Frame,
@@ -140,24 +140,58 @@ pub(crate) fn pad_color_region(
 
 pub(crate) fn load_lf_groups<S: Sample>(
     frame: &IndexedFrame,
-    lf_global_vardct: Option<&LfGlobalVarDct>,
+    lf_global: &LfGlobal<S>,
     lf_groups: &mut std::collections::HashMap<u32, LfGroup<S>>,
-    global_ma_config: Option<&MaConfig>,
     mlf_groups: Vec<TransformedModularSubimage<S>>,
     lf_region: Region,
     pool: &JxlThreadPool,
-) -> Result<()> {
+) -> Result<Option<ImageWithRegion>> {
     #[derive(Default)]
-    struct LfGroupJob<'modular, S: Sample> {
+    struct LfGroupJob<'modular, 'xyb, S: Sample> {
         idx: u32,
         lf_group: Option<LfGroup<S>>,
         modular: Option<TransformedModularSubimage<'modular, S>>,
+        lf_xyb: Option<[CutGrid<'xyb, f32>; 3]>,
     }
 
     let frame_header = frame.header();
+    let lf_global_vardct = lf_global.vardct.as_ref();
+    let global_ma_config = lf_global.gmodular.ma_config();
+    let mut lf_xyb = lf_global_vardct
+        .map(|_| {
+            ImageWithRegion::from_region_and_tracker(3, lf_region, false, frame.alloc_tracker())
+        })
+        .transpose()?;
+    let has_lf_frame = frame_header.flags.use_lf_frame();
+    let jpeg_upsampling = frame_header.jpeg_upsampling;
+    let shifts_cbycr: [_; 3] =
+        std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
+
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
     let num_lf_groups = frame_header.num_lf_groups();
+
+    let mut lf_xyb_groups = lf_xyb.as_mut().map(|lf_xyb| {
+        let num_cols = lf_groups_per_row;
+        let num_rows = num_lf_groups / num_cols;
+
+        let lf_xyb_arr = <&mut [_; 3]>::try_from(lf_xyb.buffer_mut()).unwrap();
+        let mut idx = 0usize;
+        lf_xyb_arr.each_mut().map(|grid| {
+            let grid = CutGrid::from_simple_grid(grid);
+            let shift = shifts_cbycr[idx];
+            let group_width = group_dim >> shift.hshift();
+            let group_height = group_dim >> shift.vshift();
+            let ret = grid.into_groups_with_fixed_count(
+                group_width as usize,
+                group_height as usize,
+                num_cols as usize,
+                num_rows as usize,
+            );
+            idx += 1;
+            ret
+        })
+    });
 
     let mlf_groups = mlf_groups
         .into_iter()
@@ -166,16 +200,10 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let mut lf_groups_out = (0..num_lf_groups)
         .map(|idx| LfGroupJob {
             idx,
-            lf_group: None,
-            modular: None,
+            ..Default::default()
         })
         .zip(mlf_groups)
         .filter_map(|(job, modular)| {
-            let loaded = lf_groups.get(&job.idx).map(|g| !g.partial).unwrap_or(false);
-            if loaded {
-                return None;
-            }
-
             let idx = job.idx;
             let left = (idx % lf_groups_per_row) * group_dim;
             let top = (idx / lf_groups_per_row) * group_dim;
@@ -189,37 +217,100 @@ pub(crate) fn load_lf_groups<S: Sample>(
                 return None;
             }
 
-            Some(LfGroupJob { modular, ..job })
+            let lf_xyb = lf_xyb_groups.as_mut().map(|lf_xyb_groups| {
+                lf_xyb_groups
+                    .each_mut()
+                    .map(|groups| std::mem::replace(&mut groups[idx as usize], CutGrid::empty()))
+            });
+
+            Some(LfGroupJob {
+                modular,
+                lf_xyb,
+                ..job
+            })
         })
         .collect::<Vec<_>>();
 
     let result = std::sync::RwLock::new(Result::Ok(()));
-    pool.for_each_mut_slice(
-        &mut lf_groups_out,
-        |LfGroupJob {
-             idx,
-             lf_group,
-             modular,
-         }| {
-            match frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular.take(), *idx)
-            {
+    pool.for_each_mut_slice(&mut lf_groups_out, |job| {
+        let LfGroupJob {
+            idx,
+            ref mut lf_group,
+            ref mut modular,
+            ref mut lf_xyb,
+        } = *job;
+        let loaded = lf_group.as_ref().map(|g| !g.partial).unwrap_or(false);
+
+        if !loaded {
+            let parse_result =
+                frame.try_parse_lf_group(lf_global_vardct, global_ma_config, modular.take(), idx);
+            match parse_result {
                 Some(Ok(g)) => {
                     *lf_group = Some(g);
                 }
                 Some(Err(e)) => {
                     *result.write().unwrap() = Err(e.into());
+                    return;
                 }
-                None => {}
+                None => {
+                    return;
+                }
             }
-        },
-    );
+        }
+
+        let lf_group = lf_group.as_ref().unwrap();
+        if let (false, Some(lf_xyb)) = (has_lf_frame, lf_xyb) {
+            let [lf_x, lf_y, lf_b] = lf_xyb;
+            let lf_global_vardct = lf_global_vardct.unwrap();
+
+            let lf_group_x = idx % lf_groups_per_row;
+            let lf_group_y = idx / lf_groups_per_row;
+            let left = lf_group_x * frame_header.group_dim();
+            let top = lf_group_y * frame_header.group_dim();
+            let lf_group_region = Region {
+                left: left as i32,
+                top: top as i32,
+                width: group_dim,
+                height: group_dim,
+            };
+            if lf_region.intersection(lf_group_region).is_empty() {
+                return;
+            }
+
+            let quantizer = &lf_global_vardct.quantizer;
+            let lf_coeff = lf_group.lf_coeff.as_ref().unwrap();
+            let channel_data = lf_coeff.lf_quant.image().unwrap().image_channels();
+            copy_lf_dequant(
+                lf_x,
+                quantizer,
+                lf_global.lf_dequant.m_x_lf,
+                &channel_data[1],
+                lf_coeff.extra_precision,
+            );
+            copy_lf_dequant(
+                lf_y,
+                quantizer,
+                lf_global.lf_dequant.m_y_lf,
+                &channel_data[0],
+                lf_coeff.extra_precision,
+            );
+            copy_lf_dequant(
+                lf_b,
+                quantizer,
+                lf_global.lf_dequant.m_b_lf,
+                &channel_data[2],
+                lf_coeff.extra_precision,
+            );
+        }
+    });
 
     for LfGroupJob { idx, lf_group, .. } in lf_groups_out.into_iter() {
         if let Some(group) = lf_group {
             lf_groups.insert(idx, group);
         }
     }
-    result.into_inner().unwrap()
+    result.into_inner().unwrap()?;
+    Ok(lf_xyb)
 }
 
 pub(crate) fn upsample_lf(

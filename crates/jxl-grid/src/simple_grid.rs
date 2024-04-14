@@ -166,6 +166,17 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            ptr: NonNull::dangling(),
+            split_base: None,
+            width: 0,
+            height: 0,
+            stride: 0,
+            _marker: Default::default(),
+        }
+    }
+
     /// Create a `CutGrid` from buffer slice, width, height and stride.
     ///
     /// # Panic
@@ -194,6 +205,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         let width = grid.width();
         let height = grid.height();
         Self::from_buf(grid.buf_mut(), width, height, width)
+    }
+
+    #[inline]
+    pub fn into_ptr(self) -> NonNull<V> {
+        self.ptr
     }
 
     #[inline]
@@ -276,6 +292,11 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     pub fn borrow_mut(&mut self) -> CutGrid<V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
         unsafe { CutGrid::new(self.ptr, self.width, self.height, self.stride) }
+    }
+
+    pub fn as_shared(&self) -> SharedSubgrid<V> {
+        // SAFETY: We have unique reference to the grid.
+        unsafe { SharedSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
     pub fn subgrid_mut(

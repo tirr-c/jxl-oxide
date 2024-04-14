@@ -1,5 +1,7 @@
+use std::sync::atomic::AtomicI32;
+
 use jxl_bitstream::Bitstream;
-use jxl_grid::{AllocTracker, CutGrid, SharedSubgrid};
+use jxl_grid::{AllocTracker, SharedSubgrid};
 use jxl_modular::{ChannelShift, Sample};
 
 use crate::{BlockInfo, HfBlockContext, HfPass, Result};
@@ -18,12 +20,10 @@ pub struct HfCoeffParams<'a, 'b, S: Sample> {
 }
 
 /// Decode and write HF coefficients from the bitstream.
-///
-/// Note that `hf_coeff_output` is treated as `i32` buffer, despite the type being `CutGrid<f32>`.
 pub fn write_hf_coeff<S: Sample>(
     bitstream: &mut Bitstream,
     params: HfCoeffParams<S>,
-    hf_coeff_output: &mut [CutGrid<f32>; 3],
+    hf_coeff_output: &[SharedSubgrid<AtomicI32>; 3],
 ) -> Result<()> {
     const COEFF_FREQ_CONTEXT: [u32; 63] = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19,
@@ -193,7 +193,7 @@ pub fn write_hf_coeff<S: Sample>(
                     continue;
                 }
 
-                let coeff_grid = &mut hf_coeff_output[c];
+                let coeff_grid = &hf_coeff_output[c];
                 let mut is_prev_coeff_nonzero = (non_zeros <= num_blocks * 4) as u32;
                 let order = hf_pass.order(order_id as usize, c);
 
@@ -227,8 +227,11 @@ pub fn write_hf_coeff<S: Sample>(
                     }
                     let x = sx * 8 + dx as usize;
                     let y = sy * 8 + dy as usize;
-                    let base_coeff = coeff_grid.get_mut(x, y);
-                    *base_coeff = f32::from_bits((base_coeff.to_bits() as i32 + coeff) as u32);
+
+                    // We only need atomicity here.
+                    coeff_grid
+                        .get(x, y)
+                        .fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
 
                     is_prev_coeff_nonzero = 1;
                     non_zeros -= 1;
