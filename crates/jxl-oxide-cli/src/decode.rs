@@ -1,4 +1,5 @@
 use std::io::prelude::*;
+use std::time::Duration;
 
 use jxl_oxide::{
     AllocTracker, CropInfo, EnumColourEncoding, FrameBuffer, JxlImage, JxlThreadPool, PixelFormat,
@@ -84,55 +85,70 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         }
     });
 
-    let (width, height) = if let Some(crop) = crop {
+    if let Some(crop) = crop {
         tracing::debug!(crop = format_args!("{:?}", crop), "Cropped decoding");
-        image.set_image_region(crop);
-        (crop.width, crop.height)
-    } else {
-        (image_size.width, image_size.height)
-    };
+    }
 
-    let decode_start = std::time::Instant::now();
+    let crop_region = crop.unwrap_or(CropInfo {
+        width: image_size.width,
+        height: image_size.height,
+        left: 0,
+        top: 0,
+    });
+    let CropInfo { width, height, .. } = crop_region;
+    let total_pixels = width * height;
+    let mps = total_pixels as f64 / 1e6;
 
-    let mut keyframes = Vec::new();
     if args.output_format == OutputFormat::Npy {
         image.set_render_spot_colour(false);
     }
 
-    #[allow(unused_mut)]
-    let mut rendered = false;
-    #[cfg(feature = "rayon")]
-    if let Some(rayon_pool) = &pool.as_rayon_pool() {
-        keyframes = rayon_pool
-            .install(|| {
-                use rayon::prelude::*;
+    let keyframes = if let Some(num_reps @ 2..) = args.num_reps {
+        tracing::info!("Running {num_reps} repetitions");
 
-                (0..image.num_loaded_keyframes())
-                    .into_par_iter()
-                    .map(|idx| image.render_frame_cropped(idx))
-                    .collect::<std::result::Result<Vec<_>, _>>()
-            })
-            .map_err(Error::Render)?;
-        rendered = true;
-    }
-
-    if !rendered {
-        for idx in 0..image.num_loaded_keyframes() {
-            let frame = image
-                .render_frame_cropped(idx)
-                .expect("rendering frames failed");
-            keyframes.push(frame);
+        let mut durations = Vec::with_capacity(num_reps as usize);
+        for _ in 0..num_reps - 1 {
+            // Resets internal cache
+            image.set_image_region(crop_region);
+            let (_, elapsed) = run_once(&mut image)?;
+            durations.push(elapsed);
         }
-    }
+        image.set_image_region(crop_region);
+        let (keyframes, elapsed) = run_once(&mut image)?;
+        durations.push(elapsed);
 
-    if let Ok(frame) = image.render_loading_frame_cropped() {
-        tracing::warn!("Rendered partially loaded frame");
-        keyframes.push(frame);
-    }
+        let min = durations.iter().min().unwrap().as_secs_f64();
+        let max = durations.iter().max().unwrap().as_secs_f64();
+        let geomean = durations
+            .iter()
+            .fold(1f64, |acc, elapsed| acc * elapsed.as_secs_f64());
+        let geomean = geomean.powf(1.0 / num_reps as f64);
 
-    let elapsed = decode_start.elapsed();
-    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    tracing::info!("Took {:.2} ms", elapsed_ms);
+        tracing::info!(
+            "Geomean: {:.3} ms ({:.3} MP/s)",
+            geomean * 1000.0,
+            mps / geomean
+        );
+        tracing::info!(
+            "Range: [{:.3} ms, {:.3} ms] ([{:.3} MP/s, {:.3} MP/s])",
+            min * 1000.0,
+            max * 1000.0,
+            mps / max,
+            mps / min,
+        );
+
+        keyframes
+    } else {
+        image.set_image_region(crop_region);
+        let (keyframes, elapsed) = run_once(&mut image)?;
+        let elapsed_seconds = elapsed.as_secs_f64();
+        tracing::info!(
+            "Took {:.2} ms ({:.2} MP/s)",
+            elapsed_seconds * 1000.0,
+            mps / elapsed_seconds
+        );
+        keyframes
+    };
 
     if let Some(output) = &args.output {
         if keyframes.is_empty() {
@@ -203,6 +219,47 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     };
 
     Ok(())
+}
+
+fn run_once(image: &mut JxlImage) -> Result<(Vec<Render>, Duration)> {
+    let pool = image.pool();
+
+    let mut keyframes = Vec::new();
+    #[allow(unused_mut)]
+    let mut rendered = false;
+
+    let decode_start = std::time::Instant::now();
+    #[cfg(feature = "rayon")]
+    if let Some(rayon_pool) = &pool.as_rayon_pool() {
+        keyframes = rayon_pool
+            .install(|| {
+                use rayon::prelude::*;
+
+                (0..image.num_loaded_keyframes())
+                    .into_par_iter()
+                    .map(|idx| image.render_frame_cropped(idx))
+                    .collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .map_err(Error::Render)?;
+        rendered = true;
+    }
+
+    if !rendered {
+        for idx in 0..image.num_loaded_keyframes() {
+            let frame = image
+                .render_frame_cropped(idx)
+                .expect("rendering frames failed");
+            keyframes.push(frame);
+        }
+    }
+
+    if let Ok(frame) = image.render_loading_frame_cropped() {
+        tracing::warn!("Rendered partially loaded frame");
+        keyframes.push(frame);
+    }
+
+    let elapsed = decode_start.elapsed();
+    Ok((keyframes, elapsed))
 }
 
 fn write_png<W: Write>(

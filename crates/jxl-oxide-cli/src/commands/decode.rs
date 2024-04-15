@@ -70,6 +70,9 @@ pub struct DecodeArgs {
     #[cfg(feature = "rayon")]
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
+    /// Number of repeated decoding, used for benchmarking
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub num_reps: Option<u32>,
     #[arg(value_enum, hide = true, long, default_value_t = Lz77ModeArg::IncludeMeta)]
     #[doc(hidden)]
     pub lz77_mode: Lz77ModeArg,
