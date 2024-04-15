@@ -72,7 +72,7 @@ impl TryFrom<u32> for Predictor {
 }
 
 impl Predictor {
-    pub(super) fn predict<S: Sample>(self, properties: &Properties<S>) -> i32 {
+    pub(super) fn predict<S: Sample, const EDGE: bool>(self, properties: &Properties<S>) -> i32 {
         use Predictor::*;
         let predictor = &*properties.predictor;
 
@@ -103,19 +103,21 @@ impl Predictor {
                     .expect("predict_non_sc called with SelfCorrecting predictor");
                 ((prediction + 3) >> 3) as i32
             }
-            NorthEast => predictor.ne(),
+            NorthEast => predictor.ne::<EDGE>(),
             NorthWest => predictor.nw,
-            WestWest => predictor.ww(),
+            WestWest => predictor.ww::<EDGE>(),
             AvgWestAndNorthWest => ((predictor.w as i64 + predictor.nw as i64) / 2) as i32,
             AvgNorthAndNorthWest => ((predictor.n as i64 + predictor.nw as i64) / 2) as i32,
-            AvgNorthAndNorthEast => ((predictor.n as i64 + predictor.ne() as i64) / 2) as i32,
+            AvgNorthAndNorthEast => {
+                ((predictor.n as i64 + predictor.ne::<EDGE>() as i64) / 2) as i32
+            }
             AvgAll => {
                 let n = predictor.n as i64;
                 let w = predictor.w as i64;
-                let nn = predictor.nn() as i64;
-                let ww = predictor.ww() as i64;
-                let nee = predictor.nee() as i64;
-                let ne = predictor.ne() as i64;
+                let nn = predictor.nn::<EDGE>() as i64;
+                let ww = predictor.ww::<EDGE>() as i64;
+                let nee = predictor.nee::<EDGE>() as i64;
+                let ne = predictor.ne::<EDGE>() as i64;
                 ((6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16) as i32
             }
         }
@@ -200,32 +202,42 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     }
 
     #[inline]
-    pub fn properties<'p>(&'p mut self) -> Properties<'p, 'prev, 'a, S> {
+    pub fn properties<'p, const EDGE: bool>(&'p mut self) -> Properties<'p, 'prev, 'a, S> {
         let prediction = self
             .self_correcting
             .as_ref()
-            .map(|sc_pred| self.run_sc_pred(sc_pred));
-        Properties::new(self, prediction)
+            .map(|sc_pred| self.run_sc_pred::<EDGE>(sc_pred));
+        Properties::new::<EDGE>(self, prediction)
     }
 
-    fn run_sc_pred(&self, sc_pred: &SelfCorrectingPredictor) -> PredictionResult {
-        sc_pred.predict(self.n, self.nw, self.ne(), self.w, self.nn())
+    fn run_sc_pred<const EDGE: bool>(&self, sc_pred: &SelfCorrectingPredictor) -> PredictionResult {
+        sc_pred.predict(
+            self.n,
+            self.nw,
+            self.ne::<EDGE>(),
+            self.w,
+            self.nn::<EDGE>(),
+        )
     }
 }
 
 impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     #[inline]
-    fn nn(&self) -> i32 {
-        self.curr_row
-            .get(self.x as usize)
-            .copied()
-            .unwrap_or(self.n)
+    fn nn<const EDGE: bool>(&self) -> i32 {
+        if EDGE {
+            self.curr_row
+                .get(self.x as usize)
+                .copied()
+                .unwrap_or(self.n)
+        } else {
+            self.curr_row[self.x as usize]
+        }
     }
 
     #[inline]
-    fn ne(&self) -> i32 {
+    fn ne<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
-        if self.prev_row.is_empty() || x + 1 >= self.width {
+        if EDGE && (self.prev_row.is_empty() || x + 1 >= self.width) {
             self.n
         } else {
             self.prev_row[x as usize + 1]
@@ -233,22 +245,26 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     }
 
     #[inline]
-    fn nee(&self) -> i32 {
+    fn nee<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
-        if self.prev_row.is_empty() || x + 2 >= self.width {
-            self.ne()
+        if EDGE && (self.prev_row.is_empty() || x + 2 >= self.width) {
+            self.ne::<true>()
         } else {
             self.prev_row[x as usize + 2]
         }
     }
 
     #[inline]
-    fn ww(&self) -> i32 {
+    fn ww<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
-        if let Some(x) = x.checked_sub(2) {
-            self.curr_row[x as usize]
+        if EDGE {
+            if let Some(x) = x.checked_sub(2) {
+                self.curr_row[x as usize]
+            } else {
+                self.w
+            }
         } else {
-            self.w
+            self.curr_row[(x - 2) as usize]
         }
     }
 }
@@ -428,7 +444,7 @@ pub struct Properties<'p, 'prev, 'a, S: Sample> {
 }
 
 impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
-    fn new(
+    fn new<const EDGE: bool>(
         pred: &'p mut PredictorState<'prev, 'a, S>,
         sc_prediction: Option<PredictionResult>,
     ) -> Self {
@@ -446,9 +462,9 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
             w_nw.wrapping_add(pred.n),
             w_nw,
             pred.nw.wrapping_sub(pred.n),
-            pred.n.wrapping_sub(pred.ne()),
-            pred.n.wrapping_sub(pred.nn()),
-            pred.w.wrapping_sub(pred.ww()),
+            pred.n.wrapping_sub(pred.ne::<EDGE>()),
+            pred.n.wrapping_sub(pred.nn::<EDGE>()),
+            pred.w.wrapping_sub(pred.ww::<EDGE>()),
             sc_prediction
                 .as_ref()
                 .map(|pred| pred.max_error)

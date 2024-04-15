@@ -848,13 +848,49 @@ fn decode_channel_slow<S: Sample>(
     grid: &mut CutGrid<S>,
 ) -> Result<()> {
     let height = grid.height();
-    for y in 0..height {
+    for y in 0..2usize.min(height) {
         let row = grid.get_row_mut(y);
 
         for out in row.iter_mut() {
-            let properties = predictor.properties();
+            let properties = predictor.properties::<true>();
             let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
-            let sample_prediction = predictor.predict(&properties);
+            let sample_prediction = predictor.predict::<_, true>(&properties);
+            let true_value = diff.wrapping_add(sample_prediction);
+            *out = S::from_i32(true_value);
+            properties.record(true_value);
+        }
+    }
+
+    for y in 2..height {
+        let row = grid.get_row_mut(y);
+        let (row_left, row_middle, row_right) = if row.len() <= 4 {
+            (row, [].as_mut(), [].as_mut())
+        } else {
+            let (l, m) = row.split_at_mut(2);
+            let (m, r) = m.split_at_mut(m.len() - 2);
+            (l, m, r)
+        };
+
+        for out in row_left {
+            let properties = predictor.properties::<true>();
+            let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
+            let sample_prediction = predictor.predict::<_, true>(&properties);
+            let true_value = diff.wrapping_add(sample_prediction);
+            *out = S::from_i32(true_value);
+            properties.record(true_value);
+        }
+        for out in row_middle {
+            let properties = predictor.properties::<false>();
+            let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
+            let sample_prediction = predictor.predict::<_, false>(&properties);
+            let true_value = diff.wrapping_add(sample_prediction);
+            *out = S::from_i32(true_value);
+            properties.record(true_value);
+        }
+        for out in row_right {
+            let properties = predictor.properties::<true>();
+            let (diff, predictor) = ma_tree.decode_sample_with_fn(next, &properties)?;
+            let sample_prediction = predictor.predict::<_, true>(&properties);
             let true_value = diff.wrapping_add(sample_prediction);
             *out = S::from_i32(true_value);
             properties.record(true_value);
