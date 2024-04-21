@@ -183,6 +183,7 @@ testcase_with_crop! {
         CropInfo { width: 1847, height: 1220, left: 850, top: 929 },
         CropInfo { width: 1421, height: 814, left: 1568, top: 1460 },
     ],
+    crop_bike_0: bike[CropInfo { width: 936, height: 137, left: 877, top: 2353 }],
 }
 
 fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {

@@ -171,10 +171,12 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let group_dim = frame_header.group_dim();
     let num_lf_groups = frame_header.num_lf_groups();
 
-    let mut lf_xyb_groups = lf_xyb.as_mut().map(|lf_xyb| {
-        let num_cols = lf_groups_per_row;
-        let num_rows = num_lf_groups / num_cols;
+    let lf_group_base_x = lf_region.left / group_dim as i32;
+    let lf_group_base_y = lf_region.top / group_dim as i32;
+    let num_cols = lf_region.width.div_ceil(group_dim);
+    let num_rows = lf_region.height.div_ceil(group_dim);
 
+    let mut lf_xyb_groups = lf_xyb.as_mut().map(|lf_xyb| {
         let lf_xyb_arr = <&mut [_; 3]>::try_from(lf_xyb.buffer_mut()).unwrap();
         let mut idx = 0usize;
         lf_xyb_arr.each_mut().map(|grid| {
@@ -205,8 +207,10 @@ pub(crate) fn load_lf_groups<S: Sample>(
         .zip(mlf_groups)
         .filter_map(|(job, modular)| {
             let idx = job.idx;
-            let left = (idx % lf_groups_per_row) * group_dim;
-            let top = (idx / lf_groups_per_row) * group_dim;
+            let lf_group_x = idx % lf_groups_per_row;
+            let lf_group_y = idx / lf_groups_per_row;
+            let left = lf_group_x * group_dim;
+            let top = lf_group_y * group_dim;
             let lf_group_region = Region {
                 left: left as i32,
                 top: top as i32,
@@ -217,10 +221,12 @@ pub(crate) fn load_lf_groups<S: Sample>(
                 return None;
             }
 
+            let xyb_group_idx = lf_group_y.wrapping_add_signed(-lf_group_base_y) * num_cols
+                + lf_group_x.wrapping_add_signed(-lf_group_base_x);
             let lf_xyb = lf_xyb_groups.as_mut().map(|lf_xyb_groups| {
-                lf_xyb_groups
-                    .each_mut()
-                    .map(|groups| std::mem::replace(&mut groups[idx as usize], CutGrid::empty()))
+                lf_xyb_groups.each_mut().map(|groups| {
+                    std::mem::replace(&mut groups[xyb_group_idx as usize], CutGrid::empty())
+                })
             });
 
             Some(LfGroupJob {
