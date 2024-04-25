@@ -617,6 +617,7 @@ impl<'dest, S: Sample> RecursiveModularImage<'dest, S> {
 struct RleState<S: Sample> {
     value: S,
     repeat: u32,
+    error: Option<Box<jxl_coding::Error>>,
 }
 
 impl<S: Sample> RleState<S> {
@@ -624,6 +625,7 @@ impl<S: Sample> RleState<S> {
         Self {
             value: S::default(),
             repeat: 0,
+            error: None,
         }
     }
 
@@ -633,22 +635,36 @@ impl<S: Sample> RleState<S> {
         bitstream: &mut Bitstream,
         decoder: &mut DecoderRleMode,
         cluster: u8,
-    ) -> Result<S> {
-        Ok(if self.repeat > 0 {
+    ) -> S {
+        if self.repeat > 0 {
             self.repeat -= 1;
             self.value
         } else {
-            match decoder.read_varint_clustered(bitstream, cluster)? {
-                RleToken::Value(v) => {
+            let result = decoder.read_varint_clustered(bitstream, cluster);
+            match result {
+                Ok(RleToken::Value(v)) => {
                     self.value = S::unpack_signed_u32(v);
-                    self.value
                 }
-                RleToken::Repeat(len) => {
+                Ok(RleToken::Repeat(len)) => {
                     self.repeat = len - 1;
-                    self.value
                 }
+                Err(e) if self.error.is_none() => {
+                    self.error = Some(Box::new(e));
+                }
+                _ => {}
             }
-        })
+            self.value
+        }
+    }
+
+    fn check_error(&mut self) -> Result<()> {
+        let error = self.error.take();
+        if let Some(error) = error {
+            let error = *error;
+            Err(error.into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -731,45 +747,40 @@ fn decode_fast_lossless<S: Sample>(
     cluster: u8,
     grid: &mut CutGrid<S>,
 ) -> Result<()> {
-    let width = grid.width();
     let height = grid.height();
-    let mut prev_row_cache = Vec::with_capacity(width);
+
+    for y in 0..height {
+        let out_row = grid.get_row_mut(y);
+        for out in out_row {
+            *out = rle_state.decode(bitstream, decoder, cluster);
+        }
+    }
+    rle_state.check_error()?;
 
     {
         let mut w = S::default();
         let out_row = grid.get_row_mut(0);
-        for out in out_row[..width].iter_mut() {
-            let pred = w;
-
-            let token = rle_state.decode(bitstream, decoder, cluster)?;
-            let value = token.add(pred);
-            *out = value;
-            prev_row_cache.push(value);
-            w = value;
+        for out in &mut *out_row {
+            w = w.add(*out);
+            *out = w;
         }
     }
 
     for y in 1..height {
-        let out_row = grid.get_row_mut(y);
+        let (u, mut d) = grid.split_vertical(y);
+        let prev_row = u.get_row(y - 1);
+        let out_row = d.get_row_mut(0);
 
-        let n = prev_row_cache[0];
-        let pred = n;
-        let token = rle_state.decode(bitstream, decoder, cluster)?;
-        let value = token.add(pred);
-        out_row[0] = value;
-        prev_row_cache[0] = value;
+        let mut w = out_row[0].add(prev_row[0]);
+        out_row[0] = w;
 
-        let mut w = value;
-        let mut nw = n;
-        for (prev, out) in prev_row_cache[1..].iter_mut().zip(&mut out_row[1..]) {
-            let n = *prev;
+        for (window, out) in prev_row.windows(2).zip(&mut out_row[1..]) {
+            let nw = window[0];
+            let n = window[1];
             let pred = S::grad_clamped(n, w, nw);
 
-            let token = rle_state.decode(bitstream, decoder, cluster)?;
-            let value = token.add(pred);
+            let value = out.add(pred);
             *out = value;
-            *prev = value;
-            nw = n;
             w = value;
         }
     }
@@ -787,41 +798,34 @@ fn decode_simple_grad<S: Sample>(
 ) -> Result<()> {
     let width = grid.width();
     let height = grid.height();
-    let mut prev_row_cache = Vec::with_capacity(width);
 
     {
         let mut w = S::default();
         let out_row = grid.get_row_mut(0);
         for out in out_row[..width].iter_mut() {
-            let pred = w;
-
             let token = decoder.read_varint_with_multiplier_clustered(
                 bitstream,
                 cluster,
                 dist_multiplier,
             )?;
-            let value = S::unpack_signed_u32(token).add(pred);
-            *out = value;
-            prev_row_cache.push(value);
-            w = value;
+            w = S::unpack_signed_u32(token).add(w);
+            *out = w;
         }
     }
 
     for y in 1..height {
-        let out_row = grid.get_row_mut(y);
+        let (u, mut d) = grid.split_vertical(y);
+        let prev_row = u.get_row(y - 1);
+        let out_row = d.get_row_mut(0);
 
-        let n = prev_row_cache[0];
-        let pred = n;
         let token =
             decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
-        let value = S::unpack_signed_u32(token).add(pred);
-        out_row[0] = value;
-        prev_row_cache[0] = value;
+        let mut w = S::unpack_signed_u32(token).add(prev_row[0]);
+        out_row[0] = w;
 
-        let mut w = value;
-        let mut nw = n;
-        for (prev, out) in prev_row_cache[1..].iter_mut().zip(&mut out_row[1..]) {
-            let n = *prev;
+        for (window, out) in prev_row.windows(2).zip(&mut out_row[1..]) {
+            let nw = window[0];
+            let n = window[1];
             let pred = S::grad_clamped(n, w, nw);
 
             let token = decoder.read_varint_with_multiplier_clustered(
@@ -831,8 +835,6 @@ fn decode_simple_grad<S: Sample>(
             )?;
             let value = S::unpack_signed_u32(token).add(pred);
             *out = value;
-            *prev = value;
-            nw = n;
             w = value;
         }
     }
