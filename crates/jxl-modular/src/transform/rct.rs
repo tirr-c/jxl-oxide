@@ -4,46 +4,98 @@ use jxl_grid::CutGrid;
 
 use crate::Sample;
 
-pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
-    let permutation = permutation as usize;
+type FnRow<S> = fn(u32, &mut [&mut [S]; 3]);
+type UnsafeFnRow<S> = unsafe fn(u32, &mut [&mut [S]; 3]);
 
-    let [a, b, c] = grids;
-    let width = a.width();
-    let height = a.height();
-    assert_eq!(width, b.width());
-    assert_eq!(width, c.width());
-    assert_eq!(height, b.height());
-    assert_eq!(height, c.height());
+#[inline]
+pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
+    run_rows(permutation, ty, grids, inverse_row_base);
+}
+
+#[inline]
+fn run_rows<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3], f: FnRow<S>) {
+    // SAFETY: `f` is safe.
+    unsafe { run_rows_unsafe(permutation, ty, grids, f) }
+}
+
+unsafe fn run_rows_unsafe<S: Sample>(
+    permutation: u32,
+    ty: u32,
+    mut grids: [&mut CutGrid<S>; 3],
+    f: UnsafeFnRow<S>,
+) {
+    let width = grids[0].width();
+    let height = grids[0].height();
+    assert_eq!(width, grids[1].width());
+    assert_eq!(width, grids[2].width());
+    assert_eq!(height, grids[1].height());
+    assert_eq!(height, grids[2].height());
 
     for y in 0..height {
-        for x in 0..width {
-            let samples = [a.get_mut(x, y), b.get_mut(x, y), c.get_mut(x, y)];
+        let mut rows = grids.each_mut().map(|g| g.get_row_mut(y));
+        f(ty, &mut rows);
+        inverse_permute(permutation, rows);
+    }
+}
 
-            let a = Wrapping(samples[0].to_i32());
-            let b = Wrapping(samples[1].to_i32());
-            let c = Wrapping(samples[2].to_i32());
-            let d;
-            let e;
-            let f;
-            if ty == 6 {
-                let tmp = a - (c >> 1);
-                e = c + tmp;
-                f = tmp - (b >> 1);
-                d = f + b;
+fn inverse_row_base<S: Sample>(ty: u32, rows: &mut [&mut [S]; 3]) {
+    let width = rows[0].len();
+
+    for x in 0..width {
+        let samples = rows.each_mut().map(|r| &mut r[x]);
+
+        let a = Wrapping(samples[0].to_i32());
+        let b = Wrapping(samples[1].to_i32());
+        let c = Wrapping(samples[2].to_i32());
+        let d;
+        let e;
+        let f;
+        if ty == 6 {
+            let tmp = a - (c >> 1);
+            e = c + tmp;
+            f = tmp - (b >> 1);
+            d = f + b;
+        } else {
+            d = a;
+            f = if ty & 1 != 0 { c + a } else { c };
+            e = if (ty >> 1) == 1 {
+                b + a
+            } else if (ty >> 1) == 2 {
+                b + ((a + f) >> 1)
             } else {
-                d = a;
-                f = if ty & 1 != 0 { c + a } else { c };
-                e = if (ty >> 1) == 1 {
-                    b + a
-                } else if (ty >> 1) == 2 {
-                    b + ((a + f) >> 1)
-                } else {
-                    b
-                };
-            }
-            *samples[permutation % 3] = S::from_i32(d.0);
-            *samples[(permutation + 1 + (permutation / 3)) % 3] = S::from_i32(e.0);
-            *samples[(permutation + 2 - (permutation / 3)) % 3] = S::from_i32(f.0);
+                b
+            };
         }
+        let d = S::from_i32(d.0);
+        let e = S::from_i32(e.0);
+        let f = S::from_i32(f.0);
+        *samples[0] = d;
+        *samples[1] = e;
+        *samples[2] = f;
+    }
+}
+
+#[inline(always)]
+fn inverse_permute<S: Sample>(permutation: u32, rows: [&mut [S]; 3]) {
+    let [a, b, c] = rows;
+    match permutation {
+        1 => {
+            a.swap_with_slice(b);
+            a.swap_with_slice(c);
+        }
+        2 => {
+            a.swap_with_slice(b);
+            b.swap_with_slice(c);
+        }
+        3 => {
+            b.swap_with_slice(c);
+        }
+        4 => {
+            a.swap_with_slice(b);
+        }
+        5 => {
+            a.swap_with_slice(c);
+        }
+        _ => {}
     }
 }
