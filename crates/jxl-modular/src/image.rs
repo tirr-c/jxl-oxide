@@ -749,19 +749,12 @@ fn decode_fast_lossless<S: Sample>(
 ) -> Result<()> {
     let height = grid.height();
 
-    for y in 0..height {
-        let out_row = grid.get_row_mut(y);
-        for out in out_row {
-            *out = rle_state.decode(bitstream, decoder, cluster);
-        }
-    }
-    rle_state.check_error()?;
-
     {
         let mut w = S::default();
         let out_row = grid.get_row_mut(0);
         for out in &mut *out_row {
-            w = w.add(*out);
+            let token = rle_state.decode(bitstream, decoder, cluster);
+            w = w.add(token);
             *out = w;
         }
     }
@@ -771,7 +764,8 @@ fn decode_fast_lossless<S: Sample>(
         let prev_row = u.get_row(y - 1);
         let out_row = d.get_row_mut(0);
 
-        let mut w = out_row[0].add(prev_row[0]);
+        let token = rle_state.decode(bitstream, decoder, cluster);
+        let mut w = token.add(prev_row[0]);
         out_row[0] = w;
 
         for (window, out) in prev_row.windows(2).zip(&mut out_row[1..]) {
@@ -779,13 +773,13 @@ fn decode_fast_lossless<S: Sample>(
             let n = window[1];
             let pred = S::grad_clamped(n, w, nw);
 
-            let value = out.add(pred);
-            *out = value;
-            w = value;
+            let token = rle_state.decode(bitstream, decoder, cluster);
+            w = token.add(pred);
+            *out = w;
         }
     }
 
-    Ok(())
+    rle_state.check_error()
 }
 
 #[inline(never)]
