@@ -551,7 +551,7 @@ enum Coder {
 }
 
 impl Coder {
-    #[inline]
+    #[inline(always)]
     fn read_symbol(&mut self, bitstream: &mut Bitstream, cluster: u8) -> Result<u32> {
         match self {
             Self::PrefixCode(dist) => {

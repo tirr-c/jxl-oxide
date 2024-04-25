@@ -72,6 +72,7 @@ impl TryFrom<u32> for Predictor {
 }
 
 impl Predictor {
+    #[inline(always)]
     pub(super) fn predict<S: Sample, const EDGE: bool>(self, properties: &Properties<S>) -> i32 {
         use Predictor::*;
         let predictor = &*properties.predictor;
@@ -201,7 +202,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         self.prev_grad = 0;
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn properties<'p, const EDGE: bool>(&'p mut self) -> Properties<'p, 'prev, 'a, S> {
         let prediction = self
             .self_correcting
@@ -210,6 +211,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         Properties::new::<EDGE>(self, prediction)
     }
 
+    #[inline(always)]
     fn run_sc_pred<const EDGE: bool>(&self, sc_pred: &SelfCorrectingPredictor) -> PredictionResult {
         sc_pred.predict(
             self.n,
@@ -222,7 +224,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
 }
 
 impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
-    #[inline]
+    #[inline(always)]
     fn nn<const EDGE: bool>(&self) -> i32 {
         if EDGE {
             self.curr_row
@@ -234,7 +236,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn ne<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
         if EDGE && (self.prev_row.is_empty() || x + 1 >= self.width) {
@@ -244,7 +246,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn nee<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
         if EDGE && (self.prev_row.is_empty() || x + 2 >= self.width) {
@@ -254,7 +256,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn ww<const EDGE: bool>(&self) -> i32 {
         let x = self.x;
         if EDGE {
@@ -287,6 +289,7 @@ struct SelfCorrectingPredictor {
 }
 
 impl SelfCorrectingPredictor {
+    #[inline(always)]
     fn new(width: u32, wp_header: WpHeader) -> Self {
         Self {
             width,
@@ -305,6 +308,7 @@ impl SelfCorrectingPredictor {
         }
     }
 
+    #[inline(always)]
     fn predict(&self, n: i32, nw: i32, ne: i32, w: i32, nn: i32) -> PredictionResult {
         let SelfCorrectingPredictor {
             ref wp,
@@ -386,6 +390,7 @@ impl SelfCorrectingPredictor {
         }
     }
 
+    #[inline(always)]
     fn record(&mut self, pred: PredictionResult, sample: i32) {
         let sample = sample as i64;
         let true_err = pred.prediction - (sample << 3);
@@ -444,6 +449,7 @@ pub struct Properties<'p, 'prev, 'a, S: Sample> {
 }
 
 impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
+    #[inline(always)]
     fn new<const EDGE: bool>(
         pred: &'p mut PredictorState<'prev, 'a, S>,
         sc_prediction: Option<PredictionResult>,
@@ -480,7 +486,7 @@ impl<'p, 'prev, 'a, S: Sample> Properties<'p, 'prev, 'a, S> {
 }
 
 impl<S: Sample> Properties<'_, '_, '_, S> {
-    #[inline]
+    #[inline(always)]
     fn prediction(&self) -> Option<i64> {
         self.sc_prediction.as_ref().map(|pred| pred.prediction)
     }
@@ -531,6 +537,7 @@ impl<S: Sample> Properties<'_, '_, '_, S> {
         }
     }
 
+    #[inline(always)]
     pub fn record(self, sample: i32) {
         let pred = self.predictor;
         if let (Some(sc), Some(pred)) = (&mut pred.self_correcting, self.sc_prediction) {

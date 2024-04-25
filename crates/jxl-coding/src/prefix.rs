@@ -318,7 +318,7 @@ impl Histogram {
 }
 
 impl Histogram {
-    #[inline]
+    #[inline(always)]
     pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u32> {
         let Self {
             toplevel_bits,
