@@ -441,11 +441,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
 }
 
 impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
-    fn decode_inner(
-        &mut self,
-        bitstream: &mut Bitstream,
-        stream_index: u32,
-    ) -> Result<()> {
+    fn decode_inner(&mut self, bitstream: &mut Bitstream, stream_index: u32) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "decode channels", stream_index);
         let _guard = span.enter();
 
@@ -466,8 +462,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 continue;
             }
 
-            let filtered_prev_len = self
-                .channel_info[..i]
+            let filtered_prev_len = self.channel_info[..i]
                 .iter()
                 .filter(|prev_info| {
                     info.width == prev_info.width
@@ -477,16 +472,29 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 })
                 .count();
 
-            let ma_tree = self.ma_ctx.make_flat_tree(i as u32, stream_index, filtered_prev_len as u32);
+            let ma_tree =
+                self.ma_ctx
+                    .make_flat_tree(i as u32, stream_index, filtered_prev_len as u32);
             ma_tree_list.push(Some(ma_tree));
         }
 
         let mut is_fast_lossless = false;
         if decoder.as_rle().is_some() {
             is_fast_lossless = ma_tree_list.iter().all(|ma_tree| {
-                ma_tree.as_ref().map(|ma_tree| {
-                    matches!(ma_tree.single_node(), Some(MaTreeLeafClustered { predictor: Predictor::Gradient, offset: 0, multiplier: 1, .. }))
-                }).unwrap_or(true)
+                ma_tree
+                    .as_ref()
+                    .map(|ma_tree| {
+                        matches!(
+                            ma_tree.single_node(),
+                            Some(MaTreeLeafClustered {
+                                predictor: Predictor::Gradient,
+                                offset: 0,
+                                multiplier: 1,
+                                ..
+                            })
+                        )
+                    })
+                    .unwrap_or(true)
             });
         }
 
@@ -495,8 +503,15 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         let wp_header = &self.header.wp_params;
         let mut predictor = PredictorState::new();
         let mut prev_map = HashMap::new();
-        for ((info, ma_tree), grid) in self.channel_info.iter().zip(ma_tree_list).zip(&mut self.grid) {
-            let Some(ma_tree) = ma_tree else { continue; };
+        for ((info, ma_tree), grid) in self
+            .channel_info
+            .iter()
+            .zip(ma_tree_list)
+            .zip(&mut self.grid)
+        {
+            let Some(ma_tree) = ma_tree else {
+                continue;
+            };
             let key = (info.width, info.height, info.hshift, info.vshift);
 
             let filtered_prev = prev_map.entry(key).or_insert_with(Vec::new);
@@ -517,7 +532,14 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 let filtered_prev = &filtered_prev[..ma_tree.max_prev_channel_depth()];
                 let wp_header = ma_tree.need_self_correcting().then_some(wp_header);
                 predictor.reset(grid.width() as u32, filtered_prev, wp_header);
-                decode_slow(bitstream, &mut decoder, dist_multiplier, &ma_tree, &mut predictor, grid)?;
+                decode_slow(
+                    bitstream,
+                    &mut decoder,
+                    dist_multiplier,
+                    &ma_tree,
+                    &mut predictor,
+                    grid,
+                )?;
             }
 
             filtered_prev.insert(0, grid.grid());
@@ -606,7 +628,12 @@ impl<S: Sample> RleState<S> {
     }
 
     #[inline(always)]
-    fn decode(&mut self, bitstream: &mut Bitstream, decoder: &mut DecoderRleMode, cluster: u8) -> Result<S> {
+    fn decode(
+        &mut self,
+        bitstream: &mut Bitstream,
+        decoder: &mut DecoderRleMode,
+        cluster: u8,
+    ) -> Result<S> {
         Ok(if self.repeat > 0 {
             self.repeat -= 1;
             self.value
@@ -648,24 +675,28 @@ fn decode_single_node<S: Sample>(
     match (predictor, single_token) {
         (Predictor::Zero, Some(token)) => {
             tracing::trace!("Single token in cluster, Zero predictor: hyper fast path");
-            let value = S::unpack_signed_u32(token)
-                .wrapping_muladd_i32(multiplier as i32, offset);
+            let value = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
             for y in 0..height {
                 grid.get_row_mut(y).fill(value);
             }
             Ok(())
-        },
+        }
         (Predictor::Zero, None) => {
             tracing::trace!("Zero predictor: fast path");
             for y in 0..height {
                 let row = grid.get_row_mut(y);
                 for out in row {
-                    let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
-                    *out = S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
+                    let token = decoder.read_varint_with_multiplier_clustered(
+                        bitstream,
+                        cluster,
+                        dist_multiplier,
+                    )?;
+                    *out =
+                        S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
                 }
             }
             Ok(())
-        },
+        }
         (Predictor::Gradient, _) if offset == 0 && multiplier == 1 => {
             if let Some(rle_state) = rle_state {
                 tracing::trace!("libjxl fast-lossless: quite fast path");
@@ -675,11 +706,18 @@ fn decode_single_node<S: Sample>(
                 tracing::trace!("Simple gradient: quite fast path");
                 decode_simple_grad(bitstream, decoder, cluster, dist_multiplier, grid)
             }
-        },
+        }
         _ => {
             let wp_header = (predictor == Predictor::SelfCorrecting).then_some(wp_header);
             predictor_state.reset(grid.width() as u32, &[], wp_header);
-            decode_single_node_slow(bitstream, decoder, dist_multiplier, node, predictor_state, grid)
+            decode_single_node_slow(
+                bitstream,
+                decoder,
+                dist_multiplier,
+                node,
+                predictor_state,
+                grid,
+            )
         }
     }
 }
@@ -756,7 +794,11 @@ fn decode_simple_grad<S: Sample>(
         for out in out_row[..width].iter_mut() {
             let pred = w;
 
-            let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+            let token = decoder.read_varint_with_multiplier_clustered(
+                bitstream,
+                cluster,
+                dist_multiplier,
+            )?;
             let value = S::unpack_signed_u32(token).add(pred);
             *out = value;
             prev_row_cache.push(value);
@@ -769,7 +811,8 @@ fn decode_simple_grad<S: Sample>(
 
         let n = prev_row_cache[0];
         let pred = n;
-        let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+        let token =
+            decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
         let value = S::unpack_signed_u32(token).add(pred);
         out_row[0] = value;
         prev_row_cache[0] = value;
@@ -780,7 +823,11 @@ fn decode_simple_grad<S: Sample>(
             let n = *prev;
             let pred = S::grad_clamped(n, w, nw);
 
-            let token = decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+            let token = decoder.read_varint_with_multiplier_clustered(
+                bitstream,
+                cluster,
+                dist_multiplier,
+            )?;
             let value = S::unpack_signed_u32(token).add(pred);
             *out = value;
             *prev = value;
@@ -800,7 +847,11 @@ fn decode_one<S: Sample, const EDGE: bool>(
     leaf: &MaTreeLeafClustered,
     properties: &Properties<S>,
 ) -> Result<S> {
-    let diff = S::unpack_signed_u32(decoder.read_varint_with_multiplier_clustered(bitstream, leaf.cluster, dist_multiplier)?);
+    let diff = S::unpack_signed_u32(decoder.read_varint_with_multiplier_clustered(
+        bitstream,
+        leaf.cluster,
+        dist_multiplier,
+    )?);
     let diff = diff.wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
     let predictor = leaf.predictor;
     let sample_prediction = predictor.predict::<_, EDGE>(properties);
@@ -822,13 +873,8 @@ fn decode_single_node_slow<S: Sample>(
 
         for out in row.iter_mut() {
             let properties = predictor.properties::<true>();
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
@@ -846,37 +892,22 @@ fn decode_single_node_slow<S: Sample>(
 
         for out in row_left {
             let properties = predictor.properties::<true>();
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
         for out in row_middle {
             let properties = predictor.properties::<false>();
-            let true_value = decode_one::<_, false>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, false>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
         for out in row_right {
             let properties = predictor.properties::<true>();
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
@@ -901,13 +932,8 @@ fn decode_slow<S: Sample>(
         for out in row.iter_mut() {
             let properties = predictor.properties::<true>();
             let leaf = ma_tree.get_leaf(&properties);
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
@@ -926,39 +952,24 @@ fn decode_slow<S: Sample>(
         for out in row_left {
             let properties = predictor.properties::<true>();
             let leaf = ma_tree.get_leaf(&properties);
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
         for out in row_middle {
             let properties = predictor.properties::<false>();
             let leaf = ma_tree.get_leaf(&properties);
-            let true_value = decode_one::<_, false>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, false>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
         for out in row_right {
             let properties = predictor.properties::<true>();
             let leaf = ma_tree.get_leaf(&properties);
-            let true_value = decode_one::<_, true>(
-                bitstream,
-                decoder,
-                dist_multiplier,
-                leaf,
-                &properties,
-            )?;
+            let true_value =
+                decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
