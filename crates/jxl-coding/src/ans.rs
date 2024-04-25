@@ -268,7 +268,7 @@ impl Histogram {
 }
 
 impl Histogram {
-    #[inline]
+    #[inline(always)]
     pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u32> {
         assert_eq!(std::mem::size_of::<Bucket>(), 8);
         let is_le = usize::from_le(1) == 1;

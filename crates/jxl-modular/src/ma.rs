@@ -294,8 +294,7 @@ impl FlatMaTree {
         }
     }
 
-    #[inline]
-    fn get_leaf<S: Sample>(&self, properties: &Properties<S>) -> &MaTreeLeafClustered {
+    pub(crate) fn get_leaf<S: Sample>(&self, properties: &Properties<S>) -> &MaTreeLeafClustered {
         let mut current_node = &self.nodes[0];
         loop {
             match current_node {
@@ -352,18 +351,6 @@ impl FlatMaTree {
             dist_multiplier,
         )?;
         let diff = unpack_signed(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
-        Ok((diff, leaf.predictor))
-    }
-
-    #[inline]
-    pub(crate) fn decode_sample_with_fn<S: Sample>(
-        &self,
-        next: &mut impl FnMut(u8) -> Result<i32>,
-        properties: &Properties<S>,
-    ) -> Result<(i32, super::predictor::Predictor)> {
-        let leaf = self.get_leaf(properties);
-        let diff = next(leaf.cluster)?;
-        let diff = diff.wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
         Ok((diff, leaf.predictor))
     }
 
