@@ -652,6 +652,7 @@ impl<S: Sample> RleState<S> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_single_node<S: Sample>(
     bitstream: &mut Bitstream,
     decoder: &mut Decoder,
