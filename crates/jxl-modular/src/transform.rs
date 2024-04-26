@@ -193,8 +193,18 @@ impl Rct {
         let a = channels.next().unwrap().grid_mut();
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
+        let grids = [a, b, c];
 
-        rct::inverse_rct(permutation, ty, [a, b, c], pool);
+        match ty {
+            0 => rct::inverse_rct::<_, 0>(permutation, grids, pool),
+            1 => rct::inverse_rct::<_, 1>(permutation, grids, pool),
+            2 => rct::inverse_rct::<_, 2>(permutation, grids, pool),
+            3 => rct::inverse_rct::<_, 3>(permutation, grids, pool),
+            4 => rct::inverse_rct::<_, 4>(permutation, grids, pool),
+            5 => rct::inverse_rct::<_, 5>(permutation, grids, pool),
+            6 => rct::inverse_rct::<_, 6>(permutation, grids, pool),
+            _ => unreachable!(),
+        }
     }
 }
 

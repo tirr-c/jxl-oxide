@@ -1,3 +1,7 @@
+#[cfg(target_arch = "aarch64")]
+use std::arch::is_aarch64_feature_detected;
+#[cfg(target_arch = "x86_64")]
+use std::arch::is_x86_feature_detected;
 use std::num::Wrapping;
 
 use jxl_grid::CutGrid;
@@ -5,34 +9,49 @@ use jxl_threadpool::JxlThreadPool;
 
 use crate::Sample;
 
-type FnRow<S> = fn(u32, &mut [&mut [S]; 3]);
-type UnsafeFnRow<S> = unsafe fn(u32, &mut [&mut [S]; 3]);
+type FnRow<S> = fn(&mut [&mut [S]; 3]);
+type UnsafeFnRow<S> = unsafe fn(&mut [&mut [S]; 3]);
 
-#[inline]
-pub fn inverse_rct<S: Sample>(
+pub fn inverse_rct<S: Sample, const TYPE: u32>(
     permutation: u32,
-    ty: u32,
-    grids: [&mut CutGrid<S>; 3],
+    mut grids: [&mut CutGrid<S>; 3],
     pool: &JxlThreadPool,
 ) {
-    run_rows(permutation, ty, grids, inverse_row_base, pool);
+    let grid16 = grids.each_mut().map(|g| S::try_as_i16_cut_grid_mut(g));
+    if let [Some(a), Some(b), Some(c)] = grid16 {
+        let grids = [a, b, c];
+
+        #[cfg(target_arch = "aarch64")]
+        if is_aarch64_feature_detected!("neon") {
+            unsafe {
+                run_rows_unsafe(
+                    permutation,
+                    grids,
+                    inverse_row_i16_aarch64_neon::<TYPE>,
+                    pool,
+                );
+                return;
+            }
+        }
+    }
+
+    run_rows(permutation, grids, inverse_row_base::<S, TYPE>, pool);
 }
 
 #[inline]
 fn run_rows<S: Sample>(
     permutation: u32,
-    ty: u32,
     grids: [&mut CutGrid<S>; 3],
     f: FnRow<S>,
     pool: &JxlThreadPool,
 ) {
     // SAFETY: `f` is safe.
-    unsafe { run_rows_unsafe(permutation, ty, grids, f, pool) }
+    unsafe { run_rows_unsafe(permutation, grids, f, pool) }
 }
 
+#[inline(never)]
 unsafe fn run_rows_unsafe<S: Sample>(
     permutation: u32,
-    ty: u32,
     grids: [&mut CutGrid<S>; 3],
     f: UnsafeFnRow<S>,
     pool: &JxlThreadPool,
@@ -59,13 +78,67 @@ unsafe fn run_rows_unsafe<S: Sample>(
         let height = grids[0].height();
         for y in 0..height {
             let mut rows = grids.each_mut().map(|g| g.get_row_mut(y));
-            f(ty, &mut rows);
+            f(&mut rows);
             inverse_permute(permutation, rows);
         }
     });
 }
 
-fn inverse_row_base<S: Sample>(ty: u32, rows: &mut [&mut [S]; 3]) {
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+#[inline]
+unsafe fn inverse_row_i16_aarch64_neon<const TYPE: u32>(rows: &mut [&mut [i16]; 3]) {
+    use std::arch::aarch64::*;
+
+    if TYPE == 0 {
+        return;
+    }
+
+    let [mut a, mut b, mut c] = rows.each_mut().map(|r| r.chunks_exact_mut(4));
+    for ((ra, rb), rc) in (&mut a).zip(&mut b).zip(&mut c) {
+        let a = vld1_s16(ra.as_ptr());
+        let b = vld1_s16(rb.as_ptr());
+        let c = vld1_s16(rc.as_ptr());
+        let mut d = a;
+        let mut e = b;
+        let mut f = c;
+        match TYPE {
+            1 => {
+                f = vadd_s16(c, a);
+            }
+            2 => {
+                e = vadd_s16(b, a);
+            }
+            3 => {
+                f = vadd_s16(c, a);
+                e = vadd_s16(b, a);
+            }
+            4 => {
+                e = vadd_s16(b, vshr_n_s16::<1>(vadd_s16(a, c)));
+            }
+            5 => {
+                f = vadd_s16(c, a);
+                e = vadd_s16(b, vshr_n_s16::<1>(vadd_s16(a, f)));
+            }
+            6 => {
+                let tmp = vsub_s16(a, vshr_n_s16::<1>(c));
+                e = vadd_s16(c, tmp);
+                f = vsub_s16(tmp, vshr_n_s16::<1>(b));
+                d = vadd_s16(f, b);
+            }
+            _ => {}
+        }
+        vst1_s16(ra.as_mut_ptr(), d);
+        vst1_s16(rb.as_mut_ptr(), e);
+        vst1_s16(rc.as_mut_ptr(), f);
+    }
+
+    let mut rows = [a.into_remainder(), b.into_remainder(), c.into_remainder()];
+    inverse_row_base::<i16, TYPE>(&mut rows);
+}
+
+#[inline]
+fn inverse_row_base<S: Sample, const TYPE: u32>(rows: &mut [&mut [S]; 3]) {
     let width = rows[0].len();
 
     for x in 0..width {
@@ -77,17 +150,17 @@ fn inverse_row_base<S: Sample>(ty: u32, rows: &mut [&mut [S]; 3]) {
         let d;
         let e;
         let f;
-        if ty == 6 {
+        if TYPE == 6 {
             let tmp = a - (c >> 1);
             e = c + tmp;
             f = tmp - (b >> 1);
             d = f + b;
         } else {
             d = a;
-            f = if ty & 1 != 0 { c + a } else { c };
-            e = if (ty >> 1) == 1 {
+            f = if TYPE & 1 != 0 { c + a } else { c };
+            e = if (TYPE >> 1) == 1 {
                 b + a
-            } else if (ty >> 1) == 2 {
+            } else if (TYPE >> 1) == 2 {
                 b + ((a + f) >> 1)
             } else {
                 b
