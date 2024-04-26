@@ -194,30 +194,7 @@ impl Rct {
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
 
-        let a = {
-            let g = a.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let b = {
-            let g = b.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let c = {
-            let g = c.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let groups = a
-            .into_iter()
-            .zip(b)
-            .zip(c)
-            .map(|((a, b), c)| (a, b, c))
-            .collect::<Vec<_>>();
-        pool.for_each_vec(groups, |(mut a, mut b, mut c)| {
-            rct::inverse_rct(permutation, ty, [&mut a, &mut b, &mut c]);
-        })
+        rct::inverse_rct(permutation, ty, [a, b, c], pool);
     }
 }
 

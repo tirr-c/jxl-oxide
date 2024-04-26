@@ -1,6 +1,7 @@
 use std::num::Wrapping;
 
 use jxl_grid::CutGrid;
+use jxl_threadpool::JxlThreadPool;
 
 use crate::Sample;
 
@@ -8,22 +9,38 @@ type FnRow<S> = fn(u32, &mut [&mut [S]; 3]);
 type UnsafeFnRow<S> = unsafe fn(u32, &mut [&mut [S]; 3]);
 
 #[inline]
-pub fn inverse_rct<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3]) {
-    run_rows(permutation, ty, grids, inverse_row_base);
+pub fn inverse_rct<S: Sample>(
+    permutation: u32,
+    ty: u32,
+    grids: [&mut CutGrid<S>; 3],
+    pool: &JxlThreadPool,
+) {
+    run_rows(permutation, ty, grids, inverse_row_base, pool);
 }
 
 #[inline]
-fn run_rows<S: Sample>(permutation: u32, ty: u32, grids: [&mut CutGrid<S>; 3], f: FnRow<S>) {
+fn run_rows<S: Sample>(
+    permutation: u32,
+    ty: u32,
+    grids: [&mut CutGrid<S>; 3],
+    f: FnRow<S>,
+    pool: &JxlThreadPool,
+) {
     // SAFETY: `f` is safe.
-    unsafe { run_rows_unsafe(permutation, ty, grids, f) }
+    unsafe { run_rows_unsafe(permutation, ty, grids, f, pool) }
 }
 
 unsafe fn run_rows_unsafe<S: Sample>(
     permutation: u32,
     ty: u32,
-    mut grids: [&mut CutGrid<S>; 3],
+    grids: [&mut CutGrid<S>; 3],
     f: UnsafeFnRow<S>,
+    pool: &JxlThreadPool,
 ) {
+    struct RctJob<'g, S: Sample> {
+        grids: [CutGrid<'g, S>; 3],
+    }
+
     let width = grids[0].width();
     let height = grids[0].height();
     assert_eq!(width, grids[1].width());
@@ -31,11 +48,21 @@ unsafe fn run_rows_unsafe<S: Sample>(
     assert_eq!(height, grids[1].height());
     assert_eq!(height, grids[2].height());
 
-    for y in 0..height {
-        let mut rows = grids.each_mut().map(|g| g.get_row_mut(y));
-        f(ty, &mut rows);
-        inverse_permute(permutation, rows);
+    let [mut a, mut b, mut c] = grids.map(|g| g.borrow_mut().into_groups(width, 64));
+    let mut jobs = Vec::new();
+    while let (Some(a), Some(b), Some(c)) = (a.pop(), b.pop(), c.pop()) {
+        jobs.push(RctJob { grids: [a, b, c] });
     }
+
+    pool.for_each_vec(jobs, |job| {
+        let mut grids = job.grids;
+        let height = grids[0].height();
+        for y in 0..height {
+            let mut rows = grids.each_mut().map(|g| g.get_row_mut(y));
+            f(ty, &mut rows);
+            inverse_permute(permutation, rows);
+        }
+    });
 }
 
 fn inverse_row_base<S: Sample>(ty: u32, rows: &mut [&mut [S]; 3]) {
