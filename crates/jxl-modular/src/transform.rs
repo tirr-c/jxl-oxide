@@ -193,31 +193,18 @@ impl Rct {
         let a = channels.next().unwrap().grid_mut();
         let b = channels.next().unwrap().grid_mut();
         let c = channels.next().unwrap().grid_mut();
+        let grids = [a, b, c];
 
-        let a = {
-            let g = a.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let b = {
-            let g = b.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let c = {
-            let g = c.borrow_mut();
-            let width = g.width();
-            g.into_groups(width, 8)
-        };
-        let groups = a
-            .into_iter()
-            .zip(b)
-            .zip(c)
-            .map(|((a, b), c)| (a, b, c))
-            .collect::<Vec<_>>();
-        pool.for_each_vec(groups, |(mut a, mut b, mut c)| {
-            rct::inverse_rct(permutation, ty, [&mut a, &mut b, &mut c]);
-        })
+        match ty {
+            0 => rct::inverse_rct::<_, 0>(permutation, grids, pool),
+            1 => rct::inverse_rct::<_, 1>(permutation, grids, pool),
+            2 => rct::inverse_rct::<_, 2>(permutation, grids, pool),
+            3 => rct::inverse_rct::<_, 3>(permutation, grids, pool),
+            4 => rct::inverse_rct::<_, 4>(permutation, grids, pool),
+            5 => rct::inverse_rct::<_, 5>(permutation, grids, pool),
+            6 => rct::inverse_rct::<_, 6>(permutation, grids, pool),
+            _ => unreachable!(),
+        }
     }
 }
 
