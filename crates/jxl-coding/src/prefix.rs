@@ -328,12 +328,11 @@ impl Histogram {
             ref toplevel_entries,
             ref second_level_entries,
         } = *self;
-        let mut peeked = bitstream.peek_bits_const::<15>();
+        let peeked = bitstream.peek_bits_const::<15>();
         let toplevel_offset = peeked & toplevel_mask;
         let toplevel_entry = toplevel_entries[toplevel_offset as usize];
-        peeked >>= toplevel_bits;
         if toplevel_entry.nested {
-            let chunk_offset = peeked & (toplevel_entry.bits_or_mask as u32);
+            let chunk_offset = (peeked >> toplevel_bits) & (toplevel_entry.bits_or_mask as u32);
             let second_level_offset = toplevel_entry.symbol_or_offset as u32 + chunk_offset;
             let second_level_entry = second_level_entries[second_level_offset as usize];
             bitstream.consume_bits(second_level_entry.bits_or_mask as usize)?;
