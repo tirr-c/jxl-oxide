@@ -104,6 +104,8 @@ impl Bitstream<'_> {
 
 impl Bitstream<'_> {
     /// Peeks bits from bitstream, without consuming them.
+    ///
+    /// This method refills the bit buffer.
     #[inline]
     pub fn peek_bits(&mut self, n: usize) -> u32 {
         debug_assert!(n <= 32);
@@ -112,6 +114,8 @@ impl Bitstream<'_> {
     }
 
     /// Peeks bits from bitstream, without consuming them.
+    ///
+    /// This method refills the bit buffer.
     #[inline]
     pub fn peek_bits_const<const N: usize>(&mut self) -> u32 {
         debug_assert!(N <= 32);
@@ -119,7 +123,29 @@ impl Bitstream<'_> {
         (self.buf & ((1u64 << N) - 1)) as u32
     }
 
+    /// Peeks bits from already filled bitstream, without consuming them.
+    ///
+    /// This method *does not* refill the bit buffer.
+    #[inline]
+    pub fn peek_bits_prefilled(&mut self, n: usize) -> u32 {
+        debug_assert!(n <= 32);
+        (self.buf & ((1u64 << n) - 1)) as u32
+    }
+
+    /// Peeks bits from already filled bitstream, without consuming them.
+    ///
+    /// This method *does not* refill the bit buffer.
+    #[inline]
+    pub fn peek_bits_prefilled_const<const N: usize>(&mut self) -> u32 {
+        debug_assert!(N <= 32);
+        (self.buf & ((1u64 << N) - 1)) as u32
+    }
+
     /// Consumes bits in bit buffer.
+    ///
+    /// # Errors
+    /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
+    /// bits in the bit buffer.
     #[inline]
     pub fn consume_bits(&mut self, n: usize) -> Result<()> {
         self.remaining_buf_bits = self
@@ -132,6 +158,10 @@ impl Bitstream<'_> {
     }
 
     /// Consumes bits in bit buffer.
+    ///
+    /// # Errors
+    /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
+    /// bits in the bit buffer.
     #[inline]
     pub fn consume_bits_const<const N: usize>(&mut self) -> Result<()> {
         self.remaining_buf_bits = self
