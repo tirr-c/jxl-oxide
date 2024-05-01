@@ -478,9 +478,8 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             ma_tree_list.push(Some(ma_tree));
         }
 
-        let mut is_fast_lossless = false;
-        if decoder.as_rle().is_some() {
-            is_fast_lossless = ma_tree_list.iter().all(|ma_tree| {
+        if let Some(mut rle_decoder) = decoder.as_rle() {
+            let is_fast_lossless = ma_tree_list.iter().all(|ma_tree| {
                 ma_tree
                     .as_ref()
                     .map(|ma_tree| {
@@ -496,9 +495,32 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                     })
                     .unwrap_or(true)
             });
-        }
 
-        let mut rle_state = is_fast_lossless.then(RleState::<S>::new);
+            if is_fast_lossless {
+                tracing::trace!("libjxl fast-lossless");
+                let mut rle_state = RleState::<S>::new();
+
+                for (ma_tree, grid) in ma_tree_list.into_iter().zip(&mut self.grid) {
+                    let Some(ma_tree) = ma_tree else {
+                        continue;
+                    };
+
+                    let node = ma_tree.single_node().unwrap();
+                    let cluster = node.cluster;
+                    decode_fast_lossless(
+                        bitstream,
+                        &mut rle_decoder,
+                        &mut rle_state,
+                        cluster,
+                        grid.grid_mut(),
+                    );
+                }
+
+                rle_state.check_error()?;
+                // Prefix code doesn't have checksum
+                return Ok(());
+            }
+        }
 
         let wp_header = &self.header.wp_params;
         let mut predictor = PredictorState::new();
@@ -520,7 +542,6 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                 decode_single_node(
                     bitstream,
                     &mut decoder,
-                    rle_state.as_mut(),
                     dist_multiplier,
                     &mut predictor,
                     wp_header,
@@ -621,6 +642,7 @@ struct RleState<S: Sample> {
 }
 
 impl<S: Sample> RleState<S> {
+    #[inline]
     fn new() -> Self {
         Self {
             value: S::default(),
@@ -636,27 +658,28 @@ impl<S: Sample> RleState<S> {
         decoder: &mut DecoderRleMode,
         cluster: u8,
     ) -> S {
-        if self.repeat > 0 {
-            self.repeat -= 1;
-            self.value
-        } else {
+        if self.repeat == 0 {
             let result = decoder.read_varint_clustered(bitstream, cluster);
             match result {
                 Ok(RleToken::Value(v)) => {
                     self.value = S::unpack_signed_u32(v);
+                    self.repeat = 1;
                 }
                 Ok(RleToken::Repeat(len)) => {
-                    self.repeat = len - 1;
+                    self.repeat = len;
                 }
                 Err(e) if self.error.is_none() => {
                     self.error = Some(Box::new(e));
                 }
                 _ => {}
             }
-            self.value
         }
+
+        self.repeat = self.repeat.wrapping_sub(1);
+        self.value
     }
 
+    #[inline]
     fn check_error(&mut self) -> Result<()> {
         let error = self.error.take();
         if let Some(error) = error {
@@ -668,11 +691,9 @@ impl<S: Sample> RleState<S> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn decode_single_node<S: Sample>(
     bitstream: &mut Bitstream,
     decoder: &mut Decoder,
-    rle_state: Option<&mut RleState<S>>,
     dist_multiplier: u32,
     predictor_state: &mut PredictorState<S>,
     wp_header: &WpHeader,
@@ -715,14 +736,8 @@ fn decode_single_node<S: Sample>(
             Ok(())
         }
         (Predictor::Gradient, _) if offset == 0 && multiplier == 1 => {
-            if let Some(rle_state) = rle_state {
-                tracing::trace!("libjxl fast-lossless: quite fast path");
-                let mut decoder = decoder.as_rle().unwrap();
-                decode_fast_lossless(bitstream, &mut decoder, rle_state, cluster, grid)
-            } else {
-                tracing::trace!("Simple gradient: quite fast path");
-                decode_simple_grad(bitstream, decoder, cluster, dist_multiplier, grid)
-            }
+            tracing::trace!("Simple gradient: quite fast path");
+            decode_simple_grad(bitstream, decoder, cluster, dist_multiplier, grid)
         }
         _ => {
             let wp_header = (predictor == Predictor::SelfCorrecting).then_some(wp_header);
@@ -746,7 +761,7 @@ fn decode_fast_lossless<S: Sample>(
     rle_state: &mut RleState<S>,
     cluster: u8,
     grid: &mut CutGrid<S>,
-) -> Result<()> {
+) {
     let height = grid.height();
 
     {
@@ -778,8 +793,6 @@ fn decode_fast_lossless<S: Sample>(
             *out = w;
         }
     }
-
-    rle_state.check_error()
 }
 
 #[inline(never)]
