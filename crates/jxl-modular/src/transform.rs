@@ -3,11 +3,12 @@ use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
 use jxl_threadpool::JxlThreadPool;
 
 use super::{
-    predictor::{Predictor, PredictorState, WpHeader},
+    predictor::{Predictor, WpHeader},
     ModularChannelInfo,
 };
 use crate::{image::TransformedGrid, Error, Result, Sample};
 
+mod palette;
 mod rct;
 mod squeeze;
 
@@ -209,22 +210,6 @@ impl Rct {
 }
 
 impl Palette {
-    #[rustfmt::skip]
-    const DELTA_PALETTE: [[i16; 3]; 72] = [
-        [0, 0, 0], [4, 4, 4], [11, 0, 0], [0, 0, -13], [0, -12, 0], [-10, -10, -10],
-        [-18, -18, -18], [-27, -27, -27], [-18, -18, 0], [0, 0, -32], [-32, 0, 0], [-37, -37, -37],
-        [0, -32, -32], [24, 24, 45], [50, 50, 50], [-45, -24, -24], [-24, -45, -45], [0, -24, -24],
-        [-34, -34, 0], [-24, 0, -24], [-45, -45, -24], [64, 64, 64], [-32, 0, -32], [0, -32, 0],
-        [-32, 0, 32], [-24, -45, -24], [45, 24, 45], [24, -24, -45], [-45, -24, 24], [80, 80, 80],
-        [64, 0, 0], [0, 0, -64], [0, -64, -64], [-24, -24, 45], [96, 96, 96], [64, 64, 0],
-        [45, -24, -24], [34, -34, 0], [112, 112, 112], [24, -45, -45], [45, 45, -24], [0, -32, 32],
-        [24, -24, 45], [0, 96, 96], [45, -24, 24], [24, -45, -24], [-24, -45, 24], [0, -64, 0],
-        [96, 0, 0], [128, 128, 128], [64, 0, 64], [144, 144, 144], [96, 96, 0], [-36, -36, 36],
-        [45, -24, -45], [45, -45, -24], [0, 0, -96], [0, 128, 128], [0, 96, 0], [45, 24, -45],
-        [-128, 0, 0], [24, -45, 24], [-45, 24, -45], [64, 0, -64], [64, -64, -64], [96, 0, 96],
-        [45, -45, 24], [24, 45, -45], [64, 64, -64], [128, 128, 0], [0, 0, -128], [-24, 45, -45],
-    ];
-
     fn transform_channel_info<'dest, S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
@@ -272,99 +257,6 @@ impl Palette {
         Ok(())
     }
 
-    fn inverse_once<S: Sample>(
-        &self,
-        c: usize,
-        palette: &CutGrid<'_, S>,
-        indices: Option<&CutGrid<'_, S>>,
-        grid: &mut CutGrid<'_, S>,
-        bit_depth: u32,
-    ) {
-        let nb_deltas = self.nb_deltas as i32;
-        let nb_colors = self.nb_colours as i32;
-
-        let mut need_delta = Vec::new();
-        let width = grid.width();
-        let height = grid.height();
-        for y in 0..height {
-            for x in 0..width {
-                let index = if let Some(indices) = indices {
-                    indices.get(x, y)
-                } else {
-                    grid.get(x, y)
-                }
-                .to_i32();
-                let sample = grid.get_mut(x, y);
-                if index < nb_deltas {
-                    need_delta.push((x, y));
-                }
-                if (0..nb_colors).contains(&index) {
-                    *sample = palette.get(index as usize, c);
-                } else if index >= nb_colors {
-                    let value = index;
-                    let index = index - nb_colors;
-                    if index < 64 {
-                        *sample = S::from_i32(
-                            ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
-                                + (1i32 << bit_depth.saturating_sub(3)),
-                        );
-                    } else {
-                        let mut index = index - 64;
-                        for _ in 0..c {
-                            index /= 5;
-                        }
-                        *sample = S::from_i32((index % 5) * ((1i32 << bit_depth) - 1) / 4);
-                    }
-                } else if c < 3 {
-                    let index = -(index + 1);
-                    let index = (index % 143) as usize;
-                    let mut temp_sample = Self::DELTA_PALETTE[(index + 1) >> 1][c] as i32;
-                    if index & 1 == 0 {
-                        temp_sample = -temp_sample;
-                    }
-                    if bit_depth > 8 {
-                        temp_sample <<= bit_depth.min(24) - 8;
-                    }
-                    *sample = S::from_i32(temp_sample);
-                } else {
-                    *sample = S::default();
-                }
-            }
-        }
-
-        if need_delta.is_empty() {
-            return;
-        }
-
-        let d_pred = self.d_pred;
-        let wp_header = if d_pred == Predictor::SelfCorrecting {
-            self.wp_header.as_ref()
-        } else {
-            None
-        };
-        let mut predictor = PredictorState::<S>::new();
-        predictor.reset(width as u32, &[], wp_header);
-
-        let mut idx = 0;
-        for y in 0..height {
-            for x in 0..width {
-                let properties = predictor.properties::<true>();
-                let sample = grid.get_mut(x, y);
-                let mut sample_value = sample.to_i32();
-                if need_delta[idx] == (x, y) {
-                    let diff = d_pred.predict::<_, true>(&properties);
-                    sample_value = sample_value.wrapping_add(diff);
-                    *sample = S::from_i32(sample_value);
-                    idx += 1;
-                    if idx >= need_delta.len() {
-                        return;
-                    }
-                }
-                properties.record(sample_value);
-            }
-        }
-    }
-
     fn inverse<S: Sample>(&self, grids: &mut Vec<TransformedGrid<'_, S>>, bit_depth: u32) {
         let begin_c = self.begin_c as usize;
         let num_c = self.num_c as usize;
@@ -372,19 +264,16 @@ impl Palette {
         let palette_grid = grids.remove(0);
         let leader = &mut grids[begin_c];
         let mut members = leader.unmerge(num_c - 1);
-        let index_grid = leader.grid();
-        let palette_grid = palette_grid.grid();
+        let leader = leader.grid_mut();
 
-        for (c, grid) in members.iter_mut().enumerate() {
-            self.inverse_once(
-                c + 1,
-                palette_grid,
-                Some(index_grid),
-                grid.grid_mut(),
-                bit_depth,
-            );
+        let palette = palette_grid.grid().as_shared();
+        let mut targets = Vec::with_capacity(num_c);
+        targets.push(leader.borrow_mut());
+        for member in &mut members {
+            targets.push(member.grid_mut().borrow_mut());
         }
-        self.inverse_once(0, palette_grid, None, leader.grid_mut(), bit_depth);
+
+        self.inverse_inner(palette, targets, bit_depth);
 
         for (i, grid) in members.into_iter().enumerate() {
             grids.insert(begin_c + 1 + i, grid);
