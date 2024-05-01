@@ -203,10 +203,12 @@ impl DecoderRleMode<'_> {
             .map(|token| {
                 if let Some(token) = token.checked_sub(self.min_symbol) {
                     RleToken::Repeat(
-                        self.inner.read_uint(bitstream, &self.len_config, token) + self.min_length,
+                        self.inner
+                            .read_uint_prefilled(bitstream, &self.len_config, token)
+                            + self.min_length,
                     )
                 } else {
-                    RleToken::Value(self.inner.read_uint(
+                    RleToken::Value(self.inner.read_uint_prefilled(
                         bitstream,
                         &self.inner.configs[cluster as usize],
                         token,
@@ -425,7 +427,7 @@ impl DecoderInner {
         cluster: u8,
     ) -> Result<u32> {
         let token = self.code.read_symbol(bitstream, cluster)?;
-        Ok(self.read_uint(bitstream, &self.configs[cluster as usize], token))
+        Ok(self.read_uint_prefilled(bitstream, &self.configs[cluster as usize], token))
     }
 
     fn read_varint_with_multiplier_clustered_lz77(
@@ -469,10 +471,14 @@ impl DecoderInner {
                 let lz_dist_cluster = self.lz_dist_cluster();
 
                 state.num_to_copy =
-                    self.read_uint(bitstream, &state.lz_len_conf, token - min_symbol) + min_length;
+                    self.read_uint_prefilled(bitstream, &state.lz_len_conf, token - min_symbol)
+                        + min_length;
                 let token = self.code.read_symbol(bitstream, lz_dist_cluster)?;
-                let distance =
-                    self.read_uint(bitstream, &self.configs[lz_dist_cluster as usize], token);
+                let distance = self.read_uint_prefilled(
+                    bitstream,
+                    &self.configs[lz_dist_cluster as usize],
+                    token,
+                );
                 let distance = if dist_multiplier == 0 {
                     distance
                 } else if distance < 120 {
@@ -490,7 +496,7 @@ impl DecoderInner {
                 state.copy_pos += 1;
                 state.num_to_copy -= 1;
             } else {
-                r = self.read_uint(bitstream, &self.configs[cluster as usize], token);
+                r = self.read_uint_prefilled(bitstream, &self.configs[cluster as usize], token);
             }
         }
         let offset = (state.num_decoded & 0xfffff) as usize;
@@ -504,7 +510,12 @@ impl DecoderInner {
     }
 
     #[inline]
-    fn read_uint(&self, bitstream: &mut Bitstream, config: &IntegerConfig, token: u32) -> u32 {
+    fn read_uint_prefilled(
+        &self,
+        bitstream: &mut Bitstream,
+        config: &IntegerConfig,
+        token: u32,
+    ) -> u32 {
         let &IntegerConfig {
             split_exponent,
             split,
@@ -520,7 +531,7 @@ impl DecoderInner {
             + ((token - split) >> (msb_in_token + lsb_in_token));
         // n < 32.
         let n = n & 31;
-        let rest_bits = bitstream.peek_bits(n as usize) as u64;
+        let rest_bits = bitstream.peek_bits_prefilled(n as usize) as u64;
         bitstream.consume_bits(n as usize).ok();
 
         let low_bits = token & ((1 << lsb_in_token) - 1);

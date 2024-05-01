@@ -269,7 +269,8 @@ impl Histogram {
                         last_nonzero_sym = sym;
                     }
                     16 => {
-                        repeat_count = bitstream.read_bits(2)? as usize + 3;
+                        repeat_count = bitstream.peek_bits_prefilled(2) as usize + 3;
+                        bitstream.consume_bits(2)?;
                         if prev_sym == 16 {
                             repeat_count += last_repeat_count * 3 - 8;
                             last_repeat_count += repeat_count;
@@ -282,7 +283,8 @@ impl Histogram {
                         repeat_count -= 1;
                     }
                     17 => {
-                        repeat_count = bitstream.read_bits(3)? as usize + 3;
+                        repeat_count = bitstream.peek_bits_prefilled(3) as usize + 3;
+                        bitstream.consume_bits(3)?;
                         if prev_sym == 17 {
                             repeat_count += last_repeat_count * 7 - 16;
                             last_repeat_count += repeat_count;
@@ -326,12 +328,11 @@ impl Histogram {
             ref toplevel_entries,
             ref second_level_entries,
         } = *self;
-        let mut peeked = bitstream.peek_bits(15);
+        let peeked = bitstream.peek_bits_const::<15>();
         let toplevel_offset = peeked & toplevel_mask;
         let toplevel_entry = toplevel_entries[toplevel_offset as usize];
-        peeked >>= toplevel_bits;
         if toplevel_entry.nested {
-            let chunk_offset = peeked & (toplevel_entry.bits_or_mask as u32);
+            let chunk_offset = (peeked >> toplevel_bits) & (toplevel_entry.bits_or_mask as u32);
             let second_level_offset = toplevel_entry.symbol_or_offset as u32 + chunk_offset;
             let second_level_entry = second_level_entries[second_level_offset as usize];
             bitstream.consume_bits(second_level_entry.bits_or_mask as usize)?;
