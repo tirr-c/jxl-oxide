@@ -292,8 +292,19 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
     #[inline]
     pub fn get_row(&self, row: usize) -> &[V] {
-        let ptr = self.get_ptr(0, row);
-        unsafe { std::slice::from_raw_parts(ptr as *const _, self.width) }
+        assert!(
+            row < self.height,
+            "Row index out of range: height is {} but index is {}",
+            self.height,
+            row,
+        );
+
+        // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
+        unsafe {
+            let offset = row * self.stride;
+            let ptr = self.ptr.as_ptr().add(offset);
+            std::slice::from_raw_parts(ptr as *const _, self.width)
+        }
     }
 
     #[inline]
@@ -306,8 +317,19 @@ impl<'g, V: Copy> CutGrid<'g, V> {
 
     #[inline]
     pub fn get_row_mut(&mut self, row: usize) -> &mut [V] {
-        let ptr = self.get_ptr(0, row);
-        unsafe { std::slice::from_raw_parts_mut(ptr, self.width) }
+        assert!(
+            row < self.height,
+            "Row index out of range: height is {} but index is {}",
+            self.height,
+            row,
+        );
+
+        // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
+        unsafe {
+            let offset = row * self.stride;
+            let ptr = self.ptr.as_ptr().add(offset);
+            std::slice::from_raw_parts_mut(ptr, self.width)
+        }
     }
 
     #[inline]
