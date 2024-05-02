@@ -359,7 +359,7 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
     if direction == DctDirection::Forward {
         let (input0, input1) = scratch.split_at_mut(n / 2);
         for (idx, &sec) in dct_common::sec_half(n).iter().enumerate() {
-            input0[0] = io[idx].add(io[n - idx - 1]).mul(Lane::splat_f32(0.5));
+            input0[idx] = io[idx].add(io[n - idx - 1]).mul(Lane::splat_f32(0.5));
             input1[idx] = io[idx].sub(io[n - idx - 1]).mul(Lane::splat_f32(sec / 2.0));
         }
         let (output0, output1) = io.split_at_mut(n / 2);
