@@ -4,7 +4,7 @@ use std::arch::is_aarch64_feature_detected;
 use std::arch::is_x86_feature_detected;
 use std::num::Wrapping;
 
-use jxl_grid::CutGrid;
+use jxl_grid::MutableSubgrid;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::Sample;
@@ -14,10 +14,10 @@ type UnsafeFnRow<S> = unsafe fn(&mut [&mut [S]; 3]);
 
 pub fn inverse_rct<S: Sample, const TYPE: u32>(
     permutation: u32,
-    mut grids: [&mut CutGrid<S>; 3],
+    mut grids: [&mut MutableSubgrid<S>; 3],
     pool: &JxlThreadPool,
 ) {
-    let grid16 = grids.each_mut().map(|g| S::try_as_i16_cut_grid_mut(g));
+    let grid16 = grids.each_mut().map(|g| S::try_as_mutable_subgrid_i16(g));
     if let [Some(a), Some(b), Some(c)] = grid16 {
         let grids = [a, b, c];
 
@@ -51,7 +51,7 @@ pub fn inverse_rct<S: Sample, const TYPE: u32>(
         return;
     }
 
-    let grid32 = grids.each_mut().map(|g| S::try_as_i32_cut_grid_mut(g));
+    let grid32 = grids.each_mut().map(|g| S::try_as_mutable_subgrid_i32(g));
     if let [Some(a), Some(b), Some(c)] = grid32 {
         let grids = [a, b, c];
 
@@ -88,7 +88,7 @@ pub fn inverse_rct<S: Sample, const TYPE: u32>(
 #[inline]
 fn run_rows<S: Sample>(
     permutation: u32,
-    grids: [&mut CutGrid<S>; 3],
+    grids: [&mut MutableSubgrid<S>; 3],
     f: FnRow<S>,
     pool: &JxlThreadPool,
 ) {
@@ -99,12 +99,12 @@ fn run_rows<S: Sample>(
 #[inline(never)]
 unsafe fn run_rows_unsafe<S: Sample>(
     permutation: u32,
-    grids: [&mut CutGrid<S>; 3],
+    grids: [&mut MutableSubgrid<S>; 3],
     f: UnsafeFnRow<S>,
     pool: &JxlThreadPool,
 ) {
     struct RctJob<'g, S: Sample> {
-        grids: [CutGrid<'g, S>; 3],
+        grids: [MutableSubgrid<'g, S>; 3],
     }
 
     let width = grids[0].width();

@@ -1,5 +1,5 @@
 use jxl_frame::FrameHeader;
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{ImageWithRegion, Region};
@@ -8,7 +8,7 @@ use super::impls::generic::gabor::gabor_row_edge;
 
 pub fn apply_gabor_like(
     fb: &mut ImageWithRegion,
-    fb_scratch: &mut [SimpleGrid<f32>; 3],
+    fb_scratch: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     weights: [[f32; 2]; 3],
     pool: &jxl_threadpool::JxlThreadPool,
@@ -29,8 +29,8 @@ pub(super) struct GaborRow<'buf> {
 }
 
 pub(super) fn run_gabor_rows<'buf>(
-    input: &'buf SimpleGrid<f32>,
-    output: &'buf mut SimpleGrid<f32>,
+    input: &'buf AlignedGrid<f32>,
+    output: &'buf mut AlignedGrid<f32>,
     frame_header: &FrameHeader,
     region: Region,
     weights: [f32; 2],
@@ -51,8 +51,8 @@ pub(super) fn run_gabor_rows<'buf>(
 }
 
 pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
-    input: &'buf SimpleGrid<f32>,
-    output: &'buf mut SimpleGrid<f32>,
+    input: &'buf AlignedGrid<f32>,
+    output: &'buf mut AlignedGrid<f32>,
     frame_header: &FrameHeader,
     region: Region,
     weights: [f32; 2],

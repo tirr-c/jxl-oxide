@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use jxl_frame::header::FrameType;
-use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
@@ -10,7 +10,7 @@ use crate::{util, FrameRender, FrameRenderHandle, Region, Result};
 #[derive(Debug)]
 pub struct ImageWithRegion {
     region: Region,
-    buffer: Vec<SimpleGrid<f32>>,
+    buffer: Vec<AlignedGrid<f32>>,
     ct_done: bool,
     blend_done: bool,
     tracker: Option<AllocTracker>,
@@ -26,7 +26,7 @@ impl ImageWithRegion {
         let width = region.width as usize;
         let height = region.height as usize;
         let buffer =
-            std::iter::repeat_with(|| SimpleGrid::with_alloc_tracker(width, height, tracker))
+            std::iter::repeat_with(|| AlignedGrid::with_alloc_tracker(width, height, tracker))
                 .take(channels)
                 .collect::<std::result::Result<_, _>>()?;
         let tracker = tracker.cloned();
@@ -41,7 +41,7 @@ impl ImageWithRegion {
     }
 
     pub(crate) fn from_buffer(
-        buffer: Vec<SimpleGrid<f32>>,
+        buffer: Vec<AlignedGrid<f32>>,
         left: i32,
         top: i32,
         ct_done: bool,
@@ -115,17 +115,17 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub fn buffer(&self) -> &[SimpleGrid<f32>] {
+    pub fn buffer(&self) -> &[AlignedGrid<f32>] {
         &self.buffer
     }
 
     #[inline]
-    pub fn buffer_mut(&mut self) -> &mut [SimpleGrid<f32>] {
+    pub fn buffer_mut(&mut self) -> &mut [AlignedGrid<f32>] {
         &mut self.buffer
     }
 
     #[inline]
-    pub fn take_buffer(&mut self) -> Vec<SimpleGrid<f32>> {
+    pub fn take_buffer(&mut self) -> Vec<AlignedGrid<f32>> {
         std::mem::take(&mut self.buffer)
     }
 
@@ -145,8 +145,8 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub(crate) fn add_channel(&mut self) -> Result<&mut SimpleGrid<f32>> {
-        self.buffer.push(SimpleGrid::with_alloc_tracker(
+    pub(crate) fn add_channel(&mut self) -> Result<&mut AlignedGrid<f32>> {
+        self.buffer.push(AlignedGrid::with_alloc_tracker(
             self.region.width as usize,
             self.region.height as usize,
             self.tracker.as_ref(),
@@ -155,7 +155,7 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub(crate) fn push_channel(&mut self, g: SimpleGrid<f32>) {
+    pub(crate) fn push_channel(&mut self, g: AlignedGrid<f32>) {
         assert_eq!(self.region.width as usize, g.width());
         assert_eq!(self.region.height as usize, g.height());
         self.buffer.push(g);
@@ -199,7 +199,7 @@ impl ImageWithRegion {
         &self,
         out_region: Region,
         channel_idx: usize,
-        output: &mut SimpleGrid<f32>,
+        output: &mut AlignedGrid<f32>,
     ) {
         if output.width() != out_region.width as usize
             || output.height() != out_region.height as usize
@@ -255,7 +255,7 @@ impl ImageWithRegion {
     pub(crate) fn groups_with_group_id(
         &mut self,
         frame_header: &jxl_frame::FrameHeader,
-    ) -> Vec<(u32, [CutGrid<'_, f32>; 3])> {
+    ) -> Vec<(u32, [MutableSubgrid<'_, f32>; 3])> {
         let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
             jxl_modular::ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
         });
@@ -275,7 +275,7 @@ impl ImageWithRegion {
         let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
             let fb_width = fb.width();
             let shifted = shifts_cbycr[idx].shift_size((width, height));
-            let fb = CutGrid::from_buf(
+            let fb = MutableSubgrid::from_buf(
                 fb.buf_mut(),
                 shifted.0 as usize,
                 shifted.1 as usize,

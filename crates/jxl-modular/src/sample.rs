@@ -1,13 +1,13 @@
 use jxl_bitstream::unpack_signed;
-use jxl_grid::CutGrid;
+use jxl_grid::MutableSubgrid;
 
 pub trait Sealed: Copy + Default + Send + Sync {
-    fn try_as_i32_cut_grid_mut<'a, 'g>(
-        grid: &'a mut CutGrid<'g, Self>,
-    ) -> Option<&'a mut CutGrid<'g, i32>>;
-    fn try_as_i16_cut_grid_mut<'a, 'g>(
-        grid: &'a mut CutGrid<'g, Self>,
-    ) -> Option<&'a mut CutGrid<'g, i16>>;
+    fn try_as_mutable_subgrid_i32<'a, 'g>(
+        grid: &'a mut MutableSubgrid<'g, Self>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i32>>;
+    fn try_as_mutable_subgrid_i16<'a, 'g>(
+        grid: &'a mut MutableSubgrid<'g, Self>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i16>>;
 
     fn unpack_signed_u32(value: u32) -> Self;
 
@@ -88,15 +88,15 @@ impl Sample for i16 {
 }
 
 impl Sealed for i32 {
-    fn try_as_i32_cut_grid_mut<'a, 'g>(
-        grid: &'a mut CutGrid<'g, i32>,
-    ) -> Option<&'a mut CutGrid<'g, i32>> {
+    fn try_as_mutable_subgrid_i32<'a, 'g>(
+        grid: &'a mut MutableSubgrid<'g, i32>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i32>> {
         Some(grid)
     }
 
-    fn try_as_i16_cut_grid_mut<'a, 'g>(
-        _: &'a mut CutGrid<'g, i32>,
-    ) -> Option<&'a mut CutGrid<'g, i16>> {
+    fn try_as_mutable_subgrid_i16<'a, 'g>(
+        _: &'a mut MutableSubgrid<'g, i32>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i16>> {
         None
     }
 
@@ -127,15 +127,15 @@ impl Sealed for i32 {
 }
 
 impl Sealed for i16 {
-    fn try_as_i32_cut_grid_mut<'a, 'g>(
-        _: &'a mut CutGrid<'g, i16>,
-    ) -> Option<&'a mut CutGrid<'g, i32>> {
+    fn try_as_mutable_subgrid_i32<'a, 'g>(
+        _: &'a mut MutableSubgrid<'g, i16>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i32>> {
         None
     }
 
-    fn try_as_i16_cut_grid_mut<'a, 'g>(
-        grid: &'a mut CutGrid<'g, i16>,
-    ) -> Option<&'a mut CutGrid<'g, i16>> {
+    fn try_as_mutable_subgrid_i16<'a, 'g>(
+        grid: &'a mut MutableSubgrid<'g, i16>,
+    ) -> Option<&'a mut MutableSubgrid<'g, i16>> {
         Some(grid)
     }
 

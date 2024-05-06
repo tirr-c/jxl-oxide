@@ -1,4 +1,4 @@
-use jxl_grid::{AllocTracker, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker};
 
 mod dct;
 mod transform;
@@ -28,9 +28,9 @@ pub fn adaptive_lf_smoothing_impl(
     assert_eq!(in_y.len(), in_b.len());
     assert_eq!(in_x.len(), width * height);
 
-    let mut udsum_x = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
-    let mut udsum_y = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
-    let mut udsum_b = SimpleGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_x = AlignedGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_y = AlignedGrid::with_alloc_tracker(width, height - 2, tracker)?;
+    let mut udsum_b = AlignedGrid::with_alloc_tracker(width, height - 2, tracker)?;
 
     for (g, out) in [
         (&mut *in_x, udsum_x.buf_mut()),

@@ -1,4 +1,4 @@
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 
 /// Frame buffer representing a decoded image.
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ impl FrameBuffer {
 
     /// For internal use only.
     #[doc(hidden)]
-    pub fn from_grids(grids: &[&SimpleGrid<f32>], orientation: u32) -> Self {
+    pub fn from_grids(grids: &[&AlignedGrid<f32>], orientation: u32) -> Self {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");

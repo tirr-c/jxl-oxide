@@ -157,7 +157,7 @@ pub use jxl_color::{
 };
 pub use jxl_frame::header as frame;
 pub use jxl_frame::{Frame, FrameHeader};
-pub use jxl_grid::{AllocTracker, SimpleGrid};
+pub use jxl_grid::{AlignedGrid, AllocTracker};
 pub use jxl_image as image;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
 pub use jxl_threadpool::JxlThreadPool;
@@ -761,8 +761,8 @@ impl JxlImage {
 
     fn process_render(
         &self,
-        mut grids: Vec<SimpleGrid<f32>>,
-    ) -> Result<(Vec<SimpleGrid<f32>>, Vec<ExtraChannel>)> {
+        mut grids: Vec<AlignedGrid<f32>>,
+    ) -> Result<(Vec<AlignedGrid<f32>>, Vec<ExtraChannel>)> {
         let pixel_format = self.pixel_format();
         let color_channels = if pixel_format.is_grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
@@ -884,7 +884,7 @@ pub struct Render {
     name: Name,
     duration: u32,
     orientation: u32,
-    color_channels: Vec<SimpleGrid<f32>>,
+    color_channels: Vec<AlignedGrid<f32>>,
     extra_channels: Vec<ExtraChannel>,
 }
 
@@ -966,7 +966,7 @@ impl Render {
     ///
     /// Orientation is not applied.
     #[inline]
-    pub fn color_channels(&self) -> &[SimpleGrid<f32>] {
+    pub fn color_channels(&self) -> &[AlignedGrid<f32>] {
         &self.color_channels
     }
 
@@ -974,7 +974,7 @@ impl Render {
     ///
     /// Orientation is not applied.
     #[inline]
-    pub fn color_channels_mut(&mut self) -> &mut [SimpleGrid<f32>] {
+    pub fn color_channels_mut(&mut self) -> &mut [AlignedGrid<f32>] {
         &mut self.color_channels
     }
 
@@ -1043,7 +1043,7 @@ pub struct ImageStream<'r> {
     orientation: u32,
     width: u32,
     height: u32,
-    grids: Vec<&'r SimpleGrid<f32>>,
+    grids: Vec<&'r AlignedGrid<f32>>,
     y: u32,
     x: u32,
     c: u32,
@@ -1118,7 +1118,7 @@ impl ImageStream<'_> {
 pub struct ExtraChannel {
     ty: ExtraChannelType,
     name: Name,
-    grid: SimpleGrid<f32>,
+    grid: AlignedGrid<f32>,
 }
 
 impl ExtraChannel {
@@ -1136,13 +1136,13 @@ impl ExtraChannel {
 
     /// Returns the sample grid of the channel.
     #[inline]
-    pub fn grid(&self) -> &SimpleGrid<f32> {
+    pub fn grid(&self) -> &AlignedGrid<f32> {
         &self.grid
     }
 
     /// Returns the mutable sample grid of the channel.
     #[inline]
-    pub fn grid_mut(&mut self) -> &mut SimpleGrid<f32> {
+    pub fn grid_mut(&mut self) -> &mut AlignedGrid<f32> {
         &mut self.grid
     }
 

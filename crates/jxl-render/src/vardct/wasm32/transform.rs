@@ -1,6 +1,6 @@
 use std::arch::wasm32::*;
 
-use jxl_grid::{CutGrid, SharedSubgrid, SimdVector};
+use jxl_grid::{MutableSubgrid, SharedSubgrid, SimdVector};
 use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
@@ -8,7 +8,7 @@ use crate::vardct::{dct_common::DctDirection, transform_common::transform_varblo
 
 use super::generic;
 
-unsafe fn transform_dct4_wasm32_simd128(coeff: &mut CutGrid<'_>) {
+unsafe fn transform_dct4_wasm32_simd128(coeff: &mut MutableSubgrid<'_>) {
     generic::aux_idct2_in_place_2(coeff);
 
     let mut scratch_0 = [v128::zero(); 4];
@@ -48,7 +48,7 @@ unsafe fn transform_dct4_wasm32_simd128(coeff: &mut CutGrid<'_>) {
     }
 }
 
-unsafe fn transform_dct4x8_wasm32_simd128<const TR: bool>(coeff: &mut CutGrid<'_>) {
+unsafe fn transform_dct4x8_wasm32_simd128<const TR: bool>(coeff: &mut MutableSubgrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
@@ -135,11 +135,11 @@ unsafe fn transform_dct4x8_wasm32_simd128<const TR: bool>(coeff: &mut CutGrid<'_
     }
 }
 
-unsafe fn transform_dct_wasm32_simd128(coeff: &mut CutGrid<'_>) {
+unsafe fn transform_dct_wasm32_simd128(coeff: &mut MutableSubgrid<'_>) {
     super::dct::dct_2d_wasm32_simd128(coeff, DctDirection::Inverse);
 }
 
-unsafe fn transform_wasm32_simd128(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+unsafe fn transform_wasm32_simd128(coeff: &mut MutableSubgrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
@@ -158,7 +158,7 @@ unsafe fn transform_wasm32_simd128(coeff: &mut CutGrid<'_>, dct_select: Transfor
 
 unsafe fn transform_varblocks_wasm32_simd128(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {
@@ -175,7 +175,7 @@ unsafe fn transform_varblocks_wasm32_simd128(
 #[inline]
 pub fn transform_varblocks(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {

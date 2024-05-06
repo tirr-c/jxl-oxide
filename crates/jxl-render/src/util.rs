@@ -7,7 +7,7 @@ use jxl_frame::{
     header::FrameType,
     Frame, FrameHeader,
 };
-use jxl_grid::{CutGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_image::ImageHeader;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
@@ -151,7 +151,7 @@ pub(crate) fn load_lf_groups<S: Sample>(
         idx: u32,
         lf_group: Option<LfGroup<S>>,
         modular: Option<TransformedModularSubimage<'modular, S>>,
-        lf_xyb: Option<[CutGrid<'xyb, f32>; 3]>,
+        lf_xyb: Option<[MutableSubgrid<'xyb, f32>; 3]>,
     }
 
     let frame_header = frame.header();
@@ -180,7 +180,7 @@ pub(crate) fn load_lf_groups<S: Sample>(
         let lf_xyb_arr = <&mut [_; 3]>::try_from(lf_xyb.buffer_mut()).unwrap();
         let mut idx = 0usize;
         lf_xyb_arr.each_mut().map(|grid| {
-            let grid = CutGrid::from_simple_grid(grid);
+            let grid = grid.as_subgrid_mut();
             let shift = shifts_cbycr[idx];
             let group_width = group_dim >> shift.hshift();
             let group_height = group_dim >> shift.vshift();
@@ -225,7 +225,7 @@ pub(crate) fn load_lf_groups<S: Sample>(
                 + lf_group_x.wrapping_add_signed(-lf_group_base_x);
             let lf_xyb = lf_xyb_groups.as_mut().map(|lf_xyb_groups| {
                 lf_xyb_groups.each_mut().map(|groups| {
-                    std::mem::replace(&mut groups[xyb_group_idx as usize], CutGrid::empty())
+                    std::mem::replace(&mut groups[xyb_group_idx as usize], MutableSubgrid::empty())
                 })
             });
 
@@ -357,7 +357,7 @@ pub(crate) fn upsample_lf(
 pub(crate) fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
-    grid: &mut [SimpleGrid<f32>],
+    grid: &mut [AlignedGrid<f32>],
     pool: &JxlThreadPool,
 ) -> bool {
     // save_before_ct = false

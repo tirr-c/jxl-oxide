@@ -5,7 +5,7 @@ use jxl_frame::{
     header::{BlendMode as FrameBlendMode, BlendingInfo},
     Frame,
 };
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
@@ -33,8 +33,8 @@ struct BlendParams<'a> {
 }
 
 struct BlendAlpha<'a> {
-    base: Option<&'a SimpleGrid<f32>>,
-    new: &'a SimpleGrid<f32>,
+    base: Option<&'a AlignedGrid<f32>>,
+    new: &'a AlignedGrid<f32>,
     clamp: bool,
     swapped: bool,
     premultiplied: bool,
@@ -54,8 +54,8 @@ impl<'a> BlendParams<'a> {
     fn from_blending_info(
         channel_idx: usize,
         blending_info: &BlendingInfo,
-        base_alpha: Option<&'a SimpleGrid<f32>>,
-        new_alpha: Option<&'a SimpleGrid<f32>>,
+        base_alpha: Option<&'a AlignedGrid<f32>>,
+        new_alpha: Option<&'a AlignedGrid<f32>>,
         premultiplied: Option<bool>,
     ) -> Self {
         let mode = match blending_info.mode {
@@ -99,8 +99,8 @@ impl<'a> BlendParams<'a> {
     fn from_patch_blending_info(
         channel_idx: usize,
         blending_info: &BlendingModeInformation,
-        base_alpha: Option<&'a SimpleGrid<f32>>,
-        new_alpha: Option<&'a SimpleGrid<f32>>,
+        base_alpha: Option<&'a AlignedGrid<f32>>,
+        new_alpha: Option<&'a AlignedGrid<f32>>,
         premultiplied: Option<bool>,
     ) -> Option<Self> {
         use jxl_frame::data::PatchBlendMode;
@@ -239,7 +239,7 @@ pub(crate) fn blend<S: Sample>(
 
             if base_grid.region().is_empty() {
                 clone_empty = true;
-                target_grid = SimpleGrid::with_alloc_tracker(
+                target_grid = AlignedGrid::with_alloc_tracker(
                     output_frame_region.width as usize,
                     output_frame_region.height as usize,
                     tracker,
@@ -250,12 +250,12 @@ pub(crate) fn blend<S: Sample>(
                     output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
                 target_grid = if base_grid.region() == base_frame_region {
                     if can_overwrite {
-                        std::mem::replace(&mut base_grid.buffer_mut()[idx], SimpleGrid::empty())
+                        std::mem::replace(&mut base_grid.buffer_mut()[idx], AlignedGrid::empty())
                     } else {
                         base_grid.buffer()[idx].try_clone()?
                     }
                 } else {
-                    let mut output_grid = SimpleGrid::with_alloc_tracker(
+                    let mut output_grid = AlignedGrid::with_alloc_tracker(
                         output_frame_region.width as usize,
                         output_frame_region.height as usize,
                         tracker,
@@ -269,7 +269,7 @@ pub(crate) fn blend<S: Sample>(
                         if base_grid.region() == base_frame_region {
                             base_alpha_grid = base_grid.buffer()[alpha_idx + 3].try_clone()?;
                         } else {
-                            base_alpha_grid = SimpleGrid::with_alloc_tracker(
+                            base_alpha_grid = AlignedGrid::with_alloc_tracker(
                                 output_frame_region.width as usize,
                                 output_frame_region.height as usize,
                                 tracker,
@@ -286,7 +286,7 @@ pub(crate) fn blend<S: Sample>(
             }
         } else {
             clone_empty = true;
-            target_grid = SimpleGrid::with_alloc_tracker(
+            target_grid = AlignedGrid::with_alloc_tracker(
                 output_frame_region.width as usize,
                 output_frame_region.height as usize,
                 tracker,
@@ -450,8 +450,8 @@ pub fn patch(
 }
 
 fn blend_single(
-    base: &mut SimpleGrid<f32>,
-    new_grid: &SimpleGrid<f32>,
+    base: &mut AlignedGrid<f32>,
+    new_grid: &AlignedGrid<f32>,
     blend_params: &BlendParams<'_>,
 ) {
     let &BlendParams {

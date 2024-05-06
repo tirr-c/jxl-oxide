@@ -1,5 +1,5 @@
 use jxl_bitstream::define_bundle;
-use jxl_grid::CutGrid;
+use jxl_grid::MutableSubgrid;
 
 use crate::Sample;
 
@@ -137,7 +137,7 @@ pub struct PredictorState<'prev, 'a, S: Sample> {
     width: u32,
     prev_row: Vec<i32>,
     curr_row: Vec<i32>,
-    prev_channels_rev: Vec<&'a CutGrid<'prev, S>>,
+    prev_channels_rev: Vec<&'a MutableSubgrid<'prev, S>>,
     self_correcting: Option<SelfCorrectingPredictor>,
     y: u32,
     x: u32,
@@ -179,7 +179,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     pub fn reset(
         &mut self,
         width: u32,
-        prev_channels_rev: &[&'a CutGrid<'prev, S>],
+        prev_channels_rev: &[&'a MutableSubgrid<'prev, S>],
         wp_header: Option<&WpHeader>,
     ) {
         self.self_correcting =

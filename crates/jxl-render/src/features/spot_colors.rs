@@ -1,10 +1,10 @@
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_image::ExtraChannelType;
 
 /// Renders a spot color channel onto color_channels
 pub fn render_spot_color(
-    color_channels: &mut [SimpleGrid<f32>],
-    ec_grid: &SimpleGrid<f32>,
+    color_channels: &mut [AlignedGrid<f32>],
+    ec_grid: &AlignedGrid<f32>,
     ec_ty: &ExtraChannelType,
 ) -> crate::Result<()> {
     let ExtraChannelType::SpotColour {

@@ -78,7 +78,7 @@ pub fn decode_pass_group<S: Sample>(
         let block_height = (block_info.height() - block_top).min(group_dim_blocks);
 
         let jpeg_upsampling = frame_header.jpeg_upsampling;
-        let block_info = block_info.subgrid(
+        let block_info = block_info.as_subgrid().subgrid(
             block_left..(block_left + block_width),
             block_top..(block_top + block_height),
         );
@@ -92,7 +92,7 @@ pub fn decode_pass_group<S: Sample>(
                 let block_top = block_top >> shift.vshift();
                 let (block_width, block_height) =
                     shift.shift_size((block_width as u32, block_height as u32));
-                lf_quant.subgrid(
+                lf_quant.as_subgrid().subgrid(
                     block_left..(block_left + block_width as usize),
                     block_top..(block_top + block_height as usize),
                 )

@@ -1,5 +1,5 @@
 use jxl_frame::{data::GlobalModular, FrameHeader};
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_image::BitDepth;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 
@@ -210,8 +210,8 @@ pub fn compute_modular_region<S: Sample>(
 }
 
 pub fn copy_modular_groups<S: Sample>(
-    g: &SimpleGrid<S>,
-    buffer: &mut SimpleGrid<f32>,
+    g: &AlignedGrid<S>,
+    buffer: &mut AlignedGrid<f32>,
     region: Region,
     bit_depth: BitDepth,
     xyb_encoded: bool,

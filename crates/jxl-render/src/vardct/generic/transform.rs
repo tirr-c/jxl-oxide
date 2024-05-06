@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_grid::{MutableSubgrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
@@ -11,7 +11,7 @@ use crate::vardct::{
 use super::dct_2d;
 
 #[inline(always)]
-pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
+pub(crate) fn aux_idct2_in_place_2(block: &mut MutableSubgrid<'_>) {
     let c00 = block.get(0, 0);
     let c01 = block.get(1, 0);
     let c10 = block.get(0, 1);
@@ -23,7 +23,7 @@ pub(crate) fn aux_idct2_in_place_2(block: &mut CutGrid<'_>) {
 }
 
 #[inline(always)]
-pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
+pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut MutableSubgrid<'_>) {
     debug_assert!(SIZE.is_power_of_two());
 
     let num_2x2 = SIZE / 2;
@@ -47,19 +47,19 @@ pub(crate) fn aux_idct2_in_place<const SIZE: usize>(block: &mut CutGrid<'_>) {
     }
 }
 
-pub(crate) fn transform_dct2(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct2(coeff: &mut MutableSubgrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
     aux_idct2_in_place::<4>(coeff);
     aux_idct2_in_place::<8>(coeff);
 }
 
-pub(crate) fn transform_dct4(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct4(coeff: &mut MutableSubgrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
     for y in 0..2 {
         for x in 0..2 {
-            let mut scratch = CutGrid::from_buf(&mut scratch[(y * 2 + x) * 16..], 4, 4, 4);
+            let mut scratch = MutableSubgrid::from_buf(&mut scratch[(y * 2 + x) * 16..], 4, 4, 4);
             for iy in 0..4 {
                 for ix in 0..4 {
                     *scratch.get_mut(iy, ix) = coeff.get(x + ix * 2, y + iy * 2);
@@ -81,7 +81,7 @@ pub(crate) fn transform_dct4(coeff: &mut CutGrid<'_>) {
     }
 }
 
-pub(crate) fn transform_hornuss(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_hornuss(coeff: &mut MutableSubgrid<'_>) {
     aux_idct2_in_place::<2>(coeff);
 
     let mut scratch = [0.0f32; 64];
@@ -115,7 +115,7 @@ pub(crate) fn transform_hornuss(coeff: &mut CutGrid<'_>) {
     }
 }
 
-pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut MutableSubgrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
@@ -123,7 +123,7 @@ pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut CutGrid<'_>) {
 
     let mut scratch = [0.0f32; 64];
     for idx in [0, 1] {
-        let mut scratch = CutGrid::from_buf(&mut scratch[(idx * 32)..], 8, 4, 8);
+        let mut scratch = MutableSubgrid::from_buf(&mut scratch[(idx * 32)..], 8, 4, 8);
         for iy in 0..4 {
             for ix in 0..8 {
                 *scratch.get_mut(ix, iy) = coeff.get(ix, iy * 2 + idx);
@@ -145,7 +145,7 @@ pub(crate) fn transform_dct4x8<const TR: bool>(coeff: &mut CutGrid<'_>) {
     }
 }
 
-pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
+pub(crate) fn transform_afv<const N: usize>(coeff: &mut MutableSubgrid<'_>) {
     assert!(N < 4);
     let flip_x = N % 2;
     let flip_y = N / 2;
@@ -178,7 +178,7 @@ pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
         }
     }
     dct_2d(
-        &mut CutGrid::from_buf(&mut scratch_4x4, 4, 4, 4),
+        &mut MutableSubgrid::from_buf(&mut scratch_4x4, 4, 4, 4),
         DctDirection::Inverse,
     );
 
@@ -192,7 +192,7 @@ pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
         }
     }
     dct_2d(
-        &mut CutGrid::from_buf(&mut scratch_4x8, 8, 4, 8),
+        &mut MutableSubgrid::from_buf(&mut scratch_4x8, 8, 4, 8),
         DctDirection::Inverse,
     );
 
@@ -218,11 +218,11 @@ pub(crate) fn transform_afv<const N: usize>(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct(coeff: &mut CutGrid<'_>) {
+fn transform_dct(coeff: &mut MutableSubgrid<'_>) {
     dct_2d(coeff, DctDirection::Inverse);
 }
 
-fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+fn transform(coeff: &mut MutableSubgrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
@@ -241,7 +241,7 @@ fn transform(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
 
 pub fn transform_varblocks(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {

@@ -1,176 +1,10 @@
 use std::{ops::RangeBounds, ptr::NonNull};
 
-use crate::{AllocHandle, AllocTracker, Error, SharedSubgrid, SimdVector};
-
-const fn compute_align<S>() -> usize {
-    let base_align = std::mem::align_of::<S>();
-    let min_align = if cfg!(target_arch = "x86_64") {
-        32usize
-    } else {
-        1usize
-    };
-
-    if base_align > min_align {
-        base_align
-    } else {
-        min_align
-    }
-}
-
-/// A continuous buffer in the "raster order".
-///
-/// The buffer is aligned so that it can be used in SIMD instructions.
-#[derive(Debug)]
-pub struct SimpleGrid<S> {
-    width: usize,
-    height: usize,
-    offset: usize,
-    buf: Vec<S>,
-    handle: Option<AllocHandle>,
-}
-
-impl<S: Default + Clone> SimpleGrid<S> {
-    const ALIGN: usize = compute_align::<S>();
-
-    /// Create a new buffer, recording the allocation if a tracker is given.
-    #[inline]
-    pub fn with_alloc_tracker(
-        width: usize,
-        height: usize,
-        tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
-        let len = width * height;
-        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
-        let handle = tracker
-            .map(|tracker| tracker.alloc::<S>(buf_len))
-            .transpose()?;
-        let mut buf = vec![S::default(); buf_len];
-
-        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
-        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize_with(len + offset, S::default);
-
-        Ok(Self {
-            width,
-            height,
-            offset,
-            buf,
-            handle,
-        })
-    }
-
-    #[inline]
-    pub fn empty() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            offset: 0,
-            buf: Vec::new(),
-            handle: None,
-        }
-    }
-
-    #[inline]
-    fn empty_aligned(
-        width: usize,
-        height: usize,
-        tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
-        let len = width * height;
-        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
-        let handle = tracker
-            .map(|tracker| tracker.alloc::<S>(buf_len))
-            .transpose()?;
-        let mut buf = Vec::with_capacity(buf_len);
-
-        let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
-        let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize_with(offset, S::default);
-
-        Ok(Self {
-            width,
-            height,
-            offset,
-            buf,
-            handle,
-        })
-    }
-
-    /// Clones the buffer without recording an allocation.
-    pub fn clone_untracked(&self) -> Self {
-        let mut out = Self::empty_aligned(self.width, self.height, None).unwrap();
-        out.buf.extend_from_slice(self.buf());
-        out
-    }
-
-    /// Tries to clone the buffer, and records the allocation in the same tracker as the original
-    /// buffer.
-    pub fn try_clone(&self) -> Result<Self, Error> {
-        let mut out = Self::empty_aligned(self.width, self.height, self.tracker().as_ref())?;
-        out.buf.extend_from_slice(self.buf());
-        Ok(out)
-    }
-}
-
-impl<S> SimpleGrid<S> {
-    #[inline]
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    #[inline]
-    pub fn tracker(&self) -> Option<AllocTracker> {
-        self.handle.as_ref().map(|handle| handle.tracker())
-    }
-
-    #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-
-        Some(&self.buf[y * self.width + x + self.offset])
-    }
-
-    #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-
-        Some(&mut self.buf[y * self.width + x + self.offset])
-    }
-
-    /// Get the immutable slice to the underlying buffer.
-    #[inline]
-    pub fn buf(&self) -> &[S] {
-        &self.buf[self.offset..]
-    }
-
-    /// Get the mutable slice to the underlying buffer.
-    #[inline]
-    pub fn buf_mut(&mut self) -> &mut [S] {
-        &mut self.buf[self.offset..]
-    }
-
-    #[inline]
-    pub fn subgrid(
-        &self,
-        range_x: impl RangeBounds<usize>,
-        range_y: impl RangeBounds<usize>,
-    ) -> crate::SharedSubgrid<'_, S> {
-        SharedSubgrid::from(self).subgrid(range_x, range_y)
-    }
-}
+use crate::{SharedSubgrid, SimdVector};
 
 /// A mutable subgrid of the underlying buffer.
 #[derive(Debug)]
-pub struct CutGrid<'g, V: Copy = f32> {
+pub struct MutableSubgrid<'g, V = f32> {
     ptr: NonNull<V>,
     split_base: Option<NonNull<()>>,
     width: usize,
@@ -179,10 +13,18 @@ pub struct CutGrid<'g, V: Copy = f32> {
     _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
-unsafe impl<'g, V: Copy> Send for CutGrid<'g, V> where &'g mut [V]: Send {}
-unsafe impl<'g, V: Copy> Sync for CutGrid<'g, V> where &'g mut [V]: Sync {}
+unsafe impl<'g, V> Send for MutableSubgrid<'g, V> where &'g mut [V]: Send {}
+unsafe impl<'g, V> Sync for MutableSubgrid<'g, V> where &'g mut [V]: Sync {}
 
-impl<'g, V: Copy> CutGrid<'g, V> {
+impl<'g, V> From<&'g mut crate::AlignedGrid<V>> for MutableSubgrid<'g, V> {
+    fn from(grid: &'g mut crate::AlignedGrid<V>) -> Self {
+        let width = grid.width();
+        let height = grid.height();
+        Self::from_buf(grid.buf_mut(), width, height, width)
+    }
+}
+
+impl<'g, V> MutableSubgrid<'g, V> {
     /// Create a `CutGrid` from raw pointer to the buffer, width, height and stride.
     ///
     /// # Safety
@@ -238,12 +80,6 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         }
     }
 
-    pub fn from_simple_grid(grid: &'g mut SimpleGrid<V>) -> Self {
-        let width = grid.width();
-        let height = grid.height();
-        Self::from_buf(grid.buf_mut(), width, height, width)
-    }
-
     #[inline]
     pub fn into_ptr(self) -> NonNull<V> {
         self.ptr
@@ -281,13 +117,6 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     unsafe fn get_ptr_unchecked(&self, x: usize, y: usize) -> *mut V {
         let offset = y * self.stride + x;
         self.ptr.as_ptr().add(offset)
-    }
-
-    #[inline]
-    pub fn get(&self, x: usize, y: usize) -> V {
-        let ptr = self.get_ptr(x, y);
-        // SAFETY: get_ptr returns a valid pointer.
-        unsafe { *ptr }
     }
 
     #[inline]
@@ -347,10 +176,19 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 }
 
-impl<'g, V: Copy> CutGrid<'g, V> {
-    pub fn borrow_mut(&mut self) -> CutGrid<V> {
+impl<V: Copy> MutableSubgrid<'_, V> {
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> V {
+        let ptr = self.get_ptr(x, y);
+        // SAFETY: get_ptr returns a valid pointer.
+        unsafe { *ptr }
+    }
+}
+
+impl<'g, V> MutableSubgrid<'g, V> {
+    pub fn borrow_mut(&mut self) -> MutableSubgrid<V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
-        unsafe { CutGrid::new(self.ptr, self.width, self.height, self.stride) }
+        unsafe { MutableSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
     pub fn as_shared(&self) -> SharedSubgrid<V> {
@@ -362,7 +200,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         &mut self,
         range_x: impl RangeBounds<usize>,
         range_y: impl RangeBounds<usize>,
-    ) -> CutGrid<V> {
+    ) -> MutableSubgrid<V> {
         use std::ops::Bound;
 
         let left = match range_x.start_bound() {
@@ -395,7 +233,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: subgrid region is contained in `self`.
         unsafe {
             let base_ptr = NonNull::new(self.get_ptr_unchecked(left, top)).unwrap();
-            CutGrid::new(base_ptr, right - left, bottom - top, self.stride)
+            MutableSubgrid::new(base_ptr, right - left, bottom - top, self.stride)
         }
     }
 
@@ -403,7 +241,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     ///
     /// # Panics
     /// Panics if `x > self.width()`.
-    pub fn split_horizontal(&mut self, x: usize) -> (CutGrid<'_, V>, CutGrid<'_, V>) {
+    pub fn split_horizontal(&mut self, x: usize) -> (MutableSubgrid<'_, V>, MutableSubgrid<'_, V>) {
         assert!(x <= self.width);
 
         let left_ptr = self.ptr;
@@ -411,8 +249,9 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut left_grid = CutGrid::new(left_ptr, x, self.height, self.stride);
-            let mut right_grid = CutGrid::new(right_ptr, self.width - x, self.height, self.stride);
+            let mut left_grid = MutableSubgrid::new(left_ptr, x, self.height, self.stride);
+            let mut right_grid =
+                MutableSubgrid::new(right_ptr, self.width - x, self.height, self.stride);
             left_grid.split_base = Some(split_base);
             right_grid.split_base = Some(split_base);
             (left_grid, right_grid)
@@ -423,7 +262,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     ///
     /// # Panics
     /// Panics if `x > self.width()`.
-    pub fn split_horizontal_in_place(&mut self, x: usize) -> CutGrid<'g, V> {
+    pub fn split_horizontal_in_place(&mut self, x: usize) -> MutableSubgrid<'g, V> {
         assert!(x <= self.width);
 
         let right_width = self.width - x;
@@ -433,7 +272,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
             self.width = x;
             self.split_base = Some(split_base);
-            let mut right_grid = CutGrid::new(right_ptr, right_width, self.height, self.stride);
+            let mut right_grid =
+                MutableSubgrid::new(right_ptr, right_width, self.height, self.stride);
             right_grid.split_base = Some(split_base);
             right_grid
         }
@@ -443,7 +283,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     ///
     /// # Panics
     /// Panics if `y > self.height()`.
-    pub fn split_vertical(&mut self, y: usize) -> (CutGrid<'_, V>, CutGrid<'_, V>) {
+    pub fn split_vertical(&mut self, y: usize) -> (MutableSubgrid<'_, V>, MutableSubgrid<'_, V>) {
         assert!(y <= self.height);
 
         let top_ptr = self.ptr;
@@ -451,9 +291,9 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         // SAFETY: two grids are contained in `self` and disjoint.
         unsafe {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
-            let mut top_grid = CutGrid::new(top_ptr, self.width, y, self.stride);
+            let mut top_grid = MutableSubgrid::new(top_ptr, self.width, y, self.stride);
             let mut bottom_grid =
-                CutGrid::new(bottom_ptr, self.width, self.height - y, self.stride);
+                MutableSubgrid::new(bottom_ptr, self.width, self.height - y, self.stride);
             top_grid.split_base = Some(split_base);
             bottom_grid.split_base = Some(split_base);
             (top_grid, bottom_grid)
@@ -464,7 +304,7 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     ///
     /// # Panics
     /// Panics if `y > self.height()`.
-    pub fn split_vertical_in_place(&mut self, y: usize) -> CutGrid<'g, V> {
+    pub fn split_vertical_in_place(&mut self, y: usize) -> MutableSubgrid<'g, V> {
         assert!(y <= self.height);
 
         let bottom_height = self.height - y;
@@ -474,7 +314,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
             let split_base = self.split_base.unwrap_or(self.ptr.cast());
             self.height = y;
             self.split_base = Some(split_base);
-            let mut bottom_grid = CutGrid::new(bottom_ptr, self.width, bottom_height, self.stride);
+            let mut bottom_grid =
+                MutableSubgrid::new(bottom_ptr, self.width, bottom_height, self.stride);
             bottom_grid.split_base = Some(split_base);
             bottom_grid
         }
@@ -514,8 +355,12 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 }
 
-impl<'g, V: Copy> CutGrid<'g, V> {
-    pub fn into_groups(self, group_width: usize, group_height: usize) -> Vec<CutGrid<'g, V>> {
+impl<'g, V: Copy> MutableSubgrid<'g, V> {
+    pub fn into_groups(
+        self,
+        group_width: usize,
+        group_height: usize,
+    ) -> Vec<MutableSubgrid<'g, V>> {
         let num_cols = (self.width + group_width - 1) / group_width;
         let num_rows = (self.height + group_height - 1) / group_height;
         self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
@@ -527,8 +372,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
         group_height: usize,
         num_cols: usize,
         num_rows: usize,
-    ) -> Vec<CutGrid<'g, V>> {
-        let CutGrid {
+    ) -> Vec<MutableSubgrid<'g, V>> {
+        let MutableSubgrid {
             ptr,
             split_base,
             width,
@@ -548,7 +393,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
                 let gw = (width - x).min(group_width);
                 let ptr = unsafe { row_ptr.add(x) };
 
-                let mut grid = unsafe { CutGrid::new(NonNull::new(ptr).unwrap(), gw, gh, stride) };
+                let mut grid =
+                    unsafe { MutableSubgrid::new(NonNull::new(ptr).unwrap(), gw, gh, stride) };
                 grid.split_base = Some(split_base);
                 groups.push(grid);
             }
@@ -558,8 +404,8 @@ impl<'g, V: Copy> CutGrid<'g, V> {
     }
 }
 
-impl<'g> CutGrid<'g, f32> {
-    pub fn as_vectored<V: SimdVector>(&mut self) -> Option<CutGrid<'_, V>> {
+impl<'g> MutableSubgrid<'g, f32> {
+    pub fn as_vectored<V: SimdVector>(&mut self) -> Option<MutableSubgrid<'_, V>> {
         assert!(
             V::available(),
             "Vector type `{}` is not supported by current CPU",
@@ -572,7 +418,7 @@ impl<'g> CutGrid<'g, f32> {
         (self.ptr.as_ptr() as usize & align_mask == 0
             && self.width & mask == 0
             && self.stride & mask == 0)
-            .then(|| CutGrid {
+            .then(|| MutableSubgrid {
                 ptr: self.ptr.cast::<V>(),
                 split_base: self.split_base,
                 width: self.width / V::SIZE,
@@ -580,92 +426,5 @@ impl<'g> CutGrid<'g, f32> {
                 stride: self.stride / V::SIZE,
                 _marker: Default::default(),
             })
-    }
-}
-
-/// `[SimpleGrid]` with padding.
-#[derive(Debug)]
-pub struct PaddedGrid<S: Clone> {
-    pub grid: SimpleGrid<S>,
-    padding: usize,
-}
-
-impl<S: Default + Clone> PaddedGrid<S> {
-    /// Create a new buffer.
-    pub fn with_alloc_tracker(
-        width: usize,
-        height: usize,
-        padding: usize,
-        tracker: Option<&AllocTracker>,
-    ) -> Result<Self, crate::Error> {
-        Ok(Self {
-            grid: SimpleGrid::with_alloc_tracker(
-                width + padding * 2,
-                height + padding * 2,
-                tracker,
-            )?,
-            padding,
-        })
-    }
-}
-
-impl<S: Clone> PaddedGrid<S> {
-    #[inline]
-    pub fn width(&self) -> usize {
-        self.grid.width - self.padding * 2
-    }
-
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.grid.height - self.padding * 2
-    }
-
-    #[inline]
-    pub fn padding(&self) -> usize {
-        self.padding
-    }
-
-    #[inline]
-    pub fn buf_padded(&self) -> &[S] {
-        self.grid.buf()
-    }
-
-    #[inline]
-    pub fn buf_padded_mut(&mut self) -> &mut [S] {
-        self.grid.buf_mut()
-    }
-
-    /// Use mirror operator on padding
-    pub fn mirror_edges_padding(&mut self) {
-        let padding = self.padding;
-        let stride = self.grid.width();
-        let height = self.grid.height() - padding * 2;
-
-        // Mirror horizontally.
-        let buf = self.grid.buf_mut();
-        for y in padding..height + padding {
-            for x in 0..padding {
-                buf[y * stride + x] = buf[y * stride + padding * 2 - x - 1].clone();
-                buf[(y + 1) * stride - x - 1] = buf[(y + 1) * stride - padding * 2 + x].clone();
-            }
-        }
-
-        // Mirror vertically.
-        let (out_chunk, in_chunk) = buf.split_at_mut(stride * padding);
-        let in_chunk = &in_chunk[..stride * padding];
-        for (out_row, in_row) in out_chunk
-            .chunks_exact_mut(stride)
-            .zip(in_chunk.chunks_exact(stride).rev())
-        {
-            out_row.clone_from_slice(in_row);
-        }
-
-        let (in_chunk, out_chunk) = buf.split_at_mut(stride * (height + padding));
-        for (out_row, in_row) in out_chunk
-            .chunks_exact_mut(stride)
-            .zip(in_chunk.chunks_exact(stride).rev())
-        {
-            out_row.clone_from_slice(in_row);
-        }
     }
 }

@@ -1,8 +1,8 @@
-use jxl_grid::CutGrid;
+use jxl_grid::MutableSubgrid;
 
 use super::super::dct_common::{self, DctDirection};
 
-pub fn dct_2d(io: &mut CutGrid<'_>, direction: DctDirection) {
+pub fn dct_2d(io: &mut MutableSubgrid<'_>, direction: DctDirection) {
     let width = io.width();
     let height = io.height();
     if width * height <= 1 {

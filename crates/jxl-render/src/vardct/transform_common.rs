@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_grid::{MutableSubgrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
@@ -10,11 +10,11 @@ use crate::vardct::{
 #[inline(always)]
 pub unsafe fn transform_varblocks_inner(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
-    dct: unsafe fn(&mut CutGrid<f32>, DctDirection),
-    transform: unsafe fn(&mut CutGrid<f32>, TransformType),
+    dct: unsafe fn(&mut MutableSubgrid<f32>, DctDirection),
+    transform: unsafe fn(&mut MutableSubgrid<f32>, TransformType),
 ) {
     use TransformType::*;
 

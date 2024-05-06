@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use jxl_bitstream::Bitstream;
 use jxl_coding::{Decoder, DecoderRleMode, RleToken};
-use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 
 use crate::{
     ma::{FlatMaTree, MaTreeLeafClustered},
@@ -13,15 +13,15 @@ use crate::{
 
 #[derive(Debug)]
 pub enum TransformedGrid<'dest, S: Sample> {
-    Single(CutGrid<'dest, S>),
+    Single(MutableSubgrid<'dest, S>),
     Merged {
-        leader: CutGrid<'dest, S>,
+        leader: MutableSubgrid<'dest, S>,
         members: Vec<TransformedGrid<'dest, S>>,
     },
 }
 
-impl<'dest, S: Sample> From<CutGrid<'dest, S>> for TransformedGrid<'dest, S> {
-    fn from(value: CutGrid<'dest, S>) -> Self {
+impl<'dest, S: Sample> From<MutableSubgrid<'dest, S>> for TransformedGrid<'dest, S> {
+    fn from(value: MutableSubgrid<'dest, S>) -> Self {
         Self::Single(value)
     }
 }
@@ -38,14 +38,14 @@ impl<S: Sample> TransformedGrid<'_, S> {
 }
 
 impl<'dest, S: Sample> TransformedGrid<'dest, S> {
-    pub(crate) fn grid(&self) -> &CutGrid<'dest, S> {
+    pub(crate) fn grid(&self) -> &MutableSubgrid<'dest, S> {
         match self {
             Self::Single(g) => g,
             Self::Merged { leader, .. } => leader,
         }
     }
 
-    pub(crate) fn grid_mut(&mut self) -> &mut CutGrid<'dest, S> {
+    pub(crate) fn grid_mut(&mut self) -> &mut MutableSubgrid<'dest, S> {
         match self {
             Self::Single(g) => g,
             Self::Merged { leader, .. } => leader,
@@ -59,7 +59,7 @@ impl<'dest, S: Sample> TransformedGrid<'dest, S> {
 
         match self {
             Self::Single(leader) => {
-                let tmp = CutGrid::from_buf(&mut [], 0, 0, 0);
+                let tmp = MutableSubgrid::empty();
                 let leader = std::mem::replace(leader, tmp);
                 *self = Self::Merged { leader, members };
             }
@@ -83,7 +83,7 @@ impl<'dest, S: Sample> TransformedGrid<'dest, S> {
                 let len = members.len();
                 let members = members.drain((len - count)..).collect();
                 if len == count {
-                    let tmp = CutGrid::from_buf(&mut [], 0, 0, 0);
+                    let tmp = MutableSubgrid::empty();
                     let leader = std::mem::replace(leader, tmp);
                     *self = Self::Single(leader);
                 }
@@ -100,8 +100,8 @@ pub struct ModularImageDestination<S: Sample> {
     group_dim: u32,
     bit_depth: u32,
     channels: ModularChannels,
-    meta_channels: Vec<SimpleGrid<S>>,
-    image_channels: Vec<SimpleGrid<S>>,
+    meta_channels: Vec<AlignedGrid<S>>,
+    image_channels: Vec<AlignedGrid<S>>,
 }
 
 impl<S: Sample> ModularImageDestination<S> {
@@ -122,7 +122,7 @@ impl<S: Sample> ModularImageDestination<S> {
             .info
             .iter()
             .map(|ch| {
-                SimpleGrid::with_alloc_tracker(ch.width as usize, ch.height as usize, tracker)
+                AlignedGrid::with_alloc_tracker(ch.width as usize, ch.height as usize, tracker)
             })
             .collect::<std::result::Result<_, _>>()?;
 
@@ -157,11 +157,11 @@ impl<S: Sample> ModularImageDestination<S> {
         })
     }
 
-    pub fn image_channels(&self) -> &[SimpleGrid<S>] {
+    pub fn image_channels(&self) -> &[AlignedGrid<S>] {
         &self.image_channels
     }
 
-    pub fn into_image_channels(self) -> Vec<SimpleGrid<S>> {
+    pub fn into_image_channels(self) -> Vec<AlignedGrid<S>> {
         self.image_channels
     }
 
@@ -337,12 +337,12 @@ impl<S: Sample> ModularImageDestination<S> {
         let mut meta_channel_grids = self
             .meta_channels
             .iter_mut()
-            .map(CutGrid::from_simple_grid)
+            .map(MutableSubgrid::from)
             .collect::<Vec<_>>();
         let mut grids = self
             .image_channels
             .iter_mut()
-            .map(|g| CutGrid::from_simple_grid(g).into())
+            .map(|g| g.as_subgrid_mut().into())
             .collect::<Vec<_>>();
         for tr in &self.header.transform {
             tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
@@ -595,7 +595,7 @@ pub struct RecursiveModularImage<'dest, S: Sample> {
     ma_ctx: MaConfig,
     bit_depth: u32,
     channels: ModularChannels,
-    meta_channels: Vec<SimpleGrid<S>>,
+    meta_channels: Vec<AlignedGrid<S>>,
     image_channels: Vec<TransformedGrid<'dest, S>>,
 }
 
@@ -608,7 +608,7 @@ impl<'dest, S: Sample> RecursiveModularImage<'dest, S> {
             .map(|g| {
                 let width = g.width();
                 let height = g.height();
-                CutGrid::from_buf(g.buf_mut(), width, height, width)
+                MutableSubgrid::from_buf(g.buf_mut(), width, height, width)
             })
             .collect::<Vec<_>>();
         let mut grids = self
@@ -697,7 +697,7 @@ fn decode_single_node<S: Sample>(
     dist_multiplier: u32,
     predictor_state: &mut PredictorState<S>,
     wp_header: &WpHeader,
-    grid: &mut CutGrid<S>,
+    grid: &mut MutableSubgrid<S>,
     node: &MaTreeLeafClustered,
 ) -> Result<()> {
     let &MaTreeLeafClustered {
@@ -760,7 +760,7 @@ fn decode_fast_lossless<S: Sample>(
     decoder: &mut DecoderRleMode,
     rle_state: &mut RleState<S>,
     cluster: u8,
-    grid: &mut CutGrid<S>,
+    grid: &mut MutableSubgrid<S>,
 ) {
     let height = grid.height();
 
@@ -801,7 +801,7 @@ fn decode_simple_grad<S: Sample>(
     decoder: &mut Decoder,
     cluster: u8,
     dist_multiplier: u32,
-    grid: &mut CutGrid<S>,
+    grid: &mut MutableSubgrid<S>,
 ) -> Result<()> {
     let width = grid.width();
     let height = grid.height();
@@ -875,7 +875,7 @@ fn decode_single_node_slow<S: Sample>(
     dist_multiplier: u32,
     leaf: &MaTreeLeafClustered,
     predictor: &mut PredictorState<S>,
-    grid: &mut CutGrid<S>,
+    grid: &mut MutableSubgrid<S>,
 ) -> Result<()> {
     let height = grid.height();
     for y in 0..2usize.min(height) {
@@ -933,7 +933,7 @@ fn decode_slow<S: Sample>(
     dist_multiplier: u32,
     ma_tree: &FlatMaTree,
     predictor: &mut PredictorState<S>,
-    grid: &mut CutGrid<S>,
+    grid: &mut MutableSubgrid<S>,
 ) -> Result<()> {
     let height = grid.height();
     for y in 0..2usize.min(height) {
