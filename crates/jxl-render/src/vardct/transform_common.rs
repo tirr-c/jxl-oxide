@@ -38,7 +38,9 @@ pub unsafe fn transform_varblocks_inner(
                 let logbw = bw.trailing_zeros() as usize;
                 let logbh = bh.trailing_zeros() as usize;
 
-                let mut out = coeff.subgrid_mut(left..(left + bw), top..(top + bh));
+                let mut out = coeff
+                    .borrow_mut()
+                    .subgrid(left..(left + bw), top..(top + bh));
                 if matches!(
                     dct_select,
                     Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
@@ -59,7 +61,9 @@ pub unsafe fn transform_varblocks_inner(
                     }
                 }
 
-                let mut block = coeff.subgrid_mut(left..(left + bw * 8), top..(top + bh * 8));
+                let mut block = coeff
+                    .borrow_mut()
+                    .subgrid(left..(left + bw * 8), top..(top + bh * 8));
                 transform(&mut block, dct_select);
             },
         );

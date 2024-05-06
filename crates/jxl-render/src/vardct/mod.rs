@@ -508,7 +508,9 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
                     dequant_matrices.get(channel, dct_select)
                 };
 
-                let mut coeff = coeff.subgrid_mut(left..(left + width), top..(top + height));
+                let mut coeff = coeff
+                    .borrow_mut()
+                    .subgrid(left..(left + width), top..(top + height));
                 for (y, matrix_row) in matrix.chunks_exact(width).enumerate() {
                     let row = coeff.get_row_mut(y);
                     for (q, &m) in row.iter_mut().zip(matrix_row) {
