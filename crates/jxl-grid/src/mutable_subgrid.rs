@@ -196,11 +196,11 @@ impl<'g, V> MutableSubgrid<'g, V> {
         unsafe { SharedSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
-    pub fn subgrid_mut(
-        &mut self,
+    pub fn subgrid(
+        self,
         range_x: impl RangeBounds<usize>,
         range_y: impl RangeBounds<usize>,
-    ) -> MutableSubgrid<V> {
+    ) -> MutableSubgrid<'g, V> {
         use std::ops::Bound;
 
         let left = match range_x.start_bound() {
