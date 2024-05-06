@@ -4,7 +4,7 @@ use jxl_frame::{
     data::{GlobalModular, HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
     FrameHeader,
 };
-use jxl_grid::{CutGrid, SharedSubgrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};
 use jxl_image::ImageHeader;
 use jxl_modular::{ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
@@ -345,9 +345,11 @@ pub(crate) fn render_vardct<S: Sample>(
                 let gh = (grid_xyb[0].height() + 63) / 64;
                 let x_from_y = hf_meta
                     .x_from_y
+                    .as_subgrid()
                     .subgrid(cfl_base_x..(cfl_base_x + gw), cfl_base_y..(cfl_base_y + gh));
                 let b_from_y = hf_meta
                     .b_from_y
+                    .as_subgrid()
                     .subgrid(cfl_base_x..(cfl_base_x + gw), cfl_base_y..(cfl_base_y + gh));
                 chroma_from_luma_hf_grouped(grid_xyb, &x_from_y, &b_from_y, lf_chan_corr);
             }
@@ -370,10 +372,10 @@ pub(crate) fn render_vardct<S: Sample>(
 }
 
 pub fn copy_lf_dequant<S: Sample>(
-    grid: &mut CutGrid<f32>,
+    grid: &mut MutableSubgrid<f32>,
     quantizer: &Quantizer,
     m_lf: f32,
-    channel_data: &SimpleGrid<S>,
+    channel_data: &AlignedGrid<S>,
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
@@ -397,7 +399,7 @@ pub fn copy_lf_dequant<S: Sample>(
 }
 
 pub fn adaptive_lf_smoothing(
-    lf_image: &mut [SimpleGrid<f32>],
+    lf_image: &mut [AlignedGrid<f32>],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
 ) -> Result<()> {
@@ -427,7 +429,7 @@ pub fn adaptive_lf_smoothing(
 }
 
 pub fn dequant_hf_varblock_grouped<S: Sample>(
-    out: &mut [CutGrid<'_, f32>; 3],
+    out: &mut [MutableSubgrid<'_, f32>; 3],
     group_idx: u32,
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
@@ -470,7 +472,7 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
     let block_info = &hf_meta.block_info;
     let lf_width = (block_info.width() - left_in_lf).min(group_dim as usize / 8);
     let lf_height = (block_info.height() - top_in_lf).min(group_dim as usize / 8);
-    let block_info = hf_meta.block_info.subgrid(
+    let block_info = hf_meta.block_info.as_subgrid().subgrid(
         left_in_lf..(left_in_lf + lf_width),
         top_in_lf..(top_in_lf + lf_height),
     );
@@ -526,7 +528,10 @@ pub fn dequant_hf_varblock_grouped<S: Sample>(
     }
 }
 
-pub fn chroma_from_luma_lf(coeff_xyb: &mut [SimpleGrid<f32>], lf_chan_corr: &LfChannelCorrelation) {
+pub fn chroma_from_luma_lf(
+    coeff_xyb: &mut [AlignedGrid<f32>],
+    lf_chan_corr: &LfChannelCorrelation,
+) {
     let LfChannelCorrelation {
         colour_factor,
         base_correlation_x,
@@ -552,7 +557,7 @@ pub fn chroma_from_luma_lf(coeff_xyb: &mut [SimpleGrid<f32>], lf_chan_corr: &LfC
 }
 
 pub fn chroma_from_luma_hf_grouped(
-    coeff_xyb: &mut [CutGrid<'_, f32>; 3],
+    coeff_xyb: &mut [MutableSubgrid<'_, f32>; 3],
     x_from_y: &SharedSubgrid<i32>,
     b_from_y: &SharedSubgrid<i32>,
     lf_chan_corr: &LfChannelCorrelation,
@@ -588,7 +593,7 @@ pub fn chroma_from_luma_hf_grouped(
 
 pub fn transform_with_lf_grouped<S: Sample>(
     lf: &ImageWithRegion,
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     group_idx: u32,
     frame_header: &FrameHeader,
     lf_groups: &HashMap<u32, LfGroup<S>>,
@@ -622,7 +627,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
         let lf_base_left = lf_base_left >> shift.hshift();
         let lf_base_top = lf_base_top >> shift.vshift();
         let (lf_width, lf_height) = shift.shift_size((lf_width, lf_height));
-        lf.subgrid(
+        lf.as_subgrid().subgrid(
             lf_base_left..(lf_base_left + lf_width as usize),
             lf_base_top..(lf_base_top + lf_height as usize),
         )
@@ -648,7 +653,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
         return;
     };
 
-    let block_info = hf_meta.block_info.subgrid(
+    let block_info = hf_meta.block_info.as_subgrid().subgrid(
         left_in_lf..(left_in_lf + lf_width as usize),
         top_in_lf..(top_in_lf + lf_height as usize),
     );

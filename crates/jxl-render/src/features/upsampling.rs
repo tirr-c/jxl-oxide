@@ -1,8 +1,8 @@
 use jxl_frame::FrameHeader;
-use jxl_grid::{PaddedGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, PaddedGrid};
 
 pub fn upsample(
-    grid: &mut SimpleGrid<f32>,
+    grid: &mut AlignedGrid<f32>,
     image_header: &jxl_image::ImageHeader,
     frame_header: &FrameHeader,
     channel_idx: usize,
@@ -51,7 +51,7 @@ pub fn upsample(
 }
 
 fn upsample_inner<const K: usize, const NW: usize>(
-    grid: &mut SimpleGrid<f32>,
+    grid: &mut AlignedGrid<f32>,
     weights: &[f32; NW],
 ) -> crate::Result<()> {
     assert!((K == 2 && NW == 15) || (K == 4 && NW == 55) || (K == 8 && NW == 210));
@@ -101,7 +101,7 @@ fn upsample_inner<const K: usize, const NW: usize>(
         }
     }
 
-    *grid = SimpleGrid::with_alloc_tracker(frame_width, frame_height, tracker.as_ref())?;
+    *grid = AlignedGrid::with_alloc_tracker(frame_width, frame_height, tracker.as_ref())?;
     let padded_buf = padded.buf_padded();
     let grid_buf = grid.buf_mut();
     for y in 0..frame_height {

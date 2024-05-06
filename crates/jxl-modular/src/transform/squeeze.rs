@@ -4,24 +4,24 @@ use std::arch::is_aarch64_feature_detected;
 use std::arch::is_x86_feature_detected;
 use std::num::Wrapping;
 
-use jxl_grid::CutGrid;
+use jxl_grid::MutableSubgrid;
 
 use crate::Sample;
 
-pub fn inverse_h<S: Sample>(merged: &mut CutGrid<'_, S>) {
-    if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
+pub fn inverse_h<S: Sample>(merged: &mut MutableSubgrid<'_, S>) {
+    if let Some(merged) = S::try_as_mutable_subgrid_i16(merged) {
         inverse_h_i16(merged)
-    } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
+    } else if let Some(merged) = S::try_as_mutable_subgrid_i32(merged) {
         inverse_h_i32(merged)
     }
 }
 
-fn inverse_h_i32(merged: &mut CutGrid<i32>) {
+fn inverse_h_i32(merged: &mut MutableSubgrid<i32>) {
     inverse_h_i32_base(merged)
 }
 
 #[allow(unreachable_code)]
-fn inverse_h_i16(merged: &mut CutGrid<i16>) {
+fn inverse_h_i16(merged: &mut MutableSubgrid<i16>) {
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
         if is_x86_feature_detected!("avx2") {
@@ -56,7 +56,7 @@ fn inverse_h_i16(merged: &mut CutGrid<i16>) {
     inverse_h_i16_base(merged)
 }
 
-fn inverse_h_i32_base(merged: &mut CutGrid<'_, i32>) {
+fn inverse_h_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
     let height = merged.height();
     let width = merged.width();
     let mut scratch = vec![0i32; width];
@@ -88,7 +88,7 @@ fn inverse_h_i32_base(merged: &mut CutGrid<'_, i32>) {
 }
 
 #[inline(never)]
-fn inverse_h_i16_base(merged: &mut CutGrid<'_, i16>) {
+fn inverse_h_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
     let height = merged.height();
     let width = merged.width();
     let mut scratch = vec![0i16; width];
@@ -205,7 +205,7 @@ unsafe fn transpose_i16x8(vs: [std::arch::x86_64::__m128i; 8]) -> [std::arch::x8
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse2")]
-unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::x86_64::*;
     use std::mem::MaybeUninit;
 
@@ -354,7 +354,7 @@ unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 #[target_feature(enable = "sse4.1")]
-unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::x86_64::*;
     use std::mem::MaybeUninit;
 
@@ -463,7 +463,7 @@ unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-unsafe fn inverse_h_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::aarch64::*;
     use std::mem::MaybeUninit;
 
@@ -610,7 +610,7 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
 }
 
 #[cfg(all(target_family = "wasm", target_feature = "simd128"))]
-unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::wasm32::*;
     use std::mem::MaybeUninit;
 
@@ -752,20 +752,20 @@ unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
     }
 }
 
-pub fn inverse_v<S: Sample>(merged: &mut CutGrid<'_, S>) {
-    if let Some(merged) = S::try_as_i16_cut_grid_mut(merged) {
+pub fn inverse_v<S: Sample>(merged: &mut MutableSubgrid<'_, S>) {
+    if let Some(merged) = S::try_as_mutable_subgrid_i16(merged) {
         inverse_v_i16(merged)
-    } else if let Some(merged) = S::try_as_i32_cut_grid_mut(merged) {
+    } else if let Some(merged) = S::try_as_mutable_subgrid_i32(merged) {
         inverse_v_i32(merged)
     }
 }
 
-fn inverse_v_i32(merged: &mut CutGrid<i32>) {
+fn inverse_v_i32(merged: &mut MutableSubgrid<i32>) {
     inverse_v_i32_base(merged)
 }
 
 #[allow(unreachable_code)]
-fn inverse_v_i16(merged: &mut CutGrid<i16>) {
+fn inverse_v_i16(merged: &mut MutableSubgrid<i16>) {
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse4.1") && is_x86_feature_detected!("sse2") {
         if is_x86_feature_detected!("avx2") {
@@ -800,7 +800,7 @@ fn inverse_v_i16(merged: &mut CutGrid<i16>) {
     inverse_v_i16_base(merged)
 }
 
-fn inverse_v_i32_base(merged: &mut CutGrid<'_, i32>) {
+fn inverse_v_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
     let width = merged.width();
     let height = merged.height();
     let mut scratch = vec![0i32; height];
@@ -831,7 +831,7 @@ fn inverse_v_i32_base(merged: &mut CutGrid<'_, i32>) {
 }
 
 #[inline(never)]
-fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
+fn inverse_v_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
     let width = merged.width();
     let height = merged.height();
     let mut scratch = vec![0i16; height];
@@ -865,7 +865,7 @@ fn inverse_v_i16_base(merged: &mut CutGrid<'_, i16>) {
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse2")]
-unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::x86_64::*;
     use std::mem::MaybeUninit;
 
@@ -927,7 +927,7 @@ unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut CutGrid<'_, i16>) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse2")]
-unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::x86_64::*;
     use std::mem::MaybeUninit;
 
@@ -986,7 +986,7 @@ unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut CutGrid<'_, i16>) {
 
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-unsafe fn inverse_v_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_v_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::aarch64::*;
     use std::mem::MaybeUninit;
 
@@ -1044,7 +1044,7 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut CutGrid<'_, i16>) {
 }
 
 #[cfg(all(target_family = "wasm", target_feature = "simd128"))]
-unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut CutGrid<'_, i16>) {
+unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
     use std::arch::wasm32::*;
     use std::mem::MaybeUninit;
 

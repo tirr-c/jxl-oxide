@@ -1,4 +1,3 @@
 # jxl-grid
 
-This crate provides `Grid`, `SimpleGrid`, `CutGrid` and `PaddedGrid`, used in various places
-involving images.
+This crate provides `AlignedGrid` and `PaddedGrid`, used in various places involving images.

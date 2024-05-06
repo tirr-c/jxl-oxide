@@ -1,5 +1,5 @@
 use jxl_bitstream::{Bitstream, Bundle};
-use jxl_grid::{AllocTracker, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker};
 use jxl_modular::{MaConfig, Modular, ModularChannelParams, ModularParams};
 
 use crate::{Result, TransformType};
@@ -24,13 +24,13 @@ pub struct HfMetadataParams<'ma, 'pool, 'tracker> {
 #[derive(Debug)]
 pub struct HfMetadata {
     /// Chroma-from-luma correlation grid for X channel.
-    pub x_from_y: SimpleGrid<i32>,
+    pub x_from_y: AlignedGrid<i32>,
     /// Chroma-from-luma correlation grid for B channel.
-    pub b_from_y: SimpleGrid<i32>,
+    pub b_from_y: AlignedGrid<i32>,
     /// Varblock information in an LF group.
-    pub block_info: SimpleGrid<BlockInfo>,
+    pub block_info: AlignedGrid<BlockInfo>,
     /// Sigma parameter grid for edge-preserving filter.
-    pub epf_sigma: SimpleGrid<f32>,
+    pub epf_sigma: AlignedGrid<f32>,
 }
 
 /// Varblock grid information.
@@ -104,7 +104,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
 
         let sharpness = sharpness.buf();
 
-        let mut epf_sigma = SimpleGrid::with_alloc_tracker(bw, bh, tracker)?;
+        let mut epf_sigma = AlignedGrid::with_alloc_tracker(bw, bh, tracker)?;
         let epf_sigma_buf = epf_sigma.buf_mut();
         let epf = epf.map(|(quant_mul, sharp_lut)| {
             (
@@ -113,7 +113,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
             )
         });
 
-        let mut block_info = SimpleGrid::<BlockInfo>::with_alloc_tracker(bw, bh, tracker)?;
+        let mut block_info = AlignedGrid::<BlockInfo>::with_alloc_tracker(bw, bh, tracker)?;
         let mut x;
         let mut y = 0usize;
         let mut data_idx = 0usize;

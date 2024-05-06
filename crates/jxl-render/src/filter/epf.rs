@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jxl_frame::{data::LfGroup, filter::EpfParams, FrameHeader};
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
@@ -9,7 +9,7 @@ use crate::{util, ImageWithRegion, Region};
 
 pub fn apply_epf<S: Sample>(
     fb: &mut ImageWithRegion,
-    fb_scratch: &mut [SimpleGrid<f32>; 3],
+    fb_scratch: &mut [AlignedGrid<f32>; 3],
     lf_groups: &HashMap<u32, LfGroup<S>>,
     frame_header: &FrameHeader,
     epf_params: &EpfParams,
@@ -24,7 +24,7 @@ pub fn apply_epf<S: Sample>(
     let fb = <&mut [_; 3]>::try_from(fb.buffer_mut()).unwrap();
 
     let num_lf_groups = frame_header.num_lf_groups() as usize;
-    let mut sigma_grid_map = vec![None::<&SimpleGrid<f32>>; num_lf_groups];
+    let mut sigma_grid_map = vec![None::<&AlignedGrid<f32>>; num_lf_groups];
 
     for (&lf_group_idx, lf_group) in lf_groups {
         if let Some(hf_meta) = &lf_group.hf_meta {
@@ -99,10 +99,10 @@ pub(super) struct EpfRow<'buf, 'epf> {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn run_epf_rows<'buf>(
-    input: &'buf [SimpleGrid<f32>; 3],
-    output: &'buf mut [SimpleGrid<f32>; 3],
+    input: &'buf [AlignedGrid<f32>; 3],
+    output: &'buf mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    sigma_grid_map: &[Option<&AlignedGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,

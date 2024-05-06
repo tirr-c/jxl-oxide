@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use jxl_frame::{filter::EpfParams, FrameHeader};
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
@@ -13,10 +13,10 @@ pub(crate) mod epf;
 pub(crate) mod gabor;
 
 pub fn epf<const STEP: usize>(
-    input: &[SimpleGrid<f32>; 3],
-    output: &mut [SimpleGrid<f32>; 3],
+    input: &[AlignedGrid<f32>; 3],
+    output: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
-    sigma_grid_map: &[Option<&SimpleGrid<f32>>],
+    sigma_grid_map: &[Option<&AlignedGrid<f32>>],
     region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
@@ -37,8 +37,8 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: &[SimpleGrid<f32>; 3],
-    fb_scratch: &mut [SimpleGrid<f32>; 3],
+    fb: &[AlignedGrid<f32>; 3],
+    fb_scratch: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     region: Region,
     weights: [[f32; 2]; 3],

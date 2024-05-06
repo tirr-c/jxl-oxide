@@ -1,6 +1,6 @@
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 
-pub fn apply_jpeg_upsampling(grids_cbycr: [&mut SimpleGrid<f32>; 3], jpeg_upsampling: [u32; 3]) {
+pub fn apply_jpeg_upsampling(grids_cbycr: [&mut AlignedGrid<f32>; 3], jpeg_upsampling: [u32; 3]) {
     fn interpolate(left: f32, center: f32, right: f32) -> (f32, f32) {
         (0.25 * left + 0.75 * center, 0.75 * center + 0.25 * right)
     }

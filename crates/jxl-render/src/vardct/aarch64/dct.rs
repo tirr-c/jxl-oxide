@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SimdVector};
+use jxl_grid::{MutableSubgrid, SimdVector};
 
 use super::super::dct_common::{self, DctDirection};
 use std::arch::aarch64::*;
@@ -14,7 +14,7 @@ pub(crate) unsafe fn transpose_lane(lanes: &[Lane]) -> float32x4x4_t {
 }
 
 #[inline(always)]
-pub(crate) unsafe fn dct_2d_aarch64_neon(io: &mut CutGrid<'_>, direction: DctDirection) {
+pub(crate) unsafe fn dct_2d_aarch64_neon(io: &mut MutableSubgrid<'_>, direction: DctDirection) {
     if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
         return super::generic::dct_2d(io, direction);
     }
@@ -33,7 +33,7 @@ pub(crate) unsafe fn dct_2d_aarch64_neon(io: &mut CutGrid<'_>, direction: DctDir
     dct_2d_lane(&mut io, direction);
 }
 
-fn dct_2d_lane(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
+fn dct_2d_lane(io: &mut MutableSubgrid<'_, Lane>, direction: DctDirection) {
     let scratch_size = io.height().max(io.width() * LANE_SIZE) * 2;
     unsafe {
         let mut scratch_lanes = vec![Lane::zero(); scratch_size];
@@ -130,7 +130,7 @@ pub(crate) unsafe fn dct8_vec_inverse(vl: Lane, vr: Lane) -> (Lane, Lane) {
     (output0.add(output1), vrev64q_f32(vextq_f32(sub, sub, 2)))
 }
 
-unsafe fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
+unsafe fn dct8x8(io: &mut MutableSubgrid<'_, Lane>, direction: DctDirection) {
     let (mut col0, mut col1) = io.split_horizontal(1);
 
     if direction == DctDirection::Forward {
@@ -155,7 +155,7 @@ unsafe fn dct8x8(io: &mut CutGrid<'_, Lane>, direction: DctDirection) {
 }
 
 unsafe fn column_dct_lane(
-    io: &mut CutGrid<'_, Lane>,
+    io: &mut MutableSubgrid<'_, Lane>,
     scratch: &mut [Lane],
     direction: DctDirection,
 ) {
@@ -177,7 +177,11 @@ unsafe fn column_dct_lane(
     }
 }
 
-unsafe fn row_dct_lane(io: &mut CutGrid<'_, Lane>, scratch: &mut [Lane], direction: DctDirection) {
+unsafe fn row_dct_lane(
+    io: &mut MutableSubgrid<'_, Lane>,
+    scratch: &mut [Lane],
+    direction: DctDirection,
+) {
     let width = io.width() * LANE_SIZE;
     let height = io.height();
     let (io_lanes, scratch_lanes) = scratch[..width * 2].split_at_mut(width);
@@ -239,7 +243,7 @@ pub(crate) unsafe fn dct4_inverse(input: [Lane; 4]) -> [Lane; 4] {
 }
 
 #[inline]
-unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
+unsafe fn dct8_forward(io: &mut MutableSubgrid<'_, Lane>) {
     assert!(io.height() == 8);
     let sec = dct_common::sec_half_small(8);
 
@@ -268,7 +272,7 @@ unsafe fn dct8_forward(io: &mut CutGrid<'_, Lane>) {
 }
 
 #[inline]
-unsafe fn dct8_inverse(io: &mut CutGrid<'_, Lane>) {
+unsafe fn dct8_inverse(io: &mut MutableSubgrid<'_, Lane>) {
     assert!(io.height() == 8);
     let sec = dct_common::sec_half_small(8);
 
@@ -323,9 +327,9 @@ unsafe fn dct(io: &mut [Lane], scratch: &mut [Lane], direction: DctDirection) {
 
     if n == 8 {
         if direction == DctDirection::Forward {
-            dct8_forward(&mut CutGrid::from_buf(io, 1, 8, 1));
+            dct8_forward(&mut MutableSubgrid::from_buf(io, 1, 8, 1));
         } else {
-            dct8_inverse(&mut CutGrid::from_buf(io, 1, 8, 1));
+            dct8_inverse(&mut MutableSubgrid::from_buf(io, 1, 8, 1));
         }
         return;
     }

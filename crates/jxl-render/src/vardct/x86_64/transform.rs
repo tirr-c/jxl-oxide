@@ -1,7 +1,7 @@
 use std::arch::is_x86_feature_detected;
 use std::arch::x86_64::*;
 
-use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_grid::{MutableSubgrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
@@ -11,13 +11,13 @@ use super::generic;
 
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse3")]
-unsafe fn transform_dct2_x86_64_sse41(coeff: &mut CutGrid<'_>) {
+unsafe fn transform_dct2_x86_64_sse41(coeff: &mut MutableSubgrid<'_>) {
     generic::aux_idct2_in_place_2(coeff);
     generic::aux_idct2_in_place::<4>(coeff);
     generic::aux_idct2_in_place::<8>(coeff);
 }
 
-fn transform_dct4_x86_64_sse2(coeff: &mut CutGrid<'_>) {
+fn transform_dct4_x86_64_sse2(coeff: &mut MutableSubgrid<'_>) {
     generic::aux_idct2_in_place_2(coeff);
 
     unsafe {
@@ -59,7 +59,7 @@ fn transform_dct4_x86_64_sse2(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct4x8_x86_64_sse2<const TR: bool>(coeff: &mut CutGrid<'_>) {
+fn transform_dct4x8_x86_64_sse2<const TR: bool>(coeff: &mut MutableSubgrid<'_>) {
     let coeff0 = coeff.get(0, 0);
     let coeff1 = coeff.get(0, 1);
     *coeff.get_mut(0, 0) = coeff0 + coeff1;
@@ -148,13 +148,13 @@ fn transform_dct4x8_x86_64_sse2<const TR: bool>(coeff: &mut CutGrid<'_>) {
     }
 }
 
-fn transform_dct(coeff: &mut CutGrid<'_>) {
+fn transform_dct(coeff: &mut MutableSubgrid<'_>) {
     super::dct::dct_2d_x86_64_sse2(coeff, DctDirection::Inverse);
 }
 
 #[target_feature(enable = "sse4.1")]
 #[target_feature(enable = "sse3")]
-unsafe fn transform_x86_64_sse41(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+unsafe fn transform_x86_64_sse41(coeff: &mut MutableSubgrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
@@ -171,7 +171,7 @@ unsafe fn transform_x86_64_sse41(coeff: &mut CutGrid<'_>, dct_select: TransformT
     }
 }
 
-fn transform_x86_64_sse2(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
+fn transform_x86_64_sse2(coeff: &mut MutableSubgrid<'_>, dct_select: TransformType) {
     use TransformType::*;
 
     match dct_select {
@@ -192,7 +192,7 @@ fn transform_x86_64_sse2(coeff: &mut CutGrid<'_>, dct_select: TransformType) {
 #[target_feature(enable = "sse3")]
 unsafe fn transform_varblocks_x86_64_sse41(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {
@@ -208,7 +208,7 @@ unsafe fn transform_varblocks_x86_64_sse41(
 
 pub fn transform_varblocks(
     lf: &[SharedSubgrid<f32>; 3],
-    coeff_out: &mut [CutGrid<'_, f32>; 3],
+    coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     shifts_cbycr: [ChannelShift; 3],
     block_info: &SharedSubgrid<BlockInfo>,
 ) {

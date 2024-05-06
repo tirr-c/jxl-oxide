@@ -1,4 +1,4 @@
-use jxl_grid::{CutGrid, SharedSubgrid};
+use jxl_grid::{MutableSubgrid, SharedSubgrid};
 
 use crate::{
     predictor::{Predictor, PredictorState},
@@ -27,7 +27,7 @@ impl Palette {
     pub(crate) fn inverse_inner<S: Sample>(
         &self,
         palette: SharedSubgrid<S>,
-        mut targets: Vec<CutGrid<S>>,
+        mut targets: Vec<MutableSubgrid<S>>,
         bit_depth: u32,
     ) {
         let nb_deltas = self.nb_deltas as i32;
@@ -144,7 +144,7 @@ impl Palette {
 }
 
 #[inline(never)]
-fn inverse_simple<S: Sample>(palette: SharedSubgrid<S>, targets: Vec<CutGrid<S>>) {
+fn inverse_simple<S: Sample>(palette: SharedSubgrid<S>, targets: Vec<MutableSubgrid<S>>) {
     let height = targets[0].height();
     let channels = targets.len();
     assert_eq!(channels, palette.height());

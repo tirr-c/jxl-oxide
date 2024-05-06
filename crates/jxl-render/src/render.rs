@@ -4,7 +4,7 @@ use jxl_frame::{
     header::Encoding,
     FrameHeader,
 };
-use jxl_grid::SimpleGrid;
+use jxl_grid::AlignedGrid;
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
@@ -82,9 +82,9 @@ pub(crate) fn render_frame<S: Sample>(
             let width = fb.region().width as usize;
             let height = fb.region().height as usize;
             scratch_buffer = Some([
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
             ]);
         }
         let fb_scratch = scratch_buffer.as_mut().unwrap();
@@ -96,9 +96,9 @@ pub(crate) fn render_frame<S: Sample>(
             let width = fb.region().width as usize;
             let height = fb.region().height as usize;
             scratch_buffer = Some([
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-                SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+                AlignedGrid::with_alloc_tracker(width, height, tracker)?,
             ]);
         }
         let fb_scratch = scratch_buffer.as_mut().unwrap();
@@ -212,7 +212,7 @@ fn append_extra_channels<S: Sample>(
 
         let width = region.width as usize;
         let height = region.height as usize;
-        let mut out = SimpleGrid::with_alloc_tracker(width, height, tracker)?;
+        let mut out = AlignedGrid::with_alloc_tracker(width, height, tracker)?;
         modular::copy_modular_groups(&g, &mut out, region, bit_depth, false);
         features::upsample(&mut out, image_header, frame_header, idx + 3)?;
 

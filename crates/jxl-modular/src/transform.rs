@@ -1,5 +1,5 @@
 use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
-use jxl_grid::{AllocTracker, CutGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use super::{
@@ -38,13 +38,13 @@ impl TransformInfo {
 
     pub(super) fn prepare_meta_channels<S: Sample>(
         &self,
-        meta_channels: &mut Vec<SimpleGrid<S>>,
+        meta_channels: &mut Vec<AlignedGrid<S>>,
         tracker: Option<&AllocTracker>,
     ) -> Result<()> {
         if let Self::Palette(pal) = self {
             meta_channels.insert(
                 0,
-                SimpleGrid::with_alloc_tracker(
+                AlignedGrid::with_alloc_tracker(
                     pal.nb_colours as usize,
                     pal.num_c as usize,
                     tracker,
@@ -57,7 +57,7 @@ impl TransformInfo {
     pub(super) fn transform_channels<'dest, S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
-        meta_channel_grids: &mut Vec<CutGrid<'dest, S>>,
+        meta_channel_grids: &mut Vec<MutableSubgrid<'dest, S>>,
         grids: &mut Vec<TransformedGrid<'dest, S>>,
     ) -> Result<()> {
         match self {
@@ -213,7 +213,7 @@ impl Palette {
     fn transform_channel_info<'dest, S: Sample>(
         &self,
         channels: &mut super::ModularChannels,
-        meta_channel_grids: &mut Vec<CutGrid<'dest, S>>,
+        meta_channel_grids: &mut Vec<MutableSubgrid<'dest, S>>,
         grids: Option<&mut Vec<TransformedGrid<'dest, S>>>,
     ) -> Result<()> {
         let begin_c = self.begin_c;

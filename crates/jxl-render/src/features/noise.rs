@@ -1,7 +1,7 @@
 use std::num::Wrapping;
 
 use jxl_frame::{data::NoiseParameters, FrameHeader};
-use jxl_grid::{AllocTracker, PaddedGrid, SimpleGrid};
+use jxl_grid::{AlignedGrid, AllocTracker, PaddedGrid};
 
 use crate::{ImageWithRegion, Region, Result};
 
@@ -88,7 +88,7 @@ fn init_noise(
     invisible_frames: usize,
     header: &FrameHeader,
     tracker: Option<&AllocTracker>,
-) -> Result<[SimpleGrid<f32>; 3]> {
+) -> Result<[AlignedGrid<f32>; 3]> {
     let seed0 = rng_seed0(visible_frames, invisible_frames);
 
     // We use header.width and header.height because
@@ -122,10 +122,10 @@ fn init_noise(
         channel.mirror_edges_padding();
     }
 
-    let mut convolved: [SimpleGrid<f32>; 3] = [
-        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
-        SimpleGrid::with_alloc_tracker(width, height, tracker)?,
+    let mut convolved: [AlignedGrid<f32>; 3] = [
+        AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+        AlignedGrid::with_alloc_tracker(width, height, tracker)?,
+        AlignedGrid::with_alloc_tracker(width, height, tracker)?,
     ];
 
     let mut laplacian = [[0.16f32; 5]; 5];
