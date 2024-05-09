@@ -25,7 +25,7 @@ mod vardct;
 
 pub use error::{Error, Result};
 pub use features::render_spot_color;
-pub use image::ImageWithRegion;
+pub use image::{ImageBuffer, ImageWithRegion};
 pub use region::Region;
 use state::*;
 
@@ -739,8 +739,7 @@ impl RenderContext {
 
         let frame = self.loading_frame().unwrap();
         if frame.header().lf_level > 0 {
-            let frame_region = util::image_region_to_frame(frame, image_region, true);
-            Ok(util::upsample_lf(&image, frame, frame_region)?)
+            Ok(image.upsample_lf(frame.header().lf_level)?)
         } else {
             Ok(image)
         }
@@ -755,6 +754,7 @@ impl RenderContext {
         );
         let frame_region = oriented_image_region.translate(-frame_header.x0, -frame_header.y0);
 
+        /*
         if grid.region() != frame_region {
             let mut new_grid = ImageWithRegion::from_region_and_tracker(
                 grid.channels(),
@@ -767,6 +767,7 @@ impl RenderContext {
             }
             *grid = new_grid;
         }
+        */
 
         let metadata = self.metadata();
 
@@ -787,10 +788,7 @@ impl RenderContext {
                 tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
                 if !grid.ct_done() && frame_header.do_ycbcr {
-                    let [cb, y, cr, ..] = grid.buffer_mut() else {
-                        panic!()
-                    };
-                    jxl_color::ycbcr_to_rgb([cb, y, cr]);
+                    jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
                 }
 
                 let mut transform = jxl_color::ColorTransform::builder();
@@ -803,14 +801,18 @@ impl RenderContext {
                 )?;
 
                 let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
-                let mut channels = color_channels
-                    .iter_mut()
-                    .map(|x| x.buf_mut())
-                    .collect::<Vec<_>>();
+                let mut channels = Vec::new();
+                for grid in color_channels {
+                    channels.push(
+                        grid.convert_to_float_modular(self.image_header.metadata.bit_depth)?
+                            .buf_mut(),
+                    );
+                }
+
                 let mut has_black = false;
                 for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
                     if ec_info.is_black() {
-                        channels.push(grid.buf_mut());
+                        channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
                         has_black = true;
                         break;
                     }
@@ -828,7 +830,7 @@ impl RenderContext {
                 let output_channels =
                     transform.run_with_threads(&mut channels, &*self.cms, &self.pool)?;
                 if output_channels < 3 {
-                    grid.remove_channels(output_channels..3);
+                    grid.remove_color_channels(output_channels);
                 }
                 grid.set_ct_done(true);
                 Ok(())

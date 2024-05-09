@@ -1,8 +1,11 @@
 use jxl_frame::FrameHeader;
 use jxl_grid::{AlignedGrid, PaddedGrid};
 
+use crate::Region;
+
 pub fn upsample(
     grid: &mut AlignedGrid<f32>,
+    out_region: &mut Region,
     image_header: &jxl_image::ImageHeader,
     frame_header: &FrameHeader,
     channel_idx: usize,
@@ -30,6 +33,7 @@ pub fn upsample(
                 2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight)?,
                 _ => {}
             }
+            *out_region = out_region.upsample(dim_shift);
         }
 
         factor = frame_header.ec_upsampling[ec_idx];
@@ -41,6 +45,7 @@ pub fn upsample(
         tracing::debug!(channel_idx, factor, "Applying non-separable upsampling");
     }
 
+    *out_region = out_region.upsample(factor);
     match factor {
         1 => Ok(()),
         2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),

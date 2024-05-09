@@ -1,7 +1,7 @@
 use jxl_frame::{data::GlobalModular, FrameHeader};
 use jxl_grid::AlignedGrid;
 use jxl_image::BitDepth;
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
+use jxl_modular::{image::TransformedModularSubimage, Sample};
 
 use crate::{util, Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result};
 
@@ -10,7 +10,7 @@ pub(crate) fn render_modular<S: Sample>(
     cache: &mut RenderCache<S>,
     region: Region,
     pool: &jxl_threadpool::JxlThreadPool,
-) -> Result<(ImageWithRegion, GlobalModular<S>)> {
+) -> Result<ImageWithRegion> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
     let tracker = frame.alloc_tracker();
@@ -29,14 +29,7 @@ pub(crate) fn render_modular<S: Sample>(
     let mut gmodular = lf_global.gmodular.try_clone()?;
     let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
-    let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let shifts_cbycr =
-        [0, 1, 2].map(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let channels = metadata.encoded_color_channels();
-
-    let bit_depth = metadata.bit_depth;
-    let mut fb_xyb =
-        ImageWithRegion::from_region_and_tracker(channels, region, false, frame.alloc_tracker())?;
 
     let modular_image = gmodular.modular.image_mut().unwrap();
     let groups = modular_image.prepare_groups(frame.pass_shifts())?;
@@ -147,44 +140,18 @@ pub(crate) fn render_modular<S: Sample>(
         modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
-    tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| -> Result<_> {
-        let channel_data = modular_image.image_channels();
-        for ((g, shift), buffer) in channel_data
-            .iter()
-            .zip(shifts_cbycr)
-            .zip(fb_xyb.buffer_mut())
-        {
-            let region = region.downsample_separate(shift.hshift() as u32, shift.vshift() as u32);
-            copy_modular_groups(g, buffer, region, bit_depth, xyb_encoded);
-        }
+    let mut fb = ImageWithRegion::new(tracker);
+    fb.extend_from_gmodular(gmodular);
+    if channels == 1 {
+        tracing::trace_span!("Clone Gray channel").in_scope(|| fb.clone_gray())?;
+    }
 
-        if channels == 1 {
-            fb_xyb.add_channel()?;
-            fb_xyb.add_channel()?;
-            let fb_xyb = fb_xyb.buffer_mut();
-            fb_xyb[1] = fb_xyb[0].try_clone()?;
-            fb_xyb[2] = fb_xyb[0].try_clone()?;
-        }
-        if xyb_encoded {
-            let fb_xyb = fb_xyb.buffer_mut();
-            // Make Y'X'B' to X'Y'B'
-            fb_xyb.swap(0, 1);
-            let [x, y, b] = fb_xyb else { panic!() };
-            let x = x.buf_mut();
-            let y = y.buf_mut();
-            let b = b.buf_mut();
-            for ((x, y), b) in x.iter_mut().zip(y).zip(b) {
-                *b += *y;
-                *x *= lf_global.lf_dequant.m_x_lf_unscaled();
-                *y *= lf_global.lf_dequant.m_y_lf_unscaled();
-                *b *= lf_global.lf_dequant.m_b_lf_unscaled();
-            }
-        }
+    if xyb_encoded {
+        tracing::trace_span!("Dequant XYB")
+            .in_scope(|| fb.convert_modular_xyb(&lf_global.lf_dequant))?;
+    }
 
-        Ok(())
-    })?;
-
-    Ok((fb_xyb, gmodular))
+    Ok(fb)
 }
 
 #[inline]
