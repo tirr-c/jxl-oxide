@@ -748,13 +748,13 @@ impl RenderContext {
     fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion) -> Result<()> {
         let frame_header = frame.header();
 
+        /*
         let oriented_image_region = util::apply_orientation_to_image_region(
             &self.image_header,
             self.requested_image_region,
         );
         let frame_region = oriented_image_region.translate(-frame_header.x0, -frame_header.y0);
 
-        /*
         if grid.region() != frame_region {
             let mut new_grid = ImageWithRegion::from_region_and_tracker(
                 grid.channels(),

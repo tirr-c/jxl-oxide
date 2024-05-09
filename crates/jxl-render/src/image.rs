@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use jxl_frame::{data::GlobalModular, header::Encoding, FrameHeader};
+use jxl_frame::{data::GlobalModular, FrameHeader};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 use jxl_image::{BitDepth, ImageHeader};
 use jxl_modular::{ChannelShift, Sample};

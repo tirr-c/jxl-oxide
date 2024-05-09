@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jxl_frame::{
-    data::{GlobalModular, HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
+    data::{HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
     FrameHeader,
 };
 use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};

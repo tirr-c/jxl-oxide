@@ -1,11 +1,8 @@
 use jxl_frame::{
-    data::*,
     filter::{EdgePreservingFilter, Gabor},
     header::Encoding,
-    FrameHeader,
 };
 use jxl_grid::AlignedGrid;
-use jxl_image::ImageHeader;
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
