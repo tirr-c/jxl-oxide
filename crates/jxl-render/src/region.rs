@@ -1,3 +1,5 @@
+use jxl_image::ImageHeader;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Region {
     pub left: i32,
@@ -201,6 +203,40 @@ impl Region {
             top: new_top,
             width: (self.width + x_diff + add) & mask,
             height: (self.height + y_diff + add) & mask,
+        }
+    }
+
+    pub fn apply_orientation(self, image_header: &ImageHeader) -> Self {
+        let image_width = image_header.width_with_orientation();
+        let image_height = image_header.height_with_orientation();
+        let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
+            image_width,
+            image_height,
+            self.left,
+            self.top,
+            true,
+        );
+        let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
+            image_width,
+            image_height,
+            self.left + self.width as i32 - 1,
+            self.top + self.height as i32 - 1,
+            true,
+        );
+
+        if left > right {
+            std::mem::swap(&mut left, &mut right);
+        }
+        if top > bottom {
+            std::mem::swap(&mut top, &mut bottom);
+        }
+        let width = right.abs_diff(left) + 1;
+        let height = bottom.abs_diff(top) + 1;
+        Self {
+            left,
+            top,
+            width,
+            height,
         }
     }
 }

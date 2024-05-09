@@ -45,37 +45,7 @@ pub(crate) fn apply_orientation_to_image_region(
     image_header: &ImageHeader,
     image_region: Region,
 ) -> Region {
-    let image_width = image_header.width_with_orientation();
-    let image_height = image_header.height_with_orientation();
-    let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left,
-        image_region.top,
-        true,
-    );
-    let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left + image_region.width as i32 - 1,
-        image_region.top + image_region.height as i32 - 1,
-        true,
-    );
-
-    if left > right {
-        std::mem::swap(&mut left, &mut right);
-    }
-    if top > bottom {
-        std::mem::swap(&mut top, &mut bottom);
-    }
-    let width = right.abs_diff(left) + 1;
-    let height = bottom.abs_diff(top) + 1;
-    Region {
-        left,
-        top,
-        width,
-        height,
-    }
+    image_region.apply_orientation(image_header)
 }
 
 pub(crate) fn pad_lf_region(frame_header: &FrameHeader, frame_region: Region) -> Region {
