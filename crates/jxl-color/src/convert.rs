@@ -519,6 +519,11 @@ impl ColorTransform {
         )
     }
 
+    #[inline]
+    pub fn is_noop(&self) -> bool {
+        self.ops.is_empty()
+    }
+
     /// Performs the prepared color transformation on the samples.
     ///
     /// Returns the number of final channels after transformation.

@@ -788,7 +788,11 @@ impl RenderContext {
                 tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
                 if !grid.ct_done() && frame_header.do_ycbcr {
+                    grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
                     jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
+                }
+                if grid.ct_done() {
+                    return Ok(());
                 }
 
                 let mut transform = jxl_color::ColorTransform::builder();
@@ -799,14 +803,16 @@ impl RenderContext {
                     &metadata.opsin_inverse_matrix,
                     &metadata.tone_mapping,
                 )?;
+                if transform.is_noop() {
+                    grid.set_ct_done(true);
+                    return Ok(());
+                }
 
+                grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
                 let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
                 let mut channels = Vec::new();
                 for grid in color_channels {
-                    channels.push(
-                        grid.convert_to_float_modular(self.image_header.metadata.bit_depth)?
-                            .buf_mut(),
-                    );
+                    channels.push(grid.as_float_mut().unwrap().buf_mut());
                 }
 
                 let mut has_black = false;
