@@ -14,10 +14,13 @@ pub fn apply_gabor_like(
     pool: &jxl_threadpool::JxlThreadPool,
 ) {
     tracing::debug!("Running gaborish");
-    let region = fb.region();
-    let fb = <&mut [_; 3]>::try_from(fb.buffer_mut()).unwrap();
-    super::impls::apply_gabor_like(fb, fb_scratch, frame_header, region, weights, pool);
-    fb.swap_with_slice(fb_scratch);
+    let region = fb.regions_and_shifts()[0].0;
+    let buffers = fb.as_color_floats();
+    super::impls::apply_gabor_like(buffers, fb_scratch, frame_header, region, weights, pool);
+    let buffers = fb.as_color_floats_mut();
+    for (out, scratch) in buffers.into_iter().zip(fb_scratch) {
+        std::mem::swap(out, scratch);
+    }
 }
 
 pub(super) struct GaborRow<'buf> {

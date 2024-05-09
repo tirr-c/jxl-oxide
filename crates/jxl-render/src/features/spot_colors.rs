@@ -3,7 +3,7 @@ use jxl_image::ExtraChannelType;
 
 /// Renders a spot color channel onto color_channels
 pub fn render_spot_color(
-    color_channels: &mut [AlignedGrid<f32>],
+    mut color_channels: [&mut AlignedGrid<f32>; 3],
     ec_grid: &AlignedGrid<f32>,
     ec_ty: &ExtraChannelType,
 ) -> crate::Result<()> {

@@ -12,7 +12,9 @@ use jxl_image::ImageHeader;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result};
+use crate::{
+    image::ImageBuffer, vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result,
+};
 
 pub(crate) fn image_region_to_frame(
     frame: &Frame,
@@ -157,15 +159,23 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let frame_header = frame.header();
     let lf_global_vardct = lf_global.vardct.as_ref();
     let global_ma_config = lf_global.gmodular.ma_config();
-    let mut lf_xyb = lf_global_vardct
-        .map(|_| {
-            ImageWithRegion::from_region_and_tracker(3, lf_region, false, frame.alloc_tracker())
-        })
-        .transpose()?;
     let has_lf_frame = frame_header.flags.use_lf_frame();
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let shifts_cbycr: [_; 3] =
         std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
+    let mut lf_xyb = if lf_global_vardct.is_some() && !frame_header.flags.use_lf_frame() {
+        let tracker = frame.alloc_tracker();
+        let mut out = ImageWithRegion::new(tracker);
+        let Region { width, height, .. } = lf_region;
+        for shift in shifts_cbycr {
+            let (width, height) = shift.shift_size((width, height));
+            let buffer = AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
+            out.append_channel(ImageBuffer::F32(buffer), lf_region);
+        }
+        Some(out)
+    } else {
+        None
+    };
 
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
@@ -177,9 +187,9 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let num_rows = lf_region.height.div_ceil(group_dim);
 
     let mut lf_xyb_groups = lf_xyb.as_mut().map(|lf_xyb| {
-        let lf_xyb_arr = <&mut [_; 3]>::try_from(lf_xyb.buffer_mut()).unwrap();
+        let lf_xyb_arr = lf_xyb.as_color_floats_mut();
         let mut idx = 0usize;
-        lf_xyb_arr.each_mut().map(|grid| {
+        lf_xyb_arr.map(|grid| {
             let grid = grid.as_subgrid_mut();
             let shift = shifts_cbycr[idx];
             let group_width = group_dim >> shift.hshift();
@@ -319,45 +329,10 @@ pub(crate) fn load_lf_groups<S: Sample>(
     Ok(lf_xyb)
 }
 
-pub(crate) fn upsample_lf(
-    image: &ImageWithRegion,
-    frame: &IndexedFrame,
-    frame_region: Region,
-) -> Result<ImageWithRegion> {
-    let factor = frame.header().lf_level * 3;
-    let step = 1usize << factor;
-    let new_region = image.region().upsample(factor);
-    let mut new_image = ImageWithRegion::from_region_and_tracker(
-        image.channels(),
-        new_region,
-        image.ct_done(),
-        frame.alloc_tracker(),
-    )?;
-    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
-        let height = original.height();
-        let width = original.width();
-        let stride = target.width();
-
-        let original = original.buf();
-        let target = target.buf_mut();
-        for y in 0..height {
-            let original = &original[y * width..];
-            let target = &mut target[y * step * stride..];
-            for (x, &value) in original[..width].iter().enumerate() {
-                target[x * step..][..step].fill(value);
-            }
-            for row in 1..step {
-                target.copy_within(..stride, stride * row);
-            }
-        }
-    }
-    new_image.clone_intersection(frame_region)
-}
-
 pub(crate) fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
-    grid: &mut [AlignedGrid<f32>],
+    grid: [&mut AlignedGrid<f32>; 3],
     pool: &JxlThreadPool,
 ) -> bool {
     // save_before_ct = false
@@ -365,7 +340,7 @@ pub(crate) fn convert_color_for_record(
     let metadata = &image_header.metadata;
     if do_ycbcr {
         // xyb_encoded = false
-        let [cb, y, cr, ..] = grid else { panic!() };
+        let [cb, y, cr] = grid;
         jxl_color::ycbcr_to_rgb([cb, y, cr]);
     } else if metadata.xyb_encoded {
         // want_icc = false || is_last = true
@@ -386,7 +361,7 @@ pub(crate) fn convert_color_for_record(
             _ => {}
         }
 
-        let [x, y, b, ..] = grid else { panic!() };
+        let [x, y, b] = grid;
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
             tracing::trace!(colour_encoding = ?encoding);
             let transform = ColorTransform::new(

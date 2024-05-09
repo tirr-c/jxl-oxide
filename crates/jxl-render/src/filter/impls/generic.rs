@@ -13,7 +13,7 @@ pub(crate) mod epf;
 pub(crate) mod gabor;
 
 pub fn epf<const STEP: usize>(
-    input: &[AlignedGrid<f32>; 3],
+    input: [&AlignedGrid<f32>; 3],
     output: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&AlignedGrid<f32>>],

@@ -1,4 +1,5 @@
-use jxl_grid::AlignedGrid;
+use jxl_image::BitDepth;
+use jxl_render::ImageBuffer;
 
 /// Frame buffer representing a decoded image.
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ impl FrameBuffer {
 
     /// For internal use only.
     #[doc(hidden)]
-    pub fn from_grids(grids: &[&AlignedGrid<f32>], orientation: u32) -> Self {
+    pub fn from_grids(grids: &[&ImageBuffer], bit_depth: &[BitDepth], orientation: u32) -> Self {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
@@ -61,7 +62,14 @@ impl FrameBuffer {
                         8 => (y, width - x - 1),
                         _ => unreachable!(),
                     };
-                    buf[c + (outx + outy * outw) * channels] = g.get(x, y).copied().unwrap_or(0.0);
+                    buf[c + (outx + outy * outw) * channels] = match g {
+                        ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                        ImageBuffer::I32(g) => {
+                            bit_depth[c].parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                        }
+                        ImageBuffer::I16(g) => bit_depth[c]
+                            .parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32),
+                    };
                 }
             }
         }

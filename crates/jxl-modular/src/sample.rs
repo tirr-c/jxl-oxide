@@ -1,5 +1,5 @@
 use jxl_bitstream::unpack_signed;
-use jxl_grid::MutableSubgrid;
+use jxl_grid::{AlignedGrid, MutableSubgrid};
 
 pub trait Sealed: Copy + Default + Send + Sync {
     fn try_as_mutable_subgrid_i32<'a, 'g>(
@@ -8,6 +8,8 @@ pub trait Sealed: Copy + Default + Send + Sync {
     fn try_as_mutable_subgrid_i16<'a, 'g>(
         grid: &'a mut MutableSubgrid<'g, Self>,
     ) -> Option<&'a mut MutableSubgrid<'g, i16>>;
+    fn try_into_grid_i32(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i32>, AlignedGrid<Self>>;
+    fn try_into_grid_i16(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i16>, AlignedGrid<Self>>;
 
     fn unpack_signed_u32(value: u32) -> Self;
 
@@ -100,6 +102,14 @@ impl Sealed for i32 {
         None
     }
 
+    fn try_into_grid_i32(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i32>, AlignedGrid<Self>> {
+        Ok(grid)
+    }
+
+    fn try_into_grid_i16(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i16>, AlignedGrid<Self>> {
+        Err(grid)
+    }
+
     #[inline]
     fn unpack_signed_u32(value: u32) -> Self {
         unpack_signed(value)
@@ -137,6 +147,14 @@ impl Sealed for i16 {
         grid: &'a mut MutableSubgrid<'g, i16>,
     ) -> Option<&'a mut MutableSubgrid<'g, i16>> {
         Some(grid)
+    }
+
+    fn try_into_grid_i32(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i32>, AlignedGrid<Self>> {
+        Err(grid)
+    }
+
+    fn try_into_grid_i16(grid: AlignedGrid<Self>) -> Result<AlignedGrid<i16>, AlignedGrid<Self>> {
+        Ok(grid)
     }
 
     #[inline]

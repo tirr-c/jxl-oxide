@@ -14,7 +14,7 @@ mod gabor;
 use gabor::run_gabor_row_aarch64_neon;
 
 pub fn epf<const STEP: usize>(
-    input: &[AlignedGrid<f32>; 3],
+    input: [&AlignedGrid<f32>; 3],
     output: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&AlignedGrid<f32>>],
@@ -56,7 +56,7 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: &[AlignedGrid<f32>; 3],
+    fb: [&AlignedGrid<f32>; 3],
     fb_scratch: &mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     region: Region,

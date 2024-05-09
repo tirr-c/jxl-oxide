@@ -13,11 +13,9 @@ pub fn render_noise(
     grid: &mut ImageWithRegion,
     params: &NoiseParameters,
 ) -> Result<()> {
-    let region = grid.region();
+    let region = grid.regions_and_shifts()[0].0;
     let tracker = grid.alloc_tracker().cloned();
-    let [grid_r, grid_g, grid_b, ..] = grid.buffer_mut() else {
-        panic!()
-    };
+    let [grid_r, grid_g, grid_b] = grid.as_color_floats_mut();
 
     let full_frame_region = Region::with_size(header.width, header.height);
     let actual_region = region.intersection(full_frame_region);

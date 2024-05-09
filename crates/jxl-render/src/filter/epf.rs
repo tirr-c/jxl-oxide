@@ -20,8 +20,8 @@ pub fn apply_epf<S: Sample>(
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
 
-    let region = fb.region();
-    let fb = <&mut [_; 3]>::try_from(fb.buffer_mut()).unwrap();
+    let region = fb.regions_and_shifts()[0].0;
+    let fb = fb.as_color_floats_mut();
 
     let num_lf_groups = frame_header.num_lf_groups() as usize;
     let mut sigma_grid_map = vec![None::<&AlignedGrid<f32>>; num_lf_groups];
@@ -36,7 +36,7 @@ pub fn apply_epf<S: Sample>(
     if iters == 3 {
         tracing::debug!("Running step 0");
         super::impls::epf::<0>(
-            fb,
+            fb.each_ref().map(|g| &**g),
             fb_scratch,
             frame_header,
             &sigma_grid_map,
@@ -44,16 +44,16 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        std::mem::swap(fb[0], &mut fb_scratch[0]);
+        std::mem::swap(fb[1], &mut fb_scratch[1]);
+        std::mem::swap(fb[2], &mut fb_scratch[2]);
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
         super::impls::epf::<1>(
-            fb,
+            fb.each_ref().map(|g| &**g),
             fb_scratch,
             frame_header,
             &sigma_grid_map,
@@ -61,16 +61,16 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        std::mem::swap(fb[0], &mut fb_scratch[0]);
+        std::mem::swap(fb[1], &mut fb_scratch[1]);
+        std::mem::swap(fb[2], &mut fb_scratch[2]);
     }
 
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
         super::impls::epf::<2>(
-            fb,
+            fb.each_ref().map(|g| &**g),
             fb_scratch,
             frame_header,
             &sigma_grid_map,
@@ -78,9 +78,9 @@ pub fn apply_epf<S: Sample>(
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        std::mem::swap(fb[0], &mut fb_scratch[0]);
+        std::mem::swap(fb[1], &mut fb_scratch[1]);
+        std::mem::swap(fb[2], &mut fb_scratch[2]);
     }
 }
 
@@ -99,7 +99,7 @@ pub(super) struct EpfRow<'buf, 'epf> {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn run_epf_rows<'buf>(
-    input: &'buf [AlignedGrid<f32>; 3],
+    input: [&'buf AlignedGrid<f32>; 3],
     output: &'buf mut [AlignedGrid<f32>; 3],
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&AlignedGrid<f32>>],
