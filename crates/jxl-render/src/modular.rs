@@ -1,6 +1,4 @@
 use jxl_frame::{data::GlobalModular, FrameHeader};
-use jxl_grid::AlignedGrid;
-use jxl_image::BitDepth;
 use jxl_modular::{image::TransformedModularSubimage, Sample};
 
 use crate::{util, Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result};
@@ -173,78 +171,5 @@ pub fn compute_modular_region<S: Sample>(
         Region::with_size(width, height)
     } else {
         region
-    }
-}
-
-pub fn copy_modular_groups<S: Sample>(
-    g: &AlignedGrid<S>,
-    buffer: &mut AlignedGrid<f32>,
-    region: Region,
-    bit_depth: BitDepth,
-    xyb_encoded: bool,
-) {
-    let Region {
-        left,
-        top,
-        width: rwidth,
-        height: rheight,
-    } = region;
-    assert!(buffer.width() >= rwidth as usize);
-    assert!(buffer.height() >= rheight as usize);
-
-    let width = g.width();
-    let height = g.height();
-
-    let g_stride = g.width();
-    let buffer_stride = buffer.width();
-    let g = g.buf();
-    let buffer = buffer.buf_mut();
-
-    let bottom = top.checked_add_unsigned(rheight).unwrap();
-    let right = left.checked_add_unsigned(rwidth).unwrap();
-
-    if bottom <= 0 || top > height as i32 || right <= 0 || left > width as i32 {
-        buffer.fill(0f32);
-        return;
-    }
-
-    if top < 0 {
-        buffer[..(-top) as usize * buffer_stride].fill(0f32);
-    }
-
-    if bottom as usize > height {
-        let remaining = bottom as usize - height;
-        let from_y = rheight as usize - remaining;
-        buffer[from_y * buffer_stride..].fill(0f32);
-    }
-
-    let mut col_begin = 0usize;
-    let mut col_end = buffer_stride;
-    if left < 0 {
-        col_begin = (-left) as usize;
-    }
-    if right as usize > width {
-        let remaining = right as usize - width;
-        col_end = rwidth as usize - remaining;
-    }
-
-    for y in (top.max(0) as usize)..(bottom as usize).min(height) {
-        let buffer_y = y.checked_add_signed((-top) as isize).unwrap();
-        let buffer_row = &mut buffer[buffer_y * buffer_stride..][..buffer_stride];
-
-        buffer_row[..col_begin].fill(0f32);
-        buffer_row[col_end..].fill(0f32);
-
-        let g_row = &g[y * g_stride..][left.max(0) as usize..(right as usize).min(width)];
-        let buffer_row = &mut buffer_row[col_begin..col_end];
-        if xyb_encoded {
-            for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = s.to_i32() as f32;
-            }
-        } else {
-            for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = bit_depth.parse_integer_sample(s.to_i32());
-            }
-        }
     }
 }
