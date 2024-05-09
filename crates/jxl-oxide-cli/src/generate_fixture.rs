@@ -23,12 +23,7 @@ pub fn handle_generate_fixture(args: GenerateFixtureArgs) {
         let frame = image.render_frame(idx).unwrap();
         output.write_all(&[0]).unwrap();
 
-        let color_channels = frame.color_channels();
-        let extra_channels = frame.extra_channels();
-        for grid in color_channels
-            .iter()
-            .chain(extra_channels.iter().map(|ec| ec.grid()))
-        {
+        for grid in frame.image_planar() {
             let buf = grid.buf();
             let mut output_buf = vec![0u8; grid.width() * grid.height() * 2];
             for (&sample_float, output) in buf.iter().zip(output_buf.chunks_exact_mut(2)) {
