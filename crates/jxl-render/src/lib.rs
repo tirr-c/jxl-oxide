@@ -166,6 +166,11 @@ impl RenderContext {
         self.requested_image_region = image_region;
         self.reset_cache();
     }
+
+    #[inline]
+    pub fn image_region(&self) -> Region {
+        self.requested_image_region
+    }
 }
 
 impl RenderContext {

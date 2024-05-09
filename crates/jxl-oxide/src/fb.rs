@@ -1,5 +1,5 @@
 use jxl_image::BitDepth;
-use jxl_render::ImageBuffer;
+use jxl_render::{ImageBuffer, Region};
 
 /// Frame buffer representing a decoded image.
 #[derive(Debug, Clone)]
@@ -25,7 +25,13 @@ impl FrameBuffer {
 
     /// For internal use only.
     #[doc(hidden)]
-    pub fn from_grids(grids: &[&ImageBuffer], bit_depth: &[BitDepth], orientation: u32) -> Self {
+    pub fn from_grids(
+        grids: &[&ImageBuffer],
+        bit_depth: &[BitDepth],
+        grid_regions: &[Region],
+        copy_region: Region,
+        orientation: u32,
+    ) -> Self {
         let channels = grids.len();
         if channels == 0 {
             panic!("framebuffer should have channels");
@@ -34,12 +40,14 @@ impl FrameBuffer {
             panic!("Invalid orientation {orientation}");
         }
 
-        let mut width = grids[0].width();
-        let mut height = grids[0].height();
-        for g in grids {
-            width = width.min(g.width());
-            height = height.min(g.height());
-        }
+        let Region {
+            left,
+            top,
+            width,
+            height,
+        } = copy_region;
+        let width = width as usize;
+        let height = height as usize;
 
         let (outw, outh) = match orientation {
             1..=4 => (width, height),
@@ -50,7 +58,7 @@ impl FrameBuffer {
         let buf = out.buf_mut();
         for y in 0..height {
             for x in 0..width {
-                for (c, g) in grids.iter().enumerate() {
+                for (c, (g, region)) in grids.iter().zip(grid_regions).enumerate() {
                     let (outx, outy) = match orientation {
                         1 => (x, y),
                         2 => (width - x - 1, y),
@@ -62,7 +70,24 @@ impl FrameBuffer {
                         8 => (y, width - x - 1),
                         _ => unreachable!(),
                     };
-                    buf[c + (outx + outy * outw) * channels] = match g {
+                    let idx = c + (outx + outy * outw) * channels;
+
+                    let base_x = (left - region.left) as isize;
+                    let base_y = (top - region.top) as isize;
+                    let Some(x) = x.checked_add_signed(base_x) else {
+                        buf[idx] = 0.0;
+                        continue;
+                    };
+                    let Some(y) = y.checked_add_signed(base_y) else {
+                        buf[idx] = 0.0;
+                        continue;
+                    };
+                    if x >= region.width as usize || y >= region.height as usize {
+                        buf[idx] = 0.0;
+                        continue;
+                    }
+
+                    buf[idx] = match g {
                         ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
                         ImageBuffer::I32(g) => {
                             bit_depth[c].parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
