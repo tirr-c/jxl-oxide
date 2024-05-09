@@ -45,12 +45,9 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
             panic!();
         }
 
-        let color_channels = frame.color_channels();
-        let extra_channels = frame.extra_channels();
-        assert_eq!(
-            fixture_header.channels as usize,
-            color_channels.len() + extra_channels.len()
-        );
+        let num_color_channels = frame.color_channels().len();
+        let image_planar = frame.image_planar();
+        assert_eq!(fixture_header.channels as usize, image_planar.len());
 
         // Peak error threshold of Level 10 tests, from 18181-3
         let frame_header = image.frame_header(idx).unwrap();
@@ -58,17 +55,12 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
             jxl_frame::header::Encoding::VarDct => (0.004 * 65535.0) as u16,
             jxl_frame::header::Encoding::Modular => 1u16 << 14u32.saturating_sub(bit_depth),
         };
+        let mut thresholds = vec![color_peak_error_threshold; num_color_channels];
+        for ec in &image_header.ec_info {
+            thresholds.push(1u16 << 14u32.saturating_sub(ec.bit_depth.bits_per_sample()));
+        }
 
-        let channels_it = color_channels
-            .iter()
-            .map(|cc| (cc, color_peak_error_threshold))
-            .chain(
-                extra_channels
-                    .iter()
-                    .map(|ec| (ec.grid(), 1u16 << 14u32.saturating_sub(bit_depth))),
-            );
-
-        for (grid, peak_error_threshold) in channels_it {
+        for (grid, peak_error_threshold) in image_planar.into_iter().zip(thresholds) {
             assert_eq!(fixture_header.width as usize, grid.width());
             assert_eq!(fixture_header.height as usize, grid.height());
             let buf = grid.buf();
