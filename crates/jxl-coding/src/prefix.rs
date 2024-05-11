@@ -3,28 +3,35 @@ use jxl_bitstream::{read_bits, Bitstream};
 
 use crate::{Error, Result};
 
-const MAX_TOPLEVEL_BITS: usize = 10;
-
 #[derive(Debug)]
 pub struct Histogram {
-    toplevel_bits: usize,
-    toplevel_mask: u32,
-    toplevel_entries: Vec<Entry>,
-    second_level_entries: Vec<Entry>,
+    toplevel_entries: Box<[Entry]>,
+    second_level_entries: Box<[LeafEntry]>,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
-struct Entry {
-    nested: bool,
-    bits_or_mask: u8,
-    symbol_or_offset: u16,
+struct LeafEntry {
+    bits: u32,
+    symbol: u32,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum Entry {
+    Leaf { bits: u32, symbol: u32 },
+    Nested { mask: u32, offset: u32 },
+}
+
+impl Default for Entry {
+    fn default() -> Self {
+        Self::Leaf { bits: 0, symbol: 0 }
+    }
 }
 
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> Result<Self> {
         let mut syms_for_length = Vec::with_capacity(15);
         for (sym, len) in code_lengths.into_iter().enumerate() {
-            let sym = sym as u16;
+            let sym = sym as u32;
             if len > 0 {
                 if syms_for_length.len() < len as usize {
                     syms_for_length.resize_with(len as usize, Vec::new);
@@ -33,16 +40,27 @@ impl Histogram {
             }
         }
 
-        let toplevel_bits = syms_for_length.len().min(MAX_TOPLEVEL_BITS);
+        let toplevel_bits = {
+            let mut numer = 0usize;
+            let mut denom = 1usize;
+            for syms in &syms_for_length {
+                numer = numer * 2 + syms.len();
+                denom *= 2;
+                if numer * 100 >= denom * 99 {
+                    break;
+                }
+            }
+            denom.trailing_zeros().max(4) as usize
+        };
+
         let mut entries = vec![Entry::default(); 1 << toplevel_bits];
         let mut current_bits = 0u16;
         for (idx, syms) in syms_for_length.iter().enumerate().take(toplevel_bits) {
             let shifts = toplevel_bits - 1 - idx;
             for &sym in syms {
-                let entry = Entry {
-                    nested: false,
-                    bits_or_mask: (idx + 1) as u8,
-                    symbol_or_offset: sym,
+                let entry = Entry::Leaf {
+                    bits: (idx + 1) as u32,
+                    symbol: sym,
                 };
                 entries[current_bits as usize..][..(1 << shifts)].fill(entry);
                 current_bits += 1u16 << shifts;
@@ -70,17 +88,15 @@ impl Histogram {
                     }
                 }
                 for &sym in syms {
-                    let entry = Entry {
-                        nested: false,
-                        bits_or_mask: (idx + 1) as u8,
-                        symbol_or_offset: sym,
+                    let entry = LeafEntry {
+                        bits: (idx + 1) as u32,
+                        symbol: sym,
                     };
                     chunk.push(entry);
                     if chunk.len() == chunk_size {
-                        entries[current_bits as usize] = Entry {
-                            nested: true,
-                            bits_or_mask: (chunk_size - 1) as u8,
-                            symbol_or_offset: second_level_entries.len() as u16,
+                        entries[current_bits as usize] = Entry::Nested {
+                            mask: (chunk_size - 1) as u32,
+                            offset: second_level_entries.len() as u32,
                         };
                         vec_reverse_bits(&chunk, &mut second_level_entries);
                         current_bits += 1;
@@ -100,27 +116,19 @@ impl Histogram {
             let mut toplevel_entries = Vec::with_capacity(entries.len());
             vec_reverse_bits(&entries, &mut toplevel_entries);
             Ok(Self {
-                toplevel_bits,
-                toplevel_mask: (1 << toplevel_bits) - 1,
-                toplevel_entries,
-                second_level_entries,
+                toplevel_entries: toplevel_entries.into_boxed_slice(),
+                second_level_entries: second_level_entries.into_boxed_slice(),
             })
         } else {
             Err(Error::InvalidPrefixHistogram)
         }
     }
 
-    fn with_single_symbol(symbol: u16) -> Self {
-        let entry = Entry {
-            nested: false,
-            bits_or_mask: 0,
-            symbol_or_offset: symbol,
-        };
+    fn with_single_symbol(symbol: u32) -> Self {
+        let entry = Entry::Leaf { bits: 0, symbol };
         Self {
-            toplevel_bits: 0,
-            toplevel_mask: 0,
-            toplevel_entries: vec![entry],
-            second_level_entries: Vec::new(),
+            toplevel_entries: vec![entry].into_boxed_slice(),
+            second_level_entries: Vec::new().into_boxed_slice(),
         }
     }
 
@@ -138,7 +146,7 @@ impl Histogram {
     }
 
     fn parse_simple(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
-        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros() as usize;
+        let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros();
         let nsym = read_bits!(bitstream, u(2))? + 1;
         let it = match nsym {
             1 => {
@@ -146,7 +154,7 @@ impl Histogram {
                 if sym >= alphabet_size {
                     return Err(Error::InvalidPrefixHistogram);
                 }
-                return Ok(Self::with_single_symbol(sym as u16));
+                return Ok(Self::with_single_symbol(sym));
             }
             2 => {
                 let syms = [
@@ -240,7 +248,7 @@ impl Histogram {
         }
 
         let code_length_histogram = if nonzero_count == 1 {
-            Histogram::with_single_symbol(nonzero_sym as u16)
+            Histogram::with_single_symbol(nonzero_sym as u32)
         } else if bitacc != 32 {
             return Err(Error::InvalidPrefixHistogram);
         } else {
@@ -261,7 +269,7 @@ impl Histogram {
                 *len = repeat_sym;
                 repeat_count -= 1;
             } else {
-                let sym = code_length_histogram.read_symbol(bitstream)? as u8;
+                let sym = code_length_histogram.read_symbol(bitstream) as u8;
                 match sym {
                     0 => {}
                     1..=15 => {
@@ -312,6 +320,7 @@ impl Histogram {
             }
         }
 
+        bitstream.check_in_bounds()?;
         if bitacc != 32768 || repeat_count > 0 {
             return Err(Error::InvalidPrefixHistogram);
         }
@@ -321,44 +330,42 @@ impl Histogram {
 
 impl Histogram {
     #[inline(always)]
-    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> Result<u32> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream) -> u32 {
         let Self {
-            toplevel_bits,
-            toplevel_mask,
-            ref toplevel_entries,
-            ref second_level_entries,
-        } = *self;
-        let peeked = bitstream.peek_bits_const::<15>();
-        let toplevel_offset = peeked & toplevel_mask;
-        let toplevel_entry = toplevel_entries[toplevel_offset as usize];
-        if toplevel_entry.nested {
-            let chunk_offset = (peeked >> toplevel_bits) & (toplevel_entry.bits_or_mask as u32);
-            let second_level_offset = toplevel_entry.symbol_or_offset as u32 + chunk_offset;
-            let second_level_entry = second_level_entries[second_level_offset as usize];
-            bitstream.consume_bits(second_level_entry.bits_or_mask as usize)?;
-            Ok(second_level_entry.symbol_or_offset as u32)
-        } else {
-            bitstream.consume_bits(toplevel_entry.bits_or_mask as usize)?;
-            Ok(toplevel_entry.symbol_or_offset as u32)
-        }
+            toplevel_entries,
+            second_level_entries,
+        } = self;
+        let peeked = bitstream.bit_buffer_u32();
+        debug_assert!(toplevel_entries.len().is_power_of_two());
+        let toplevel_mask = toplevel_entries.len() - 1;
+        let toplevel_offset = peeked as usize & toplevel_mask;
+        let toplevel_entry = unsafe { *toplevel_entries.get_unchecked(toplevel_offset) };
+        let (bits, symbol) = match toplevel_entry {
+            Entry::Leaf { bits, symbol } => (bits, symbol),
+            Entry::Nested { mask, offset } => {
+                let toplevel_bits = toplevel_mask.trailing_ones();
+                let chunk_offset = (peeked >> toplevel_bits) & mask;
+                let second_level_offset = offset + chunk_offset;
+                let entry = second_level_entries[second_level_offset as usize];
+                (entry.bits, entry.symbol)
+            }
+        };
+
+        bitstream.consume_bits_silent(bits);
+        symbol
     }
 
     #[inline]
     pub fn single_symbol(&self) -> Option<u32> {
-        if let &[Entry {
-            nested: false,
-            bits_or_mask: 0,
-            symbol_or_offset: symbol,
-        }] = &*self.toplevel_entries
-        {
-            Some(symbol as u32)
+        if let &[Entry::Leaf { bits: 0, symbol }] = &*self.toplevel_entries {
+            Some(symbol)
         } else {
             None
         }
     }
 }
 
-fn vec_reverse_bits(v: &[Entry], out: &mut Vec<Entry>) {
+fn vec_reverse_bits<T: Copy>(v: &[T], out: &mut Vec<T>) {
     let len = v.len();
     debug_assert!(len.is_power_of_two());
     let bits = len.trailing_zeros();
@@ -367,13 +374,5 @@ fn vec_reverse_bits(v: &[Entry], out: &mut Vec<Entry>) {
         let rev_idx = idx.reverse_bits() >> shift;
         let entry = v[rev_idx];
         out.push(entry);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn type_size() {
-        assert_eq!(std::mem::size_of::<super::Entry>(), 4);
     }
 }

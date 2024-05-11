@@ -26,7 +26,7 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
     let mut b2 = 0u8;
     decoder.begin(bitstream)?;
     for (idx, b) in encoded_icc.iter_mut().enumerate() {
-        let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))?;
+        let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2));
         if sym >= 256 {
             return Err(Error::InvalidIccStream("decoded value out of range"));
         }
@@ -65,7 +65,7 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
     // Read remaining data
     encoded_icc.resize(enc_size as usize, 0);
     for (idx, b) in encoded_icc.iter_mut().enumerate().skip(max_size_header_len) {
-        let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2))?;
+        let sym = decoder.read_varint(bitstream, get_icc_ctx(idx, b1, b2));
         if sym >= 256 {
             return Err(Error::InvalidIccStream("decoded value out of range"));
         }
@@ -75,7 +75,7 @@ pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
         b1 = *b;
     }
 
-    decoder.finalize()?;
+    decoder.finalize(bitstream)?;
     Ok(encoded_icc)
 }
 

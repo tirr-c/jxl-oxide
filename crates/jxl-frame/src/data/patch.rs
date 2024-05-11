@@ -105,7 +105,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
             (1 << 24).min((frame_width as u64 * frame_height as u64 / 16) as u32);
         let max_num_patches = max_num_patch_refs * 4; // from libjxl limits
 
-        let num_patch_refs = decoder.read_varint(bitstream, 0)?;
+        let num_patch_refs = decoder.read_varint(bitstream, 0);
         tracing::trace!(num_patch_refs, "Patch ref");
         if num_patch_refs > max_num_patch_refs {
             tracing::error!(num_patch_refs, max_num_patch_refs, "Too many patches");
@@ -114,18 +114,18 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
 
         let mut total_patches = 0u32;
         let patches = std::iter::repeat_with(|| -> Result<_> {
-            let ref_idx = decoder.read_varint(bitstream, 1)?;
+            let ref_idx = decoder.read_varint(bitstream, 1);
             if ref_idx >= 4 {
                 tracing::error!(ref_idx, "PatchRef index out of bounds");
                 return Err(
                     jxl_bitstream::Error::ValidationFailed("PatchRef index out of bounds").into(),
                 );
             }
-            let x0 = decoder.read_varint(bitstream, 3)?;
-            let y0 = decoder.read_varint(bitstream, 3)?;
-            let width = decoder.read_varint(bitstream, 2)? + 1;
-            let height = decoder.read_varint(bitstream, 2)? + 1;
-            let count = decoder.read_varint(bitstream, 7)? + 1;
+            let x0 = decoder.read_varint(bitstream, 3);
+            let y0 = decoder.read_varint(bitstream, 3);
+            let width = decoder.read_varint(bitstream, 2) + 1;
+            let height = decoder.read_varint(bitstream, 2) + 1;
+            let count = decoder.read_varint(bitstream, 7) + 1;
             tracing::trace!(ref_idx, x0, y0, width, height, count, "Patch target");
 
             total_patches += count;
@@ -137,8 +137,8 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
             let mut prev_xy = None;
             let patch_targets = std::iter::repeat_with(|| -> Result<_> {
                 let (x, y) = if let Some((px, py)) = prev_xy {
-                    let dx = decoder.read_varint(bitstream, 6)?;
-                    let dy = decoder.read_varint(bitstream, 6)?;
+                    let dx = decoder.read_varint(bitstream, 6);
+                    let dy = decoder.read_varint(bitstream, 6);
                     let dx = unpack_signed(dx);
                     let dy = unpack_signed(dy);
                     let x = dx.checked_add(px);
@@ -152,22 +152,22 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
                     (x, y)
                 } else {
                     (
-                        decoder.read_varint(bitstream, 4)? as i32,
-                        decoder.read_varint(bitstream, 4)? as i32,
+                        decoder.read_varint(bitstream, 4) as i32,
+                        decoder.read_varint(bitstream, 4) as i32,
                     )
                 };
                 prev_xy = Some((x, y));
 
                 let blending = std::iter::repeat_with(|| -> Result<_> {
-                    let raw_mode = decoder.read_varint(bitstream, 5)?;
+                    let raw_mode = decoder.read_varint(bitstream, 5);
                     let mode = PatchBlendMode::try_from(raw_mode)?;
                     let alpha_channel = if raw_mode >= 4 && alpha_channel_indices.len() >= 2 {
-                        decoder.read_varint(bitstream, 8)?
+                        decoder.read_varint(bitstream, 8)
                     } else {
                         alpha_channel_indices.first().copied().unwrap_or_default()
                     };
                     let clamp = if raw_mode >= 3 {
-                        decoder.read_varint(bitstream, 9)? != 0
+                        decoder.read_varint(bitstream, 9) != 0
                     } else {
                         false
                     };
@@ -198,7 +198,7 @@ impl Bundle<(&ImageHeader, &FrameHeader)> for Patches {
         .take(num_patch_refs as usize)
         .collect::<Result<Vec<_>>>()?;
 
-        decoder.finalize()?;
+        decoder.finalize(bitstream)?;
         Ok(Self { patches })
     }
 }

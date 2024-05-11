@@ -59,7 +59,7 @@ impl Bundle<HfPassParams<'_>> for HfPass {
 
                 used_orders >>= 1;
             }
-            decoder.finalize()?;
+            decoder.finalize(bitstream)?;
         }
 
         let hf_dist = Decoder::parse(

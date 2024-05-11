@@ -566,7 +566,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
             filtered_prev.insert(0, grid.grid());
         }
 
-        decoder.finalize()?;
+        decoder.finalize(bitstream)?;
         Ok(())
     }
 
@@ -652,26 +652,17 @@ impl<S: Sample> RleState<S> {
     }
 
     #[inline(always)]
-    fn decode(
-        &mut self,
-        bitstream: &mut Bitstream,
-        decoder: &mut DecoderRleMode,
-        cluster: u8,
-    ) -> S {
+    fn decode(&mut self, bitstream: &mut Bitstream, decoder: &mut DecoderRleMode) -> S {
         if self.repeat == 0 {
-            let result = decoder.read_varint_clustered(bitstream, cluster);
+            let result = decoder.read_varint_clustered(bitstream);
             match result {
-                Ok(RleToken::Value(v)) => {
+                RleToken::Value(v) => {
                     self.value = S::unpack_signed_u32(v);
                     self.repeat = 1;
                 }
-                Ok(RleToken::Repeat(len)) => {
+                RleToken::Repeat(len) => {
                     self.repeat = len;
                 }
-                Err(e) if self.error.is_none() => {
-                    self.error = Some(Box::new(e));
-                }
-                _ => {}
             }
         }
 
@@ -728,7 +719,7 @@ fn decode_single_node<S: Sample>(
                         bitstream,
                         cluster,
                         dist_multiplier,
-                    )?;
+                    );
                     *out =
                         S::unpack_signed_u32(token).wrapping_muladd_i32(multiplier as i32, offset);
                 }
@@ -763,12 +754,13 @@ fn decode_fast_lossless<S: Sample>(
     grid: &mut MutableSubgrid<S>,
 ) {
     let height = grid.height();
+    decoder.select_cluster(cluster);
 
     {
         let mut w = S::default();
         let out_row = grid.get_row_mut(0);
         for out in &mut *out_row {
-            let token = rle_state.decode(bitstream, decoder, cluster);
+            let token = rle_state.decode(bitstream, decoder);
             w = w.add(token);
             *out = w;
         }
@@ -779,7 +771,7 @@ fn decode_fast_lossless<S: Sample>(
         let prev_row = u.get_row(y - 1);
         let out_row = d.get_row_mut(0);
 
-        let token = rle_state.decode(bitstream, decoder, cluster);
+        let token = rle_state.decode(bitstream, decoder);
         let mut w = token.add(prev_row[0]);
         out_row[0] = w;
 
@@ -788,7 +780,7 @@ fn decode_fast_lossless<S: Sample>(
             let n = window[1];
             let pred = S::grad_clamped(n, w, nw);
 
-            let token = rle_state.decode(bitstream, decoder, cluster);
+            let token = rle_state.decode(bitstream, decoder);
             w = token.add(pred);
             *out = w;
         }
@@ -810,11 +802,8 @@ fn decode_simple_grad<S: Sample>(
         let mut w = S::default();
         let out_row = grid.get_row_mut(0);
         for out in out_row[..width].iter_mut() {
-            let token = decoder.read_varint_with_multiplier_clustered(
-                bitstream,
-                cluster,
-                dist_multiplier,
-            )?;
+            let token =
+                decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier);
             w = S::unpack_signed_u32(token).add(w);
             *out = w;
         }
@@ -826,7 +815,7 @@ fn decode_simple_grad<S: Sample>(
         let out_row = d.get_row_mut(0);
 
         let token =
-            decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+            decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier);
         let mut w = S::unpack_signed_u32(token).add(prev_row[0]);
         out_row[0] = w;
 
@@ -835,11 +824,8 @@ fn decode_simple_grad<S: Sample>(
             let n = window[1];
             let pred = S::grad_clamped(n, w, nw);
 
-            let token = decoder.read_varint_with_multiplier_clustered(
-                bitstream,
-                cluster,
-                dist_multiplier,
-            )?;
+            let token =
+                decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier);
             let value = S::unpack_signed_u32(token).add(pred);
             *out = value;
             w = value;
@@ -861,7 +847,7 @@ fn decode_one<S: Sample, const EDGE: bool>(
         bitstream,
         leaf.cluster,
         dist_multiplier,
-    )?);
+    ));
     let diff = diff.wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
     let predictor = leaf.predictor;
     let sample_prediction = predictor.predict::<_, EDGE>(properties);

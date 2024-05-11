@@ -70,7 +70,7 @@ impl Bundle<HfGlobalParams<'_, '_>> for HfGlobal {
 
         let num_groups = frame_header.num_groups();
         let num_hf_presets =
-            bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros() as usize)? + 1;
+            bitstream.read_bits(num_groups.next_power_of_two().trailing_zeros())? + 1;
 
         let hf_pass_params = HfPassParams::new(hf_block_ctx, num_hf_presets);
         let hf_passes = std::iter::repeat_with(|| HfPass::parse(bitstream, hf_pass_params))

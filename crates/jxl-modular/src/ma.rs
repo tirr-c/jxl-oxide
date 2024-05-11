@@ -6,7 +6,7 @@ use jxl_coding::Decoder;
 use jxl_grid::{AllocHandle, AllocTracker};
 
 use super::predictor::{Predictor, Properties};
-use crate::{sample::Sealed, Result, Sample};
+use crate::{sample::Sealed, Sample};
 
 /// Meta-adaptive tree configuration.
 ///
@@ -129,21 +129,21 @@ impl Bundle<MaConfigParams<'_>> for MaConfig {
             }
 
             nodes_left -= 1;
-            let property = tree_decoder.read_varint(bitstream, 1)?;
+            let property = tree_decoder.read_varint(bitstream, 1);
             let node = if let Some(property) = property.checked_sub(1) {
-                let value = unpack_signed(tree_decoder.read_varint(bitstream, 0)?);
+                let value = unpack_signed(tree_decoder.read_varint(bitstream, 0));
                 let node = FoldingTree::Decision(property, value);
                 nodes_left += 2;
                 node
             } else {
-                let predictor = tree_decoder.read_varint(bitstream, 2)?;
+                let predictor = tree_decoder.read_varint(bitstream, 2);
                 let predictor = Predictor::try_from(predictor)?;
-                let offset = unpack_signed(tree_decoder.read_varint(bitstream, 3)?);
-                let mul_log = tree_decoder.read_varint(bitstream, 4)?;
+                let offset = unpack_signed(tree_decoder.read_varint(bitstream, 3));
+                let mul_log = tree_decoder.read_varint(bitstream, 4);
                 if mul_log > 30 {
                     return Err(crate::Error::InvalidMaTree);
                 }
-                let mul_bits = tree_decoder.read_varint(bitstream, 5)?;
+                let mul_bits = tree_decoder.read_varint(bitstream, 5);
                 if mul_bits > (1 << (31 - mul_log)) - 2 {
                     return Err(crate::Error::InvalidMaTree);
                 }
@@ -160,7 +160,7 @@ impl Bundle<MaConfigParams<'_>> for MaConfig {
             nodes.push(node);
             max_depth = max_depth.max(nodes_left);
         }
-        tree_decoder.finalize()?;
+        tree_decoder.finalize(bitstream)?;
         let num_tree_nodes = nodes.len();
         let decoder = Decoder::parse(bitstream, ctx)?;
         let cluster_map = decoder.cluster_map();
@@ -343,15 +343,12 @@ impl FlatMaTree {
         decoder: &mut Decoder,
         properties: &Properties<S>,
         dist_multiplier: u32,
-    ) -> Result<(i32, super::predictor::Predictor)> {
+    ) -> (i32, super::predictor::Predictor) {
         let leaf = self.get_leaf(properties);
-        let diff = decoder.read_varint_with_multiplier_clustered(
-            bitstream,
-            leaf.cluster,
-            dist_multiplier,
-        )?;
+        let diff =
+            decoder.read_varint_with_multiplier_clustered(bitstream, leaf.cluster, dist_multiplier);
         let diff = unpack_signed(diff).wrapping_muladd_i32(leaf.multiplier as i32, leaf.offset);
-        Ok((diff, leaf.predictor))
+        (diff, leaf.predictor)
     }
 
     #[inline]

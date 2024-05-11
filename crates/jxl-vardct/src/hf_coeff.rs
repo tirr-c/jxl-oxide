@@ -64,7 +64,7 @@ pub fn write_hf_coeff<S: Sample>(
     let vshifts = upsampling_shifts.map(|shift| shift.vshift());
 
     let hfp_bits = num_hf_presets.next_power_of_two().trailing_zeros();
-    let hfp = bitstream.read_bits(hfp_bits as usize)?;
+    let hfp = bitstream.read_bits(hfp_bits)?;
     let ctx_size = 495 * *num_block_clusters;
     let cluster_map = dist.cluster_map()[(ctx_size * hfp) as usize..][..ctx_size as usize].to_vec();
 
@@ -177,7 +177,7 @@ pub fn write_hf_coeff<S: Sample>(
                     bitstream,
                     cluster_map[non_zeros_ctx as usize],
                     0,
-                )?;
+                );
                 if non_zeros > (63 << num_blocks_log) {
                     tracing::error!(non_zeros, num_blocks, "non_zeros too large");
                     return Err(
@@ -213,8 +213,7 @@ pub fn write_hf_coeff<S: Sample>(
                             "too many zeros in varblock HF coefficient",
                         )
                     })?;
-                    let ucoeff =
-                        dist.read_varint_with_multiplier_clustered(bitstream, cluster, 0)?;
+                    let ucoeff = dist.read_varint_with_multiplier_clustered(bitstream, cluster, 0);
                     if ucoeff == 0 {
                         is_prev_coeff_nonzero = 0;
                         continue;
@@ -244,7 +243,7 @@ pub fn write_hf_coeff<S: Sample>(
         }
     }
 
-    dist.finalize()?;
+    dist.finalize(bitstream)?;
 
     Ok(())
 }

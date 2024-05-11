@@ -80,7 +80,7 @@ impl Histogram {
             dist[leftover..alphabet_size].fill(base as u16);
         } else {
             // compressed distribution info
-            let mut len = 0usize;
+            let mut len = 0u32;
             while len < 3 {
                 if read_bits!(bitstream, Bool)? {
                     len += 1;
@@ -162,7 +162,7 @@ impl Histogram {
                     let zeros = (*code - 1) as i16;
                     let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
                     *code = (1 << zeros)
-                        + ((bitstream.read_bits(bitcount as usize)? as u16) << (zeros - bitcount));
+                        + ((bitstream.read_bits(bitcount as u32)? as u16) << (zeros - bitcount));
                 }
                 prev_dist = *code;
                 acc += *code;
@@ -260,7 +260,7 @@ impl Histogram {
     fn read_u8(bitstream: &mut Bitstream) -> Result<u8> {
         Ok(if read_bits!(bitstream, Bool)? {
             let n = bitstream.read_bits(3)?;
-            ((1 << n) + bitstream.read_bits(n as usize)?) as u8
+            ((1 << n) + bitstream.read_bits(n)?) as u8
         } else {
             0
         })
@@ -269,7 +269,7 @@ impl Histogram {
 
 impl Histogram {
     #[inline(always)]
-    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u32> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> u32 {
         assert_eq!(std::mem::size_of::<Bucket>(), 8);
         let is_le = usize::from_le(1) == 1;
 
@@ -321,8 +321,8 @@ impl Histogram {
         } else {
             next_state
         };
-        bitstream.consume_bits(if select_appended { 16 } else { 0 })?;
-        Ok(symbol as u32)
+        bitstream.consume_bits_silent(if select_appended { 16 } else { 0 });
+        symbol as u32
     }
 
     #[inline]

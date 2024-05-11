@@ -197,7 +197,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
             decoder.begin(bitstream)?;
             let permutation =
                 jxl_coding::read_permutation(bitstream, &mut decoder, entry_count, 0)?;
-            decoder.finalize()?;
+            decoder.finalize(bitstream)?;
             permutation
         } else {
             Vec::new()

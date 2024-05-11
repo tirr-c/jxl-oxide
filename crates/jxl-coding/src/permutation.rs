@@ -7,7 +7,7 @@ pub fn read_permutation(
     size: u32,
     skip: u32,
 ) -> crate::Result<Vec<usize>> {
-    let end = decoder.read_varint(bitstream, get_context(size))?;
+    let end = decoder.read_varint(bitstream, get_context(size));
     if end > size - skip {
         tracing::error!(size, skip, end, "Invalid permutation");
         return Err(crate::Error::InvalidPermutation);
@@ -17,7 +17,7 @@ pub fn read_permutation(
     let mut prev_val = 0u32;
     for (idx, val) in lehmer.iter_mut().enumerate() {
         let idx = idx as u32;
-        *val = decoder.read_varint(bitstream, get_context(prev_val))?;
+        *val = decoder.read_varint(bitstream, get_context(prev_val));
         if *val >= size - skip - idx {
             tracing::error!(idx = idx + skip, size, lehmer = *val, "Invalid permutation");
             return Err(crate::Error::InvalidPermutation);

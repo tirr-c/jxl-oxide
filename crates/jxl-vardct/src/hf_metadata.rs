@@ -78,8 +78,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
             bh = (bh + 1) / 2 * 2;
         }
 
-        let nb_blocks =
-            1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros() as usize)?;
+        let nb_blocks = 1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros())?;
 
         let channels = vec![
             ModularChannelParams::new((lf_width + 63) / 64, (lf_height + 63) / 64),

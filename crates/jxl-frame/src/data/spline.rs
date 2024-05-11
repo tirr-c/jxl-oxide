@@ -20,7 +20,7 @@ impl Bundle<&FrameHeader> for Splines {
         let mut decoder = jxl_coding::Decoder::parse(bitstream, 6)?;
         decoder.begin(bitstream)?;
 
-        let num_splines = decoder.read_varint(bitstream, 2)? as usize;
+        let num_splines = decoder.read_varint(bitstream, 2) as usize;
         let num_pixels = (header.width * header.height) as usize;
         let max_num_splines = usize::min(MAX_NUM_SPLINES, num_pixels / 4);
         if num_splines >= max_num_splines {
@@ -31,19 +31,19 @@ impl Bundle<&FrameHeader> for Splines {
 
         let mut start_points = vec![(0i64, 0i64); num_splines];
         let mut prev_point = (
-            decoder.read_varint(bitstream, 1)? as i64,
-            decoder.read_varint(bitstream, 1)? as i64,
+            decoder.read_varint(bitstream, 1) as i64,
+            decoder.read_varint(bitstream, 1) as i64,
         );
         start_points[0] = prev_point;
         for next_point in &mut start_points[1..] {
-            let x = decoder.read_varint(bitstream, 1)?;
-            let y = decoder.read_varint(bitstream, 1)?;
+            let x = decoder.read_varint(bitstream, 1);
+            let y = decoder.read_varint(bitstream, 1);
             prev_point.0 += unpack_signed(x) as i64;
             prev_point.1 += unpack_signed(y) as i64;
             *next_point = prev_point;
         }
 
-        let quant_adjust = unpack_signed(decoder.read_varint(bitstream, 0)?);
+        let quant_adjust = unpack_signed(decoder.read_varint(bitstream, 0));
 
         let mut splines: Vec<QuantSpline> = Vec::with_capacity(num_splines);
         let mut acc_control_points = 0usize;
@@ -57,7 +57,7 @@ impl Bundle<&FrameHeader> for Splines {
             splines.push(spline);
         }
 
-        decoder.finalize()?;
+        decoder.finalize(bitstream)?;
 
         Ok(Self {
             quant_adjust,
@@ -165,7 +165,7 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
             acc_control_points,
         } = params;
 
-        let num_points = decoder.read_varint(bitstream, 3)? as usize;
+        let num_points = decoder.read_varint(bitstream, 3) as usize;
         let acc_num_points = acc_control_points + num_points;
         let max_num_points = usize::min(MAX_NUM_CONTROL_POINTS, num_pixels / 2);
         if acc_num_points > max_num_points {
@@ -180,8 +180,8 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
         quant_points.push(cur_value);
         for _ in 0..num_points {
             let prev_value = cur_value;
-            let delta_x = unpack_signed(decoder.read_varint(bitstream, 4)?) as i64;
-            let delta_y = unpack_signed(decoder.read_varint(bitstream, 4)?) as i64;
+            let delta_x = unpack_signed(decoder.read_varint(bitstream, 4)) as i64;
+            let delta_y = unpack_signed(decoder.read_varint(bitstream, 4)) as i64;
 
             cur_delta.0 += delta_x;
             cur_delta.1 += delta_y;
@@ -204,13 +204,13 @@ impl Bundle<QuantSplineParams<'_>> for QuantSpline {
         let mut xyb_dct = [[0; 32]; 3];
         for color_dct in &mut xyb_dct {
             for i in color_dct {
-                *i = unpack_signed(decoder.read_varint(bitstream, 5)?);
+                *i = unpack_signed(decoder.read_varint(bitstream, 5));
             }
         }
 
         let mut sigma_dct = [0; 32];
         for i in &mut sigma_dct {
-            *i = unpack_signed(decoder.read_varint(bitstream, 5)?);
+            *i = unpack_signed(decoder.read_varint(bitstream, 5));
         }
 
         Ok(Self {

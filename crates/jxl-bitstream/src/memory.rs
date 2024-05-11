@@ -10,7 +10,8 @@ pub struct Bitstream<'buf> {
     bytes: &'buf [u8],
     buf: u64,
     num_read_bits: usize,
-    remaining_buf_bits: usize,
+    remaining_buf_bits: u32,
+    eof: bool,
     /// LZ77 dist_multiplier mode.
     ///
     /// It shouldn't be here, this is a hack to avoid API breakage.
@@ -44,6 +45,7 @@ impl<'buf> Bitstream<'buf> {
             buf: 0,
             num_read_bits: 0,
             remaining_buf_bits: 0,
+            eof: false,
             lz77_mode: Lz77Mode::IncludeMeta,
         }
     }
@@ -52,6 +54,15 @@ impl<'buf> Bitstream<'buf> {
     #[inline]
     pub fn num_read_bits(&self) -> usize {
         self.num_read_bits
+    }
+
+    #[inline]
+    pub fn check_in_bounds(&self) -> Result<()> {
+        if self.eof {
+            Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))
+        } else {
+            Ok(())
+        }
     }
 
     #[inline]
@@ -79,8 +90,8 @@ impl Bitstream<'_> {
             // SAFETY: read_bytes < 8, self.bytes.len() >= 8 (from the pattern).
             self.bytes = unsafe {
                 std::slice::from_raw_parts(
-                    self.bytes.as_ptr().add(read_bytes),
-                    self.bytes.len() - read_bytes,
+                    self.bytes.as_ptr().add(read_bytes as usize),
+                    self.bytes.len() - read_bytes as usize,
                 )
             };
         } else {
@@ -107,7 +118,7 @@ impl Bitstream<'_> {
     ///
     /// This method refills the bit buffer.
     #[inline]
-    pub fn peek_bits(&mut self, n: usize) -> u32 {
+    pub fn peek_bits(&mut self, n: u32) -> u32 {
         debug_assert!(n <= 32);
         self.refill();
         (self.buf & ((1u64 << n) - 1)) as u32
@@ -117,17 +128,23 @@ impl Bitstream<'_> {
     ///
     /// This method refills the bit buffer.
     #[inline]
-    pub fn peek_bits_const<const N: usize>(&mut self) -> u32 {
+    pub fn peek_bits_const<const N: u32>(&mut self) -> u32 {
         debug_assert!(N <= 32);
         self.refill();
         (self.buf & ((1u64 << N) - 1)) as u32
+    }
+
+    #[inline]
+    pub fn bit_buffer_u32(&mut self) -> u32 {
+        self.refill();
+        self.buf as u32
     }
 
     /// Peeks bits from already filled bitstream, without consuming them.
     ///
     /// This method *does not* refill the bit buffer.
     #[inline]
-    pub fn peek_bits_prefilled(&mut self, n: usize) -> u32 {
+    pub fn peek_bits_prefilled(&mut self, n: u32) -> u32 {
         debug_assert!(n <= 32);
         (self.buf & ((1u64 << n) - 1)) as u32
     }
@@ -136,7 +153,7 @@ impl Bitstream<'_> {
     ///
     /// This method *does not* refill the bit buffer.
     #[inline]
-    pub fn peek_bits_prefilled_const<const N: usize>(&mut self) -> u32 {
+    pub fn peek_bits_prefilled_const<const N: u32>(&mut self) -> u32 {
         debug_assert!(N <= 32);
         (self.buf & ((1u64 << N) - 1)) as u32
     }
@@ -147,14 +164,22 @@ impl Bitstream<'_> {
     /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
     /// bits in the bit buffer.
     #[inline]
-    pub fn consume_bits(&mut self, n: usize) -> Result<()> {
+    pub fn consume_bits(&mut self, n: u32) -> Result<()> {
         self.remaining_buf_bits = self
             .remaining_buf_bits
             .checked_sub(n)
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
-        self.num_read_bits += n;
+        self.num_read_bits += n as usize;
         self.buf >>= n;
         Ok(())
+    }
+
+    #[inline]
+    pub fn consume_bits_silent(&mut self, n: u32) {
+        self.eof |= self.remaining_buf_bits < n;
+        self.remaining_buf_bits = self.remaining_buf_bits.wrapping_sub(n) & 63;
+        self.num_read_bits += n as usize;
+        self.buf >>= n;
     }
 
     /// Consumes bits in bit buffer.
@@ -163,19 +188,19 @@ impl Bitstream<'_> {
     /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
     /// bits in the bit buffer.
     #[inline]
-    pub fn consume_bits_const<const N: usize>(&mut self) -> Result<()> {
+    pub fn consume_bits_const<const N: u32>(&mut self) -> Result<()> {
         self.remaining_buf_bits = self
             .remaining_buf_bits
             .checked_sub(N)
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
-        self.num_read_bits += N;
+        self.num_read_bits += N as usize;
         self.buf >>= N;
         Ok(())
     }
 
     /// Read and consume bits from bitstream.
     #[inline]
-    pub fn read_bits(&mut self, n: usize) -> Result<u32> {
+    pub fn read_bits(&mut self, n: u32) -> Result<u32> {
         let ret = self.peek_bits(n);
         self.consume_bits(n)?;
         Ok(ret)
@@ -183,15 +208,15 @@ impl Bitstream<'_> {
 
     #[inline(never)]
     pub fn skip_bits(&mut self, mut n: usize) -> Result<()> {
-        if let Some(next_remaining_bits) = self.remaining_buf_bits.checked_sub(n) {
+        if self.remaining_buf_bits as usize >= n {
             self.num_read_bits += n;
-            self.remaining_buf_bits = next_remaining_bits;
+            self.remaining_buf_bits -= n as u32;
             self.buf >>= n;
             return Ok(());
         }
 
-        n -= self.remaining_buf_bits;
-        self.num_read_bits += self.remaining_buf_bits;
+        n -= self.remaining_buf_bits as usize;
+        self.num_read_bits += self.remaining_buf_bits as usize;
         self.buf = 0;
         self.remaining_buf_bits = 0;
         if n > self.bytes.len() * 8 {
@@ -205,7 +230,7 @@ impl Bitstream<'_> {
         self.refill();
         self.remaining_buf_bits = self
             .remaining_buf_bits
-            .checked_sub(n)
+            .checked_sub(n as u32)
             .ok_or(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
         self.buf >>= n;
         Ok(())
@@ -215,7 +240,7 @@ impl Bitstream<'_> {
     pub fn zero_pad_to_byte(&mut self) -> Result<()> {
         let byte_boundary = (self.num_read_bits + 7) / 8 * 8;
         let n = byte_boundary - self.num_read_bits;
-        if self.read_bits(n)? != 0 {
+        if self.read_bits(n as u32)? != 0 {
             Err(Error::NonZeroPadding)
         } else {
             Ok(())
