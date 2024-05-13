@@ -234,7 +234,6 @@ pub struct FlatMaTree {
 }
 
 #[derive(Debug)]
-#[repr(u32)]
 enum FlatMaTreeNode {
     FusedDecision {
         prop_level0: u32,
@@ -242,6 +241,11 @@ enum FlatMaTreeNode {
         props_level1: (u32, u32),
         values_level1: (i32, i32),
         index_base: u32,
+    },
+    Table {
+        prop: u32,
+        value_base: i32,
+        indices: Box<[u32]>,
     },
     Leaf(MaTreeLeafClustered),
 }
@@ -262,6 +266,7 @@ impl FlatMaTree {
                 props_level1: (pl, pr),
                 ..
             } => p == 15 || pl == 15 || pr == 15,
+            FlatMaTreeNode::Table { prop, .. } => prop == 15,
             FlatMaTreeNode::Leaf(MaTreeLeafClustered { predictor, .. }) => {
                 predictor == Predictor::SelfCorrecting
             }
@@ -282,6 +287,10 @@ impl FlatMaTree {
                     max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
                 }
                 if let Some(p) = pr.checked_sub(16) {
+                    max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
+                }
+            } else if let FlatMaTreeNode::Table { prop, .. } = *node {
+                if let Some(p) = prop.checked_sub(16) {
                     max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
                 }
             }
@@ -312,6 +321,16 @@ impl FlatMaTree {
                     let l = (plv <= vl) as u32;
                     let r = 2 | (prv <= vr) as u32;
                     let next_node = index_base + if high_bit { r } else { l };
+                    current_node = &self.nodes[next_node as usize];
+                }
+                &FlatMaTreeNode::Table {
+                    prop,
+                    value_base,
+                    ref indices,
+                } => {
+                    let v = properties.get(prop as usize);
+                    let idx = (v - value_base).clamp(0, indices.len() as i32 - 1) as usize;
+                    let next_node = indices[idx];
                     current_node = &self.nodes[next_node as usize];
                 }
                 FlatMaTreeNode::Leaf(leaf) => return leaf,
@@ -405,6 +424,96 @@ impl MaTreeNode {
         }
     }
 
+    fn try_compile_to_table(
+        &self,
+        channel: u32,
+        stream_idx: u32,
+        prev_channels: u32,
+        next_index_base: u32,
+    ) -> Option<(FlatMaTreeNode, Vec<&MaTreeNode>)> {
+        let &MaTreeNode::Decision {
+            property,
+            value,
+            ref left,
+            ref right,
+        } = self
+        else {
+            return None;
+        };
+
+        let mut lower_bound = value;
+        let mut upper_bound = value;
+        let mut stack = vec![
+            (&**left, (value + 1)..=i32::MAX),
+            (&**right, i32::MIN..=value),
+        ];
+        let mut range_nodes = Vec::new();
+        while let Some((node, range)) = stack.pop() {
+            let node = node.next_decision_node(channel, stream_idx, prev_channels);
+            let (value, left, right) = match node {
+                &MaTreeNode::Decision {
+                    property: target_property,
+                    value,
+                    ref left,
+                    ref right,
+                } if target_property == property => (value, left, right),
+                _ => {
+                    range_nodes.push((node, *range.end()));
+                    continue;
+                }
+            };
+            let new_lower_bound = lower_bound.min(value);
+            let new_upper_bound = upper_bound.max(value);
+            if new_upper_bound.abs_diff(new_lower_bound) > 1024 - 2 {
+                range_nodes.push((node, *range.end()));
+                continue;
+            }
+            lower_bound = new_lower_bound;
+            upper_bound = new_upper_bound;
+
+            let left_range = (value + 1)..=(*range.end());
+            let right_range = (*range.start())..=value;
+            if !left_range.is_empty() {
+                stack.push((&**left, left_range));
+            }
+            if !right_range.is_empty() {
+                stack.push((&**right, right_range));
+            }
+        }
+        if range_nodes.len() < 4 {
+            return None;
+        }
+
+        range_nodes.sort_unstable_by_key(|(_, range_end)| *range_end);
+
+        let index_count = upper_bound.abs_diff(lower_bound) as usize + 2;
+        let mut indices = vec![0u32; index_count];
+        let mut nodes = Vec::with_capacity(range_nodes.len());
+
+        let mut range_start = lower_bound - 1;
+        let mut next_index = 0usize;
+        for (idx, (node, range_end)) in range_nodes.into_iter().enumerate() {
+            if range_end == i32::MAX {
+                *indices.last_mut().unwrap() = next_index_base + idx as u32;
+                nodes.push(node);
+                break;
+            }
+            let len = range_end.abs_diff(range_start) as usize;
+            let end_index = next_index + len;
+            indices[next_index..end_index].fill(next_index_base + idx as u32);
+            nodes.push(node);
+            next_index = end_index;
+            range_start = range_end;
+        }
+
+        let node = FlatMaTreeNode::Table {
+            prop: property,
+            value_base: lower_bound,
+            indices: indices.into_boxed_slice(),
+        };
+        Some((node, nodes))
+    }
+
     fn flatten(&self, channel: u32, stream_idx: u32, prev_channels: u32) -> Vec<FlatMaTreeNode> {
         let target = self.next_decision_node(channel, stream_idx, prev_channels);
         let mut q = std::collections::VecDeque::new();
@@ -414,6 +523,16 @@ impl MaTreeNode {
         let mut next_base = 1u32;
         while let Some(target) = q.pop_front() {
             let target = target.next_decision_node(channel, stream_idx, prev_channels);
+            if let Some((out_node, nodes)) =
+                target.try_compile_to_table(channel, stream_idx, prev_channels, next_base)
+            {
+                let len = nodes.len() as u32;
+                out.push(out_node);
+                q.extend(nodes);
+                next_base += len;
+                continue;
+            }
+
             match *target {
                 MaTreeNode::Decision {
                     property,
