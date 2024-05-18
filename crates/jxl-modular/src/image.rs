@@ -5,7 +5,7 @@ use jxl_coding::{Decoder, DecoderRleMode, RleToken};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 
 use crate::{
-    ma::{FlatMaTree, MaTreeLeafClustered},
+    ma::{FlatMaTree, MaTreeLeafClustered, SimpleMaTable},
     predictor::{Predictor, PredictorState, Properties, WpHeader},
     sample::Sample,
     MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
@@ -548,6 +548,16 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
                     grid.grid_mut(),
                     node,
                 )?;
+            } else if let Some(table) = ma_tree.simple_table() {
+                decode_simple_table(
+                    bitstream,
+                    &mut decoder,
+                    dist_multiplier,
+                    &mut predictor,
+                    wp_header,
+                    grid.grid_mut(),
+                    &table,
+                )?;
             } else {
                 let grid = grid.grid_mut();
                 let filtered_prev = &filtered_prev[..ma_tree.max_prev_channel_depth()];
@@ -918,6 +928,223 @@ fn decode_single_node_slow<S: Sample>(
             let properties = predictor.properties::<true>();
             let true_value =
                 decode_one::<_, true>(bitstream, decoder, dist_multiplier, leaf, &properties)?;
+            *out = true_value;
+            properties.record(true_value.to_i32());
+        }
+    }
+
+    Ok(())
+}
+
+fn decode_simple_table<S: Sample>(
+    bitstream: &mut Bitstream,
+    decoder: &mut Decoder,
+    dist_multiplier: u32,
+    predictor_state: &mut PredictorState<S>,
+    wp_header: &WpHeader,
+    grid: &mut MutableSubgrid<S>,
+    table: &SimpleMaTable,
+) -> Result<()> {
+    let &SimpleMaTable {
+        decision_prop,
+        value_base,
+        predictor,
+        offset,
+        multiplier,
+        ref cluster_table,
+    } = table;
+
+    if offset == 0 && multiplier == 1 && decision_prop == 9 && predictor == Predictor::Gradient {
+        return decode_gradient_table(
+            bitstream,
+            decoder,
+            dist_multiplier,
+            grid,
+            value_base,
+            cluster_table,
+        );
+    }
+
+    decode_simple_table_slow(
+        bitstream,
+        decoder,
+        dist_multiplier,
+        predictor_state,
+        wp_header,
+        grid,
+        table,
+    )
+}
+
+#[inline(always)]
+fn cluster_from_table(sample: i32, value_base: i32, cluster_table: &[u8]) -> u8 {
+    let index = (sample - value_base).clamp(0, cluster_table.len() as i32 - 1);
+    cluster_table[index as usize]
+}
+
+fn decode_gradient_table<S: Sample>(
+    bitstream: &mut Bitstream,
+    decoder: &mut Decoder,
+    dist_multiplier: u32,
+    grid: &mut MutableSubgrid<S>,
+    value_base: i32,
+    cluster_table: &[u8],
+) -> Result<()> {
+    tracing::trace!("Gradient-only lookup table");
+
+    let width = grid.width();
+    let height = grid.height();
+
+    {
+        let mut w = S::default();
+        let out_row = grid.get_row_mut(0);
+        for out in out_row[..width].iter_mut() {
+            let cluster = cluster_from_table(w.to_i32(), value_base, cluster_table);
+            let token = decoder.read_varint_with_multiplier_clustered(
+                bitstream,
+                cluster,
+                dist_multiplier,
+            )?;
+            w = S::unpack_signed_u32(token).add(w);
+            *out = w;
+        }
+    }
+
+    for y in 1..height {
+        let (u, mut d) = grid.split_vertical(y);
+        let prev_row = u.get_row(y - 1);
+        let out_row = d.get_row_mut(0);
+
+        let cluster = cluster_from_table(prev_row[0].to_i32(), value_base, cluster_table);
+        let token =
+            decoder.read_varint_with_multiplier_clustered(bitstream, cluster, dist_multiplier)?;
+        let mut w = S::unpack_signed_u32(token).add(prev_row[0]);
+        out_row[0] = w;
+
+        for (window, out) in prev_row.windows(2).zip(&mut out_row[1..]) {
+            let nw = window[0];
+            let n = window[1];
+            let prop = n
+                .to_i32()
+                .wrapping_add(w.to_i32())
+                .wrapping_sub(nw.to_i32());
+            let pred = S::grad_clamped(n, w, nw);
+
+            let cluster = cluster_from_table(prop, value_base, cluster_table);
+            let token = decoder.read_varint_with_multiplier_clustered(
+                bitstream,
+                cluster,
+                dist_multiplier,
+            )?;
+            let value = S::unpack_signed_u32(token).add(pred);
+            *out = value;
+            w = value;
+        }
+    }
+
+    Ok(())
+}
+
+#[inline(always)]
+fn decode_table_one<S: Sample, const EDGE: bool>(
+    bitstream: &mut Bitstream,
+    decoder: &mut Decoder,
+    dist_multiplier: u32,
+    table: &SimpleMaTable,
+    properties: &Properties<S>,
+) -> Result<S> {
+    let prop_value = properties.get(table.decision_prop as usize);
+
+    let cluster = cluster_from_table(prop_value, table.value_base, &table.cluster_table);
+
+    let diff = S::unpack_signed_u32(decoder.read_varint_with_multiplier_clustered(
+        bitstream,
+        cluster,
+        dist_multiplier,
+    )?);
+    let diff = diff.wrapping_muladd_i32(table.multiplier as i32, table.offset);
+    let predictor = table.predictor;
+    let sample_prediction = predictor.predict::<_, EDGE>(properties);
+    Ok(diff.add(S::from_i32(sample_prediction)))
+}
+
+#[inline(never)]
+fn decode_simple_table_slow<S: Sample>(
+    bitstream: &mut Bitstream,
+    decoder: &mut Decoder,
+    dist_multiplier: u32,
+    predictor_state: &mut PredictorState<S>,
+    wp_header: &WpHeader,
+    grid: &mut MutableSubgrid<S>,
+    table: &SimpleMaTable,
+) -> Result<()> {
+    tracing::trace!("Slow lookup table");
+
+    let need_wp_header = table.decision_prop == 15 || table.predictor == Predictor::SelfCorrecting;
+    let wp_header = need_wp_header.then_some(wp_header);
+    predictor_state.reset(grid.width() as u32, &[], wp_header);
+
+    let height = grid.height();
+    for y in 0..2usize.min(height) {
+        let row = grid.get_row_mut(y);
+
+        for out in row.iter_mut() {
+            let properties = predictor_state.properties::<true>();
+            let true_value = decode_table_one::<_, true>(
+                bitstream,
+                decoder,
+                dist_multiplier,
+                table,
+                &properties,
+            )?;
+            *out = true_value;
+            properties.record(true_value.to_i32());
+        }
+    }
+
+    for y in 2..height {
+        let row = grid.get_row_mut(y);
+        let (row_left, row_middle, row_right) = if row.len() <= 4 {
+            (row, [].as_mut(), [].as_mut())
+        } else {
+            let (l, m) = row.split_at_mut(2);
+            let (m, r) = m.split_at_mut(m.len() - 2);
+            (l, m, r)
+        };
+
+        for out in row_left {
+            let properties = predictor_state.properties::<true>();
+            let true_value = decode_table_one::<_, true>(
+                bitstream,
+                decoder,
+                dist_multiplier,
+                table,
+                &properties,
+            )?;
+            *out = true_value;
+            properties.record(true_value.to_i32());
+        }
+        for out in row_middle {
+            let properties = predictor_state.properties::<false>();
+            let true_value = decode_table_one::<_, false>(
+                bitstream,
+                decoder,
+                dist_multiplier,
+                table,
+                &properties,
+            )?;
+            *out = true_value;
+            properties.record(true_value.to_i32());
+        }
+        for out in row_right {
+            let properties = predictor_state.properties::<true>();
+            let true_value = decode_table_one::<_, true>(
+                bitstream,
+                decoder,
+                dist_multiplier,
+                table,
+                &properties,
+            )?;
             *out = true_value;
             properties.record(true_value.to_i32());
         }
