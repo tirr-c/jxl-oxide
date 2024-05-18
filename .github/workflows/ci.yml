@@ -56,6 +56,8 @@ jobs:
       matrix:
         target:
           - x86_64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,41 +70,45 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-19be83481fd3e50ea103d800d72e0f8eddb1c90c-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-
+            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-19be83481fd3e50ea103d800d72e0f8eddb1c90c-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - name: Install grcov
-        run: cargo install grcov --version 0.8.19
       - name: Install cross
-        run: cargo install cross --version 0.2.5
-      - name: Build
-        run: cross build --target ${{ matrix.target }}
-        env:
-          CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 19be83481fd3e50ea103d800d72e0f8eddb1c90c
+      - name: Set environment variables
+        run: |
+          target_uppercase="$(tr '[:lower:]-' '[:upper:]_' <<< '${{ matrix.target }}')"
+          echo "RUSTFLAGS=-C instrument-coverage -Z coverage-options=branch" >>"$GITHUB_ENV"
+          echo "CARGO_TARGET_${target_uppercase}_RUSTFLAGS=-C instrument-coverage -Z coverage-options=branch" >>"$GITHUB_ENV"
+          echo "RUSTC_SYSROOT=$(rustc --print sysroot)" >>"$GITHUB_ENV"
       - name: Run tests
         run: cross test --no-fail-fast --all-features --target ${{ matrix.target }}
-        env:
-          CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
-          RUSTDOCFLAGS: '-Cpanic=abort'
-      - name: Run grcov
+      - name: Collect coverage data
         run: |
-          zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" -or -name "crop-*.gc*" -or -name "fuzz_findings-*.gc*" \) -print`
-          grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore '../**' --ignore "/*" -o coverage.lcov
+          llvm_profdata="$(find $RUSTC_SYSROOT -name llvm-profdata)"
+          llvm_cov="$(find $RUSTC_SYSROOT -name llvm-cov)"
+          profiles="$(find . -name '*.profraw')"
+          $llvm_profdata merge -sparse $profiles -o coverage.profdata
+          testbins=$( \
+            cross test --no-run --message-format=json --all-features --target ${{ matrix.target }} \
+            | jq -r "select(.profile.test == true) | .filenames[]" \
+            | grep -v dSYM \
+          )
+          covargs=$(for bin in $testbins; do echo "-object ${PWD}${bin}"; done)
+          $llvm_cov export -instr-profile=coverage.profdata $covargs \
+            -ignore-filename-regex='/\.cargo/' \
+            -ignore-filename-regex='/rustc/' \
+            >coverage.json
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage.lcov
+          files: ./coverage.json
           flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
