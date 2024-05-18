@@ -39,6 +39,13 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ./crates/jxl-oxide/tests/cache/
+          key: jxl-oxide-fixtures-0-${{ hashFiles('crates/jxl-oxide/tests/*.rs') }}
+          restore-keys: |
+            jxl-oxide-fixtures-0-
       - name: Install cross
         run: cargo install cross --version 0.2.5
       - name: Run tests
@@ -79,6 +86,13 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ./crates/jxl-oxide/tests/cache/
+          key: jxl-oxide-fixtures-0-${{ hashFiles('crates/jxl-oxide/tests/*.rs') }}
+          restore-keys: |
+            jxl-oxide-fixtures-0-
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross --rev 19be83481fd3e50ea103d800d72e0f8eddb1c90c
       - name: Set environment variables
