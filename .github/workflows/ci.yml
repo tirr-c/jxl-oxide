@@ -115,14 +115,14 @@ jobs:
             | grep -v dSYM \
           )
           covargs=$(for bin in $testbins; do echo "-object ${PWD}${bin}"; done)
-          $llvm_cov export -instr-profile=coverage.profdata $covargs \
+          $llvm_cov export -format=lcov -instr-profile=coverage.profdata $covargs \
             -ignore-filename-regex='/\.cargo/' \
             -ignore-filename-regex='/rustc/' \
-            >coverage.json
+            >coverage.lcov
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage.json
+          files: ./coverage.lcov
           flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
