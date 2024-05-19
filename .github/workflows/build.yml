@@ -58,19 +58,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - run: cargo install cross --version 0.2.5
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross@0.2.5
       - run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
@@ -90,20 +88,21 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-wasm-pack-0.12.1-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-wasm-pack-0.12.1-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - run: cargo install wasm-pack --version 0.12.1
-      - run: cargo install wasm-bindgen-cli --version 0.2.92
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.12.1
+      - name: Install wasm-bindgen
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.92
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
