@@ -380,6 +380,54 @@ impl FlatMaTree {
             _ => None,
         }
     }
+
+    pub(crate) fn simple_table(&self) -> Option<SimpleMaTable> {
+        let Some(&FlatMaTreeNode::Table {
+            prop: decision_prop,
+            value_base,
+            ref indices,
+        }) = self.nodes.first()
+        else {
+            return None;
+        };
+
+        let mut state: Option<(Predictor, i32, u32)> = None;
+        let mut cluster_table = Vec::with_capacity(indices.len());
+        for &index in &**indices {
+            let node = &self.nodes[index as usize];
+            let FlatMaTreeNode::Leaf(leaf) = node else {
+                return None;
+            };
+
+            let leaf_props = (leaf.predictor, leaf.offset, leaf.multiplier);
+            let &mut state = state.get_or_insert(leaf_props);
+            if leaf_props != state {
+                return None;
+            }
+
+            cluster_table.push(leaf.cluster);
+        }
+
+        let (predictor, offset, multiplier) = state.unwrap();
+        Some(SimpleMaTable {
+            decision_prop,
+            value_base,
+            predictor,
+            offset,
+            multiplier,
+            cluster_table: cluster_table.into_boxed_slice(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SimpleMaTable {
+    pub(crate) decision_prop: u32,
+    pub(crate) value_base: i32,
+    pub(crate) predictor: Predictor,
+    pub(crate) offset: i32,
+    pub(crate) multiplier: u32,
+    pub(crate) cluster_table: Box<[u8]>,
 }
 
 #[derive(Debug)]
