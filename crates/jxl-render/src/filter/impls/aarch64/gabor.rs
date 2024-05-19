@@ -6,14 +6,13 @@ use crate::filter::gabor::GaborRow;
 pub(super) unsafe fn run_gabor_row_aarch64_neon(row: GaborRow) {
     let GaborRow {
         input_rows,
-        input_start: start_x,
-        input_stride: stride,
         output_row,
         weights,
     } = row;
     let width = output_row.len();
-    assert_eq!(input_rows.len(), 3 * stride);
-    assert!(stride >= start_x + width);
+    assert_eq!(input_rows[0].len(), width);
+    assert_eq!(input_rows[1].len(), width);
+    assert_eq!(input_rows[2].len(), width);
 
     if width == 0 {
         return;
@@ -22,9 +21,9 @@ pub(super) unsafe fn run_gabor_row_aarch64_neon(row: GaborRow) {
     let [w0, w1] = weights;
     let global_weight = (1.0 + w0 * 4.0 + w1 * 4.0).recip();
 
-    let input_ptr_t = input_rows.as_ptr().add(start_x);
-    let input_ptr_c = input_rows.as_ptr().add(start_x + stride);
-    let input_ptr_b = input_rows.as_ptr().add(start_x + stride * 2);
+    let input_ptr_t = input_rows[0].as_ptr();
+    let input_ptr_c = input_rows[1].as_ptr();
+    let input_ptr_b = input_rows[2].as_ptr();
     let output_ptr = output_row.as_mut_ptr();
 
     let mut tl = vld1_dup_f32(input_ptr_t);

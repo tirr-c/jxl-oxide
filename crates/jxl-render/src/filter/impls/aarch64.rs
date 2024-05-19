@@ -1,7 +1,7 @@
 use std::arch::is_aarch64_feature_detected;
 
 use jxl_frame::{filter::EpfParams, FrameHeader};
-use jxl_grid::AlignedGrid;
+use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::filter::epf::run_epf_rows;
@@ -56,40 +56,22 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: [&AlignedGrid<f32>; 3],
+    fb: [MutableSubgrid<f32>; 3],
     fb_scratch: &mut [AlignedGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    region: Region,
     weights: [[f32; 2]; 3],
     pool: &jxl_threadpool::JxlThreadPool,
 ) {
     if is_aarch64_feature_detected!("neon") {
         // SAFETY: Features are checked above.
         unsafe {
-            for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
-                run_gabor_rows_unsafe(
-                    input,
-                    output,
-                    frame_header,
-                    region,
-                    weights,
-                    pool,
-                    run_gabor_row_aarch64_neon,
-                );
+            for ((input, output), weights) in fb.into_iter().zip(fb_scratch).zip(weights) {
+                run_gabor_rows_unsafe(input, output, weights, pool, run_gabor_row_aarch64_neon);
             }
         }
         return;
     }
 
-    for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
-        run_gabor_rows(
-            input,
-            output,
-            frame_header,
-            region,
-            weights,
-            pool,
-            run_gabor_row_generic,
-        );
+    for ((input, output), weights) in fb.into_iter().zip(fb_scratch).zip(weights) {
+        run_gabor_rows(input, output, weights, pool, run_gabor_row_generic);
     }
 }

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use jxl_frame::{filter::EpfParams, FrameHeader};
-use jxl_grid::AlignedGrid;
+use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
@@ -37,22 +37,12 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: [&AlignedGrid<f32>; 3],
+    fb: [MutableSubgrid<f32>; 3],
     fb_scratch: &mut [AlignedGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    region: Region,
     weights: [[f32; 2]; 3],
     pool: &jxl_threadpool::JxlThreadPool,
 ) {
-    for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
-        run_gabor_rows(
-            input,
-            output,
-            frame_header,
-            region,
-            weights,
-            pool,
-            gabor::run_gabor_row_generic,
-        );
+    for ((input, output), weights) in fb.into_iter().zip(fb_scratch).zip(weights) {
+        run_gabor_rows(input, output, weights, pool, gabor::run_gabor_row_generic);
     }
 }

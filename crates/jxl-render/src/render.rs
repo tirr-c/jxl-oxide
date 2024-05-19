@@ -77,8 +77,7 @@ pub(crate) fn render_frame<S: Sample>(
             ]);
         }
         let fb_scratch = scratch_buffer.as_mut().unwrap();
-        // TODO: apply color_padded_region
-        filter::apply_gabor_like(&mut fb, fb_scratch, frame_header, weights, &pool);
+        filter::apply_gabor_like(&mut fb, color_padded_region, fb_scratch, weights, &pool);
     }
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
         if scratch_buffer.is_none() {
