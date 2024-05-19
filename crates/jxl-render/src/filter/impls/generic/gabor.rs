@@ -88,27 +88,21 @@ pub(crate) fn gabor_row_edge(
 #[inline(always)]
 pub(crate) fn run_gabor_row_generic(row: GaborRow) {
     let GaborRow {
-        input_rows,
-        input_start: start_x,
-        input_stride: stride,
+        input_rows: [input_row_t, input_row_c, input_row_b],
         output_row,
         weights,
     } = row;
     let width = output_row.len();
-    assert_eq!(input_rows.len(), 3 * stride);
-    assert!(stride >= start_x + width);
+    assert_eq!(input_row_t.len(), width);
+    assert_eq!(input_row_c.len(), width);
+    assert_eq!(input_row_b.len(), width);
 
     if width == 0 {
         return;
     }
 
-    let input_rows = &input_rows[start_x..];
     let [w0, w1] = weights;
     let global_weight = (1.0 + w0 * 4.0 + w1 * 4.0).recip();
-
-    let input_row_t = &input_rows[..width];
-    let input_row_c = &input_rows[stride..][..width];
-    let input_row_b = &input_rows[stride * 2..][..width];
 
     if width == 1 {
         let t = input_row_t[0];
