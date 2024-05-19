@@ -33,79 +33,23 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-0.2.5-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - name: Install cross
-        run: cargo install cross --version 0.2.5
-      - name: Run tests
-        run: cross test --release --all-features --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: images
-          path: crates/jxl-oxide/tests/.artifact/
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'true'
-      - uses: dtolnay/rust-toolchain@nightly
-        id: toolchain
-        with:
-          targets: ${{ matrix.target }}
-          components: 'llvm-tools-preview'
       - uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-${{ hashFiles('**/Cargo.lock') }}
+            ./crates/jxl-oxide/tests/cache/
+          key: jxl-oxide-fixtures-0-${{ hashFiles('crates/jxl-oxide/tests/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-grcov-0.8.19-cross-0.2.5-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
-            ${{ runner.os }}-dot-cargo-
-      - name: Install grcov
-        run: cargo install grcov --version 0.8.19
+            jxl-oxide-fixtures-0-
       - name: Install cross
-        run: cargo install cross --version 0.2.5
-      - name: Build
-        run: cross build --target ${{ matrix.target }}
-        env:
-          CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
-      - name: Run tests
-        run: cross test --no-fail-fast --all-features --target ${{ matrix.target }}
-        env:
-          CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
-          RUSTDOCFLAGS: '-Cpanic=abort'
-      - name: Run grcov
-        run: |
-          zip -0 ccov.zip `find . \( -name "jxl_*.gc*" -or -name "conformance-*.gc*" -or -name "decode-*.gc*" -or -name "crop-*.gc*" -or -name "fuzz_findings-*.gc*" \) -print`
-          grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore '../**' --ignore "/*" -o coverage.lcov
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+        uses: taiki-e/install-action@v2
         with:
-          files: ./coverage.lcov
-          flags: rust-${{ matrix.target }}
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          tool: cross@0.2.5
+      - name: Run tests
+        run: cross test --release --all-features --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
