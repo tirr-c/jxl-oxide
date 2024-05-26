@@ -61,11 +61,13 @@ pub(crate) fn render_frame<S: Sample>(
 
     if frame.header().do_ycbcr {
         // TODO: apply color_padded_region
+        fb.convert_modular_color(image_header.metadata.bit_depth)?;
         filter::apply_jpeg_upsampling(fb.as_color_floats_mut(), frame_header.jpeg_upsampling);
     }
 
     let mut scratch_buffer = None;
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
+        fb.convert_modular_color(image_header.metadata.bit_depth)?;
         if scratch_buffer.is_none() {
             let tracker = fb.alloc_tracker();
             let width = color_padded_region.width as usize;
@@ -80,6 +82,7 @@ pub(crate) fn render_frame<S: Sample>(
         filter::apply_gabor_like(&mut fb, color_padded_region, fb_scratch, weights, &pool);
     }
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
+        fb.convert_modular_color(image_header.metadata.bit_depth)?;
         if scratch_buffer.is_none() {
             let tracker = fb.alloc_tracker();
             let width = color_padded_region.width as usize;
