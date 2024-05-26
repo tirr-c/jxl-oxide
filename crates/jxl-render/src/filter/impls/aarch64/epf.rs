@@ -26,7 +26,6 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
         epf_params,
         ..
     } = epf_row;
-    let iwidth = width as isize;
     let merged_input_rows = merged_input_rows.unwrap();
     let kernel_offsets = epf_kernel_offsets::<STEP>();
 
@@ -75,11 +74,10 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
         let sm = sm[(sigma_x / 4) & 1];
         let sigma_x = sigma_x / 8 - x / 8;
 
-        let input_base_idx = 3 * width + dx;
         let sigma_val = sigma_row[sigma_x];
 
         let originals: [_; 3] = std::array::from_fn(|c| unsafe {
-            vld1q_f32(merged_input_rows[c].as_ptr().add(input_base_idx))
+            vld1q_f32(merged_input_rows[c].get_row(3).as_ptr().add(dx))
         });
 
         if sigma_val < 0.3 {
@@ -99,29 +97,29 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                 let mut dist1 = vdupq_n_f32(0.0);
                 for c in 0..3 {
                     let scale = channel_scale[c];
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
 
-                    let v0 = vld1q_f32(rows_ptr.add(input_base_idx - 2 * width));
+                    let v0 = vld1q_f32(input_rows.get_row(1).as_ptr().add(dx));
 
-                    let v1r = vld1q_f32(rows_ptr.add(input_base_idx - width + 1));
-                    let v1lc = vld1_f32(rows_ptr.add(input_base_idx - width - 1));
+                    let v1r = vld1q_f32(input_rows.get_row(2).as_ptr().add(dx + 1));
+                    let v1lc = vld1_f32(input_rows.get_row(2).as_ptr().add(dx - 1));
                     let v1lcq = vcombine_f32(vdup_n_f32(0.0), v1lc);
                     let v1 = vextq_f32::<3>(v1lcq, v1r);
                     let v1l = vcombine_f32(v1lc, vget_low_f32(v1r));
 
-                    let v2r = vld1q_f32(rows_ptr.add(input_base_idx + 1));
-                    let v2lc = vld1_f32(rows_ptr.add(input_base_idx - 1));
+                    let v2r = vld1q_f32(input_rows.get_row(3).as_ptr().add(dx + 1));
+                    let v2lc = vld1_f32(input_rows.get_row(3).as_ptr().add(dx - 1));
                     let v2lcq = vcombine_f32(vdup_n_f32(0.0), v2lc);
                     let v2 = vextq_f32::<3>(v2lcq, v2r);
                     let v2l = vcombine_f32(v2lc, vget_low_f32(v2r));
 
-                    let v3r = vld1q_f32(rows_ptr.add(input_base_idx + width + 1));
-                    let v3lc = vld1_f32(rows_ptr.add(input_base_idx + width - 1));
+                    let v3r = vld1q_f32(input_rows.get_row(4).as_ptr().add(dx + 1));
+                    let v3lc = vld1_f32(input_rows.get_row(4).as_ptr().add(dx - 1));
                     let v3lcq = vcombine_f32(vdup_n_f32(0.0), v3lc);
                     let v3 = vextq_f32::<3>(v3lcq, v3r);
                     let v3l = vcombine_f32(v3lc, vget_low_f32(v3r));
 
-                    let v4 = vld1q_f32(rows_ptr.add(input_base_idx + 2 * width));
+                    let v4 = vld1q_f32(input_rows.get_row(5).as_ptr().add(dx));
 
                     let tmp = v1.sub(v2).abs().add(v3.sub(v2).abs());
                     let mut acc0 = tmp.add(v1.sub(v0).abs());
@@ -142,9 +140,9 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                 sum_weights = sum_weights.add(weight0).add(weight1);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    let rows_ptr = merged_input_rows[c].as_ptr();
-                    let weighted0 = weight0.mul(vld1q_f32(rows_ptr.add(input_base_idx - width)));
-                    let weighted1 = weight1.mul(vld1q_f32(rows_ptr.add(input_base_idx + width)));
+                    let input_rows = &merged_input_rows[c];
+                    let weighted0 = weight0.mul(vld1q_f32(input_rows.get_row(2).as_ptr().add(dx)));
+                    let weighted1 = weight1.mul(vld1q_f32(input_rows.get_row(4).as_ptr().add(dx)));
                     *sum = sum.add(weighted0).add(weighted1);
                 }
             }
@@ -155,18 +153,18 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                 let mut dist1 = vdupq_n_f32(0.0);
                 for c in 0..3 {
                     let scale = channel_scale[c];
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
 
-                    let v0r = vld1q_f32(rows_ptr.add(input_base_idx - width + 1));
-                    let v0lc = vld1_f32(rows_ptr.add(input_base_idx - width - 1));
+                    let v0r = vld1q_f32(input_rows.get_row(2).as_ptr().add(dx + 1));
+                    let v0lc = vld1_f32(input_rows.get_row(2).as_ptr().add(dx - 1));
                     let v0lcq = vcombine_f32(vdup_n_f32(0.0), v0lc);
                     let v0 = vextq_f32::<3>(v0lcq, v0r);
                     let v0l = vcombine_f32(v0lc, vget_low_f32(v0r));
                     let mut acc0 = v0l.sub(v0).abs();
                     let mut acc1 = v0r.sub(v0).abs();
 
-                    let v1rr = vld1q_f32(rows_ptr.add(input_base_idx + 2));
-                    let v1ll = vld1q_f32(rows_ptr.add(input_base_idx - 2));
+                    let v1rr = vld1q_f32(input_rows.get_row(3).as_ptr().add(dx + 2));
+                    let v1ll = vld1q_f32(input_rows.get_row(3).as_ptr().add(dx - 2));
                     let v1r = vextq_f32::<3>(v1ll, v1rr);
                     let v1 = vextq_f32::<2>(v1ll, v1rr);
                     let v1l = vextq_f32::<1>(v1ll, v1rr);
@@ -177,8 +175,8 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                     acc1 = acc1.add(v1.sub(v1r).abs());
                     acc1 = acc1.add(v1rr.sub(v1r).abs());
 
-                    let v2r = vld1q_f32(rows_ptr.add(input_base_idx + width + 1));
-                    let v2lc = vld1_f32(rows_ptr.add(input_base_idx + width - 1));
+                    let v2r = vld1q_f32(input_rows.get_row(4).as_ptr().add(dx + 1));
+                    let v2lc = vld1_f32(input_rows.get_row(4).as_ptr().add(dx - 1));
                     let v2lcq = vcombine_f32(vdup_n_f32(0.0), v2lc);
                     let v2 = vextq_f32::<3>(v2lcq, v2r);
                     let v2l = vcombine_f32(v2lc, vget_low_f32(v2r));
@@ -194,30 +192,33 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                 sum_weights = sum_weights.add(weight0).add(weight1);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    let rows_ptr = merged_input_rows[c].as_ptr();
-                    let weighted0 = weight0.mul(vld1q_f32(rows_ptr.add(input_base_idx - 1)));
-                    let weighted1 = weight1.mul(vld1q_f32(rows_ptr.add(input_base_idx + 1)));
+                    let input_rows = &merged_input_rows[c];
+                    let weighted0 =
+                        weight0.mul(vld1q_f32(input_rows.get_row(3).as_ptr().add(dx - 1)));
+                    let weighted1 =
+                        weight1.mul(vld1q_f32(input_rows.get_row(3).as_ptr().add(dx + 1)));
                     *sum = sum.add(weighted0).add(weighted1);
                 }
             }
         } else {
             for &(kx, ky) in kernel_offsets {
-                let input_kernel_idx = input_base_idx.wrapping_add_signed(ky * iwidth + kx);
+                let ky = 3usize.wrapping_add_signed(ky);
+                let kx = dx.wrapping_add_signed(kx);
                 let mut dist = vdupq_n_f32(0.0);
                 for c in 0..3 {
                     let scale = channel_scale[c];
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
                     if STEP == 0 {
-                        let vk0 = vld1q_f32(rows_ptr.add(input_kernel_idx - width));
-                        let vb0 = vld1q_f32(rows_ptr.add(input_base_idx - width));
+                        let vk0 = vld1q_f32(input_rows.get_row(ky - 1).as_ptr().add(kx));
+                        let vb0 = vld1q_f32(input_rows.get_row(2).as_ptr().add(dx));
                         let mut acc = vk0.sub(vb0).abs();
 
-                        let vk1r = vld1q_f32(rows_ptr.add(input_kernel_idx + 1));
-                        let vb1r = vld1q_f32(rows_ptr.add(input_base_idx + 1));
+                        let vk1r = vld1q_f32(input_rows.get_row(ky).as_ptr().add(kx + 1));
+                        let vb1r = vld1q_f32(input_rows.get_row(3).as_ptr().add(dx + 1));
                         acc = acc.add(vk1r.sub(vb1r).abs());
 
-                        let vk1lc = vld1_f32(rows_ptr.add(input_kernel_idx - 1));
-                        let vb1lc = vld1_f32(rows_ptr.add(input_base_idx - 1));
+                        let vk1lc = vld1_f32(input_rows.get_row(ky).as_ptr().add(kx - 1));
+                        let vb1lc = vld1_f32(input_rows.get_row(3).as_ptr().add(dx - 1));
 
                         let vk1lcq = vcombine_f32(vdup_n_f32(0.0), vk1lc);
                         let vb1lcq = vcombine_f32(vdup_n_f32(0.0), vb1lc);
@@ -229,14 +230,14 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
                         let vb1l = vcombine_f32(vb1lc, vget_low_f32(vb1r));
                         acc = acc.add(vk1l.sub(vb1l).abs());
 
-                        let vk2 = vld1q_f32(rows_ptr.add(input_kernel_idx + width));
-                        let vb2 = vld1q_f32(rows_ptr.add(input_base_idx + width));
+                        let vk2 = vld1q_f32(input_rows.get_row(ky + 1).as_ptr().add(kx));
+                        let vb2 = vld1q_f32(input_rows.get_row(4).as_ptr().add(dx));
                         acc = acc.add(vk2.sub(vb2).abs());
 
                         dist = vmulq_n_f32(acc, scale).add(dist);
                     } else {
-                        let v0 = vld1q_f32(rows_ptr.add(input_kernel_idx));
-                        let v1 = vld1q_f32(rows_ptr.add(input_base_idx));
+                        let v0 = vld1q_f32(input_rows.get_row(ky).as_ptr().add(kx));
+                        let v1 = vld1q_f32(input_rows.get_row(3).as_ptr().add(dx));
                         dist = vmulq_n_f32(v0.sub(v1).abs(), scale).add(dist);
                     }
                 }
@@ -246,9 +247,7 @@ pub(crate) unsafe fn epf_row_aarch64_neon<const STEP: usize>(epf_row: EpfRow) {
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
                     *sum = weight
-                        .mul(vld1q_f32(
-                            merged_input_rows[c].as_ptr().add(input_kernel_idx),
-                        ))
+                        .mul(vld1q_f32(merged_input_rows[c].get_row(ky).as_ptr().add(kx)))
                         .add(*sum);
                 }
             }

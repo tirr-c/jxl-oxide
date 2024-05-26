@@ -91,10 +91,10 @@ pub(crate) fn render_frame<S: Sample>(
             ]);
         }
         let fb_scratch = scratch_buffer.as_mut().unwrap();
-        // TODO: apply color_padded_region
         filter::apply_epf(
             &mut fb,
             fb_scratch,
+            color_padded_region,
             &cache.lf_groups,
             frame_header,
             epf_params,

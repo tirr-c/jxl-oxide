@@ -32,7 +32,6 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
         epf_params,
         ..
     } = epf_row;
-    let iwidth = width as isize;
     let merged_input_rows = merged_input_rows.unwrap();
     let kernel_offsets = epf_kernel_offsets::<STEP>();
 
@@ -81,11 +80,10 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
         let sm = sm[(sigma_x / 4) & 1];
         let sigma_x = sigma_x / 8 - x / 8;
 
-        let input_base_idx = 3 * width + dx;
         let sigma_val = sigma_row[sigma_x];
 
         let originals: [_; 3] = std::array::from_fn(|c| unsafe {
-            Vector::load(merged_input_rows[c].as_ptr().add(input_base_idx))
+            Vector::load(merged_input_rows[c].get_row(3).as_ptr().add(dx))
         });
 
         if sigma_val < 0.3 {
@@ -105,9 +103,9 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                 let mut dist1 = Vector::zero();
                 for c in 0..3 {
                     let scale = Vector::splat_f32(channel_scale[c]);
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
 
-                    let v0 = Vector::load(rows_ptr.add(input_base_idx - 2 * width));
+                    let v0 = Vector::load(input_rows.get_row(1).as_ptr().add(dx));
 
                     //      0 1 2 3
                     // v1l: A B C D
@@ -115,19 +113,19 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                     // v1r: C D E F
                     //      1 2 3 6
                     // v1 : B C D E
-                    let v1r = Vector::load(rows_ptr.add(input_base_idx - width + 1));
-                    let v1l = Vector::load(rows_ptr.add(input_base_idx - width - 1));
+                    let v1r = Vector::load(input_rows.get_row(2).as_ptr().add(dx + 1));
+                    let v1l = Vector::load(input_rows.get_row(2).as_ptr().add(dx - 1));
                     let v1 = i32x4_shuffle::<1, 2, 3, 6>(v1l, v1r);
 
-                    let v2r = Vector::load(rows_ptr.add(input_base_idx + 1));
-                    let v2l = Vector::load(rows_ptr.add(input_base_idx - 1));
+                    let v2r = Vector::load(input_rows.get_row(3).as_ptr().add(dx + 1));
+                    let v2l = Vector::load(input_rows.get_row(3).as_ptr().add(dx - 1));
                     let v2 = i32x4_shuffle::<1, 2, 3, 6>(v2l, v2r);
 
-                    let v3r = Vector::load(rows_ptr.add(input_base_idx + width + 1));
-                    let v3l = Vector::load(rows_ptr.add(input_base_idx + width - 1));
+                    let v3r = Vector::load(input_rows.get_row(4).as_ptr().add(dx + 1));
+                    let v3l = Vector::load(input_rows.get_row(4).as_ptr().add(dx - 1));
                     let v3 = i32x4_shuffle::<1, 2, 3, 6>(v3l, v3r);
 
-                    let v4 = Vector::load(rows_ptr.add(input_base_idx + 2 * width));
+                    let v4 = Vector::load(input_rows.get_row(5).as_ptr().add(dx));
 
                     let tmp = v1.sub(v2).abs().add(v3.sub(v2).abs());
                     let mut acc0 = tmp.add(v1.sub(v0).abs());
@@ -148,9 +146,11 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                 sum_weights = sum_weights.add(weight0).add(weight1);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    let rows_ptr = merged_input_rows[c].as_ptr();
-                    let weighted0 = weight0.mul(Vector::load(rows_ptr.add(input_base_idx - width)));
-                    let weighted1 = weight1.mul(Vector::load(rows_ptr.add(input_base_idx + width)));
+                    let input_rows = &merged_input_rows[c];
+                    let weighted0 =
+                        weight0.mul(Vector::load(input_rows.get_row(2).as_ptr().add(dx)));
+                    let weighted1 =
+                        weight1.mul(Vector::load(input_rows.get_row(4).as_ptr().add(dx)));
                     *sum = sum.add(weighted0).add(weighted1);
                 }
             }
@@ -161,16 +161,16 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                 let mut dist1 = Vector::zero();
                 for c in 0..3 {
                     let scale = Vector::splat_f32(channel_scale[c]);
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
 
-                    let v0r = Vector::load(rows_ptr.add(input_base_idx - width + 1));
-                    let v0l = Vector::load(rows_ptr.add(input_base_idx - width - 1));
+                    let v0r = Vector::load(input_rows.get_row(2).as_ptr().add(dx + 1));
+                    let v0l = Vector::load(input_rows.get_row(2).as_ptr().add(dx - 1));
                     let v0 = i32x4_shuffle::<1, 2, 3, 6>(v0l, v0r);
                     let mut acc0 = v0l.sub(v0).abs();
                     let mut acc1 = v0r.sub(v0).abs();
 
-                    let v1rr = Vector::load(rows_ptr.add(input_base_idx + 2));
-                    let v1ll = Vector::load(rows_ptr.add(input_base_idx - 2));
+                    let v1rr = Vector::load(input_rows.get_row(3).as_ptr().add(dx + 2));
+                    let v1ll = Vector::load(input_rows.get_row(3).as_ptr().add(dx - 2));
                     let v1l = i32x4_shuffle::<1, 2, 3, 4>(v1ll, v1rr);
                     let v1 = i32x4_shuffle::<2, 3, 4, 5>(v1ll, v1rr);
                     let v1r = i32x4_shuffle::<3, 4, 5, 6>(v1ll, v1rr);
@@ -181,8 +181,8 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                     acc1 = acc1.add(v1.sub(v1r).abs());
                     acc1 = acc1.add(v1rr.sub(v1r).abs());
 
-                    let v2r = Vector::load(rows_ptr.add(input_base_idx + width + 1));
-                    let v2l = Vector::load(rows_ptr.add(input_base_idx + width - 1));
+                    let v2r = Vector::load(input_rows.get_row(4).as_ptr().add(dx + 1));
+                    let v2l = Vector::load(input_rows.get_row(4).as_ptr().add(dx - 1));
                     let v2 = i32x4_shuffle::<1, 2, 3, 6>(v2l, v2r);
                     acc0 = acc0.add(v2l.sub(v2).abs());
                     acc1 = acc1.add(v2r.sub(v2).abs());
@@ -196,43 +196,46 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                 sum_weights = sum_weights.add(weight0).add(weight1);
 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
-                    let rows_ptr = merged_input_rows[c].as_ptr();
-                    let weighted0 = weight0.mul(Vector::load(rows_ptr.add(input_base_idx - 1)));
-                    let weighted1 = weight1.mul(Vector::load(rows_ptr.add(input_base_idx + 1)));
+                    let input_rows = &merged_input_rows[c];
+                    let weighted0 =
+                        weight0.mul(Vector::load(input_rows.get_row(3).as_ptr().add(dx - 1)));
+                    let weighted1 =
+                        weight1.mul(Vector::load(input_rows.get_row(3).as_ptr().add(dx + 1)));
                     *sum = sum.add(weighted0).add(weighted1);
                 }
             }
         } else {
             for &(kx, ky) in kernel_offsets {
-                let input_kernel_idx = input_base_idx.wrapping_add_signed(ky * iwidth + kx);
+                let ky = 3usize.wrapping_add_signed(ky);
+                let kx = dx.wrapping_add_signed(kx);
                 let mut dist = Vector::zero();
                 for c in 0..3 {
                     let scale = Vector::splat_f32(channel_scale[c]);
-                    let rows_ptr = merged_input_rows[c].as_ptr();
+                    let input_rows = &merged_input_rows[c];
                     if STEP == 0 {
-                        let vk0 = Vector::load(rows_ptr.add(input_kernel_idx - width));
-                        let vb0 = Vector::load(rows_ptr.add(input_base_idx - width));
+                        let vk0 = Vector::load(input_rows.get_row(ky - 1).as_ptr().add(kx));
+                        let vb0 = Vector::load(input_rows.get_row(2).as_ptr().add(dx));
                         let mut acc = vk0.sub(vb0).abs();
 
-                        let vk1r = Vector::load(rows_ptr.add(input_kernel_idx + 1));
-                        let vb1r = Vector::load(rows_ptr.add(input_base_idx + 1));
+                        let vk1r = Vector::load(input_rows.get_row(ky).as_ptr().add(kx + 1));
+                        let vb1r = Vector::load(input_rows.get_row(3).as_ptr().add(dx + 1));
                         acc = acc.add(vk1r.sub(vb1r).abs());
 
-                        let vk1l = Vector::load(rows_ptr.add(input_kernel_idx - 1));
-                        let vb1l = Vector::load(rows_ptr.add(input_base_idx - 1));
+                        let vk1l = Vector::load(input_rows.get_row(ky).as_ptr().add(kx - 1));
+                        let vb1l = Vector::load(input_rows.get_row(3).as_ptr().add(dx - 1));
                         let vk1 = i32x4_shuffle::<1, 2, 3, 6>(vk1l, vk1r);
                         let vb1 = i32x4_shuffle::<1, 2, 3, 6>(vb1l, vb1r);
                         acc = acc.add(vk1.sub(vb1).abs());
                         acc = acc.add(vk1l.sub(vb1l).abs());
 
-                        let vk2 = Vector::load(rows_ptr.add(input_kernel_idx + width));
-                        let vb2 = Vector::load(rows_ptr.add(input_base_idx + width));
+                        let vk2 = Vector::load(input_rows.get_row(ky + 1).as_ptr().add(kx));
+                        let vb2 = Vector::load(input_rows.get_row(4).as_ptr().add(dx));
                         acc = acc.add(vk2.sub(vb2).abs());
 
                         dist = acc.mul(scale).add(dist);
                     } else {
-                        let v0 = Vector::load(rows_ptr.add(input_kernel_idx));
-                        let v1 = Vector::load(rows_ptr.add(input_base_idx));
+                        let v0 = Vector::load(input_rows.get_row(ky).as_ptr().add(kx));
+                        let v1 = Vector::load(input_rows.get_row(3).as_ptr().add(dx));
                         dist = v0.sub(v1).abs().mul(scale).add(dist);
                     }
                 }
@@ -243,7 +246,7 @@ pub(crate) unsafe fn epf_row_wasm32_simd128<const STEP: usize>(epf_row: EpfRow) 
                 for (c, sum) in sum_channels.iter_mut().enumerate() {
                     *sum = weight
                         .mul(Vector::load(
-                            merged_input_rows[c].as_ptr().add(input_kernel_idx),
+                            merged_input_rows[c].get_row(ky).as_ptr().add(kx),
                         ))
                         .add(*sum);
                 }
