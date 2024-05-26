@@ -178,6 +178,7 @@ pub(crate) fn blend<S: Sample>(
     let header = new_frame.header();
     let tracker = new_frame.alloc_tracker();
 
+    let full_frame_region = Region::with_size(header.width, header.height);
     let output_image_region = output_frame_region.translate(header.x0, header.y0);
 
     let mut used_refs = [false; 4];
@@ -224,7 +225,9 @@ pub(crate) fn blend<S: Sample>(
             && (header.is_last
                 || (header.can_reference() && ref_idx == header.save_as_reference as usize));
 
-        let original_frame_region = new_grid.regions_and_shifts()[idx].0;
+        let original_frame_region = new_grid.regions_and_shifts()[idx]
+            .0
+            .intersection(full_frame_region);
         let clipped_original_frame_region = original_frame_region.intersection(output_frame_region);
 
         let mut base_alpha_grid;
@@ -609,9 +612,16 @@ fn blend_single(
                     base_row[base_buf_x] = if alpha.premultiplied {
                         new_sample + base_sample * (1.0 - new_alpha)
                     } else {
-                        let mixed_alpha = base_alpha + new_alpha * (1.0 - base_alpha);
-                        (new_alpha * new_sample + base_alpha * base_sample * (1.0 - new_alpha))
-                            / mixed_alpha
+                        let base_alpha_rev = 1.0 - base_alpha;
+                        let new_alpha_rev = 1.0 - new_alpha;
+                        let mixed_alpha = 1.0 - new_alpha_rev * base_alpha_rev;
+                        let mixed_alpha_recip = if mixed_alpha > 0.0 {
+                            mixed_alpha.recip()
+                        } else {
+                            0.0
+                        };
+                        (new_alpha * new_sample + base_alpha * base_sample * new_alpha_rev)
+                            * mixed_alpha_recip
                     };
                 }
             }
