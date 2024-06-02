@@ -1,4 +1,5 @@
 use jxl_image::ImageHeader;
+use jxl_modular::ChannelShift;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Region {
@@ -172,6 +173,23 @@ impl Region {
             top: new_top,
             width: (adj_width + add_x) >> factor_x,
             height: (adj_height + add_y) >> factor_y,
+        }
+    }
+
+    #[inline]
+    pub fn downsample_with_shift(self, shift: ChannelShift) -> Self {
+        let factor_x = shift.hshift();
+        let factor_y = shift.vshift();
+
+        let left = self.left >> factor_x;
+        let top = self.top >> factor_y;
+        let (width, height) = shift.shift_size((self.width, self.height));
+
+        Self {
+            left,
+            top,
+            width,
+            height,
         }
     }
 

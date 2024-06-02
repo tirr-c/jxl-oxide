@@ -396,6 +396,44 @@ impl ImageWithRegion {
         Ok(out)
     }
 
+    pub(crate) fn upsample_jpeg(
+        &mut self,
+        valid_region: Region,
+        bit_depth: BitDepth,
+    ) -> Result<()> {
+        self.convert_modular_color(bit_depth)?;
+
+        for (g, (region, shift)) in self.buffer.iter_mut().zip(&mut self.regions) {
+            let downsampled_image_region = region.downsample_with_shift(*shift);
+            let downsampled_valid_region = valid_region.downsample_with_shift(*shift);
+            let left = downsampled_valid_region
+                .left
+                .abs_diff(downsampled_image_region.left);
+            let top = downsampled_valid_region
+                .top
+                .abs_diff(downsampled_image_region.top);
+            let width = downsampled_valid_region.width;
+            let height = downsampled_valid_region.height;
+
+            let subgrid = g.as_float().unwrap().as_subgrid().subgrid(
+                left as usize..(left + width) as usize,
+                top as usize..(top + height) as usize,
+            );
+            let out = crate::filter::apply_jpeg_upsampling_single(
+                subgrid,
+                *shift,
+                valid_region,
+                self.tracker.as_ref(),
+            )?;
+
+            *g = ImageBuffer::F32(out);
+            *region = valid_region;
+            *shift = ChannelShift::from_shift(0);
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn upsample_nonseparable(
         &mut self,
         image_header: &ImageHeader,
@@ -405,7 +443,8 @@ impl ImageWithRegion {
             debug_assert!(!image_header.metadata.xyb_encoded);
         }
 
-        for (idx, ((region, _), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate() {
+        for (idx, ((region, shift), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate()
+        {
             let g = if let Some(ec_idx) = idx.checked_sub(3) {
                 if image_header.metadata.ec_info[ec_idx].dim_shift == 0
                     && frame_header.ec_upsampling[ec_idx] == 1
@@ -420,6 +459,7 @@ impl ImageWithRegion {
                 g.convert_to_float_modular(image_header.metadata.bit_depth)?
             };
             crate::features::upsample(g, region, image_header, frame_header, idx)?;
+            *shift = ChannelShift::from_shift(0);
         }
 
         Ok(())
