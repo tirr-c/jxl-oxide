@@ -60,9 +60,7 @@ pub(crate) fn render_frame<S: Sample>(
     };
 
     if frame.header().do_ycbcr {
-        // TODO: apply color_padded_region
-        fb.convert_modular_color(image_header.metadata.bit_depth)?;
-        filter::apply_jpeg_upsampling(fb.as_color_floats_mut(), frame_header.jpeg_upsampling);
+        fb.upsample_jpeg(color_padded_region, image_header.metadata.bit_depth)?;
     }
 
     let mut scratch_buffer = None;
