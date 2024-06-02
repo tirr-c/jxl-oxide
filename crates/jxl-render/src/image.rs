@@ -438,6 +438,7 @@ impl ImageWithRegion {
         &mut self,
         image_header: &ImageHeader,
         frame_header: &FrameHeader,
+        upsampled_valid_region: Region,
     ) -> Result<()> {
         if frame_header.upsampling != 1 && self.buffer[0].as_float().is_none() {
             debug_assert!(!image_header.metadata.xyb_encoded);
@@ -445,20 +446,54 @@ impl ImageWithRegion {
 
         for (idx, ((region, shift), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate()
         {
-            let g = if let Some(ec_idx) = idx.checked_sub(3) {
-                if image_header.metadata.ec_info[ec_idx].dim_shift == 0
-                    && frame_header.ec_upsampling[ec_idx] == 1
-                {
+            let tracker = g.tracker();
+            let (grid, upsampling_factor) = if let Some(ec_idx) = idx.checked_sub(3) {
+                let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
+                let upsampling_factor = frame_header.ec_upsampling[ec_idx].trailing_zeros();
+                let shift = dim_shift + upsampling_factor;
+                if shift == 0 {
                     continue;
                 }
-                g.convert_to_float_modular(image_header.metadata.ec_info[ec_idx].bit_depth)?
+                let g =
+                    g.convert_to_float_modular(image_header.metadata.ec_info[ec_idx].bit_depth)?;
+                (g, shift)
             } else {
-                if frame_header.upsampling == 1 {
+                let shift = frame_header.upsampling.trailing_zeros();
+                if shift == 0 {
                     continue;
                 }
-                g.convert_to_float_modular(image_header.metadata.bit_depth)?
+                let g = g.convert_to_float_modular(image_header.metadata.bit_depth)?;
+                (g, shift)
             };
-            crate::features::upsample(g, region, image_header, frame_header, idx)?;
+
+            // let downsampled_image_region = region.downsample(upsampling_factor);
+            let downsampled_image_region = *region;
+            let downsampled_valid_region = upsampled_valid_region.downsample(upsampling_factor);
+            let left = downsampled_valid_region
+                .left
+                .abs_diff(downsampled_image_region.left);
+            let top = downsampled_valid_region
+                .top
+                .abs_diff(downsampled_image_region.top);
+            let width = downsampled_valid_region.width;
+            let height = downsampled_valid_region.height;
+
+            let subgrid = grid.as_subgrid().subgrid(
+                left as usize..(left + width) as usize,
+                top as usize..(top + height) as usize,
+            );
+            *region = downsampled_valid_region;
+            let out = crate::features::upsample(
+                subgrid,
+                region,
+                image_header,
+                frame_header,
+                idx,
+                tracker.as_ref(),
+            )?;
+            if let Some(out) = out {
+                *g = ImageBuffer::F32(out);
+            }
             *shift = ChannelShift::from_shift(0);
         }
 
