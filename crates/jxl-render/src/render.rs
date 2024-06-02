@@ -103,7 +103,8 @@ pub(crate) fn render_frame<S: Sample>(
         );
     }
 
-    fb.upsample_nonseparable(image_header, frame_header)?;
+    tracing::trace!(?frame_region);
+    fb.upsample_nonseparable(image_header, frame_header, frame_region)?;
 
     render_features(
         frame,
