@@ -12,7 +12,9 @@ use jxl_image::ImageHeader;
 use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result};
+use crate::{
+    image::ImageBuffer, vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result,
+};
 
 pub(crate) fn image_region_to_frame(
     frame: &Frame,
@@ -43,37 +45,7 @@ pub(crate) fn apply_orientation_to_image_region(
     image_header: &ImageHeader,
     image_region: Region,
 ) -> Region {
-    let image_width = image_header.width_with_orientation();
-    let image_height = image_header.height_with_orientation();
-    let (_, _, mut left, mut top) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left,
-        image_region.top,
-        true,
-    );
-    let (_, _, mut right, mut bottom) = image_header.metadata.apply_orientation(
-        image_width,
-        image_height,
-        image_region.left + image_region.width as i32 - 1,
-        image_region.top + image_region.height as i32 - 1,
-        true,
-    );
-
-    if left > right {
-        std::mem::swap(&mut left, &mut right);
-    }
-    if top > bottom {
-        std::mem::swap(&mut top, &mut bottom);
-    }
-    let width = right.abs_diff(left) + 1;
-    let height = bottom.abs_diff(top) + 1;
-    Region {
-        left,
-        top,
-        width,
-        height,
-    }
+    image_region.apply_orientation(image_header)
 }
 
 pub(crate) fn pad_lf_region(frame_header: &FrameHeader, frame_region: Region) -> Region {
@@ -85,12 +57,12 @@ pub(crate) fn pad_lf_region(frame_header: &FrameHeader, frame_region: Region) ->
     }
 }
 
-pub(crate) fn pad_color_region(
+pub(crate) fn pad_upsampling(
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     frame_region: Region,
 ) -> Region {
-    let color_upsample_factor = frame_header.upsampling.ilog2();
+    let color_upsample_factor = frame_header.upsampling.trailing_zeros();
     let max_upsample_factor = frame_header
         .ec_upsampling
         .iter()
@@ -99,16 +71,25 @@ pub(crate) fn pad_color_region(
         .max()
         .unwrap_or(color_upsample_factor);
 
-    let mut color_padded_region = if max_upsample_factor > 0 {
+    if max_upsample_factor > 0 {
         // Additional upsampling pass is needed for every 3 levels of upsampling factor.
-        let padded_region = frame_region
+        frame_region
             .downsample(max_upsample_factor)
-            .pad(2 + (max_upsample_factor - 1) / 3);
-        let upsample_diff = max_upsample_factor - color_upsample_factor;
-        padded_region.upsample(upsample_diff)
+            .pad(2 + (max_upsample_factor - 1) / 3)
+            .upsample(max_upsample_factor)
     } else {
         frame_region
-    };
+    }
+}
+
+pub(crate) fn pad_color_region(
+    image_header: &ImageHeader,
+    frame_header: &FrameHeader,
+    frame_region: Region,
+) -> Region {
+    let color_upsample_factor = frame_header.upsampling.ilog2();
+    let mut color_padded_region =
+        pad_upsampling(image_header, frame_header, frame_region).downsample(color_upsample_factor);
 
     // TODO: actual region could be smaller.
     if let EdgePreservingFilter::Enabled(EpfParams { iters, .. }) =
@@ -157,15 +138,23 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let frame_header = frame.header();
     let lf_global_vardct = lf_global.vardct.as_ref();
     let global_ma_config = lf_global.gmodular.ma_config();
-    let mut lf_xyb = lf_global_vardct
-        .map(|_| {
-            ImageWithRegion::from_region_and_tracker(3, lf_region, false, frame.alloc_tracker())
-        })
-        .transpose()?;
     let has_lf_frame = frame_header.flags.use_lf_frame();
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let shifts_cbycr: [_; 3] =
         std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
+    let mut lf_xyb = if lf_global_vardct.is_some() && !frame_header.flags.use_lf_frame() {
+        let tracker = frame.alloc_tracker();
+        let mut out = ImageWithRegion::new(tracker);
+        let Region { width, height, .. } = lf_region;
+        for shift in shifts_cbycr {
+            let (width, height) = shift.shift_size((width, height));
+            let buffer = AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
+            out.append_channel_shifted(ImageBuffer::F32(buffer), lf_region, shift);
+        }
+        Some(out)
+    } else {
+        None
+    };
 
     let lf_groups_per_row = frame_header.lf_groups_per_row();
     let group_dim = frame_header.group_dim();
@@ -177,9 +166,9 @@ pub(crate) fn load_lf_groups<S: Sample>(
     let num_rows = lf_region.height.div_ceil(group_dim);
 
     let mut lf_xyb_groups = lf_xyb.as_mut().map(|lf_xyb| {
-        let lf_xyb_arr = <&mut [_; 3]>::try_from(lf_xyb.buffer_mut()).unwrap();
+        let lf_xyb_arr = lf_xyb.as_color_floats_mut();
         let mut idx = 0usize;
-        lf_xyb_arr.each_mut().map(|grid| {
+        lf_xyb_arr.map(|grid| {
             let grid = grid.as_subgrid_mut();
             let shift = shifts_cbycr[idx];
             let group_width = group_dim >> shift.hshift();
@@ -319,45 +308,10 @@ pub(crate) fn load_lf_groups<S: Sample>(
     Ok(lf_xyb)
 }
 
-pub(crate) fn upsample_lf(
-    image: &ImageWithRegion,
-    frame: &IndexedFrame,
-    frame_region: Region,
-) -> Result<ImageWithRegion> {
-    let factor = frame.header().lf_level * 3;
-    let step = 1usize << factor;
-    let new_region = image.region().upsample(factor);
-    let mut new_image = ImageWithRegion::from_region_and_tracker(
-        image.channels(),
-        new_region,
-        image.ct_done(),
-        frame.alloc_tracker(),
-    )?;
-    for (original, target) in image.buffer().iter().zip(new_image.buffer_mut()) {
-        let height = original.height();
-        let width = original.width();
-        let stride = target.width();
-
-        let original = original.buf();
-        let target = target.buf_mut();
-        for y in 0..height {
-            let original = &original[y * width..];
-            let target = &mut target[y * step * stride..];
-            for (x, &value) in original[..width].iter().enumerate() {
-                target[x * step..][..step].fill(value);
-            }
-            for row in 1..step {
-                target.copy_within(..stride, stride * row);
-            }
-        }
-    }
-    new_image.clone_intersection(frame_region)
-}
-
 pub(crate) fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
-    grid: &mut [AlignedGrid<f32>],
+    grid: [&mut AlignedGrid<f32>; 3],
     pool: &JxlThreadPool,
 ) -> bool {
     // save_before_ct = false
@@ -365,7 +319,7 @@ pub(crate) fn convert_color_for_record(
     let metadata = &image_header.metadata;
     if do_ycbcr {
         // xyb_encoded = false
-        let [cb, y, cr, ..] = grid else { panic!() };
+        let [cb, y, cr] = grid;
         jxl_color::ycbcr_to_rgb([cb, y, cr]);
     } else if metadata.xyb_encoded {
         // want_icc = false || is_last = true
@@ -386,7 +340,7 @@ pub(crate) fn convert_color_for_record(
             _ => {}
         }
 
-        let [x, y, b, ..] = grid else { panic!() };
+        let [x, y, b] = grid;
         tracing::trace_span!("XYB to target colorspace").in_scope(|| {
             tracing::trace!(colour_encoding = ?encoding);
             let transform = ColorTransform::new(

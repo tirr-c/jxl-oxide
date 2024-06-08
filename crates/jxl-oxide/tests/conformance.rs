@@ -74,9 +74,6 @@ fn run_test(
 
         eprintln!("Testing keyframe #{keyframe_idx}");
 
-        let idx_black = render.extra_channels().iter().position(|x| x.is_black());
-        let num_color_channels = render.color_channels().len();
-
         let fb = render.image_all_channels();
         let interleaved_buffer = fb.buf();
         assert_eq!(expected.len(), interleaved_buffer.len());
@@ -93,14 +90,7 @@ fn run_test(
                     let expected_peak_error = expected_error_list[c].0;
 
                     let reference = expected[c + (x + y * width) * channels];
-                    let mut output = interleaved_buffer[c + (x + y * width) * channels];
-                    if let Some(idx_black) = idx_black {
-                        let idx_black = idx_black + num_color_channels;
-                        if c < num_color_channels || c == idx_black {
-                            output = 1.0 - output;
-                        }
-                    }
-
+                    let output = interleaved_buffer[c + (x + y * width) * channels];
                     let sum_se = &mut sum_se[c];
                     let peak_error = &mut peak_error[c];
 

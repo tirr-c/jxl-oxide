@@ -2,7 +2,7 @@ use std::{ops::RangeBounds, ptr::NonNull, sync::atomic::AtomicI32};
 
 use crate::SimdVector;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct SharedSubgrid<'g, V = f32> {
     ptr: NonNull<V>,
     width: usize,

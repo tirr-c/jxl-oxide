@@ -1,14 +1,20 @@
 use jxl_frame::FrameHeader;
-use jxl_grid::{AlignedGrid, PaddedGrid};
+use jxl_grid::{AlignedGrid, AllocTracker, PaddedGrid, SharedSubgrid};
+
+use crate::Region;
 
 pub fn upsample(
-    grid: &mut AlignedGrid<f32>,
+    grid: SharedSubgrid<f32>,
+    out_region: &mut Region,
     image_header: &jxl_image::ImageHeader,
     frame_header: &FrameHeader,
     channel_idx: usize,
-) -> crate::Result<()> {
+    tracker: Option<&AllocTracker>,
+) -> crate::Result<Option<AlignedGrid<f32>>> {
     let metadata = &image_header.metadata;
 
+    let mut out = None;
+    let mut grid = grid;
     let factor;
     if let Some(ec_idx) = channel_idx.checked_sub(3) {
         let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
@@ -23,13 +29,28 @@ pub fn upsample(
             let last_up = dim_shift % 3;
 
             for _ in 0..up8 {
-                upsample_inner::<8, 210>(grid, &metadata.up8_weight)?;
+                out = Some(upsample_inner::<8, 210>(
+                    grid,
+                    &metadata.up8_weight,
+                    tracker,
+                )?);
+                grid = out.as_ref().unwrap().as_subgrid();
             }
-            match last_up {
-                1 => upsample_inner::<2, 15>(grid, &metadata.up2_weight)?,
-                2 => upsample_inner::<4, 55>(grid, &metadata.up4_weight)?,
-                _ => {}
-            }
+            out = match last_up {
+                1 => Some(upsample_inner::<2, 15>(
+                    grid,
+                    &metadata.up2_weight,
+                    tracker,
+                )?),
+                2 => Some(upsample_inner::<4, 55>(
+                    grid,
+                    &metadata.up4_weight,
+                    tracker,
+                )?),
+                _ => out,
+            };
+            grid = out.as_ref().unwrap().as_subgrid();
+            *out_region = out_region.upsample(dim_shift);
         }
 
         factor = frame_header.ec_upsampling[ec_idx];
@@ -41,21 +62,23 @@ pub fn upsample(
         tracing::debug!(channel_idx, factor, "Applying non-separable upsampling");
     }
 
-    match factor {
-        1 => Ok(()),
-        2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight),
-        4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight),
-        8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight),
+    *out_region = out_region.upsample(factor.trailing_zeros());
+    let out = match factor {
+        1 => return Ok(out),
+        2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight, tracker),
+        4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight, tracker),
+        8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight, tracker),
         _ => panic!("invalid upsampling factor {}", factor),
-    }
+    }?;
+    Ok(Some(out))
 }
 
 fn upsample_inner<const K: usize, const NW: usize>(
-    grid: &mut AlignedGrid<f32>,
+    grid: SharedSubgrid<f32>,
     weights: &[f32; NW],
-) -> crate::Result<()> {
+    tracker: Option<&AllocTracker>,
+) -> crate::Result<AlignedGrid<f32>> {
     assert!((K == 2 && NW == 15) || (K == 4 && NW == 55) || (K == 8 && NW == 210));
-    let tracker = grid.tracker();
     let grid_width = grid.width();
     let grid_height = grid.height();
     let frame_width = grid_width << K.ilog2();
@@ -63,15 +86,13 @@ fn upsample_inner<const K: usize, const NW: usize>(
 
     // 5x5 kernel
     const PADDING: usize = 2;
-    let mut padded =
-        PaddedGrid::with_alloc_tracker(grid_width, grid_height, PADDING, tracker.as_ref())?;
+    let mut padded = PaddedGrid::with_alloc_tracker(grid_width, grid_height, PADDING, tracker)?;
     let padded_width = grid_width + PADDING * 2;
 
-    let grid_buf = grid.buf();
     let padded_buf = padded.buf_padded_mut();
     for y in 0..grid.height() {
-        padded_buf[(y + PADDING) * padded_width + PADDING..][..grid_width]
-            .copy_from_slice(&grid_buf[y * grid_width..][..grid_width]);
+        let row = grid.get_row(y);
+        padded_buf[(y + PADDING) * padded_width + PADDING..][..grid_width].copy_from_slice(row);
     }
     padded.mirror_edges_padding();
 
@@ -101,7 +122,7 @@ fn upsample_inner<const K: usize, const NW: usize>(
         }
     }
 
-    *grid = AlignedGrid::with_alloc_tracker(frame_width, frame_height, tracker.as_ref())?;
+    let mut grid = AlignedGrid::with_alloc_tracker(frame_width, frame_height, tracker)?;
     let padded_buf = padded.buf_padded();
     let grid_buf = grid.buf_mut();
     for y in 0..frame_height {
@@ -131,5 +152,5 @@ fn upsample_inner<const K: usize, const NW: usize>(
         }
     }
 
-    Ok(())
+    Ok(grid)
 }
