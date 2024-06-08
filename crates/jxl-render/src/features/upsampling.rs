@@ -62,7 +62,7 @@ pub fn upsample(
         tracing::debug!(channel_idx, factor, "Applying non-separable upsampling");
     }
 
-    *out_region = out_region.upsample(factor);
+    *out_region = out_region.upsample(factor.trailing_zeros());
     let out = match factor {
         1 => return Ok(out),
         2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight, tracker),

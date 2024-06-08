@@ -57,12 +57,12 @@ pub(crate) fn pad_lf_region(frame_header: &FrameHeader, frame_region: Region) ->
     }
 }
 
-pub(crate) fn pad_color_region(
+pub(crate) fn pad_upsampling(
     image_header: &ImageHeader,
     frame_header: &FrameHeader,
     frame_region: Region,
 ) -> Region {
-    let color_upsample_factor = frame_header.upsampling.ilog2();
+    let color_upsample_factor = frame_header.upsampling.trailing_zeros();
     let max_upsample_factor = frame_header
         .ec_upsampling
         .iter()
@@ -71,16 +71,25 @@ pub(crate) fn pad_color_region(
         .max()
         .unwrap_or(color_upsample_factor);
 
-    let mut color_padded_region = if max_upsample_factor > 0 {
+    if max_upsample_factor > 0 {
         // Additional upsampling pass is needed for every 3 levels of upsampling factor.
-        let padded_region = frame_region
+        frame_region
             .downsample(max_upsample_factor)
-            .pad(2 + (max_upsample_factor - 1) / 3);
-        let upsample_diff = max_upsample_factor - color_upsample_factor;
-        padded_region.upsample(upsample_diff)
+            .pad(2 + (max_upsample_factor - 1) / 3)
+            .upsample(max_upsample_factor)
     } else {
         frame_region
-    };
+    }
+}
+
+pub(crate) fn pad_color_region(
+    image_header: &ImageHeader,
+    frame_header: &FrameHeader,
+    frame_region: Region,
+) -> Region {
+    let color_upsample_factor = frame_header.upsampling.ilog2();
+    let mut color_padded_region =
+        pad_upsampling(image_header, frame_header, frame_region).downsample(color_upsample_factor);
 
     // TODO: actual region could be smaller.
     if let EdgePreservingFilter::Enabled(EpfParams { iters, .. }) =

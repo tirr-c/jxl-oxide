@@ -29,13 +29,19 @@ pub(crate) fn render_frame<S: Sample>(
 
     let image_header = frame.image_header();
     let frame_header = frame.header();
+    let frame_region = util::pad_lf_region(frame_header, frame_region);
+
+    let upsampled_full_frame_region =
+        Region::with_size(frame_header.sample_width(1), frame_header.sample_height(1));
+    let upsampling_valid_region = util::pad_upsampling(image_header, frame_header, frame_region)
+        .intersection(upsampled_full_frame_region);
+
     let full_frame_region = Region::with_size(
         frame_header.color_sample_width(),
         frame_header.color_sample_height(),
     );
-    let frame_region = util::pad_lf_region(frame_header, frame_region);
-    let color_padded_region = util::pad_color_region(image_header, frame_header, frame_region);
-    let color_padded_region = color_padded_region.intersection(full_frame_region);
+    let color_padded_region = util::pad_color_region(image_header, frame_header, frame_region)
+        .intersection(full_frame_region);
 
     let mut fb = match frame_header.encoding {
         Encoding::Modular => modular::render_modular(frame, cache, color_padded_region, &pool)?,
@@ -103,8 +109,8 @@ pub(crate) fn render_frame<S: Sample>(
         );
     }
 
-    tracing::trace!(?frame_region);
-    fb.upsample_nonseparable(image_header, frame_header, frame_region)?;
+    tracing::trace!(?upsampling_valid_region);
+    fb.upsample_nonseparable(image_header, frame_header, upsampling_valid_region)?;
 
     render_features(
         frame,
