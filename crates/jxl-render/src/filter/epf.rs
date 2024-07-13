@@ -8,8 +8,8 @@ use jxl_threadpool::JxlThreadPool;
 use crate::{util, ImageWithRegion, Region};
 
 pub fn apply_epf<S: Sample>(
-    fb: &mut ImageWithRegion,
-    fb_scratch: &mut [AlignedGrid<f32>; 3],
+    fb_image: &mut ImageWithRegion,
+    mut fb_scratch_arr: [AlignedGrid<f32>; 3],
     color_padded_region: Region,
     lf_groups: &HashMap<u32, LfGroup<S>>,
     frame_header: &FrameHeader,
@@ -21,16 +21,16 @@ pub fn apply_epf<S: Sample>(
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
 
-    let region = fb.regions_and_shifts()[0].0;
+    let region = fb_image.regions_and_shifts()[0].0;
     assert!(region.contains(color_padded_region));
     let left = region.left.abs_diff(color_padded_region.left) as usize;
     let top = region.top.abs_diff(color_padded_region.top) as usize;
     let right = left + color_padded_region.width as usize;
     let bottom = top + color_padded_region.height as usize;
 
-    let fb = fb.as_color_floats_mut();
+    let fb = fb_image.as_color_floats_mut();
     let mut fb = fb.map(|g| g.as_subgrid_mut().subgrid(left..right, top..bottom));
-    let mut fb_scratch = fb_scratch.each_mut().map(|g| g.as_subgrid_mut());
+    let mut fb_scratch = fb_scratch_arr.each_mut().map(|g| g.as_subgrid_mut());
 
     let num_lf_groups = frame_header.num_lf_groups() as usize;
     let mut sigma_grid_map = vec![None::<&AlignedGrid<f32>>; num_lf_groups];
@@ -87,14 +87,8 @@ pub fn apply_epf<S: Sample>(
     }
 
     if iters == 1 || iters == 3 {
-        for (a, mut b) in fb.into_iter().zip(fb_scratch) {
-            let height = a.height();
-            assert_eq!(b.height(), height);
-            for y in 0..height {
-                let row_a = a.get_row(y);
-                let row_b = b.get_row_mut(y);
-                row_b.copy_from_slice(row_a);
-            }
+        for (idx, grid) in fb_scratch_arr.into_iter().enumerate() {
+            fb_image.replace_channel(idx, crate::ImageBuffer::F32(grid), color_padded_region);
         }
     }
 }

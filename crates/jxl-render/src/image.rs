@@ -344,6 +344,29 @@ impl ImageWithRegion {
         self.regions.push((original_region, shift));
     }
 
+    #[inline]
+    pub fn replace_channel(&mut self, index: usize, buffer: ImageBuffer, region: Region) {
+        assert_eq!(buffer.width(), region.width as usize);
+        assert_eq!(buffer.height(), region.height as usize);
+        self.buffer[index] = buffer;
+        self.regions[index] = (region, ChannelShift::from_shift(0));
+    }
+
+    #[inline]
+    pub fn replace_channel_shifted(
+        &mut self,
+        index: usize,
+        buffer: ImageBuffer,
+        original_region: Region,
+        shift: ChannelShift,
+    ) {
+        let (width, height) = shift.shift_size((original_region.width, original_region.height));
+        assert_eq!(buffer.width(), width as usize);
+        assert_eq!(buffer.height(), height as usize);
+        self.buffer[index] = buffer;
+        self.regions[index] = (original_region, shift);
+    }
+
     pub fn extend_from_gmodular<S: Sample>(&mut self, gmodular: GlobalModular<S>) {
         let Some(image) = gmodular.modular.into_image() else {
             return;
@@ -359,8 +382,11 @@ impl ImageWithRegion {
 
     pub(crate) fn clone_gray(&mut self) -> Result<()> {
         let gray = self.buffer[0].try_clone()?;
+        let region = self.regions[0];
         self.buffer.insert(1, gray.try_clone()?);
+        self.regions.insert(1, region);
         self.buffer.insert(2, gray);
+        self.regions.insert(2, region);
         Ok(())
     }
 

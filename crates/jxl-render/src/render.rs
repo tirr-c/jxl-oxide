@@ -87,17 +87,18 @@ pub(crate) fn render_frame<S: Sample>(
     }
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
-        if scratch_buffer.is_none() {
+        let fb_scratch = if let Some(buffer) = scratch_buffer {
+            buffer
+        } else {
             let tracker = fb.alloc_tracker();
             let width = color_padded_region.width as usize;
             let height = color_padded_region.height as usize;
-            scratch_buffer = Some([
+            [
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
-            ]);
-        }
-        let fb_scratch = scratch_buffer.as_mut().unwrap();
+            ]
+        };
         filter::apply_epf(
             &mut fb,
             fb_scratch,
