@@ -66,9 +66,11 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - name: Install cross
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/cache-cargo-install-action@v2
         with:
-          tool: cross@0.2.5
+          tool: cross
+          git: https://github.com/cross-rs/cross
+          rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:

@@ -45,9 +45,11 @@ jobs:
           restore-keys: |
             jxl-oxide-fixtures-0-
       - name: Install cross
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/cache-cargo-install-action@v2
         with:
-          tool: cross@0.2.5
+          tool: cross
+          git: https://github.com/cross-rs/cross
+          rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - name: Run tests
         run: cross test --release --all-features --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
