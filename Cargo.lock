@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-grid"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "tracing",
 ]
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
