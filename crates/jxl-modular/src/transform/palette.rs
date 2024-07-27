@@ -68,12 +68,11 @@ impl Palette {
                         *sample = *palette.get(index as usize, c);
                     }
                 } else if index >= nb_colors {
-                    let value = index;
                     let index = index - nb_colors;
                     if index < 64 {
                         for (c, sample) in channels_it.enumerate() {
                             *sample = S::from_i32(
-                                ((value >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
+                                ((index >> (2 * c)) % 4) * ((1i32 << bit_depth) - 1) / 4
                                     + (1i32 << bit_depth.saturating_sub(3)),
                             );
                         }
