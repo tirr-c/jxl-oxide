@@ -149,4 +149,5 @@ test! {
     issue_26,
     issue_32,
     squeeze_edge,
+    issue_311,
 }
