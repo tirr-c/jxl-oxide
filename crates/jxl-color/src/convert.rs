@@ -476,13 +476,11 @@ impl ColorTransform {
                     detect_peak,
                 });
 
-                if target_encoding.rendering_intent == RenderingIntent::Perceptual {
+                if current_encoding.rendering_intent == RenderingIntent::Perceptual {
                     ops.push(ColorTransformOp::GamutMap {
                         luminances,
                         saturation_factor: 0.3,
                     });
-                } else {
-                    ops.push(ColorTransformOp::Clip);
                 }
             }
         }
