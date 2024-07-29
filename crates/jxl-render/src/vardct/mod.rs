@@ -122,21 +122,6 @@ pub(crate) fn render_vardct<S: Sample>(
                 height_rounded as u32 / 8,
             ));
 
-    let mut fb = {
-        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-            ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
-        });
-        let Region { width, height, .. } = modular_region;
-
-        let mut fb = ImageWithRegion::new(tracker);
-        for shift in shifts_cbycr {
-            let (width, height) = shift.shift_size((width, height));
-            let buffer = AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
-            fb.append_channel_shifted(ImageBuffer::F32(buffer), modular_region, shift);
-        }
-        fb
-    };
-
     let mut modular_image = gmodular.modular.image_mut();
     let groups = modular_image
         .as_mut()
@@ -151,56 +136,88 @@ pub(crate) fn render_vardct<S: Sample>(
         ret
     });
 
-    let group_dim = frame_header.group_dim();
-    let lf_groups = &mut cache.lf_groups;
-
     let hf_global = &mut cache.hf_global;
-    if hf_global.is_none() {
-        tracing::trace_span!("Parse HfGlobal").in_scope(|| -> Result<_> {
-            *hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
-            Ok(())
-        })?;
-    }
+    let lf_groups = &mut cache.lf_groups;
+    let group_dim = frame_header.group_dim();
 
-    let lf_xyb = tracing::trace_span!("Load LF groups").in_scope(|| {
-        util::load_lf_groups(
-            frame,
-            lf_global,
-            lf_groups,
-            lf_group_image,
-            modular_lf_region,
-            pool,
-        )
-    })?;
-    let hf_global = cache.hf_global.as_ref();
-
-    let lf_xyb = if let Some(x) = lf_frame {
-        tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
-            let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
-            let lf_frame = lf_frame.blend(None, pool)?.try_clone()?;
-            Ok(lf_frame)
-        })?
-    } else {
-        let mut lf_xyb = lf_xyb.unwrap();
-
-        if !subsampled {
-            tracing::trace_span!("LF CfL").in_scope(|| {
-                chroma_from_luma_lf(lf_xyb.as_color_floats_mut(), &lf_global_vardct.lf_chan_corr);
+    let result = std::sync::RwLock::new(Result::Ok(()));
+    let (mut fb, lf_xyb) = pool.scope(|scope| -> Result<_> {
+        if hf_global.is_none() {
+            scope.spawn(|_| {
+                let ret = tracing::trace_span!("Parse HfGlobal").in_scope(|| -> Result<_> {
+                    *hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
+                    Ok(())
+                });
+                if let Err(e) = ret {
+                    *result.write().unwrap() = Err(e);
+                }
             });
         }
 
-        if !frame_header.flags.skip_adaptive_lf_smoothing() {
-            tracing::trace_span!("Adaptive LF smoothing").in_scope(|| {
-                adaptive_lf_smoothing(
-                    lf_xyb.as_color_floats_mut(),
-                    &lf_global.lf_dequant,
-                    &lf_global_vardct.quantizer,
-                )
-            })?;
-        }
+        let lf_xyb = tracing::trace_span!("Load LF groups").in_scope(|| {
+            util::load_lf_groups(
+                frame,
+                lf_global,
+                lf_groups,
+                lf_group_image,
+                modular_lf_region,
+                pool,
+            )
+        })?;
 
-        lf_xyb
-    };
+        let lf_xyb = if let Some(x) = lf_frame {
+            tracing::trace_span!("Copy LFQuant").in_scope(|| -> Result<_> {
+                let lf_frame = std::sync::Arc::clone(&x.image).run_with_image()?;
+                let lf_frame = lf_frame.blend(None, pool)?.try_clone()?;
+                Ok(lf_frame)
+            })?
+        } else {
+            let mut lf_xyb = lf_xyb.unwrap();
+
+            if !subsampled {
+                tracing::trace_span!("LF CfL").in_scope(|| {
+                    chroma_from_luma_lf(
+                        lf_xyb.as_color_floats_mut(),
+                        &lf_global_vardct.lf_chan_corr,
+                    );
+                });
+            }
+
+            if !frame_header.flags.skip_adaptive_lf_smoothing() {
+                tracing::trace_span!("Adaptive LF smoothing").in_scope(|| {
+                    adaptive_lf_smoothing(
+                        lf_xyb.as_color_floats_mut(),
+                        &lf_global.lf_dequant,
+                        &lf_global_vardct.quantizer,
+                    )
+                })?;
+            }
+
+            lf_xyb
+        };
+
+        let fb = {
+            let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
+                ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
+            });
+            let Region { width, height, .. } = modular_region;
+
+            let mut fb = ImageWithRegion::new(tracker);
+            for shift in shifts_cbycr {
+                let (width, height) = shift.shift_size((width, height));
+                let buffer =
+                    AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
+                fb.append_channel_shifted(ImageBuffer::F32(buffer), modular_region, shift);
+            }
+            fb
+        };
+
+        Ok((fb, lf_xyb))
+    })?;
+    result.into_inner().unwrap()?;
+
+    let hf_global = cache.hf_global.as_ref();
+    let lf_groups = &mut cache.lf_groups;
 
     let it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
         fb.color_groups_with_group_id(frame_header)
