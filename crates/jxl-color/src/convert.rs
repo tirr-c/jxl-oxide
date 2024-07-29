@@ -380,6 +380,22 @@ impl ColorTransform {
             || (current_encoding.colour_space == ColourSpace::Rgb
                 && current_encoding.primaries != target_encoding.primaries)
         {
+            if current_encoding.rendering_intent == RenderingIntent::Perceptual {
+                let illuminant = current_encoding.white_point.as_chromaticity();
+                let mat = crate::ciexyz::primaries_to_xyz_mat(
+                    current_encoding.primaries.as_chromaticity(),
+                    illuminant,
+                );
+                let luminances = [mat[3], mat[4], mat[5]];
+
+                ops.push(ColorTransformOp::GamutMap {
+                    luminances,
+                    saturation_factor: 0.3,
+                });
+            } else {
+                ops.push(ColorTransformOp::Clip);
+            }
+
             match current_encoding.colour_space {
                 ColourSpace::Rgb => {
                     // RGB to XYZ
@@ -427,11 +443,15 @@ impl ColorTransform {
                     return Err(Error::UnsupportedColorEncoding);
                 }
             }
+
+            current_encoding.colour_space = target_encoding.colour_space;
+            current_encoding.white_point = target_encoding.white_point;
+            current_encoding.primaries = target_encoding.primaries;
         }
 
-        let illuminant = target_encoding.white_point.as_chromaticity();
+        let illuminant = current_encoding.white_point.as_chromaticity();
         let mat = crate::ciexyz::primaries_to_xyz_mat(
-            target_encoding.primaries.as_chromaticity(),
+            current_encoding.primaries.as_chromaticity(),
             illuminant,
         );
         let luminances = [mat[3], mat[4], mat[5]];
@@ -443,7 +463,7 @@ impl ColorTransform {
         };
 
         if intensity_target > 255.0 && !target_encoding.is_hdr() {
-            if target_encoding.colour_space == ColourSpace::Grey {
+            if current_encoding.colour_space == ColourSpace::Grey {
                 ops.push(ColorTransformOp::ToneMapLumaRec2408 {
                     hdr_params,
                     target_display_luminance: 255.0,
@@ -459,7 +479,7 @@ impl ColorTransform {
                 if current_encoding.rendering_intent == RenderingIntent::Perceptual {
                     ops.push(ColorTransformOp::GamutMap {
                         luminances,
-                        saturation_factor: 0.1,
+                        saturation_factor: 0.3,
                     });
                 }
             }
@@ -636,6 +656,7 @@ enum ColorTransformOp {
         luminances: [f32; 3],
         saturation_factor: f32,
     },
+    Clip,
     IccToIcc {
         inputs: usize,
         outputs: usize,
@@ -700,6 +721,7 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("luminances", luminances)
                 .field("saturation_factor", saturation_factor)
                 .finish(),
+            Self::Clip => f.write_str("Clip"),
             Self::IccToIcc {
                 inputs,
                 outputs,
@@ -733,6 +755,7 @@ impl ColorTransformOp {
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
+            ColorTransformOp::Clip => None,
             ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
         }
@@ -752,6 +775,7 @@ impl ColorTransformOp {
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
+            ColorTransformOp::Clip => None,
             ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
             ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
         }
@@ -864,6 +888,14 @@ impl ColorTransformOp {
                 };
                 gamut_map::gamut_map(r, g, b, *luminances, *saturation_factor);
                 3
+            }
+            Self::Clip => {
+                for buf in &mut channels[..num_input_channels] {
+                    for v in buf.iter_mut() {
+                        *v = v.clamp(0.0, 1.0);
+                    }
+                }
+                num_input_channels
             }
             Self::IccToIcc { from, to, .. } => {
                 cms.transform(from, to, RenderingIntent::Relative, channels)?

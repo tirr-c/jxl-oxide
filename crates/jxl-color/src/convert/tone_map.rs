@@ -199,7 +199,7 @@ fn tone_map_generic(
             to_luminance_range,
         );
         let y_mapped = crate::tf::pq::pq_to_linear_generic(y_mapped, intensity_target);
-        let ratio = if y <= 1e-7 {
+        let ratio = if y.abs() <= 1e-7 {
             y_mapped * scale
         } else {
             y_mapped / y * scale
@@ -229,6 +229,7 @@ unsafe fn tone_map_x86_64_avx2(
     assert_eq!(g.len(), b.len());
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm256_set1_ps(scale);
+    let absmask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fff_ffff));
 
     let [lr, lg, lb] = luminances;
     let vlr = _mm256_set1_ps(lr);
@@ -250,7 +251,8 @@ unsafe fn tone_map_x86_64_avx2(
             to_luminance_range,
         );
         let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_avx2(vy_mapped, intensity_target);
-        let is_small = _mm256_cmp_ps::<_CMP_LT_OQ>(vy, _mm256_set1_ps(1e-7));
+        let is_small =
+            _mm256_cmp_ps::<_CMP_LT_OQ>(_mm256_and_ps(vy, absmask), _mm256_set1_ps(1e-7));
         let vy = _mm256_blendv_ps(vy, _mm256_set1_ps(1.0), is_small);
         let ratio = _mm256_div_ps(_mm256_mul_ps(vy_mapped, vscale), vy);
         _mm256_storeu_ps(r.as_mut_ptr(), _mm256_mul_ps(vr, ratio));
@@ -287,6 +289,7 @@ unsafe fn tone_map_x86_64_fma(
     assert_eq!(g.len(), b.len());
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm_set1_ps(scale);
+    let absmask = _mm_castsi128_ps(_mm_set1_epi32(0x7fff_ffff));
 
     let [lr, lg, lb] = luminances;
     let vlr = _mm_set1_ps(lr);
@@ -308,7 +311,7 @@ unsafe fn tone_map_x86_64_fma(
             to_luminance_range,
         );
         let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_fma(vy_mapped, intensity_target);
-        let is_small = _mm_cmplt_ps(vy, _mm_set1_ps(1e-7));
+        let is_small = _mm_cmplt_ps(_mm_and_ps(vy, absmask), _mm_set1_ps(1e-7));
         let vy = _mm_blendv_ps(vy, _mm_set1_ps(1.0), is_small);
         let ratio = _mm_div_ps(_mm_mul_ps(vy_mapped, vscale), vy);
         _mm_storeu_ps(r.as_mut_ptr(), _mm_mul_ps(vr, ratio));
@@ -343,6 +346,7 @@ unsafe fn tone_map_x86_64_sse2(
     assert_eq!(g.len(), b.len());
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm_set1_ps(scale);
+    let absmask = _mm_castsi128_ps(_mm_set1_epi32(0x7fff_ffff));
 
     let [lr, lg, lb] = luminances;
     let vlr = _mm_set1_ps(lr);
@@ -366,7 +370,7 @@ unsafe fn tone_map_x86_64_sse2(
             to_luminance_range,
         );
         let vy_mapped = crate::tf::pq::pq_to_linear_x86_64_sse2(vy_mapped, intensity_target);
-        let is_small = _mm_cmplt_ps(vy, _mm_set1_ps(1e-7));
+        let is_small = _mm_cmplt_ps(_mm_and_ps(vy, absmask), _mm_set1_ps(1e-7));
         let vy = _mm_or_ps(
             _mm_andnot_ps(is_small, vy),
             _mm_and_ps(is_small, _mm_set1_ps(1.0)),
@@ -423,7 +427,7 @@ unsafe fn tone_map_aarch64_neon(
         );
         let vy_mapped = crate::tf::pq::pq_to_linear_aarch64_neon(vy_mapped, intensity_target);
 
-        let is_small = vcleq_f32(vy, vdupq_n_f32(1e-7));
+        let is_small = vcleq_f32(vabsq_f32(vy), vdupq_n_f32(1e-7));
         let vy = vbslq_f32(is_small, vdupq_n_f32(1.0), vy);
         let ratio = vdivq_f32(vmulq_n_f32(vy_mapped, scale), vy);
 
