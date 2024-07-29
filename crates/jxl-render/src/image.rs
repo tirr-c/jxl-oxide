@@ -367,6 +367,22 @@ impl ImageWithRegion {
         self.regions[index] = (original_region, shift);
     }
 
+    #[inline]
+    pub(crate) fn swap_channel_f32(
+        &mut self,
+        index: usize,
+        buffer: &mut AlignedGrid<f32>,
+        region: Region,
+    ) {
+        assert_eq!(buffer.width(), region.width as usize);
+        assert_eq!(buffer.height(), region.height as usize);
+        let ImageBuffer::F32(original_buffer) = &mut self.buffer[index] else {
+            panic!("original buffer is not F32");
+        };
+        std::mem::swap(original_buffer, buffer);
+        self.regions[index] = (region, ChannelShift::from_shift(0));
+    }
+
     pub fn extend_from_gmodular<S: Sample>(&mut self, gmodular: GlobalModular<S>) {
         let Some(image) = gmodular.modular.into_image() else {
             return;

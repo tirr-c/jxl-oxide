@@ -87,8 +87,18 @@ pub fn apply_epf<S: Sample>(
     }
 
     if iters == 1 || iters == 3 {
+        let left = color_padded_region.left;
+        let top = color_padded_region.top;
         for (idx, grid) in fb_scratch_arr.into_iter().enumerate() {
-            fb_image.replace_channel(idx, crate::ImageBuffer::F32(grid), color_padded_region);
+            let width = grid.width() as u32;
+            let height = grid.height() as u32;
+            let region = Region {
+                width,
+                height,
+                left,
+                top,
+            };
+            fb_image.replace_channel(idx, crate::ImageBuffer::F32(grid), region);
         }
     }
 }

@@ -24,6 +24,20 @@ pub fn apply_gabor_like(
     let buffers = buffers.map(|g| g.as_subgrid_mut().subgrid(left..right, top..bottom));
 
     super::impls::apply_gabor_like(buffers, fb_scratch, weights, pool);
+
+    let left = color_padded_region.left;
+    let top = color_padded_region.top;
+    for (idx, grid) in fb_scratch.iter_mut().enumerate() {
+        let width = grid.width() as u32;
+        let height = grid.height() as u32;
+        let region = Region {
+            width,
+            height,
+            left,
+            top,
+        };
+        fb.swap_channel_f32(idx, grid, region);
+    }
 }
 
 pub(super) struct GaborRow<'buf> {
@@ -43,7 +57,7 @@ pub(super) fn run_gabor_rows<'buf>(
 }
 
 pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
-    mut input: MutableSubgrid<'buf, f32>,
+    input: MutableSubgrid<'buf, f32>,
     output: &'buf mut AlignedGrid<f32>,
     weights: [f32; 2],
     pool: &JxlThreadPool,
@@ -96,10 +110,6 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
         let input_buf_a = input.get_row(height - 2);
         let output_buf = bottom_row;
         gabor_row_edge(input_buf_c, Some(input_buf_a), output_buf, weights);
-    }
-
-    for (y, row) in output_buf.chunks_exact(width).enumerate() {
-        input.get_row_mut(y).copy_from_slice(row);
     }
 }
 

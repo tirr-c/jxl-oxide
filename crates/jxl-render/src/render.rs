@@ -72,18 +72,24 @@ pub(crate) fn render_frame<S: Sample>(
     let mut scratch_buffer = None;
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
-        if scratch_buffer.is_none() {
+        let mut fb_scratch = {
             let tracker = fb.alloc_tracker();
             let width = color_padded_region.width as usize;
             let height = color_padded_region.height as usize;
-            scratch_buffer = Some([
+            [
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
-            ]);
-        }
-        let fb_scratch = scratch_buffer.as_mut().unwrap();
-        filter::apply_gabor_like(&mut fb, color_padded_region, fb_scratch, weights, &pool);
+            ]
+        };
+        filter::apply_gabor_like(
+            &mut fb,
+            color_padded_region,
+            &mut fb_scratch,
+            weights,
+            &pool,
+        );
+        scratch_buffer = Some(fb_scratch);
     }
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
