@@ -53,7 +53,6 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         ));
     }
 
-    let image_size = &image.image_header().size;
     let image_meta = &image.image_header().metadata;
     tracing::info!("Image dimension: {}x{}", image.width(), image.height());
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
@@ -72,12 +71,12 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
             None
         } else if crop.width == 0 {
             Some(CropInfo {
-                width: image_size.width,
+                width: image.width(),
                 ..crop
             })
         } else if crop.height == 0 {
             Some(CropInfo {
-                height: image_size.height,
+                height: image.height(),
                 ..crop
             })
         } else {
@@ -90,8 +89,8 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     }
 
     let crop_region = crop.unwrap_or(CropInfo {
-        width: image_size.width,
-        height: image_size.height,
+        width: image.width(),
+        height: image.height(),
         left: 0,
         top: 0,
     });
@@ -211,7 +210,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
                     tracing::warn!("--icc-output is not set. Numpy buffer alone cannot be used to display image as its colorspace is unknown.");
                 }
 
-                write_npy(output, &image, &keyframes, width, height).map_err(Error::WriteImage)?;
+                write_npy(output, &keyframes, width, height).map_err(Error::WriteImage)?;
             }
         }
     } else {
@@ -276,7 +275,6 @@ fn write_png<W: Write>(
     let cicp = image.rendered_cicp();
     let metadata = &image.image_header().metadata;
 
-    let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let mut encoder = png::Encoder::new(output, width, height);
 
     let color_type = match pixfmt {
@@ -377,13 +375,10 @@ fn write_png<W: Write>(
 
 fn write_npy<W: Write>(
     output: W,
-    image: &JxlImage,
     keyframes: &[Render],
     width: u32,
     height: u32,
 ) -> std::io::Result<()> {
-    let metadata = &image.image_header().metadata;
-    let (width, height, _, _) = metadata.apply_orientation(width, height, 0, 0, false);
     let channels = {
         let first_frame = keyframes.first().unwrap();
         first_frame.color_channels().len() + first_frame.extra_channels().len()
