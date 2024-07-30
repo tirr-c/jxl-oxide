@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `jxl-modular`: Fix incorrect color with complex inverse palette (#312).
+- `jxl-color`: Fix color conversion with out-of-gamut inputs (#316).
 
 ## [0.8.0] - 2024-03-25
 
