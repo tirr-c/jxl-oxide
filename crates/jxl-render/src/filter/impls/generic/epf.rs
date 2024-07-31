@@ -5,7 +5,6 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
         input_rows,
         output_rows,
         width,
-        x,
         y,
         sigma_row,
         epf_params,
@@ -29,10 +28,9 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     let sm = if is_y_border {
         [step_multiplier * border_sad_mul; 8]
     } else {
-        let neg_x = 8 - (x & 7);
         let mut sm = [step_multiplier; 8];
-        sm[neg_x & 7] *= border_sad_mul;
-        sm[(neg_x + 7) & 7] *= border_sad_mul;
+        sm[0] *= border_sad_mul;
+        sm[7] *= border_sad_mul;
         sm
     };
 
@@ -45,14 +43,11 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     };
 
     let simd_range = {
-        let start = (x + left_edge_width + 7) & !7;
-        let end = (x + width - right_edge_width) & !7;
+        let start = 4;
+        let end = (width - right_edge_width) & !3;
         if start > end {
-            let start = start - x;
             start..start
         } else {
-            let start = start - x;
-            let end = end - x;
             start..end
         }
     };
@@ -65,8 +60,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
 
     for dx in 0..left_padding_end {
         let sm_idx = dx & 7;
-        let sigma_x = (x + dx) / 8 - x / 8;
-        let sigma_val = sigma_row[sigma_x];
+        let sigma_val = sigma_row[dx / 8];
         if sigma_val < 0.3 {
             for c in 0..3 {
                 output_rows[c][dx] = input_rows[c][3][dx];
@@ -114,8 +108,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
     if !skip_inner {
         for dx in left_padding_end..right_padding_start {
             let sm_idx = dx & 7;
-            let sigma_x = (x + dx) / 8 - x / 8;
-            let sigma_val = sigma_row[sigma_x];
+            let sigma_val = sigma_row[dx / 8];
             if sigma_val < 0.3 {
                 for c in 0..3 {
                     output_rows[c][dx] = input_rows[c][3][dx];
@@ -164,8 +157,7 @@ pub(crate) fn epf_row<const STEP: usize>(epf_row: EpfRow<'_, '_>) {
 
     for dx in right_padding_start..width {
         let sm_idx = dx & 7;
-        let sigma_x = (x + dx) / 8 - x / 8;
-        let sigma_val = sigma_row[sigma_x];
+        let sigma_val = sigma_row[dx / 8];
         if sigma_val < 0.3 {
             for c in 0..3 {
                 output_rows[c][dx] = input_rows[c][3][dx];

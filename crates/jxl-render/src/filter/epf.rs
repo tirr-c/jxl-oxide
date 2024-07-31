@@ -109,7 +109,6 @@ pub(super) struct EpfRow<'buf, 'epf> {
     pub merged_input_rows: Option<[SharedSubgrid<'buf, f32>; 3]>,
     pub output_rows: [&'buf mut [f32]; 3],
     pub width: usize,
-    pub x: usize,
     pub y: usize,
     pub sigma_row: &'buf [f32],
     pub epf_params: &'epf EpfParams,
@@ -144,6 +143,8 @@ pub(super) unsafe fn run_epf_rows(
         height,
     } = color_padded_region;
     assert!(left >= 0 && top >= 0);
+    assert!(left % 8 == 0);
+    assert!(top % 8 == 0);
 
     let width = width as usize;
     let height = height as usize;
@@ -151,10 +152,9 @@ pub(super) unsafe fn run_epf_rows(
     let top = top as usize;
 
     let mut jobs = Vec::new();
-    let mut image_y = top;
-    while image_y < height + top {
-        let next = ((image_y + 8) & !7).min(height + top);
-        let job_height = next - image_y;
+    for dy in (0..height).step_by(8) {
+        let image_y = top + dy;
+        let job_height = (height - dy).min(8);
 
         let next_output0 = output0.split_vertical_in_place(job_height);
         let next_output1 = output1.split_vertical_in_place(job_height);
@@ -169,13 +169,12 @@ pub(super) unsafe fn run_epf_rows(
         output0 = next_output0;
         output1 = next_output1;
         output2 = next_output2;
-        image_y = next;
     }
 
     let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
     let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
     let groups_per_row = frame_header.lf_groups_per_row() as usize;
-    let sigma_len = (left + width + 7) / 8 - left / 8;
+    let sigma_len = (width + 7) / 8;
     pool.for_each_vec_with(
         jobs,
         vec![epf_params.sigma_for_modular; sigma_len],
@@ -233,7 +232,6 @@ pub(super) unsafe fn run_epf_rows(
                             merged_input_rows,
                             output_rows,
                             width,
-                            x: left,
                             y: image_y,
                             sigma_row,
                             epf_params,
@@ -249,7 +247,6 @@ pub(super) unsafe fn run_epf_rows(
                     output_rows,
                     merged_input_rows,
                     width,
-                    x: left,
                     y: image_y,
                     sigma_row,
                     epf_params,

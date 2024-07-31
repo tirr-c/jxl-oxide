@@ -21,7 +21,6 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow) {
         merged_input_rows,
         output_rows,
         width,
-        x,
         y,
         sigma_row,
         epf_params,
@@ -46,14 +45,11 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow) {
     }
 
     let simd_range = {
-        let start = (x + padding + 7) & !7;
-        let end = (x + width - padding) & !7;
+        let start = 4;
+        let end = (width - padding) & !3;
         if start > end {
-            let start = start - x;
             start..start
         } else {
-            let start = start - x;
-            let end = end - x;
             start..end
         }
     };
@@ -80,9 +76,8 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow) {
     };
 
     for dx in simd_range.step_by(4) {
-        let sigma_x = x + dx;
-        let sm = sm[(sigma_x / 4) & 1];
-        let sigma_x = sigma_x / 8 - x / 8;
+        let sm = sm[(dx / 4) & 1];
+        let sigma_x = dx / 8;
 
         let sigma_val = sigma_row[sigma_x];
 
