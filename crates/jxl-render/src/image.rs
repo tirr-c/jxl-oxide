@@ -155,12 +155,12 @@ impl ImageBuffer {
             }
             [Self::I32(y), Self::I32(_), Self::I32(b)] => {
                 for (b, &y) in b.buf_mut().iter_mut().zip(y.buf()) {
-                    *b += y;
+                    *b = b.saturating_add(y);
                 }
             }
             [Self::I16(y), Self::I16(_), Self::I16(b)] => {
                 for (b, &y) in b.buf_mut().iter_mut().zip(y.buf()) {
-                    *b += y;
+                    *b = b.saturating_add(y);
                 }
             }
             _ => panic!(),
