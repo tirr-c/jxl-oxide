@@ -387,12 +387,13 @@ impl ImageWithRegion {
         let Some(image) = gmodular.modular.into_image() else {
             return;
         };
-        for g in image.into_image_channels() {
-            let width = g.width();
-            let height = g.height();
-            let region = Region::with_size(width as u32, height as u32);
+        for (g, info) in image.into_image_channels_with_info() {
+            let (width, height) = info.original_size();
+            let shift = info.shift();
+
+            let original_region = Region::with_size(width, height);
             let buffer = ImageBuffer::from_modular_channel(g);
-            self.append_channel(buffer, region);
+            self.append_channel_shifted(buffer, original_region, shift);
         }
     }
 
@@ -445,7 +446,7 @@ impl ImageWithRegion {
     ) -> Result<()> {
         self.convert_modular_color(bit_depth)?;
 
-        for (g, (region, shift)) in self.buffer.iter_mut().zip(&mut self.regions) {
+        for (g, (region, shift)) in self.buffer.iter_mut().zip(&mut self.regions).take(3) {
             let downsampled_image_region = region.downsample_with_shift(*shift);
             let downsampled_valid_region = valid_region.downsample_with_shift(*shift);
             let left = downsampled_valid_region

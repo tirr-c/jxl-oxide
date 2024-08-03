@@ -160,6 +160,7 @@ pub struct ModularChannelInfo {
     original_height: u32,
     hshift: i32,
     vshift: i32,
+    original_shift: ChannelShift,
 }
 
 impl ModularChannelInfo {
@@ -172,6 +173,7 @@ impl ModularChannelInfo {
             original_height,
             hshift: shift.hshift(),
             vshift: shift.vshift(),
+            original_shift: shift,
         }
     }
 
@@ -183,7 +185,16 @@ impl ModularChannelInfo {
             original_height: height,
             hshift: -1,
             vshift: -1,
+            original_shift: ChannelShift::from_shift(0),
         }
+    }
+
+    pub fn shift(&self) -> ChannelShift {
+        self.original_shift
+    }
+
+    pub fn original_size(&self) -> (u32, u32) {
+        (self.original_width, self.original_height)
     }
 }
 
