@@ -165,6 +165,12 @@ impl<S: Sample> ModularImageDestination<S> {
         self.image_channels
     }
 
+    pub fn into_image_channels_with_info(
+        self,
+    ) -> impl Iterator<Item = (AlignedGrid<S>, ModularChannelInfo)> {
+        self.image_channels.into_iter().zip(self.channels.info)
+    }
+
     pub fn has_palette(&self) -> bool {
         self.header.transform.iter().any(|tr| tr.is_palette())
     }
@@ -231,6 +237,7 @@ impl<S: Sample> ModularImageDestination<S> {
                 original_height,
                 hshift,
                 vshift,
+                original_shift,
                 ..
             } = info;
             assert!(hshift >= 0 && vshift >= 0);
@@ -319,6 +326,7 @@ impl<S: Sample> ModularImageDestination<S> {
                     original_height: height << vshift,
                     hshift,
                     vshift,
+                    original_shift,
                 });
                 subimage.channel_indices.push(i);
                 subimage.grid.push(grid.into());

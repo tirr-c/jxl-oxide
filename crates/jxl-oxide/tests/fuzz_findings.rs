@@ -77,4 +77,5 @@ test_by_include!(
     squeeze_groups_off_by_one,
     cluster_hole,
     invalid_alpha_ref,
+    modular_jpeg_upsampling_2,
 );
