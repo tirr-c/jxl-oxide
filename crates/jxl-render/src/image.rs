@@ -1,98 +1,291 @@
 use std::sync::Arc;
 
-use jxl_frame::header::FrameType;
+use jxl_frame::{data::GlobalModular, FrameHeader};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
-use jxl_modular::Sample;
+use jxl_image::{BitDepth, ImageHeader};
+use jxl_modular::{ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
+use jxl_vardct::LfChannelDequantization;
 
 use crate::{util, FrameRender, FrameRenderHandle, Region, Result};
 
 #[derive(Debug)]
+pub enum ImageBuffer {
+    F32(AlignedGrid<f32>),
+    I32(AlignedGrid<i32>),
+    I16(AlignedGrid<i16>),
+}
+
+impl ImageBuffer {
+    #[inline]
+    pub fn from_modular_channel<S: Sample>(g: AlignedGrid<S>) -> Self {
+        let g = match S::try_into_grid_i16(g) {
+            Ok(g) => return Self::I16(g),
+            Err(g) => g,
+        };
+        match S::try_into_grid_i32(g) {
+            Ok(g) => Self::I32(g),
+            Err(_) => panic!(),
+        }
+    }
+
+    #[inline]
+    pub fn zeroed_f32(width: usize, height: usize, tracker: Option<&AllocTracker>) -> Result<Self> {
+        let grid = AlignedGrid::with_alloc_tracker(width, height, tracker)?;
+        Ok(Self::F32(grid))
+    }
+
+    #[inline]
+    pub fn try_clone(&self) -> Result<Self> {
+        match self {
+            Self::F32(g) => g.try_clone().map(Self::F32),
+            Self::I32(g) => g.try_clone().map(Self::I32),
+            Self::I16(g) => g.try_clone().map(Self::I16),
+        }
+        .map_err(From::from)
+    }
+
+    #[inline]
+    pub fn width(&self) -> usize {
+        match self {
+            Self::F32(g) => g.width(),
+            Self::I32(g) => g.width(),
+            Self::I16(g) => g.width(),
+        }
+    }
+
+    #[inline]
+    pub fn height(&self) -> usize {
+        match self {
+            Self::F32(g) => g.height(),
+            Self::I32(g) => g.height(),
+            Self::I16(g) => g.height(),
+        }
+    }
+
+    #[inline]
+    pub fn tracker(&self) -> Option<AllocTracker> {
+        match self {
+            Self::F32(g) => g.tracker(),
+            Self::I32(g) => g.tracker(),
+            Self::I16(g) => g.tracker(),
+        }
+    }
+
+    #[inline]
+    pub fn as_float(&self) -> Option<&AlignedGrid<f32>> {
+        if let Self::F32(g) = self {
+            Some(g)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_float_mut(&mut self) -> Option<&mut AlignedGrid<f32>> {
+        if let Self::F32(g) = self {
+            Some(g)
+        } else {
+            None
+        }
+    }
+
+    pub fn convert_to_float_modular(
+        &mut self,
+        bit_depth: BitDepth,
+    ) -> Result<&mut AlignedGrid<f32>> {
+        Ok(match self {
+            Self::F32(g) => g,
+            Self::I32(g) => {
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(g.width(), g.height(), g.tracker().as_ref())?;
+                for (o, &i) in out.buf_mut().iter_mut().zip(g.buf()) {
+                    *o = bit_depth.parse_integer_sample(i);
+                }
+
+                *self = Self::F32(out);
+                self.as_float_mut().unwrap()
+            }
+            Self::I16(g) => {
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(g.width(), g.height(), g.tracker().as_ref())?;
+                for (o, &i) in out.buf_mut().iter_mut().zip(g.buf()) {
+                    *o = bit_depth.parse_integer_sample(i as i32);
+                }
+
+                *self = Self::F32(out);
+                self.as_float_mut().unwrap()
+            }
+        })
+    }
+
+    pub fn cast_to_float(&mut self) -> Result<&mut AlignedGrid<f32>> {
+        Ok(match self {
+            Self::F32(g) => g,
+            Self::I32(g) => {
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(g.width(), g.height(), g.tracker().as_ref())?;
+                for (o, &i) in out.buf_mut().iter_mut().zip(g.buf()) {
+                    *o = i as f32;
+                }
+
+                *self = Self::F32(out);
+                self.as_float_mut().unwrap()
+            }
+            Self::I16(g) => {
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(g.width(), g.height(), g.tracker().as_ref())?;
+                for (o, &i) in out.buf_mut().iter_mut().zip(g.buf()) {
+                    *o = i as f32;
+                }
+
+                *self = Self::F32(out);
+                self.as_float_mut().unwrap()
+            }
+        })
+    }
+
+    pub fn convert_to_float_modular_xyb<'g>(
+        yxb: [&'g mut Self; 3],
+        lf_dequant: &LfChannelDequantization,
+    ) -> Result<[&'g mut AlignedGrid<f32>; 3]> {
+        match yxb {
+            [Self::F32(_), Self::F32(_), Self::F32(_)] => {
+                panic!("channels are already converted");
+            }
+            [Self::I32(y), Self::I32(_), Self::I32(b)] => {
+                for (b, &y) in b.buf_mut().iter_mut().zip(y.buf()) {
+                    *b += y;
+                }
+            }
+            [Self::I16(y), Self::I16(_), Self::I16(b)] => {
+                for (b, &y) in b.buf_mut().iter_mut().zip(y.buf()) {
+                    *b += y;
+                }
+            }
+            _ => panic!(),
+        }
+
+        let [y, x, b] = yxb;
+        let y = y.cast_to_float()?;
+        let x = x.cast_to_float()?;
+        let b = b.cast_to_float()?;
+        let buf_y = y.buf_mut();
+        let buf_x = x.buf_mut();
+        let buf_b = b.buf_mut();
+        let m_x_lf = lf_dequant.m_x_lf_unscaled();
+        let m_y_lf = lf_dequant.m_y_lf_unscaled();
+        let m_b_lf = lf_dequant.m_b_lf_unscaled();
+
+        for ((y, x), b) in buf_y.iter_mut().zip(buf_x).zip(buf_b) {
+            let py = *y;
+            let px = *x;
+            *y = px * m_x_lf;
+            *x = py * m_y_lf;
+            *b *= m_b_lf;
+        }
+
+        Ok([y, x, b])
+    }
+
+    pub(crate) fn upsample_nn(&self, factor: u32) -> Result<ImageBuffer> {
+        #[inline]
+        fn inner<S: Copy>(
+            original: &[S],
+            target: &mut [S],
+            width: usize,
+            height: usize,
+            factor: u32,
+        ) {
+            assert_eq!(original.len(), width * height);
+            assert_eq!(target.len(), original.len() << (factor * 2));
+            let step = 1usize << factor;
+            let stride = width << factor;
+            for y in 0..height {
+                let original = &original[y * width..];
+                let target = &mut target[y * step * stride..];
+                for (x, &value) in original[..width].iter().enumerate() {
+                    target[x * step..][..step].fill(value);
+                }
+                for row in 1..step {
+                    target.copy_within(..stride, stride * row);
+                }
+            }
+        }
+
+        if factor == 0 {
+            return self.try_clone();
+        }
+
+        let tracker = self.tracker();
+        let width = self.width();
+        let height = self.height();
+        Ok(match self {
+            Self::F32(g) => {
+                let up_width = width << factor;
+                let up_height = height << factor;
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(up_width, up_height, tracker.as_ref())?;
+
+                let original = g.buf();
+                let target = out.buf_mut();
+                inner(original, target, width, height, factor);
+                Self::F32(out)
+            }
+            Self::I32(g) => {
+                let up_width = width << factor;
+                let up_height = height << factor;
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(up_width, up_height, tracker.as_ref())?;
+
+                let original = g.buf();
+                let target = out.buf_mut();
+                inner(original, target, width, height, factor);
+                Self::I32(out)
+            }
+            Self::I16(g) => {
+                let up_width = width << factor;
+                let up_height = height << factor;
+                let mut out =
+                    AlignedGrid::with_alloc_tracker(up_width, up_height, tracker.as_ref())?;
+
+                let original = g.buf();
+                let target = out.buf_mut();
+                inner(original, target, width, height, factor);
+                Self::I16(out)
+            }
+        })
+    }
+}
+
+#[derive(Debug)]
 pub struct ImageWithRegion {
-    region: Region,
-    buffer: Vec<AlignedGrid<f32>>,
+    buffer: Vec<ImageBuffer>,
+    regions: Vec<(Region, ChannelShift)>,
     ct_done: bool,
     blend_done: bool,
     tracker: Option<AllocTracker>,
 }
 
 impl ImageWithRegion {
-    pub(crate) fn from_region_and_tracker(
-        channels: usize,
-        region: Region,
-        ct_done: bool,
-        tracker: Option<&AllocTracker>,
-    ) -> Result<Self> {
-        let width = region.width as usize;
-        let height = region.height as usize;
-        let buffer =
-            std::iter::repeat_with(|| AlignedGrid::with_alloc_tracker(width, height, tracker))
-                .take(channels)
-                .collect::<std::result::Result<_, _>>()?;
-        let tracker = tracker.cloned();
-
-        Ok(Self {
-            region,
-            buffer,
-            ct_done,
+    pub(crate) fn new(tracker: Option<&AllocTracker>) -> Self {
+        Self {
+            buffer: Vec::new(),
+            regions: Vec::new(),
+            ct_done: false,
             blend_done: false,
-            tracker,
-        })
-    }
-
-    pub(crate) fn from_buffer(
-        buffer: Vec<AlignedGrid<f32>>,
-        left: i32,
-        top: i32,
-        ct_done: bool,
-    ) -> Self {
-        let channels = buffer.len();
-        if channels == 0 {
-            Self {
-                region: Region {
-                    top,
-                    left,
-                    width: 0,
-                    height: 0,
-                },
-                buffer,
-                ct_done,
-                blend_done: false,
-                tracker: None,
-            }
-        } else {
-            let width = buffer[0].width();
-            let height = buffer[0].height();
-            if buffer
-                .iter()
-                .any(|g| g.width() != width || g.height() != height)
-            {
-                panic!("Buffer size is not uniform");
-            }
-            let tracker = buffer[0].tracker();
-            Self {
-                region: Region {
-                    top,
-                    left,
-                    width: width as u32,
-                    height: height as u32,
-                },
-                buffer,
-                ct_done,
-                blend_done: false,
-                tracker,
-            }
+            tracker: tracker.cloned(),
         }
     }
 
     pub(crate) fn try_clone(&self) -> Result<Self> {
         Ok(Self {
-            region: self.region,
             buffer: self
                 .buffer
                 .iter()
                 .map(|x| x.try_clone())
                 .collect::<std::result::Result<_, _>>()?,
+            regions: self.regions.clone(),
             ct_done: self.ct_done,
             blend_done: false,
             tracker: self.tracker.clone(),
@@ -110,23 +303,249 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub fn region(&self) -> Region {
-        self.region
-    }
-
-    #[inline]
-    pub fn buffer(&self) -> &[AlignedGrid<f32>] {
+    pub fn buffer(&self) -> &[ImageBuffer] {
         &self.buffer
     }
 
     #[inline]
-    pub fn buffer_mut(&mut self) -> &mut [AlignedGrid<f32>] {
+    pub fn buffer_mut(&mut self) -> &mut [ImageBuffer] {
         &mut self.buffer
     }
 
     #[inline]
-    pub fn take_buffer(&mut self) -> Vec<AlignedGrid<f32>> {
+    pub fn take_buffer(&mut self) -> Vec<ImageBuffer> {
         std::mem::take(&mut self.buffer)
+    }
+
+    #[inline]
+    pub fn regions_and_shifts(&self) -> &[(Region, ChannelShift)] {
+        &self.regions
+    }
+
+    #[inline]
+    pub fn append_channel(&mut self, buffer: ImageBuffer, region: Region) {
+        assert_eq!(buffer.width(), region.width as usize);
+        assert_eq!(buffer.height(), region.height as usize);
+        self.buffer.push(buffer);
+        self.regions.push((region, ChannelShift::from_shift(0)));
+    }
+
+    #[inline]
+    pub fn append_channel_shifted(
+        &mut self,
+        buffer: ImageBuffer,
+        original_region: Region,
+        shift: ChannelShift,
+    ) {
+        let (width, height) = shift.shift_size((original_region.width, original_region.height));
+        assert_eq!(buffer.width(), width as usize);
+        assert_eq!(buffer.height(), height as usize);
+        self.buffer.push(buffer);
+        self.regions.push((original_region, shift));
+    }
+
+    #[inline]
+    pub fn replace_channel(&mut self, index: usize, buffer: ImageBuffer, region: Region) {
+        assert_eq!(buffer.width(), region.width as usize);
+        assert_eq!(buffer.height(), region.height as usize);
+        self.buffer[index] = buffer;
+        self.regions[index] = (region, ChannelShift::from_shift(0));
+    }
+
+    #[inline]
+    pub fn replace_channel_shifted(
+        &mut self,
+        index: usize,
+        buffer: ImageBuffer,
+        original_region: Region,
+        shift: ChannelShift,
+    ) {
+        let (width, height) = shift.shift_size((original_region.width, original_region.height));
+        assert_eq!(buffer.width(), width as usize);
+        assert_eq!(buffer.height(), height as usize);
+        self.buffer[index] = buffer;
+        self.regions[index] = (original_region, shift);
+    }
+
+    #[inline]
+    pub(crate) fn swap_channel_f32(
+        &mut self,
+        index: usize,
+        buffer: &mut AlignedGrid<f32>,
+        region: Region,
+    ) {
+        assert_eq!(buffer.width(), region.width as usize);
+        assert_eq!(buffer.height(), region.height as usize);
+        let ImageBuffer::F32(original_buffer) = &mut self.buffer[index] else {
+            panic!("original buffer is not F32");
+        };
+        std::mem::swap(original_buffer, buffer);
+        self.regions[index] = (region, ChannelShift::from_shift(0));
+    }
+
+    pub fn extend_from_gmodular<S: Sample>(&mut self, gmodular: GlobalModular<S>) {
+        let Some(image) = gmodular.modular.into_image() else {
+            return;
+        };
+        for g in image.into_image_channels() {
+            let width = g.width();
+            let height = g.height();
+            let region = Region::with_size(width as u32, height as u32);
+            let buffer = ImageBuffer::from_modular_channel(g);
+            self.append_channel(buffer, region);
+        }
+    }
+
+    pub(crate) fn clone_gray(&mut self) -> Result<()> {
+        let gray = self.buffer[0].try_clone()?;
+        let region = self.regions[0];
+        self.buffer.insert(1, gray.try_clone()?);
+        self.regions.insert(1, region);
+        self.buffer.insert(2, gray);
+        self.regions.insert(2, region);
+        Ok(())
+    }
+
+    pub(crate) fn convert_modular_color(&mut self, bit_depth: BitDepth) -> Result<()> {
+        let [a, b, c, ..] = &mut *self.buffer else {
+            panic!()
+        };
+        a.convert_to_float_modular(bit_depth)?;
+        b.convert_to_float_modular(bit_depth)?;
+        c.convert_to_float_modular(bit_depth)?;
+        Ok(())
+    }
+
+    pub(crate) fn convert_modular_xyb(
+        &mut self,
+        lf_dequant: &LfChannelDequantization,
+    ) -> Result<()> {
+        let [y, x, b, ..] = &mut *self.buffer else {
+            panic!()
+        };
+        ImageBuffer::convert_to_float_modular_xyb([y, x, b], lf_dequant)?;
+        Ok(())
+    }
+
+    pub(crate) fn upsample_lf(&self, lf_level: u32) -> Result<Self> {
+        let factor = lf_level * 3;
+        let mut out = Self::new(self.tracker.as_ref());
+        for (&(region, shift), buffer) in self.regions.iter().zip(&self.buffer) {
+            let up_region = region.upsample(factor);
+            let buffer = buffer.upsample_nn(factor)?;
+            out.append_channel_shifted(buffer, up_region, shift);
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn upsample_jpeg(
+        &mut self,
+        valid_region: Region,
+        bit_depth: BitDepth,
+    ) -> Result<()> {
+        self.convert_modular_color(bit_depth)?;
+
+        for (g, (region, shift)) in self.buffer.iter_mut().zip(&mut self.regions) {
+            let downsampled_image_region = region.downsample_with_shift(*shift);
+            let downsampled_valid_region = valid_region.downsample_with_shift(*shift);
+            let left = downsampled_valid_region
+                .left
+                .abs_diff(downsampled_image_region.left);
+            let top = downsampled_valid_region
+                .top
+                .abs_diff(downsampled_image_region.top);
+            let width = downsampled_valid_region.width;
+            let height = downsampled_valid_region.height;
+
+            let subgrid = g.as_float().unwrap().as_subgrid().subgrid(
+                left as usize..(left + width) as usize,
+                top as usize..(top + height) as usize,
+            );
+            let out = crate::filter::apply_jpeg_upsampling_single(
+                subgrid,
+                *shift,
+                valid_region,
+                self.tracker.as_ref(),
+            )?;
+
+            *g = ImageBuffer::F32(out);
+            *region = valid_region;
+            *shift = ChannelShift::from_shift(0);
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn upsample_nonseparable(
+        &mut self,
+        image_header: &ImageHeader,
+        frame_header: &FrameHeader,
+        upsampled_valid_region: Region,
+    ) -> Result<()> {
+        if frame_header.upsampling != 1 && self.buffer[0].as_float().is_none() {
+            debug_assert!(!image_header.metadata.xyb_encoded);
+        }
+
+        for (idx, ((region, shift), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate()
+        {
+            let tracker = g.tracker();
+            let (grid, upsampling_factor) = if let Some(ec_idx) = idx.checked_sub(3) {
+                let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
+                let upsampling_factor = frame_header.ec_upsampling[ec_idx].trailing_zeros();
+                let shift = dim_shift + upsampling_factor;
+                if shift == 0 {
+                    continue;
+                }
+                let g =
+                    g.convert_to_float_modular(image_header.metadata.ec_info[ec_idx].bit_depth)?;
+                (g, shift)
+            } else {
+                let shift = frame_header.upsampling.trailing_zeros();
+                if shift == 0 {
+                    continue;
+                }
+                let g = g.convert_to_float_modular(image_header.metadata.bit_depth)?;
+                (g, shift)
+            };
+
+            // let downsampled_image_region = region.downsample(upsampling_factor);
+            let downsampled_image_region = *region;
+            let downsampled_valid_region = upsampled_valid_region.downsample(upsampling_factor);
+            let left = downsampled_valid_region
+                .left
+                .abs_diff(downsampled_image_region.left);
+            let top = downsampled_valid_region
+                .top
+                .abs_diff(downsampled_image_region.top);
+            let width = downsampled_valid_region.width;
+            let height = downsampled_valid_region.height;
+
+            let subgrid = grid.as_subgrid().subgrid(
+                left as usize..(left + width) as usize,
+                top as usize..(top + height) as usize,
+            );
+            *region = downsampled_valid_region;
+            let out = crate::features::upsample(
+                subgrid,
+                region,
+                image_header,
+                frame_header,
+                idx,
+                tracker.as_ref(),
+            )?;
+            if let Some(out) = out {
+                *g = ImageBuffer::F32(out);
+            }
+            *shift = ChannelShift::from_shift(0);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn remove_color_channels(&mut self, count: usize) {
+        self.buffer.drain(count..3);
+        self.regions.drain(count..3);
     }
 
     #[inline]
@@ -143,147 +562,48 @@ impl ImageWithRegion {
     pub(crate) fn set_blend_done(&mut self, blend_done: bool) {
         self.blend_done = blend_done;
     }
-
-    #[inline]
-    pub(crate) fn add_channel(&mut self) -> Result<&mut AlignedGrid<f32>> {
-        self.buffer.push(AlignedGrid::with_alloc_tracker(
-            self.region.width as usize,
-            self.region.height as usize,
-            self.tracker.as_ref(),
-        )?);
-        Ok(self.buffer.last_mut().unwrap())
-    }
-
-    #[inline]
-    pub(crate) fn push_channel(&mut self, g: AlignedGrid<f32>) {
-        assert_eq!(self.region.width as usize, g.width());
-        assert_eq!(self.region.height as usize, g.height());
-        self.buffer.push(g);
-    }
-
-    #[inline]
-    pub(crate) fn remove_channels(&mut self, range: impl std::ops::RangeBounds<usize>) {
-        self.buffer.drain(range);
-    }
-
-    pub(crate) fn clone_intersection(&self, new_region: Region) -> Result<Self> {
-        let intersection = self.region.intersection(new_region);
-        let begin_x = intersection.left.abs_diff(self.region.left) as usize;
-        let begin_y = intersection.top.abs_diff(self.region.top) as usize;
-        let mut out = Self::from_region_and_tracker(
-            self.channels(),
-            intersection,
-            self.ct_done,
-            self.tracker.as_ref(),
-        )?;
-
-        for (input, output) in self.buffer.iter().zip(out.buffer.iter_mut()) {
-            let input_stride = input.width();
-            let input_buf = input.buf();
-            let output_stride = output.width();
-            let output_buf = output.buf_mut();
-            for (input_row, output_row) in input_buf
-                .chunks_exact(input_stride)
-                .skip(begin_y)
-                .zip(output_buf.chunks_exact_mut(output_stride))
-            {
-                let input_row = &input_row[begin_x..][..output_stride];
-                output_row.copy_from_slice(input_row);
-            }
-        }
-
-        Ok(out)
-    }
-
-    pub(crate) fn clone_region_channel(
-        &self,
-        out_region: Region,
-        channel_idx: usize,
-        output: &mut AlignedGrid<f32>,
-    ) {
-        if output.width() != out_region.width as usize
-            || output.height() != out_region.height as usize
-        {
-            panic!(
-                "region mismatch, out_region={:?}, grid size={:?}",
-                out_region,
-                (output.width(), output.height())
-            );
-        }
-        let input = self
-            .buffer
-            .get(channel_idx)
-            .expect("channel index out of range");
-
-        let intersection = self.region.intersection(out_region);
-        if intersection.is_empty() {
-            return;
-        }
-
-        let input_begin_x = intersection.left.abs_diff(self.region.left) as usize;
-        let input_begin_y = intersection.top.abs_diff(self.region.top) as usize;
-        let output_begin_x = intersection
-            .left
-            .abs_diff(out_region.left)
-            .clamp(0, out_region.width) as usize;
-        let output_begin_y = intersection
-            .top
-            .abs_diff(out_region.top)
-            .clamp(0, out_region.height) as usize;
-
-        let input_stride = input.width();
-        let input_buf = input.buf();
-        let output_stride = output.width();
-        let output_buf = output.buf_mut();
-        for (input_row, output_row) in input_buf
-            .chunks_exact(input_stride)
-            .skip(input_begin_y)
-            .zip(
-                output_buf
-                    .chunks_exact_mut(output_stride)
-                    .skip(output_begin_y),
-            )
-        {
-            let input_row = &input_row[input_begin_x..][..intersection.width as usize];
-            let output_row = &mut output_row[output_begin_x..][..intersection.width as usize];
-            output_row.copy_from_slice(input_row);
-        }
-    }
 }
 
 impl ImageWithRegion {
-    pub(crate) fn groups_with_group_id(
+    pub(crate) fn as_color_floats(&self) -> [&AlignedGrid<f32>; 3] {
+        let [a, b, c, ..] = &*self.buffer else {
+            panic!()
+        };
+        let a = a.as_float().unwrap();
+        let b = b.as_float().unwrap();
+        let c = c.as_float().unwrap();
+        [a, b, c]
+    }
+
+    pub(crate) fn as_color_floats_mut(&mut self) -> [&mut AlignedGrid<f32>; 3] {
+        let [a, b, c, ..] = &mut *self.buffer else {
+            panic!()
+        };
+        let a = a.as_float_mut().unwrap();
+        let b = b.as_float_mut().unwrap();
+        let c = c.as_float_mut().unwrap();
+        [a, b, c]
+    }
+
+    pub(crate) fn color_groups_with_group_id(
         &mut self,
         frame_header: &jxl_frame::FrameHeader,
     ) -> Vec<(u32, [MutableSubgrid<'_, f32>; 3])> {
-        let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-            jxl_modular::ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
-        });
-
-        let [fb_x, fb_y, fb_b, ..] = self.buffer.as_mut_slice() else {
+        let [fb_x, fb_y, fb_b, ..] = &mut *self.buffer else {
             panic!();
         };
 
         let group_dim = frame_header.group_dim();
-        let base_group_x = self.region.left as u32 / group_dim;
-        let base_group_y = self.region.top as u32 / group_dim;
-        let width = self.region.width;
-        let height = self.region.height;
+        let base_group_x = self.regions[0].0.left as u32 / group_dim;
+        let base_group_y = self.regions[0].0.top as u32 / group_dim;
+        let width = self.regions[0].0.width;
         let frame_groups_per_row = frame_header.groups_per_row();
         let groups_per_row = (width + group_dim - 1) / group_dim;
 
         let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
-            let fb_width = fb.width();
-            let shifted = shifts_cbycr[idx].shift_size((width, height));
-            let fb = MutableSubgrid::from_buf(
-                fb.buf_mut(),
-                shifted.0 as usize,
-                shifted.1 as usize,
-                fb_width,
-            );
-
-            let hshift = shifts_cbycr[idx].hshift();
-            let vshift = shifts_cbycr[idx].vshift();
+            let fb = fb.as_float_mut().unwrap().as_subgrid_mut();
+            let hshift = self.regions[idx].1.hshift();
+            let vshift = self.regions[idx].1.vshift();
             let group_dim = group_dim as usize;
             fb.into_groups(group_dim >> hshift, group_dim >> vshift)
         });
@@ -347,34 +667,16 @@ impl<S: Sample> RenderedImage<S> {
 
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
             grid.blend_done = true;
-            if frame_header.frame_type == FrameType::ReferenceOnly
-                || grid.region().contains(frame_region)
-            {
-                return Ok(BlendResult(grid_lock));
-            }
-
-            if grid.region() != frame_region {
-                tracing::trace!(render_region = ?grid.region(), ?frame_region);
-                let mut out = ImageWithRegion::from_region_and_tracker(
-                    grid.channels(),
-                    frame_region,
-                    grid.ct_done(),
-                    grid.alloc_tracker(),
-                )?;
-                for (idx, channel) in out.buffer_mut().iter_mut().enumerate() {
-                    grid.clone_region_channel(frame_region, idx, channel);
-                }
-                out.blend_done = true;
-                *grid = out;
-            }
             return Ok(BlendResult(grid_lock));
         }
 
         if !grid.ct_done() {
+            let bit_depth = self.image.frame.header().bit_depth;
+            grid.convert_modular_color(bit_depth)?;
             let ct_done = util::convert_color_for_record(
                 image_header,
                 frame_header.do_ycbcr,
-                grid.buffer_mut(),
+                grid.as_color_floats_mut(),
                 pool,
             );
             grid.set_ct_done(ct_done);

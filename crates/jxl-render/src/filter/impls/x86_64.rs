@@ -1,5 +1,5 @@
 use jxl_frame::{filter::EpfParams, FrameHeader};
-use jxl_grid::AlignedGrid;
+use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
@@ -14,11 +14,11 @@ mod epf_sse41;
 mod gabor_avx2;
 
 pub fn epf<const STEP: usize>(
-    input: &[AlignedGrid<f32>; 3],
-    output: &mut [AlignedGrid<f32>; 3],
+    input: &mut [MutableSubgrid<f32>; 3],
+    output: &mut [MutableSubgrid<f32>; 3],
+    color_padded_region: Region,
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&AlignedGrid<f32>>],
-    region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
 ) {
@@ -28,9 +28,9 @@ pub fn epf<const STEP: usize>(
             return run_epf_rows(
                 input,
                 output,
+                color_padded_region,
                 frame_header,
                 sigma_grid_map,
-                region,
                 epf_params,
                 pool,
                 Some(epf_sse41::epf_row_x86_64_sse41::<STEP>),
@@ -43,9 +43,9 @@ pub fn epf<const STEP: usize>(
         run_epf_rows(
             input,
             output,
+            color_padded_region,
             frame_header,
             sigma_grid_map,
-            region,
             epf_params,
             pool,
             None,
@@ -55,22 +55,18 @@ pub fn epf<const STEP: usize>(
 }
 
 pub fn apply_gabor_like(
-    fb: &[AlignedGrid<f32>; 3],
+    fb: [MutableSubgrid<f32>; 3],
     fb_scratch: &mut [AlignedGrid<f32>; 3],
-    frame_header: &FrameHeader,
-    region: Region,
     weights: [[f32; 2]; 3],
     pool: &jxl_threadpool::JxlThreadPool,
 ) {
     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
         // SAFETY: Features are checked above.
         unsafe {
-            for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
+            for ((input, output), weights) in fb.into_iter().zip(fb_scratch).zip(weights) {
                 run_gabor_rows_unsafe(
                     input,
                     output,
-                    frame_header,
-                    region,
                     weights,
                     pool,
                     gabor_avx2::run_gabor_row_x86_64_avx2,
@@ -80,15 +76,7 @@ pub fn apply_gabor_like(
         return;
     }
 
-    for ((input, output), weights) in fb.iter().zip(fb_scratch).zip(weights) {
-        run_gabor_rows(
-            input,
-            output,
-            frame_header,
-            region,
-            weights,
-            pool,
-            run_gabor_row_generic,
-        );
+    for ((input, output), weights) in fb.into_iter().zip(fb_scratch).zip(weights) {
+        run_gabor_rows(input, output, weights, pool, run_gabor_row_generic);
     }
 }

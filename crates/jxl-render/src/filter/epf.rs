@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
 use jxl_frame::{data::LfGroup, filter::EpfParams, FrameHeader};
-use jxl_grid::AlignedGrid;
+use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{util, ImageWithRegion, Region};
 
 pub fn apply_epf<S: Sample>(
-    fb: &mut ImageWithRegion,
-    fb_scratch: &mut [AlignedGrid<f32>; 3],
+    fb_image: &mut ImageWithRegion,
+    mut fb_scratch_arr: [AlignedGrid<f32>; 3],
+    color_padded_region: Region,
     lf_groups: &HashMap<u32, LfGroup<S>>,
     frame_header: &FrameHeader,
     epf_params: &EpfParams,
@@ -20,8 +21,16 @@ pub fn apply_epf<S: Sample>(
     let span = tracing::span!(tracing::Level::TRACE, "Edge-preserving filter");
     let _guard = span.enter();
 
-    let region = fb.region();
-    let fb = <&mut [_; 3]>::try_from(fb.buffer_mut()).unwrap();
+    let region = fb_image.regions_and_shifts()[0].0;
+    assert!(region.contains(color_padded_region));
+    let left = region.left.abs_diff(color_padded_region.left) as usize;
+    let top = region.top.abs_diff(color_padded_region.top) as usize;
+    let right = left + color_padded_region.width as usize;
+    let bottom = top + color_padded_region.height as usize;
+
+    let fb = fb_image.as_color_floats_mut();
+    let mut fb = fb.map(|g| g.as_subgrid_mut().subgrid(left..right, top..bottom));
+    let mut fb_scratch = fb_scratch_arr.each_mut().map(|g| g.as_subgrid_mut());
 
     let num_lf_groups = frame_header.num_lf_groups() as usize;
     let mut sigma_grid_map = vec![None::<&AlignedGrid<f32>>; num_lf_groups];
@@ -36,61 +45,70 @@ pub fn apply_epf<S: Sample>(
     if iters == 3 {
         tracing::debug!("Running step 0");
         super::impls::epf::<0>(
-            fb,
-            fb_scratch,
+            &mut fb,
+            &mut fb_scratch,
+            color_padded_region,
             frame_header,
             &sigma_grid_map,
-            region,
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        fb.swap_with_slice(&mut fb_scratch);
     }
 
     // Step 1
     {
         tracing::debug!("Running step 1");
         super::impls::epf::<1>(
-            fb,
-            fb_scratch,
+            &mut fb,
+            &mut fb_scratch,
+            color_padded_region,
             frame_header,
             &sigma_grid_map,
-            region,
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        fb.swap_with_slice(&mut fb_scratch);
     }
 
     // Step 2
     if iters >= 2 {
         tracing::debug!("Running step 2");
         super::impls::epf::<2>(
-            fb,
-            fb_scratch,
+            &mut fb,
+            &mut fb_scratch,
+            color_padded_region,
             frame_header,
             &sigma_grid_map,
-            region,
             epf_params,
             pool,
         );
-        std::mem::swap(&mut fb[0], &mut fb_scratch[0]);
-        std::mem::swap(&mut fb[1], &mut fb_scratch[1]);
-        std::mem::swap(&mut fb[2], &mut fb_scratch[2]);
+        fb.swap_with_slice(&mut fb_scratch);
+    }
+
+    if iters == 1 || iters == 3 {
+        let left = color_padded_region.left;
+        let top = color_padded_region.top;
+        for (idx, grid) in fb_scratch_arr.into_iter().enumerate() {
+            let width = grid.width() as u32;
+            let height = grid.height() as u32;
+            let region = Region {
+                width,
+                height,
+                left,
+                top,
+            };
+            fb_image.replace_channel(idx, crate::ImageBuffer::F32(grid), region);
+        }
     }
 }
 
 pub(super) struct EpfRow<'buf, 'epf> {
     pub input_rows: [[&'buf [f32]; 7]; 3],
     #[allow(unused)]
-    pub merged_input_rows: Option<[&'buf [f32]; 3]>,
+    pub merged_input_rows: Option<[SharedSubgrid<'buf, f32>; 3]>,
     pub output_rows: [&'buf mut [f32]; 3],
     pub width: usize,
-    pub x: usize,
     pub y: usize,
     pub sigma_row: &'buf [f32],
     pub epf_params: &'epf EpfParams,
@@ -98,12 +116,12 @@ pub(super) struct EpfRow<'buf, 'epf> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn run_epf_rows<'buf>(
-    input: &'buf [AlignedGrid<f32>; 3],
-    output: &'buf mut [AlignedGrid<f32>; 3],
+pub(super) unsafe fn run_epf_rows(
+    input: &mut [MutableSubgrid<f32>; 3],
+    output: &mut [MutableSubgrid<f32>; 3],
+    color_padded_region: Region,
     frame_header: &FrameHeader,
     sigma_grid_map: &[Option<&AlignedGrid<f32>>],
-    region: Region,
     epf_params: &EpfParams,
     pool: &JxlThreadPool,
     handle_row_simd: Option<for<'a, 'b> unsafe fn(EpfRow<'a, 'b>)>,
@@ -111,67 +129,62 @@ pub(super) unsafe fn run_epf_rows<'buf>(
 ) {
     struct EpfJob<'buf> {
         base_y: usize,
-        output0: &'buf mut [f32],
-        output1: &'buf mut [f32],
-        output2: &'buf mut [f32],
+        output0: MutableSubgrid<'buf, f32>,
+        output1: MutableSubgrid<'buf, f32>,
+        output2: MutableSubgrid<'buf, f32>,
     }
 
-    let width = region.width as usize;
-    let height = region.height as usize;
-    assert!(region.left >= 0);
-    assert!(region.top >= 0);
-    let left = region.left as usize;
-    let top = region.top as usize;
+    let input = input.each_ref().map(|g| g.as_shared());
+    let [mut output0, mut output1, mut output2] = output.each_mut().map(|g| g.borrow_mut());
+    let Region {
+        left,
+        top,
+        width,
+        height,
+    } = color_padded_region;
+    assert!(left >= 0 && top >= 0);
+    assert!(left % 8 == 0);
+    assert!(top % 8 == 0);
 
-    let input_buf = [input[0].buf(), input[1].buf(), input[2].buf()];
-    let (mut output0, mut output1, mut output2) = {
-        let [a, b, c] = output;
-        (a.buf_mut(), b.buf_mut(), c.buf_mut())
-    };
-
-    assert_eq!(input_buf[0].len(), width * height);
-    assert_eq!(input_buf[1].len(), width * height);
-    assert_eq!(input_buf[2].len(), width * height);
-    assert_eq!(output0.len(), width * height);
-    assert_eq!(output1.len(), width * height);
-    assert_eq!(output2.len(), width * height);
+    let width = width as usize;
+    let height = height as usize;
+    let left = left as usize;
+    let top = top as usize;
 
     let mut jobs = Vec::new();
-    let mut image_y = top;
-    while image_y < top + height {
-        let next = ((image_y + 8) & !7).min(top + height);
-        let job_height = next - image_y;
+    for dy in (0..height).step_by(8) {
+        let image_y = top + dy;
+        let job_height = (height - dy).min(8);
 
-        let (job_output0, next_output0) = output0.split_at_mut(job_height * width);
-        let (job_output1, next_output1) = output1.split_at_mut(job_height * width);
-        let (job_output2, next_output2) = output2.split_at_mut(job_height * width);
+        let next_output0 = output0.split_vertical_in_place(job_height);
+        let next_output1 = output1.split_vertical_in_place(job_height);
+        let next_output2 = output2.split_vertical_in_place(job_height);
         jobs.push(EpfJob {
             base_y: image_y - top,
-            output0: job_output0,
-            output1: job_output1,
-            output2: job_output2,
+            output0,
+            output1,
+            output2,
         });
 
         output0 = next_output0;
         output1 = next_output1;
         output2 = next_output2;
-        image_y = next;
     }
 
     let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
     let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
     let groups_per_row = frame_header.lf_groups_per_row() as usize;
-    let sigma_len = (left + width + 7) / 8 - left / 8;
+    let sigma_len = (width + 7) / 8;
     pool.for_each_vec_with(
         jobs,
         vec![epf_params.sigma_for_modular; sigma_len],
-        |sigma_row,
-         EpfJob {
-             base_y,
-             output0,
-             output1,
-             output2,
-         }| {
+        |sigma_row, job| {
+            let EpfJob {
+                base_y,
+                mut output0,
+                mut output1,
+                mut output2,
+            } = job;
             let sigma_y = (top + base_y) / 8;
             let sigma_group_y = sigma_y >> sigma_group_dim_shift;
             let sigma_inner_y = sigma_y & sigma_group_dim_mask;
@@ -187,26 +200,26 @@ pub(super) unsafe fn run_epf_rows<'buf>(
                 }
             }
 
-            let it = output0
-                .chunks_exact_mut(width)
-                .zip(output1.chunks_exact_mut(width))
-                .zip(output2.chunks_exact_mut(width));
-            for (dy, ((output0, output1), output2)) in it.enumerate() {
+            let job_height = output0.height();
+            for dy in 0..job_height {
                 let y = base_y + dy;
                 let input_rows: [[_; 7]; 3] = std::array::from_fn(|c| {
                     std::array::from_fn(|idx| {
                         let y = util::mirror((y + idx) as isize - 3, height);
-                        &input_buf[c][y * width..][..width]
+                        input[c].get_row(y)
                     })
                 });
-                let merged_input_rows: Option<[_; 3]> = if y >= 3 && y < height - 3 {
+                let merged_input_rows = if y >= 3 && y + 4 <= height {
                     Some(std::array::from_fn(|c| {
-                        &input_buf[c][(y - 3) * width..][..7 * width]
+                        input[c].subgrid(.., (y - 3)..(y + 4))
                     }))
                 } else {
                     None
                 };
 
+                let output0 = output0.get_row_mut(dy);
+                let output1 = output1.get_row_mut(dy);
+                let output2 = output2.get_row_mut(dy);
                 let image_y = top + base_y + dy;
 
                 let mut skip_inner = false;
@@ -219,7 +232,6 @@ pub(super) unsafe fn run_epf_rows<'buf>(
                             merged_input_rows,
                             output_rows,
                             width,
-                            x: left,
                             y: image_y,
                             sigma_row,
                             epf_params,
@@ -235,7 +247,6 @@ pub(super) unsafe fn run_epf_rows<'buf>(
                     output_rows,
                     merged_input_rows,
                     width,
-                    x: left,
                     y: image_y,
                     sigma_row,
                     epf_params,

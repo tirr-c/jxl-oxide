@@ -194,13 +194,10 @@ fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
 
     file.write_all(b"\x93NUMPY\x01\x00").unwrap();
 
-    let color_channels = render.color_channels();
-    let extra_channels = render.extra_channels();
-
-    let num_channels = color_channels.len() + extra_channels.len();
-    let first_channel = &color_channels[0];
-    let width = first_channel.width();
-    let height = first_channel.height();
+    let image = render.image_all_channels();
+    let num_channels = image.channels();
+    let width = image.width();
+    let height = image.height();
     let header_string = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': (1, {height}, {width}, {num_channels}), }}\n");
     eprintln!("width={width}, height={height}, num_channels={num_channels}");
     let header_len = header_string.len() as u16;
@@ -208,19 +205,9 @@ fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
     file.write_all(header_string.as_bytes()).unwrap();
     file.flush().unwrap();
 
-    for y in 0..height {
-        for x in 0..width {
-            for cc in color_channels {
-                let f = *cc.get(x, y).unwrap();
-                let b = f.to_bits().to_le_bytes();
-                file.write_all(&b).unwrap();
-            }
-            for ec in extra_channels {
-                let f = *ec.grid().get(x, y).unwrap();
-                let b = f.to_bits().to_le_bytes();
-                file.write_all(&b).unwrap();
-            }
-        }
+    for &f in image.buf() {
+        let b = f.to_bits().to_le_bytes();
+        file.write_all(&b).unwrap();
     }
 
     file.flush().unwrap();

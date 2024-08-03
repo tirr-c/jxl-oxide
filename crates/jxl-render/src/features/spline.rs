@@ -181,7 +181,7 @@ pub fn render_spline(
     splines: &Splines,
     base_correlations_xb: Option<(f32, f32)>,
 ) -> crate::Result<()> {
-    let region = base_grid.region();
+    let region = base_grid.regions_and_shifts()[0].0;
 
     for quant_spline in &splines.quant_splines {
         let spline = Spline::dequant(quant_spline, splines.quant_adjust, base_correlations_xb);
@@ -215,7 +215,7 @@ pub fn render_spline(
                 (arc.point.y + max_distance + 1.5).floor() as i32,
             );
 
-            for (channel, buffer) in base_grid.buffer_mut()[..3].iter_mut().enumerate() {
+            for (channel, buffer) in base_grid.as_color_floats_mut().iter_mut().enumerate() {
                 for y in ybegin..yend {
                     let fy = y - region.top;
                     if fy < 0 {

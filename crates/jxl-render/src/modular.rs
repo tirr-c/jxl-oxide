@@ -1,7 +1,5 @@
 use jxl_frame::{data::GlobalModular, FrameHeader};
-use jxl_grid::AlignedGrid;
-use jxl_image::BitDepth;
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
+use jxl_modular::{image::TransformedModularSubimage, Sample};
 
 use crate::{util, Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result};
 
@@ -10,7 +8,7 @@ pub(crate) fn render_modular<S: Sample>(
     cache: &mut RenderCache<S>,
     region: Region,
     pool: &jxl_threadpool::JxlThreadPool,
-) -> Result<(ImageWithRegion, GlobalModular<S>)> {
+) -> Result<ImageWithRegion> {
     let image_header = frame.image_header();
     let frame_header = frame.header();
     let tracker = frame.alloc_tracker();
@@ -29,14 +27,7 @@ pub(crate) fn render_modular<S: Sample>(
     let mut gmodular = lf_global.gmodular.try_clone()?;
     let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
 
-    let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let shifts_cbycr =
-        [0, 1, 2].map(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let channels = metadata.encoded_color_channels();
-
-    let bit_depth = metadata.bit_depth;
-    let mut fb_xyb =
-        ImageWithRegion::from_region_and_tracker(channels, region, false, frame.alloc_tracker())?;
 
     let modular_image = gmodular.modular.image_mut().unwrap();
     let groups = modular_image.prepare_groups(frame.pass_shifts())?;
@@ -147,44 +138,18 @@ pub(crate) fn render_modular<S: Sample>(
         modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
-    tracing::trace_span!("Convert to float samples", xyb_encoded).in_scope(|| -> Result<_> {
-        let channel_data = modular_image.image_channels();
-        for ((g, shift), buffer) in channel_data
-            .iter()
-            .zip(shifts_cbycr)
-            .zip(fb_xyb.buffer_mut())
-        {
-            let region = region.downsample_separate(shift.hshift() as u32, shift.vshift() as u32);
-            copy_modular_groups(g, buffer, region, bit_depth, xyb_encoded);
-        }
+    let mut fb = ImageWithRegion::new(tracker);
+    fb.extend_from_gmodular(gmodular);
+    if channels == 1 {
+        tracing::trace_span!("Clone Gray channel").in_scope(|| fb.clone_gray())?;
+    }
 
-        if channels == 1 {
-            fb_xyb.add_channel()?;
-            fb_xyb.add_channel()?;
-            let fb_xyb = fb_xyb.buffer_mut();
-            fb_xyb[1] = fb_xyb[0].try_clone()?;
-            fb_xyb[2] = fb_xyb[0].try_clone()?;
-        }
-        if xyb_encoded {
-            let fb_xyb = fb_xyb.buffer_mut();
-            // Make Y'X'B' to X'Y'B'
-            fb_xyb.swap(0, 1);
-            let [x, y, b] = fb_xyb else { panic!() };
-            let x = x.buf_mut();
-            let y = y.buf_mut();
-            let b = b.buf_mut();
-            for ((x, y), b) in x.iter_mut().zip(y).zip(b) {
-                *b += *y;
-                *x *= lf_global.lf_dequant.m_x_lf_unscaled();
-                *y *= lf_global.lf_dequant.m_y_lf_unscaled();
-                *b *= lf_global.lf_dequant.m_b_lf_unscaled();
-            }
-        }
+    if xyb_encoded {
+        tracing::trace_span!("Dequant XYB")
+            .in_scope(|| fb.convert_modular_xyb(&lf_global.lf_dequant))?;
+    }
 
-        Ok(())
-    })?;
-
-    Ok((fb_xyb, gmodular))
+    Ok(fb)
 }
 
 #[inline]
@@ -206,78 +171,5 @@ pub fn compute_modular_region<S: Sample>(
         Region::with_size(width, height)
     } else {
         region
-    }
-}
-
-pub fn copy_modular_groups<S: Sample>(
-    g: &AlignedGrid<S>,
-    buffer: &mut AlignedGrid<f32>,
-    region: Region,
-    bit_depth: BitDepth,
-    xyb_encoded: bool,
-) {
-    let Region {
-        left,
-        top,
-        width: rwidth,
-        height: rheight,
-    } = region;
-    assert!(buffer.width() >= rwidth as usize);
-    assert!(buffer.height() >= rheight as usize);
-
-    let width = g.width();
-    let height = g.height();
-
-    let g_stride = g.width();
-    let buffer_stride = buffer.width();
-    let g = g.buf();
-    let buffer = buffer.buf_mut();
-
-    let bottom = top.checked_add_unsigned(rheight).unwrap();
-    let right = left.checked_add_unsigned(rwidth).unwrap();
-
-    if bottom <= 0 || top > height as i32 || right <= 0 || left > width as i32 {
-        buffer.fill(0f32);
-        return;
-    }
-
-    if top < 0 {
-        buffer[..(-top) as usize * buffer_stride].fill(0f32);
-    }
-
-    if bottom as usize > height {
-        let remaining = bottom as usize - height;
-        let from_y = rheight as usize - remaining;
-        buffer[from_y * buffer_stride..].fill(0f32);
-    }
-
-    let mut col_begin = 0usize;
-    let mut col_end = buffer_stride;
-    if left < 0 {
-        col_begin = (-left) as usize;
-    }
-    if right as usize > width {
-        let remaining = right as usize - width;
-        col_end = rwidth as usize - remaining;
-    }
-
-    for y in (top.max(0) as usize)..(bottom as usize).min(height) {
-        let buffer_y = y.checked_add_signed((-top) as isize).unwrap();
-        let buffer_row = &mut buffer[buffer_y * buffer_stride..][..buffer_stride];
-
-        buffer_row[..col_begin].fill(0f32);
-        buffer_row[col_end..].fill(0f32);
-
-        let g_row = &g[y * g_stride..][left.max(0) as usize..(right as usize).min(width)];
-        let buffer_row = &mut buffer_row[col_begin..col_end];
-        if xyb_encoded {
-            for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = s.to_i32() as f32;
-            }
-        } else {
-            for (&s, v) in g_row.iter().zip(buffer_row) {
-                *v = bit_depth.parse_integer_sample(s.to_i32());
-            }
-        }
     }
 }
