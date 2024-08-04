@@ -792,6 +792,8 @@ impl JxlImage {
         &self,
         mut grids: Vec<ImageBuffer>,
     ) -> Result<(Vec<ImageBuffer>, Vec<ExtraChannel>)> {
+        let _guard = tracing::trace_span!("Process rendered image").entered();
+
         let pixel_format = self.pixel_format();
         let color_channels = if pixel_format.is_grayscale() { 1 } else { 3 };
         let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
@@ -807,7 +809,8 @@ impl JxlImage {
             .filter(|x| !x.is_black() || pixel_format.has_black()) // filter black channel
             .collect();
 
-        if self.render_spot_colour && color_channels.len() == 3 {
+        let has_spot_colour = extra_channels.iter().any(|ec| ec.is_spot_colour());
+        if self.render_spot_colour && color_channels.len() == 3 && has_spot_colour {
             let bit_depth = self.image_header.metadata.bit_depth;
             let [a, b, c] = &mut *color_channels else {
                 unreachable!()
