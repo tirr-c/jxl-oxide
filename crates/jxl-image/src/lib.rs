@@ -234,16 +234,6 @@ impl ImageMetadata {
         self.colour_encoding.colour_space() == ColourSpace::Grey
     }
 
-    /// Returns the number of channels actually encoded in the image.
-    #[inline]
-    pub fn encoded_color_channels(&self) -> usize {
-        if !self.xyb_encoded && self.grayscale() {
-            1
-        } else {
-            3
-        }
-    }
-
     /// Returns the index of the first alpha channel in the image.
     pub fn alpha(&self) -> Option<usize> {
         self.ec_info

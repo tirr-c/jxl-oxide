@@ -12,7 +12,6 @@ pub(crate) fn render_modular<S: Sample>(
     let image_header = frame.image_header();
     let frame_header = frame.header();
     let tracker = frame.alloc_tracker();
-    let metadata = &image_header.metadata;
     let xyb_encoded = image_header.metadata.xyb_encoded;
 
     let lf_global = if let Some(x) = &cache.lf_global {
@@ -26,8 +25,6 @@ pub(crate) fn render_modular<S: Sample>(
     };
     let mut gmodular = lf_global.gmodular.try_clone()?;
     let modular_region = compute_modular_region(frame_header, &gmodular, region, false);
-
-    let channels = metadata.encoded_color_channels();
 
     let modular_image = gmodular.modular.image_mut().unwrap();
     let groups = modular_image.prepare_groups(frame.pass_shifts())?;
@@ -140,9 +137,6 @@ pub(crate) fn render_modular<S: Sample>(
 
     let mut fb = ImageWithRegion::new(tracker);
     fb.extend_from_gmodular(gmodular);
-    if channels == 1 {
-        tracing::trace_span!("Clone Gray channel").in_scope(|| fb.clone_gray())?;
-    }
 
     if xyb_encoded {
         tracing::trace_span!("Dequant XYB")

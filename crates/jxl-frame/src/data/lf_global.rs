@@ -199,8 +199,8 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
         let span = tracing::span!(tracing::Level::TRACE, "Decode GlobalModular");
         let _guard = span.enter();
 
-        let num_channels = (image_header.metadata.encoded_color_channels()
-            + image_header.metadata.ec_info.len()) as u64;
+        let num_channels =
+            (header.encoded_color_channels() + image_header.metadata.ec_info.len()) as u64;
         let max_global_ma_nodes =
             1024 + header.width as u64 * header.height as u64 * num_channels / 16;
         let max_global_ma_nodes = (1 << 22).min(max_global_ma_nodes) as usize;
@@ -240,7 +240,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
                 ));
             } else {
                 let channel_param = ModularChannelParams::new(color_width, color_height);
-                let channels = image_header.metadata.encoded_color_channels();
+                let channels = header.encoded_color_channels();
                 shifts.extend(std::iter::repeat(channel_param).take(channels));
             }
         }
