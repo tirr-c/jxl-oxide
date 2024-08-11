@@ -65,12 +65,20 @@ pub(crate) fn render_frame<S: Sample>(
         }
     };
 
-    if frame.header().do_ycbcr {
+    if frame_header.do_ycbcr {
         fb.upsample_jpeg(color_padded_region, image_header.metadata.bit_depth)?;
     }
 
+    let color_channels = frame_header.encoded_color_channels();
+    let mut gray_cloned = false;
     let mut scratch_buffer = None;
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
+        if color_channels < 3 {
+            tracing::trace!("Cloning gray channel");
+            fb.clone_gray()?;
+            gray_cloned = true;
+        }
+
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
         let mut fb_scratch = {
             let tracker = fb.alloc_tracker();
@@ -91,7 +99,14 @@ pub(crate) fn render_frame<S: Sample>(
         );
         scratch_buffer = Some(fb_scratch);
     }
+
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
+        if color_channels < 3 && !gray_cloned {
+            tracing::trace!("Cloning gray channel");
+            fb.clone_gray()?;
+            gray_cloned = true;
+        }
+
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
         let fb_scratch = if let Some(buffer) = scratch_buffer {
             buffer
@@ -114,6 +129,11 @@ pub(crate) fn render_frame<S: Sample>(
             epf_params,
             &pool,
         );
+    }
+
+    // Truncate cloned gray channels.
+    if color_channels < 3 && gray_cloned {
+        fb.remove_color_channels(1);
     }
 
     tracing::trace!(?upsampling_valid_region);

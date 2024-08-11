@@ -813,6 +813,11 @@ impl RenderContext {
                     return Ok(());
                 }
 
+                let encoded_color_channels = frame_header.encoded_color_channels();
+                if encoded_color_channels < 3 {
+                    grid.clone_gray()?;
+                }
+
                 grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
                 let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
                 let mut channels = Vec::new();

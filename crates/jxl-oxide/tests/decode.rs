@@ -142,4 +142,5 @@ test! {
     issue_32,
     squeeze_edge,
     issue_311,
+    grayalpha,
 }

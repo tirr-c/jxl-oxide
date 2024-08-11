@@ -11,6 +11,14 @@ define_bundle! {
         pub encoding: ty(Bundle(Encoding)) cond(!all_default) default(Encoding::VarDct),
         pub flags: ty(Bundle(FrameFlags)) cond(!all_default),
         pub do_ycbcr: ty(Bool) cond(!all_default && !headers.metadata.xyb_encoded),
+        encoded_color_channels:
+            ty(u(0))
+            cond(false)
+            default(if !do_ycbcr && !headers.metadata.xyb_encoded && headers.metadata.grayscale() {
+                1
+            } else {
+                3
+            }),
         pub jpeg_upsampling: ty(Array[u(2)]; 3) cond(do_ycbcr && !flags.use_lf_frame()),
         pub upsampling: ty(U32(1, 2, 4, 8)) cond(!all_default && !flags.use_lf_frame()) default(1),
         pub ec_upsampling:
@@ -255,6 +263,12 @@ impl FrameHeader {
 
     pub fn color_sample_height(&self) -> u32 {
         self.sample_height(self.upsampling)
+    }
+
+    /// Returns the number of channels actually encoded in the frame.
+    #[inline]
+    pub fn encoded_color_channels(&self) -> usize {
+        self.encoded_color_channels as usize
     }
 
     pub fn num_groups(&self) -> u32 {
