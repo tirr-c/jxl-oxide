@@ -78,4 +78,5 @@ test_by_include!(
     cluster_hole,
     invalid_alpha_ref,
     modular_jpeg_upsampling_2,
+    grayscale_icc,
 );

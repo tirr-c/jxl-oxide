@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_color::{
-    ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, EnumColourEncoding,
+    ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, ColourSpace,
+    EnumColourEncoding,
 };
 use jxl_frame::{header::FrameType, Frame, FrameContext};
 use jxl_grid::AllocTracker;
@@ -88,7 +89,7 @@ impl RenderContextBuilder {
         self
     }
 
-    pub fn build(self, image_header: Arc<ImageHeader>) -> RenderContext {
+    pub fn build(self, image_header: Arc<ImageHeader>) -> Result<RenderContext> {
         let color_encoding = &image_header.metadata.colour_encoding;
         let requested_color_encoding = if let ColourEncoding::Enum(encoding) = color_encoding {
             ColorEncodingWithProfile::new(encoding.clone())
@@ -97,8 +98,26 @@ impl RenderContextBuilder {
                 jxl_color::RenderingIntent::Relative,
             ))
         } else {
+            let ColourEncoding::IccProfile(color_space) = color_encoding else {
+                unreachable!();
+            };
             match ColorEncodingWithProfile::with_icc(&self.embedded_icc) {
-                Ok(x) => x,
+                Ok(parsed_icc) => {
+                    let header_is_gray = *color_space == ColourSpace::Grey;
+                    let icc_is_gray = parsed_icc.is_grayscale();
+                    if header_is_gray != icc_is_gray {
+                        tracing::error!(
+                            header_is_gray,
+                            icc_is_gray,
+                            "Color channel mismatch between header and ICC profile"
+                        );
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "Color channel mismatch between header and ICC profile",
+                        )
+                        .into());
+                    }
+                    parsed_icc
+                }
                 Err(e) => {
                     tracing::warn!(%e, "Malformed embedded ICC profile");
                     ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
@@ -113,7 +132,7 @@ impl RenderContextBuilder {
             image_header.height_with_orientation(),
         );
 
-        RenderContext {
+        Ok(RenderContext {
             image_header,
             tracker: self.tracker,
             pool: self.pool.unwrap_or_else(JxlThreadPool::none),
@@ -134,7 +153,7 @@ impl RenderContextBuilder {
             embedded_icc: self.embedded_icc,
             requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
-        }
+        })
     }
 }
 
