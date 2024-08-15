@@ -14,10 +14,12 @@ define_bundle! {
         encoded_color_channels:
             ty(u(0))
             cond(false)
-            default(if !do_ycbcr && !headers.metadata.xyb_encoded && headers.metadata.grayscale() {
-                1
-            } else {
-                3
+            default({
+                let acutally_grayscale = encoding == Encoding::Modular
+                    && !do_ycbcr
+                    && !headers.metadata.xyb_encoded
+                    && headers.metadata.grayscale();
+                if acutally_grayscale { 1 } else { 3 }
             }),
         pub jpeg_upsampling: ty(Array[u(2)]; 3) cond(do_ycbcr && !flags.use_lf_frame()),
         pub upsampling: ty(U32(1, 2, 4, 8)) cond(!all_default && !flags.use_lf_frame()) default(1),

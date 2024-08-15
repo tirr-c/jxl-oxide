@@ -850,7 +850,7 @@ impl ColorTransformOp {
                 inverse: false,
             } => {
                 apply_transfer_function(&mut channels[..num_input_channels], *tf, *hdr_params);
-                channels.len()
+                num_input_channels
             }
             Self::TransferFunction {
                 tf,
@@ -862,7 +862,7 @@ impl ColorTransformOp {
                     *tf,
                     *hdr_params,
                 );
-                channels.len()
+                num_input_channels
             }
             Self::ToneMapRec2408 {
                 hdr_params,
