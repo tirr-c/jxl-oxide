@@ -69,11 +69,18 @@ jobs:
             -max_len=8192 \
             -timeout=5 \
             -max_total_time=600
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && (steps.fuzz.outcome == 'failure' || steps.minimize.outcome == 'failure') }}
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
+      - name: Upload corpus
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.fuzz.outcome != 'cancelled' }}
+        with:
+          name: fuzz-corpus
+          path: fuzz/corpus/
       - uses: actions/cache/save@v4
         if: ${{ !cancelled() && steps.fuzz.outcome != 'cancelled' }}
         with:
