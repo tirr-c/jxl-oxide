@@ -103,6 +103,20 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for LfGlobal<S> {
             })
             .transpose()?;
         let lf_dequant = read_bits!(bitstream, Bundle(LfChannelDequantization))?;
+
+        let modular_dequants = [
+            lf_dequant.m_x_lf_unscaled(),
+            lf_dequant.m_y_lf_unscaled(),
+            lf_dequant.m_b_lf_unscaled(),
+        ];
+        if modular_dequants.into_iter().any(|v| v < 1e-8) {
+            tracing::error!(?modular_dequants, "Modular dequant weight is too small");
+            return Err(jxl_bitstream::Error::ValidationFailed(
+                "Modular dequant weight is too small",
+            )
+            .into());
+        }
+
         let vardct = (header.encoding == crate::header::Encoding::VarDct)
             .then(|| read_bits!(bitstream, Bundle(LfGlobalVarDct)))
             .transpose()?;
