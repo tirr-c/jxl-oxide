@@ -11,7 +11,10 @@ fn decode(c: &mut Criterion) {
     let mut bench_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     bench_path.push("tests/decode/benchmark-data");
 
+    #[cfg(feature = "rayon")]
     let pool = JxlThreadPool::rayon(None);
+    #[cfg(not(feature = "rayon"))]
+    let pool = JxlThreadPool::none();
 
     bench_one(c, &bench_path, "lumine-paimon.d0-e7", &pool);
     bench_one(c, &bench_path, "minecraft.d0-e6", &pool);
