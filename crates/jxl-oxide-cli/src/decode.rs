@@ -221,15 +221,13 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
 }
 
 fn run_once(image: &mut JxlImage) -> Result<(Vec<Render>, Duration)> {
-    let pool = image.pool();
-
     let mut keyframes = Vec::new();
     #[allow(unused_mut)]
     let mut rendered = false;
 
     let decode_start = std::time::Instant::now();
     #[cfg(feature = "rayon")]
-    if let Some(rayon_pool) = &pool.as_rayon_pool() {
+    if let Some(rayon_pool) = image.pool().as_rayon_pool() {
         keyframes = rayon_pool
             .install(|| {
                 use rayon::prelude::*;
