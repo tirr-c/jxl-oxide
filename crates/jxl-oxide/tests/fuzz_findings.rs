@@ -79,4 +79,5 @@ test_by_include!(
     invalid_alpha_ref,
     modular_jpeg_upsampling_2,
     grayscale_icc,
+    icc_large_stride,
 );
