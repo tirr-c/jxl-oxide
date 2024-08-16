@@ -353,7 +353,7 @@ pub fn decode_icc(stream: &[u8]) -> Result<Vec<u8>> {
                     }
                     stride
                 };
-                if stride * 4 >= out.len() {
+                if stride.saturating_mul(4) >= out.len() {
                     return Err(Error::InvalidIccStream("stride * 4 >= out.len()"));
                 }
 
