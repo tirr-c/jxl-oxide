@@ -136,18 +136,20 @@ pub(crate) fn render_frame<S: Sample>(
         fb.remove_color_channels(1);
     }
 
-    tracing::trace!(?upsampling_valid_region);
-    fb.upsample_nonseparable(image_header, frame_header, upsampling_valid_region)?;
+    fb.prepare_color_upsampling(frame_header);
 
     render_features(
         frame,
         &mut fb,
+        upsampling_valid_region,
         reference_frames.refs.clone(),
         cache,
         frame_visibility.0,
         frame_visibility.1,
         &pool,
     )?;
+
+    fb.upsample_nonseparable(image_header, frame_header, upsampling_valid_region, false)?;
 
     if !frame_header.save_before_ct && !frame_header.is_last {
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
@@ -163,9 +165,11 @@ pub(crate) fn render_frame<S: Sample>(
     Ok(fb)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_features<S: Sample>(
     frame: &IndexedFrame,
     grid: &mut ImageWithRegion,
+    upsampling_valid_region: Region,
     reference_grids: [Option<Reference<S>>; 4],
     cache: &mut RenderCache<S>,
     visible_frames_num: usize,
@@ -186,6 +190,8 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
+        grid.upsample_nonseparable(image_header, frame_header, upsampling_valid_region, true)?;
+
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));

@@ -391,7 +391,6 @@ impl DequantMatrixParams {
         }
 
         for w in weights.iter().flatten() {
-            tracing::trace!(w);
             if *w >= 1e8 || *w <= 0.0 {
                 tracing::error!(w, "Dequant matrix has too large or non-positive element");
                 return Err(jxl_bitstream::Error::ValidationFailed(

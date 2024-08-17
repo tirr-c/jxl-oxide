@@ -481,36 +481,38 @@ impl ImageWithRegion {
         &mut self,
         image_header: &ImageHeader,
         frame_header: &FrameHeader,
-        upsampled_valid_region: Region,
+        mut upsampled_valid_region: Region,
+        ec_to_color_only: bool,
     ) -> Result<()> {
         if frame_header.upsampling != 1 && self.buffer[0].as_float().is_none() {
             debug_assert!(!image_header.metadata.xyb_encoded);
         }
 
+        let color_channels = frame_header.encoded_color_channels();
+        let color_shift = frame_header.upsampling.trailing_zeros();
+        if ec_to_color_only {
+            upsampled_valid_region = upsampled_valid_region.downsample(color_shift);
+        }
+
         for (idx, ((region, shift), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate()
         {
             let tracker = g.tracker();
-            let (grid, upsampling_factor) = if let Some(ec_idx) = idx.checked_sub(3) {
-                let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
-                let upsampling_factor = frame_header.ec_upsampling[ec_idx].trailing_zeros();
-                let shift = dim_shift + upsampling_factor;
-                if shift == 0 {
-                    continue;
-                }
-                let g =
-                    g.convert_to_float_modular(image_header.metadata.ec_info[ec_idx].bit_depth)?;
-                (g, shift)
+            let ChannelShift::Shifts(upsampling_factor) = *shift else {
+                panic!("invalid channel shift for upsampling: {:?}", shift);
+            };
+            let bit_depth = if let Some(ec_idx) = idx.checked_sub(color_channels) {
+                image_header.metadata.ec_info[ec_idx].bit_depth
             } else {
-                let shift = frame_header.upsampling.trailing_zeros();
-                if shift == 0 {
-                    continue;
-                }
-                let g = g.convert_to_float_modular(image_header.metadata.bit_depth)?;
-                (g, shift)
+                image_header.metadata.bit_depth
             };
 
-            // let downsampled_image_region = region.downsample(upsampling_factor);
-            let downsampled_image_region = *region;
+            let target_factor = if ec_to_color_only { color_shift } else { 0 };
+            if upsampling_factor == target_factor {
+                continue;
+            }
+            let grid = g.convert_to_float_modular(bit_depth)?;
+
+            let downsampled_image_region = region.downsample(upsampling_factor);
             let downsampled_valid_region = upsampled_valid_region.downsample(upsampling_factor);
             let left = downsampled_valid_region
                 .left
@@ -526,21 +528,49 @@ impl ImageWithRegion {
                 top as usize..(top + height) as usize,
             );
             *region = downsampled_valid_region;
-            let out = crate::features::upsample(
-                subgrid,
-                region,
-                image_header,
-                frame_header,
-                idx,
-                tracker.as_ref(),
-            )?;
+            let out = tracing::trace_span!(
+                "Non-separable upsampling",
+                channel_idx = idx,
+                upsampling_factor,
+                target_factor
+            )
+            .in_scope(|| {
+                crate::features::upsample(
+                    subgrid,
+                    region,
+                    image_header,
+                    upsampling_factor - target_factor,
+                    tracker.as_ref(),
+                )
+            })?;
             if let Some(out) = out {
                 *g = ImageBuffer::F32(out);
             }
-            *shift = ChannelShift::from_shift(0);
+            *shift = ChannelShift::from_shift(target_factor);
         }
 
         Ok(())
+    }
+
+    pub(crate) fn prepare_color_upsampling(&mut self, frame_header: &FrameHeader) {
+        let upsampling_factor = frame_header.upsampling.trailing_zeros();
+        if upsampling_factor == 0 {
+            return;
+        }
+
+        for (region, shift) in &mut self.regions {
+            match shift {
+                ChannelShift::Raw(h, v) if *h != -1 && *v != -1 => {
+                    *h = h.wrapping_add_unsigned(upsampling_factor);
+                    *v = v.wrapping_add_unsigned(upsampling_factor);
+                }
+                ChannelShift::Shifts(shift) => {
+                    *shift += upsampling_factor;
+                }
+                _ => continue,
+            }
+            *region = region.upsample(upsampling_factor);
+        }
     }
 
     #[inline]
