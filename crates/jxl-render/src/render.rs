@@ -206,9 +206,12 @@ fn render_features<S: Sample>(
     }
 
     if let Some(splines) = &lf_global.splines {
+        grid.convert_modular_color(image_header.metadata.bit_depth)?;
         features::render_spline(frame_header, grid, splines, base_correlations_xb)?;
     }
+
     if let Some(noise) = &lf_global.noise {
+        grid.convert_modular_color(image_header.metadata.bit_depth)?;
         features::render_noise(
             frame.header(),
             visible_frames_num,
