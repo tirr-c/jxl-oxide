@@ -1,4 +1,3 @@
-use jxl_frame::FrameHeader;
 use jxl_grid::{AlignedGrid, AllocTracker, PaddedGrid, SharedSubgrid};
 
 use crate::Region;
@@ -7,70 +6,39 @@ pub fn upsample(
     grid: SharedSubgrid<f32>,
     out_region: &mut Region,
     image_header: &jxl_image::ImageHeader,
-    frame_header: &FrameHeader,
-    channel_idx: usize,
+    factor: u32,
     tracker: Option<&AllocTracker>,
 ) -> crate::Result<Option<AlignedGrid<f32>>> {
     let metadata = &image_header.metadata;
 
     let mut out = None;
     let mut grid = grid;
-    let factor;
-    if let Some(ec_idx) = channel_idx.checked_sub(3) {
-        let dim_shift = image_header.metadata.ec_info[ec_idx].dim_shift;
-        if dim_shift > 0 {
-            tracing::debug!(
-                channel_idx,
-                dim_shift,
-                "Applying non-separable upsampling for extra channel"
-            );
 
-            let up8 = dim_shift / 3;
-            let last_up = dim_shift % 3;
-
-            for _ in 0..up8 {
-                out = Some(upsample_inner::<8, 210>(
-                    grid,
-                    &metadata.up8_weight,
-                    tracker,
-                )?);
-                grid = out.as_ref().unwrap().as_subgrid();
-            }
-            out = match last_up {
-                1 => Some(upsample_inner::<2, 15>(
-                    grid,
-                    &metadata.up2_weight,
-                    tracker,
-                )?),
-                2 => Some(upsample_inner::<4, 55>(
-                    grid,
-                    &metadata.up4_weight,
-                    tracker,
-                )?),
-                _ => out,
-            };
-            grid = out.as_ref().unwrap().as_subgrid();
-            *out_region = out_region.upsample(dim_shift);
-        }
-
-        factor = frame_header.ec_upsampling[ec_idx];
-    } else {
-        factor = frame_header.upsampling;
-    };
-
-    if factor != 1 {
-        tracing::debug!(channel_idx, factor, "Applying non-separable upsampling");
+    let up8 = factor / 3;
+    let last_up = factor % 3;
+    for _ in 0..up8 {
+        out = Some(upsample_inner::<8, 210>(
+            grid,
+            &metadata.up8_weight,
+            tracker,
+        )?);
+        grid = out.as_ref().unwrap().as_subgrid();
     }
-
-    *out_region = out_region.upsample(factor.trailing_zeros());
-    let out = match factor {
-        1 => return Ok(out),
-        2 => upsample_inner::<2, 15>(grid, &metadata.up2_weight, tracker),
-        4 => upsample_inner::<4, 55>(grid, &metadata.up4_weight, tracker),
-        8 => upsample_inner::<8, 210>(grid, &metadata.up8_weight, tracker),
-        _ => panic!("invalid upsampling factor {}", factor),
-    }?;
-    Ok(Some(out))
+    out = match last_up {
+        1 => Some(upsample_inner::<2, 15>(
+            grid,
+            &metadata.up2_weight,
+            tracker,
+        )?),
+        2 => Some(upsample_inner::<4, 55>(
+            grid,
+            &metadata.up4_weight,
+            tracker,
+        )?),
+        _ => out,
+    };
+    *out_region = out_region.upsample(factor);
+    Ok(out)
 }
 
 fn upsample_inner<const K: usize, const NW: usize>(

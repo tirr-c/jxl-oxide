@@ -53,6 +53,7 @@ impl std::fmt::Debug for BlendAlpha<'_> {
 impl<'a> BlendParams<'a> {
     fn from_blending_info(
         channel_idx: usize,
+        color_channels: usize,
         blending_info: &BlendingInfo,
         base_alpha: Option<SharedSubgrid<'a, f32>>,
         new_alpha: Option<SharedSubgrid<'a, f32>>,
@@ -61,7 +62,9 @@ impl<'a> BlendParams<'a> {
         let mode = match blending_info.mode {
             FrameBlendMode::Replace => BlendMode::Replace,
             FrameBlendMode::Add => BlendMode::Add,
-            FrameBlendMode::Blend if channel_idx == blending_info.alpha_channel as usize + 3 => {
+            FrameBlendMode::Blend
+                if channel_idx == blending_info.alpha_channel as usize + color_channels =>
+            {
                 BlendMode::MixAlpha {
                     clamp: blending_info.clamp,
                     swapped: false,
@@ -74,7 +77,9 @@ impl<'a> BlendParams<'a> {
                 swapped: false,
                 premultiplied: premultiplied.unwrap(),
             }),
-            FrameBlendMode::MulAdd if channel_idx == blending_info.alpha_channel as usize + 3 => {
+            FrameBlendMode::MulAdd
+                if channel_idx == blending_info.alpha_channel as usize + color_channels =>
+            {
                 BlendMode::Skip
             }
             FrameBlendMode::MulAdd => BlendMode::MulAdd(BlendAlpha {
@@ -98,6 +103,7 @@ impl<'a> BlendParams<'a> {
 
     fn from_patch_blending_info(
         channel_idx: usize,
+        color_channels: usize,
         blending_info: &BlendingModeInformation,
         base_alpha: Option<SharedSubgrid<'a, f32>>,
         new_alpha: Option<SharedSubgrid<'a, f32>>,
@@ -112,7 +118,7 @@ impl<'a> BlendParams<'a> {
             PatchBlendMode::Mul => BlendMode::Mul(blending_info.clamp),
             PatchBlendMode::BlendAbove | PatchBlendMode::BlendBelow => {
                 let swapped = blending_info.mode == PatchBlendMode::BlendBelow;
-                if channel_idx == blending_info.alpha_channel as usize + 3 {
+                if channel_idx == blending_info.alpha_channel as usize + color_channels {
                     BlendMode::MixAlpha {
                         clamp: blending_info.clamp,
                         swapped,
@@ -129,7 +135,7 @@ impl<'a> BlendParams<'a> {
             }
             PatchBlendMode::MulAddAbove | PatchBlendMode::MulAddBelow => {
                 let swapped = blending_info.mode == PatchBlendMode::MulAddBelow;
-                if channel_idx == blending_info.alpha_channel as usize + 3 {
+                if channel_idx == blending_info.alpha_channel as usize + color_channels {
                     if swapped {
                         BlendMode::Replace
                     } else {
@@ -205,15 +211,16 @@ pub(crate) fn blend<S: Sample>(
             .blend(Some(output_image_region), pool)?;
     }
 
-    let mut output_grid = ImageWithRegion::new(tracker);
+    let color_channels = new_grid.color_channels();
+    let mut output_grid = ImageWithRegion::new(color_channels, tracker);
     output_grid.set_ct_done(new_grid.ct_done());
 
-    for (idx, blending_info) in [&header.blending_info; 3]
-        .into_iter()
+    for (idx, blending_info) in std::iter::repeat(&header.blending_info)
+        .take(color_channels)
         .chain(&header.ec_blending_info)
         .enumerate()
     {
-        let bit_depth = if let Some(ec_idx) = idx.checked_sub(3) {
+        let bit_depth = if let Some(ec_idx) = idx.checked_sub(color_channels) {
             image_header.metadata.ec_info[ec_idx].bit_depth
         } else {
             image_header.metadata.bit_depth
@@ -221,7 +228,7 @@ pub(crate) fn blend<S: Sample>(
 
         let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
         let ref_grid = &reference_grids[ref_idx];
-        let mut can_overwrite = idx < 3
+        let mut can_overwrite = idx < color_channels
             && (header.is_last
                 || (header.can_reference() && ref_idx == header.save_as_reference as usize));
 
@@ -243,6 +250,7 @@ pub(crate) fn blend<S: Sample>(
 
             let base_grid = Arc::clone(&grid.image).run_with_image()?;
             let mut base_grid = base_grid.blend(Some(output_image_region), pool)?;
+            assert_eq!(base_grid.color_channels(), color_channels);
 
             if base_grid.regions_and_shifts()[idx].0.is_empty() {
                 clone_empty = true;
@@ -286,13 +294,15 @@ pub(crate) fn blend<S: Sample>(
                 };
 
                 if let Some(alpha_idx) = alpha_idx {
-                    if alpha_idx + 3 != idx {
+                    if alpha_idx + color_channels != idx {
                         let alpha_bit_depth = image_header.metadata.ec_info[alpha_idx].bit_depth;
-                        base_alpha_grid = base_grid.buffer()[alpha_idx + 3].try_clone()?;
+                        base_alpha_grid =
+                            base_grid.buffer()[alpha_idx + color_channels].try_clone()?;
                         let base_alpha_grid =
                             base_alpha_grid.convert_to_float_modular(alpha_bit_depth)?;
                         base_alpha = Some({
-                            let grid_region = base_grid.regions_and_shifts()[alpha_idx + 3].0;
+                            let grid_region =
+                                base_grid.regions_and_shifts()[alpha_idx + color_channels].0;
                             let region =
                                 base_frame_region.translate(-grid_region.left, -grid_region.top);
                             let Region {
@@ -324,23 +334,39 @@ pub(crate) fn blend<S: Sample>(
 
         if let Some(idx) = alpha_idx {
             let bit_depth = image_header.metadata.ec_info[idx].bit_depth;
-            new_grid.buffer_mut()[idx + 3].convert_to_float_modular(bit_depth)?;
+            new_grid.buffer_mut()[idx + color_channels].convert_to_float_modular(bit_depth)?;
         }
         new_grid.buffer_mut()[idx].convert_to_float_modular(bit_depth)?;
 
         let mut blend_params = if clone_empty {
-            let new_alpha =
-                alpha_idx.map(|idx| new_grid.buffer()[idx + 3].as_float().unwrap().as_subgrid());
-            let premultiplied =
-                alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
-            BlendParams::from_blending_info(idx, blending_info, None, new_alpha, premultiplied)
-        } else {
-            let new_alpha =
-                alpha_idx.map(|idx| new_grid.buffer()[idx + 3].as_float().unwrap().as_subgrid());
+            let new_alpha = alpha_idx.map(|idx| {
+                new_grid.buffer()[idx + color_channels]
+                    .as_float()
+                    .unwrap()
+                    .as_subgrid()
+            });
             let premultiplied =
                 alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
             BlendParams::from_blending_info(
                 idx,
+                color_channels,
+                blending_info,
+                None,
+                new_alpha,
+                premultiplied,
+            )
+        } else {
+            let new_alpha = alpha_idx.map(|idx| {
+                new_grid.buffer()[idx + color_channels]
+                    .as_float()
+                    .unwrap()
+                    .as_subgrid()
+            });
+            let premultiplied =
+                alpha_idx.and_then(|idx| image_header.metadata.ec_info[idx].alpha_associated());
+            BlendParams::from_blending_info(
+                idx,
+                color_channels,
                 blending_info,
                 base_alpha,
                 new_alpha,
@@ -392,9 +418,11 @@ pub fn patch(
 ) -> Result<()> {
     use jxl_frame::data::PatchBlendMode;
 
+    let color_channels = base_grid.color_channels();
+    assert_eq!(patch_ref_grid.color_channels(), color_channels);
     for target in &patch_ref.patch_targets {
-        for (idx, blending_info) in [&target.blending[0]; 3]
-            .into_iter()
+        for (idx, blending_info) in std::iter::repeat(&target.blending[0])
+            .take(color_channels)
             .chain(&target.blending[1..])
             .enumerate()
         {
@@ -431,7 +459,7 @@ pub fn patch(
             let base_topleft = (base_left, base_top);
             let new_topleft = (patch_left, patch_top);
 
-            let bit_depth = if let Some(ec_idx) = idx.checked_sub(3) {
+            let bit_depth = if let Some(ec_idx) = idx.checked_sub(color_channels) {
                 image_header.metadata.ec_info[ec_idx].bit_depth
             } else {
                 image_header.metadata.bit_depth
@@ -453,27 +481,27 @@ pub fn patch(
             let premultiplied;
             let base_grid = base_grid.buffer_mut();
             let base_grid = if let Some(alpha_idx) = alpha_idx {
-                if alpha_idx + 3 == idx {
+                if alpha_idx + color_channels == idx {
                     base_alpha = None;
                     new_alpha = None;
                     premultiplied = None;
                     &mut base_grid[idx]
                 } else {
                     let alpha_bit_depth = image_header.metadata.ec_info[alpha_idx].bit_depth;
-                    let (base, alpha) = if idx < alpha_idx + 3 {
-                        let (l, r) = base_grid.split_at_mut(alpha_idx + 3);
+                    let (base, alpha) = if idx < alpha_idx + color_channels {
+                        let (l, r) = base_grid.split_at_mut(alpha_idx + color_channels);
                         r[0].convert_to_float_modular(alpha_bit_depth)?;
                         (&mut l[idx], &r[0])
                     } else {
                         let (l, r) = base_grid.split_at_mut(idx);
-                        l[alpha_idx + 3].convert_to_float_modular(alpha_bit_depth)?;
-                        (&mut r[0], &l[alpha_idx + 3])
+                        l[alpha_idx + color_channels].convert_to_float_modular(alpha_bit_depth)?;
+                        (&mut r[0], &l[alpha_idx + color_channels])
                     };
                     base_alpha = Some(alpha.as_float().unwrap().as_subgrid());
-                    patch_ref_grid.buffer_mut()[alpha_idx + 3]
+                    patch_ref_grid.buffer_mut()[alpha_idx + color_channels]
                         .convert_to_float_modular(alpha_bit_depth)?;
                     new_alpha = Some(
-                        patch_ref_grid.buffer()[alpha_idx + 3]
+                        patch_ref_grid.buffer()[alpha_idx + color_channels]
                             .as_float()
                             .unwrap()
                             .as_subgrid(),
@@ -492,6 +520,7 @@ pub fn patch(
 
             let Some(mut blend_params) = BlendParams::from_patch_blending_info(
                 idx,
+                color_channels,
                 blending_info,
                 base_alpha,
                 new_alpha,

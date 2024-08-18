@@ -69,14 +69,12 @@ pub(crate) fn render_frame<S: Sample>(
         fb.upsample_jpeg(color_padded_region, image_header.metadata.bit_depth)?;
     }
 
-    let color_channels = frame_header.encoded_color_channels();
-    let mut gray_cloned = false;
+    let color_channels = fb.color_channels();
     let mut scratch_buffer = None;
     if let Gabor::Enabled(weights) = frame_header.restoration_filter.gab {
-        if color_channels < 3 {
+        if fb.color_channels() < 3 {
             tracing::trace!("Cloning gray channel");
             fb.clone_gray()?;
-            gray_cloned = true;
         }
 
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
@@ -101,10 +99,9 @@ pub(crate) fn render_frame<S: Sample>(
     }
 
     if let EdgePreservingFilter::Enabled(epf_params) = &frame_header.restoration_filter.epf {
-        if color_channels < 3 && !gray_cloned {
+        if fb.color_channels() < 3 {
             tracing::trace!("Cloning gray channel");
             fb.clone_gray()?;
-            gray_cloned = true;
         }
 
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
@@ -132,16 +129,14 @@ pub(crate) fn render_frame<S: Sample>(
     }
 
     // Truncate cloned gray channels.
-    if color_channels < 3 && gray_cloned {
-        fb.remove_color_channels(1);
-    }
+    fb.remove_color_channels(color_channels);
 
-    tracing::trace!(?upsampling_valid_region);
-    fb.upsample_nonseparable(image_header, frame_header, upsampling_valid_region)?;
+    fb.prepare_color_upsampling(frame_header);
 
     render_features(
         frame,
         &mut fb,
+        upsampling_valid_region,
         reference_frames.refs.clone(),
         cache,
         frame_visibility.0,
@@ -149,23 +144,20 @@ pub(crate) fn render_frame<S: Sample>(
         &pool,
     )?;
 
+    fb.upsample_nonseparable(image_header, frame_header, upsampling_valid_region, false)?;
+
     if !frame_header.save_before_ct && !frame_header.is_last {
-        fb.convert_modular_color(image_header.metadata.bit_depth)?;
-        let ct_done = util::convert_color_for_record(
-            image_header,
-            frame_header.do_ycbcr,
-            fb.as_color_floats_mut(),
-            &pool,
-        );
-        fb.set_ct_done(ct_done);
+        util::convert_color_for_record(image_header, frame_header.do_ycbcr, &mut fb, &pool)?;
     }
 
     Ok(fb)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_features<S: Sample>(
     frame: &IndexedFrame,
     grid: &mut ImageWithRegion,
+    upsampling_valid_region: Region,
     reference_grids: [Option<Reference<S>>; 4],
     cache: &mut RenderCache<S>,
     visible_frames_num: usize,
@@ -186,6 +178,8 @@ fn render_features<S: Sample>(
     });
 
     if let Some(patches) = &lf_global.patches {
+        grid.upsample_nonseparable(image_header, frame_header, upsampling_valid_region, true)?;
+
         for patch in &patches.patches {
             let Some(ref_grid) = &reference_grids[patch.ref_idx as usize] else {
                 return Err(Error::InvalidReference(patch.ref_idx));
@@ -200,17 +194,28 @@ fn render_features<S: Sample>(
     }
 
     if let Some(splines) = &lf_global.splines {
-        features::render_spline(frame_header, grid, splines, base_correlations_xb)?;
+        if grid.color_channels() == 3 {
+            grid.convert_modular_color(image_header.metadata.bit_depth)?;
+            features::render_spline(frame_header, grid, splines, base_correlations_xb)?;
+        } else {
+            tracing::warn!("Cannot render splines on grayscale buffer; skipping");
+        }
     }
+
     if let Some(noise) = &lf_global.noise {
-        features::render_noise(
-            frame.header(),
-            visible_frames_num,
-            invisible_frames_num,
-            base_correlations_xb,
-            grid,
-            noise,
-        )?;
+        if grid.color_channels() == 3 {
+            grid.convert_modular_color(image_header.metadata.bit_depth)?;
+            features::render_noise(
+                frame.header(),
+                visible_frames_num,
+                invisible_frames_num,
+                base_correlations_xb,
+                grid,
+                noise,
+            )?;
+        } else {
+            tracing::warn!("Cannot render noise on grayscale buffer; skipping");
+        }
     }
 
     Ok(())
