@@ -200,14 +200,20 @@ pub(crate) fn render_vardct<S: Sample>(
             let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
                 ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
             });
-            let Region { width, height, .. } = modular_region;
+            let align = shifts_cbycr
+                .into_iter()
+                .map(|shift| shift.hshift())
+                .max()
+                .unwrap() as u32;
+            let aligned_modular_region = modular_region.container_aligned(32 << align);
+            let Region { width, height, .. } = aligned_modular_region;
 
             let mut fb = ImageWithRegion::new(3, tracker);
             for shift in shifts_cbycr {
                 let (width, height) = shift.shift_size((width, height));
                 let buffer =
                     AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
-                fb.append_channel_shifted(ImageBuffer::F32(buffer), modular_region, shift);
+                fb.append_channel_shifted(ImageBuffer::F32(buffer), aligned_modular_region, shift);
             }
             fb
         };
@@ -220,7 +226,7 @@ pub(crate) fn render_vardct<S: Sample>(
     let lf_groups = &mut cache.lf_groups;
 
     let it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
-        fb.color_groups_with_group_id(frame_header)
+        fb.color_groups_with_group_id(frame_header, modular_region)
             .into_iter()
             .filter_map(|(group_idx, grid_xyb)| {
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
@@ -328,7 +334,14 @@ pub(crate) fn render_vardct<S: Sample>(
             };
 
             if lf_group.hf_meta.is_none() || hf_global.is_none() || !transform_hf {
-                transform_with_lf_grouped(&lf_xyb, grid_xyb, group_idx, frame_header, lf_groups);
+                transform_with_lf_grouped(
+                    &lf_xyb,
+                    modular_lf_region,
+                    grid_xyb,
+                    group_idx,
+                    frame_header,
+                    lf_groups,
+                );
                 return;
             }
 
@@ -362,7 +375,14 @@ pub(crate) fn render_vardct<S: Sample>(
                 chroma_from_luma_hf_grouped(grid_xyb, &x_from_y, &b_from_y, lf_chan_corr);
             }
 
-            transform_with_lf_grouped(&lf_xyb, grid_xyb, group_idx, frame_header, lf_groups);
+            transform_with_lf_grouped(
+                &lf_xyb,
+                modular_lf_region,
+                grid_xyb,
+                group_idx,
+                frame_header,
+                lf_groups,
+            );
         });
     });
 
@@ -384,19 +404,18 @@ pub fn copy_lf_dequant<S: Sample>(
     extra_precision: u8,
 ) {
     debug_assert!(extra_precision < 4);
-    assert!(grid.width() >= channel_data.width());
-    assert!(grid.height() >= channel_data.height());
+    let width = grid.width().min(channel_data.width());
+    let height = grid.height().min(channel_data.height());
+    let mut grid = grid.borrow_mut().subgrid(0..width, ..height);
+    let channel_data = channel_data.as_subgrid().subgrid(0..width, 0..height);
 
     let precision_scale = 1i32 << (9 - extra_precision);
     let scale_inv = quantizer.global_scale as u64 * quantizer.quant_lf as u64;
     let scale = (m_lf as f64 * precision_scale as f64 / scale_inv as f64) as f32;
 
-    let width = channel_data.width();
-    let height = channel_data.height();
-    let buf = channel_data.buf();
     for y in 0..height {
         let row = grid.get_row_mut(y);
-        let quant = &buf[y * width..][..width];
+        let quant = channel_data.get_row(y);
         for (out, &q) in row.iter_mut().zip(quant) {
             *out = q.to_i32() as f32 * scale;
         }
@@ -596,6 +615,7 @@ pub fn chroma_from_luma_hf_grouped(
 
 pub fn transform_with_lf_grouped<S: Sample>(
     lf: &ImageWithRegion,
+    actual_lf_region: Region,
     coeff_out: &mut [MutableSubgrid<'_, f32>; 3],
     group_idx: u32,
     frame_header: &FrameHeader,
@@ -620,17 +640,34 @@ pub fn transform_with_lf_grouped<S: Sample>(
         (lf_regions[2], lf_b),
     ]
     .map(|((lf_region, shift), lf)| {
-        let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
-        let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
-        let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
-        let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
+        let lf = {
+            let lf = lf.as_subgrid();
+            let downsampled_lf_region = lf_region.downsample_with_shift(shift);
+            let downsampled_actual_lf_region = actual_lf_region.downsample_with_shift(shift);
+            let dx = downsampled_lf_region
+                .left
+                .abs_diff(downsampled_actual_lf_region.left);
+            let dy = downsampled_lf_region
+                .top
+                .abs_diff(downsampled_actual_lf_region.top);
+            lf.subgrid(dx as usize.., dy as usize..)
+        };
+
+        let lf_base_left = lf_base_left
+            .checked_add_signed(-actual_lf_region.left)
+            .unwrap();
+        let lf_base_top = lf_base_top
+            .checked_add_signed(-actual_lf_region.top)
+            .unwrap();
+        let lf_width = (actual_lf_region.width - lf_base_left).min(group_dim / 8);
+        let lf_height = (actual_lf_region.height - lf_base_top).min(group_dim / 8);
         let lf_base_left = lf_base_left as usize;
         let lf_base_top = lf_base_top as usize;
 
         let lf_base_left = lf_base_left >> shift.hshift();
         let lf_base_top = lf_base_top >> shift.vshift();
         let (lf_width, lf_height) = shift.shift_size((lf_width, lf_height));
-        lf.as_subgrid().subgrid(
+        lf.subgrid(
             lf_base_left..(lf_base_left + lf_width as usize),
             lf_base_top..(lf_base_top + lf_height as usize),
         )
@@ -657,11 +694,14 @@ pub fn transform_with_lf_grouped<S: Sample>(
     };
 
     let block_info = {
-        let lf_region = lf_regions[0].0;
-        let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
-        let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
-        let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
-        let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
+        let lf_base_left = lf_base_left
+            .checked_add_signed(-actual_lf_region.left)
+            .unwrap();
+        let lf_base_top = lf_base_top
+            .checked_add_signed(-actual_lf_region.top)
+            .unwrap();
+        let lf_width = (actual_lf_region.width - lf_base_left).min(group_dim / 8);
+        let lf_height = (actual_lf_region.height - lf_base_top).min(group_dim / 8);
 
         hf_meta.block_info.as_subgrid().subgrid(
             left_in_lf..(left_in_lf + lf_width as usize),

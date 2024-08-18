@@ -102,6 +102,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
         let block_info_raw = image_iter.next().unwrap();
         let sharpness = image_iter.next().unwrap();
 
+        let sharpness_stride = sharpness.width();
         let sharpness = sharpness.buf();
 
         let mut epf_sigma = AlignedGrid::with_alloc_tracker(bw, bh, tracker)?;
@@ -181,7 +182,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                             };
 
                             if let Some((sigma, sharp_lut)) = epf {
-                                let sharpness = sharpness[(y + dy) * bw + (x + dx)];
+                                let sharpness = sharpness[(y + dy) * sharpness_stride + (x + dx)];
                                 if !(0..8).contains(&sharpness) {
                                     return Err(jxl_bitstream::Error::ValidationFailed(
                                         "Invalid EPF sharpness value",

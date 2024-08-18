@@ -65,12 +65,13 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
 ) {
     let width = input.width();
     let height = input.height();
+    let output_stride = output.width();
     let output_buf = output.buf_mut();
-    assert_eq!(output_buf.len(), width * height);
+    assert!(output_stride >= width);
 
     if height == 1 {
         let input_buf = input.get_row(0);
-        gabor_row_edge(input_buf, None, output_buf, weights);
+        gabor_row_edge(input_buf, None, &mut output_buf[..width], weights);
         return;
     }
 
@@ -81,14 +82,15 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
         gabor_row_edge(input_buf_c, Some(input_buf_a), output_buf, weights);
     }
 
-    let (inner_rows, bottom_row) = output_buf[width..].split_at_mut((height - 2) * width);
+    let (inner_rows, bottom_row) =
+        output_buf[output_stride..].split_at_mut((height - 2) * output_stride);
     let output_rows = inner_rows
-        .chunks_mut(width * 8)
+        .chunks_mut(output_stride * 8)
         .enumerate()
         .collect::<Vec<_>>();
 
     pool.for_each_vec(output_rows, |(y8, output_rows)| {
-        let it = output_rows.chunks_exact_mut(width);
+        let it = output_rows.chunks_exact_mut(output_stride);
         for (dy, output_row) in it.enumerate() {
             let y_up = y8 * 8 + dy;
             let input_rows = [
@@ -96,6 +98,7 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
                 input.get_row(y_up + 1),
                 input.get_row(y_up + 2),
             ];
+            let output_row = &mut output_row[..width];
             let row = GaborRow {
                 input_rows,
                 output_row,
@@ -108,7 +111,7 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
     {
         let input_buf_c = input.get_row(height - 1);
         let input_buf_a = input.get_row(height - 2);
-        let output_buf = bottom_row;
+        let output_buf = &mut bottom_row[..width];
         gabor_row_edge(input_buf_c, Some(input_buf_a), output_buf, weights);
     }
 }

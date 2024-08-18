@@ -639,23 +639,31 @@ impl ImageWithRegion {
     pub(crate) fn color_groups_with_group_id(
         &mut self,
         frame_header: &jxl_frame::FrameHeader,
+        valid_region: Region,
     ) -> Vec<(u32, [MutableSubgrid<'_, f32>; 3])> {
         assert_eq!(self.color_channels, 3);
         let [fb_x, fb_y, fb_b, ..] = &mut *self.buffer else {
             panic!();
         };
 
+        let region = self.regions[0].0;
+        assert_eq!(region.left, valid_region.left);
+        assert_eq!(region.top, valid_region.top);
+
         let group_dim = frame_header.group_dim();
-        let base_group_x = self.regions[0].0.left as u32 / group_dim;
-        let base_group_y = self.regions[0].0.top as u32 / group_dim;
-        let width = self.regions[0].0.width;
+        let base_group_x = region.left as u32 / group_dim;
+        let base_group_y = region.top as u32 / group_dim;
+        let width = valid_region.width;
         let frame_groups_per_row = frame_header.groups_per_row();
         let groups_per_row = (width + group_dim - 1) / group_dim;
 
         let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
             let fb = fb.as_float_mut().unwrap().as_subgrid_mut();
-            let hshift = self.regions[idx].1.hshift();
-            let vshift = self.regions[idx].1.vshift();
+            let shift = self.regions[idx].1;
+            let hshift = shift.hshift();
+            let vshift = shift.vshift();
+            let (width, height) = shift.shift_size((valid_region.width, valid_region.height));
+            let fb = fb.subgrid(0..width as usize, 0..height as usize);
             let group_dim = group_dim as usize;
             fb.into_groups(group_dim >> hshift, group_dim >> vshift)
         });

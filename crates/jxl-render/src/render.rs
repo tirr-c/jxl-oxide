@@ -80,8 +80,9 @@ pub(crate) fn render_frame<S: Sample>(
         fb.convert_modular_color(image_header.metadata.bit_depth)?;
         let mut fb_scratch = {
             let tracker = fb.alloc_tracker();
-            let width = color_padded_region.width as usize;
-            let height = color_padded_region.height as usize;
+            let aligned_region = color_padded_region.container_aligned(32);
+            let width = aligned_region.width as usize;
+            let height = aligned_region.height as usize;
             [
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
@@ -109,8 +110,9 @@ pub(crate) fn render_frame<S: Sample>(
             buffer
         } else {
             let tracker = fb.alloc_tracker();
-            let width = color_padded_region.width as usize;
-            let height = color_padded_region.height as usize;
+            let aligned_region = color_padded_region.container_aligned(32);
+            let width = aligned_region.width as usize;
+            let height = aligned_region.height as usize;
             [
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,
                 AlignedGrid::with_alloc_tracker(width, height, tracker)?,

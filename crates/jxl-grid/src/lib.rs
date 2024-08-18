@@ -59,7 +59,7 @@ impl<S> AlignedGrid<S> {
 }
 
 impl<S: Default + Clone> AlignedGrid<S> {
-    const ALIGN: usize = 32;
+    const ALIGN: usize = 128;
 
     /// Create a new buffer, recording the allocation if a tracker is given.
     #[inline]

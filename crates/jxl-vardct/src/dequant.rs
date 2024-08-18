@@ -372,12 +372,16 @@ impl DequantMatrixParams {
                 params,
             } => {
                 let (width, height) = dct_select.dequant_matrix_size();
+                let width = width as usize;
+                let height = height as usize;
                 let channel_data = params.into_image().unwrap().into_image_channels();
                 [0usize, 1, 2].map(|c| {
                     let channel = &channel_data[c];
-                    let mut ret = vec![0.0f32; width as usize * height as usize];
-                    for (c, ret) in channel.buf().iter().zip(&mut ret) {
-                        *ret = *c as f32 * denominator;
+                    let mut ret = vec![0.0f32; width * height];
+                    for y in 0..height {
+                        for x in 0..width {
+                            ret[y * width + x] = *channel.get(x, y).unwrap() as f32 * denominator;
+                        }
                     }
                     ret
                 })

@@ -110,7 +110,7 @@ impl<S: Sample> ModularImageDestination<S> {
         ma_ctx: MaConfig,
         group_dim: u32,
         bit_depth: u32,
-        channels: ModularChannels,
+        mut channels: ModularChannels,
         tracker: Option<&AllocTracker>,
     ) -> Result<Self> {
         let mut meta_channels = Vec::new();
@@ -120,9 +120,17 @@ impl<S: Sample> ModularImageDestination<S> {
 
         let image_channels = channels
             .info
-            .iter()
+            .iter_mut()
             .map(|ch| {
-                AlignedGrid::with_alloc_tracker(ch.width as usize, ch.height as usize, tracker)
+                let width_aligned = if ch.hshift >= 0 {
+                    let align = 128 / std::mem::size_of::<S>();
+                    let width_aligned = (ch.width as usize + align - 1) & !(align - 1);
+                    ch.original_width = (width_aligned as u32) << ch.hshift;
+                    width_aligned
+                } else {
+                    ch.width as usize
+                };
+                AlignedGrid::with_alloc_tracker(width_aligned, ch.height as usize, tracker)
             })
             .collect::<std::result::Result<_, _>>()?;
 
@@ -350,7 +358,12 @@ impl<S: Sample> ModularImageDestination<S> {
         let mut grids = self
             .image_channels
             .iter_mut()
-            .map(|g| g.as_subgrid_mut().into())
+            .zip(&self.channels.info)
+            .map(|(g, info)| {
+                let width = info.width as usize;
+                let height = info.height as usize;
+                g.as_subgrid_mut().subgrid(0..width, 0..height).into()
+            })
             .collect::<Vec<_>>();
         for tr in &self.header.transform {
             tr.transform_channels(&mut channels, &mut meta_channel_grids, &mut grids)?;
