@@ -202,7 +202,7 @@ pub(crate) fn render_vardct<S: Sample>(
             });
             let Region { width, height, .. } = modular_region;
 
-            let mut fb = ImageWithRegion::new(tracker);
+            let mut fb = ImageWithRegion::new(3, tracker);
             for shift in shifts_cbycr {
                 let (width, height) = shift.shift_size((width, height));
                 let buffer =

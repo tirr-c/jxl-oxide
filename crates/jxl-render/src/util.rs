@@ -144,7 +144,7 @@ pub(crate) fn load_lf_groups<S: Sample>(
         std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
     let mut lf_xyb = if lf_global_vardct.is_some() && !frame_header.flags.use_lf_frame() {
         let tracker = frame.alloc_tracker();
-        let mut out = ImageWithRegion::new(tracker);
+        let mut out = ImageWithRegion::new(3, tracker);
         let Region { width, height, .. } = lf_region;
         for shift in shifts_cbycr {
             let (width, height) = shift.shift_size((width, height));
@@ -311,37 +311,42 @@ pub(crate) fn load_lf_groups<S: Sample>(
 pub(crate) fn convert_color_for_record(
     image_header: &ImageHeader,
     do_ycbcr: bool,
-    grid: [&mut AlignedGrid<f32>; 3],
+    fb: &mut ImageWithRegion,
     pool: &JxlThreadPool,
-) -> bool {
+) -> Result<()> {
     // save_before_ct = false
 
     let metadata = &image_header.metadata;
     if do_ycbcr {
         // xyb_encoded = false
-        let [cb, y, cr] = grid;
+        fb.convert_modular_color(metadata.bit_depth)?;
+        let [cb, y, cr] = fb.as_color_floats_mut();
         jxl_color::ycbcr_to_rgb([cb, y, cr]);
+        if metadata.colour_encoding.colour_space() == ColourSpace::Grey {
+            fb.remove_color_channels(1);
+        }
     } else if metadata.xyb_encoded {
         // want_icc = false || is_last = true
         // in any case, blending does not occur when want_icc = true
         let ColourEncoding::Enum(encoding) = &metadata.colour_encoding else {
-            return false;
+            return Ok(());
         };
 
         match encoding.colour_space {
-            ColourSpace::Xyb => return false,
+            ColourSpace::Xyb => return Ok(()),
             ColourSpace::Unknown => {
                 tracing::warn!(
                     colour_encoding = ?metadata.colour_encoding,
                     "Signalled color encoding is unknown",
                 );
-                return false;
+                return Ok(());
             }
             _ => {}
         }
 
-        let [x, y, b] = grid;
-        tracing::trace_span!("XYB to target colorspace").in_scope(|| {
+        tracing::trace_span!("XYB to target colorspace").in_scope(|| -> Result<_> {
+            fb.convert_modular_color(metadata.bit_depth)?;
+            let [x, y, b] = fb.as_color_floats_mut();
             tracing::trace!(colour_encoding = ?encoding);
             let transform = ColorTransform::new(
                 &ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
@@ -352,18 +357,21 @@ pub(crate) fn convert_color_for_record(
                 &metadata.tone_mapping,
             )
             .unwrap();
-            transform
+            let output_channels = transform
                 .run_with_threads(
                     &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
                     &jxl_color::NullCms,
                     pool,
                 )
                 .unwrap();
-        });
+            fb.remove_color_channels(output_channels);
+            Ok(())
+        })?;
     }
 
     // color transform is done
-    true
+    fb.set_ct_done(true);
+    Ok(())
 }
 
 pub(crate) fn mirror(mut offset: isize, len: usize) -> usize {

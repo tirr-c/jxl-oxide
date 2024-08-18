@@ -135,7 +135,7 @@ pub(crate) fn render_modular<S: Sample>(
         modular_image.prepare_subimage().unwrap().finish(pool);
     });
 
-    let mut fb = ImageWithRegion::new(tracker);
+    let mut fb = ImageWithRegion::new(frame_header.encoded_color_channels(), tracker);
     fb.extend_from_gmodular(gmodular);
 
     if xyb_encoded {

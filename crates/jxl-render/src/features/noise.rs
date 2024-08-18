@@ -13,12 +13,14 @@ pub fn render_noise(
     grid: &mut ImageWithRegion,
     params: &NoiseParameters,
 ) -> Result<()> {
-    let region = grid.regions_and_shifts()[0].0;
+    let (region, shift) = grid.regions_and_shifts()[0];
     let tracker = grid.alloc_tracker().cloned();
     let [grid_r, grid_g, grid_b] = grid.as_color_floats_mut();
 
     let full_frame_region = Region::with_size(header.width, header.height);
-    let actual_region = region.intersection(full_frame_region);
+    let actual_region = region
+        .intersection(full_frame_region)
+        .downsample_with_shift(shift);
 
     let left = actual_region.left as usize;
     let top = actual_region.top as usize;
