@@ -488,7 +488,7 @@ impl ImageWithRegion {
         &mut self,
         image_header: &ImageHeader,
         frame_header: &FrameHeader,
-        mut upsampled_valid_region: Region,
+        upsampled_valid_region: Region,
         ec_to_color_only: bool,
     ) -> Result<()> {
         if frame_header.upsampling != 1 && self.buffer[0].as_float().is_none() {
@@ -497,9 +497,6 @@ impl ImageWithRegion {
 
         let color_channels = self.color_channels;
         let color_shift = frame_header.upsampling.trailing_zeros();
-        if ec_to_color_only {
-            upsampled_valid_region = upsampled_valid_region.downsample(color_shift);
-        }
 
         for (idx, ((region, shift), g)) in self.regions.iter_mut().zip(&mut self.buffer).enumerate()
         {
