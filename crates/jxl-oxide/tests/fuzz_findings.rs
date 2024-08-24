@@ -80,4 +80,5 @@ test_by_include!(
     modular_jpeg_upsampling_2,
     grayscale_icc,
     icc_large_stride,
+    upsample_separate_ec,
 );
