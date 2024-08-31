@@ -150,6 +150,7 @@ use jxl_bitstream::Name;
 use jxl_bitstream::{Bitstream, Bundle};
 use jxl_frame::FrameContext;
 use jxl_render::ImageBuffer;
+use jxl_render::ImageWithRegion;
 use jxl_render::Region;
 use jxl_render::{IndexedFrame, RenderContext};
 
@@ -719,11 +720,7 @@ impl JxlImage {
 
     /// Renders the given keyframe with optional cropping region.
     pub fn render_frame_cropped(&self, keyframe_index: usize) -> Result<Render> {
-        let mut image = self.ctx.render_keyframe(keyframe_index)?;
-        let grids = image.take_buffer();
-        let regions = image.regions_and_shifts();
-        let (color_channels, extra_channels) = self.process_render(grids)?;
-        let (color_regions, extra_regions) = regions.split_at(color_channels.len());
+        let image = self.ctx.render_keyframe(keyframe_index)?;
 
         let image_region = self
             .ctx
@@ -738,11 +735,9 @@ impl JxlImage {
             name: frame_header.name.clone(),
             duration: frame_header.duration,
             orientation: self.image_header.metadata.orientation,
-            color_channels,
-            extra_channels,
+            image,
+            extra_channels: self.convert_ec_info(),
             target_frame_region,
-            color_regions: color_regions.iter().map(|&(region, _)| region).collect(),
-            extra_regions: extra_regions.iter().map(|&(region, _)| region).collect(),
             color_bit_depth: self.image_header.metadata.bit_depth,
         };
         Ok(result)
@@ -755,15 +750,10 @@ impl JxlImage {
 
     /// Renders the currently loading keyframe with optional cropping region.
     pub fn render_loading_frame_cropped(&mut self) -> Result<Render> {
-        let (frame, mut image) = self.ctx.render_loading_keyframe()?;
+        let (frame, image) = self.ctx.render_loading_keyframe()?;
         let frame_header = frame.header();
         let name = frame_header.name.clone();
         let duration = frame_header.duration;
-
-        let grids = image.take_buffer();
-        let regions = image.regions_and_shifts();
-        let (color_channels, extra_channels) = self.process_render(grids)?;
-        let (color_regions, extra_regions) = regions.split_at(color_channels.len());
 
         let image_region = self
             .ctx
@@ -778,55 +768,25 @@ impl JxlImage {
             name,
             duration,
             orientation: self.image_header.metadata.orientation,
-            color_channels,
-            extra_channels,
+            image,
+            extra_channels: self.convert_ec_info(),
             target_frame_region,
-            color_regions: color_regions.iter().map(|&(region, _)| region).collect(),
-            extra_regions: extra_regions.iter().map(|&(region, _)| region).collect(),
             color_bit_depth: self.image_header.metadata.bit_depth,
         };
         Ok(result)
     }
 
-    fn process_render(
-        &self,
-        mut grids: Vec<ImageBuffer>,
-    ) -> Result<(Vec<ImageBuffer>, Vec<ExtraChannel>)> {
-        let _guard = tracing::trace_span!("Process rendered image").entered();
-
-        let pixel_format = self.pixel_format();
-        let color_channels = if pixel_format.is_grayscale() { 1 } else { 3 };
-        let mut color_channels: Vec<_> = grids.drain(..color_channels).collect();
-        let mut extra_channels: Vec<_> = grids
-            .into_iter()
-            .zip(&self.image_header.metadata.ec_info)
-            .map(|(grid, ec_info)| ExtraChannel {
+    fn convert_ec_info(&self) -> Vec<ExtraChannel> {
+        self.image_header
+            .metadata
+            .ec_info
+            .iter()
+            .map(|ec_info| ExtraChannel {
                 ty: ec_info.ty,
                 name: ec_info.name.clone(),
                 bit_depth: ec_info.bit_depth,
-                grid,
             })
-            .filter(|x| !x.is_black() || pixel_format.has_black()) // filter black channel
-            .collect();
-
-        let has_spot_colour = extra_channels.iter().any(|ec| ec.is_spot_colour());
-        if self.render_spot_colour && color_channels.len() == 3 && has_spot_colour {
-            let bit_depth = self.image_header.metadata.bit_depth;
-            let [a, b, c] = &mut *color_channels else {
-                unreachable!()
-            };
-            let a = a.convert_to_float_modular(bit_depth)?;
-            let b = b.convert_to_float_modular(bit_depth)?;
-            let c = c.convert_to_float_modular(bit_depth)?;
-            for ec in &mut extra_channels {
-                if ec.is_spot_colour() {
-                    let ec_grid = ec.grid.convert_to_float_modular(ec.bit_depth)?;
-                    jxl_render::render_spot_color([a, b, c], ec_grid, &ec.ty)?;
-                }
-            }
-        }
-
-        Ok((color_channels, extra_channels))
+            .collect()
     }
 }
 
@@ -925,11 +885,9 @@ pub struct Render {
     name: Name,
     duration: u32,
     orientation: u32,
-    color_channels: Vec<ImageBuffer>,
+    image: Arc<ImageWithRegion>,
     extra_channels: Vec<ExtraChannel>,
     target_frame_region: Region,
-    color_regions: Vec<Region>,
-    extra_regions: Vec<Region>,
     color_bit_depth: BitDepth,
 }
 
@@ -963,23 +921,40 @@ impl Render {
     /// Extra channels other than black and alpha are not included.
     #[inline]
     pub fn image(&self) -> FrameBuffer {
-        let mut fb: Vec<_> = self.color_channels.iter().collect();
+        let buffers = self.image.buffer();
+        let regions_and_shifts = self.image.regions_and_shifts();
+        let color_channels = self.image.color_channels();
+
+        let mut fb: Vec<_> = buffers[..color_channels].iter().collect();
         let mut bit_depth = vec![self.color_bit_depth; fb.len()];
-        let mut regions = self.color_regions.clone();
+        let mut regions: Vec<_> = regions_and_shifts[..color_channels]
+            .iter()
+            .map(|(region, _)| *region)
+            .collect();
 
         // Find black
-        for (ec, &region) in self.extra_channels.iter().zip(&self.extra_regions) {
+        for (ec_idx, (ec, &(region, _))) in self
+            .extra_channels
+            .iter()
+            .zip(regions_and_shifts)
+            .enumerate()
+        {
             if ec.is_black() {
-                fb.push(&ec.grid);
+                fb.push(&buffers[color_channels + ec_idx]);
                 bit_depth.push(ec.bit_depth);
                 regions.push(region);
                 break;
             }
         }
         // Find alpha
-        for (ec, &region) in self.extra_channels.iter().zip(&self.extra_regions) {
+        for (ec_idx, (ec, &(region, _))) in self
+            .extra_channels
+            .iter()
+            .zip(regions_and_shifts)
+            .enumerate()
+        {
             if ec.is_alpha() {
-                fb.push(&ec.grid);
+                fb.push(&buffers[color_channels + ec_idx]);
                 bit_depth.push(ec.bit_depth);
                 regions.push(region);
                 break;
@@ -1000,14 +975,17 @@ impl Render {
     /// All extra channels are included.
     #[inline]
     pub fn image_all_channels(&self) -> FrameBuffer {
-        let mut fb: Vec<_> = self.color_channels.iter().collect();
-        let mut bit_depth = vec![self.color_bit_depth; fb.len()];
+        let fb: Vec<_> = self.image.buffer().iter().collect();
+        let mut bit_depth = vec![self.color_bit_depth; self.image.color_channels()];
         for ec in &self.extra_channels {
-            fb.push(&ec.grid);
             bit_depth.push(ec.bit_depth);
         }
-        let mut regions = self.color_regions.clone();
-        regions.extend_from_slice(&self.extra_regions);
+        let regions: Vec<_> = self
+            .image
+            .regions_and_shifts()
+            .iter()
+            .map(|(region, _)| *region)
+            .collect();
 
         FrameBuffer::from_grids(
             &fb,
@@ -1022,17 +1000,20 @@ impl Render {
     ///
     /// All extra channels are included.
     pub fn image_planar(&self) -> Vec<FrameBuffer> {
-        self.color_channels
+        let grids = self.image.buffer();
+        let bit_depth_it = std::iter::repeat(self.color_bit_depth)
+            .take(self.image.color_channels())
+            .chain(self.extra_channels.iter().map(|ec| ec.bit_depth));
+        let region_it = self
+            .image
+            .regions_and_shifts()
             .iter()
-            .zip(&self.color_regions)
-            .map(|(g, &region)| (g, self.color_bit_depth, region))
-            .chain(
-                self.extra_channels
-                    .iter()
-                    .zip(&self.extra_regions)
-                    .map(|(x, &region)| (&x.grid, x.bit_depth, region)),
-            )
-            .map(|(x, bit_depth, region)| {
+            .map(|(region, _)| *region);
+
+        bit_depth_it
+            .zip(region_it)
+            .zip(grids)
+            .map(|((bit_depth, region), x)| {
                 FrameBuffer::from_grids(
                     &[x],
                     &[bit_depth],
@@ -1049,32 +1030,17 @@ impl Render {
     /// Orientation is not applied.
     #[inline]
     pub fn color_channels(&self) -> &[ImageBuffer] {
-        &self.color_channels
-    }
-
-    /// Returns the mutable slice to the color channels.
-    ///
-    /// Orientation is not applied.
-    #[inline]
-    pub fn color_channels_mut(&mut self) -> &mut [ImageBuffer] {
-        &mut self.color_channels
+        let color_channels = self.image.color_channels();
+        &self.image.buffer()[..color_channels]
     }
 
     /// Returns the extra channels, potentially including alpha and black channels.
     ///
     /// Orientation is not applied.
     #[inline]
-    pub fn extra_channels(&self) -> &[ExtraChannel] {
-        &self.extra_channels
-    }
-
-    /// Returns the mutable slice to the extra channels, potentially including alpha and black
-    /// channels.
-    ///
-    /// Orientation is not applied.
-    #[inline]
-    pub fn extra_channels_mut(&mut self) -> &mut [ExtraChannel] {
-        &mut self.extra_channels
+    pub fn extra_channels(&self) -> (&[ExtraChannel], &[ImageBuffer]) {
+        let color_channels = self.image.color_channels();
+        (&self.extra_channels, &self.image.buffer()[color_channels..])
     }
 }
 
@@ -1095,27 +1061,42 @@ impl Render {
         if orientation >= 5 {
             std::mem::swap(&mut width, &mut height);
         }
-        let mut grids: Vec<_> = self.color_channels.iter().collect();
+
+        let fb = self.image.buffer();
+        let color_channels = self.image.color_channels();
+        let regions_and_shifts = self.image.regions_and_shifts();
+
+        let mut grids: Vec<_> = self.color_channels().iter().collect();
         let mut bit_depth = vec![self.color_bit_depth; grids.len()];
 
         let mut start_offset_xy = Vec::new();
-        for region in &self.color_regions {
+        for (region, _) in &regions_and_shifts[..color_channels] {
             start_offset_xy.push((left - region.left, top - region.top));
         }
 
         // Find black
-        for (ec, region) in self.extra_channels.iter().zip(&self.extra_regions) {
+        for (ec_idx, (ec, (region, _))) in self
+            .extra_channels
+            .iter()
+            .zip(&regions_and_shifts[color_channels..])
+            .enumerate()
+        {
             if ec.is_black() {
-                grids.push(&ec.grid);
+                grids.push(&fb[color_channels + ec_idx]);
                 bit_depth.push(ec.bit_depth);
                 start_offset_xy.push((left - region.left, top - region.top));
                 break;
             }
         }
         // Find alpha
-        for (ec, region) in self.extra_channels.iter().zip(&self.extra_regions) {
+        for (ec_idx, (ec, (region, _))) in self
+            .extra_channels
+            .iter()
+            .zip(&regions_and_shifts[color_channels..])
+            .enumerate()
+        {
             if ec.is_alpha() {
-                grids.push(&ec.grid);
+                grids.push(&fb[color_channels + ec_idx]);
                 bit_depth.push(ec.bit_depth);
                 start_offset_xy.push((left - region.left, top - region.top));
                 break;
@@ -1238,7 +1219,6 @@ pub struct ExtraChannel {
     ty: ExtraChannelType,
     name: Name,
     bit_depth: BitDepth,
-    grid: ImageBuffer,
 }
 
 impl ExtraChannel {
@@ -1252,18 +1232,6 @@ impl ExtraChannel {
     #[inline]
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    /// Returns the sample grid of the channel.
-    #[inline]
-    pub fn grid(&self) -> &ImageBuffer {
-        &self.grid
-    }
-
-    /// Returns the mutable sample grid of the channel.
-    #[inline]
-    pub fn grid_mut(&mut self) -> &mut ImageBuffer {
-        &mut self.grid
     }
 
     /// Returns `true` if the channel is a black channel of CMYK image.

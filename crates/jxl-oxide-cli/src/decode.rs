@@ -379,7 +379,7 @@ fn write_npy<W: Write>(
 ) -> std::io::Result<()> {
     let channels = {
         let first_frame = keyframes.first().unwrap();
-        first_frame.color_channels().len() + first_frame.extra_channels().len()
+        first_frame.color_channels().len() + first_frame.extra_channels().0.len()
     };
 
     let mut output = std::io::BufWriter::new(output);

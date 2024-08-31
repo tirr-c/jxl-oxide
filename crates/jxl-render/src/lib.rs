@@ -540,17 +540,15 @@ impl RenderContext {
         }
     }
 
-    fn render_by_index(&self, index: usize) -> Result<ImageWithRegion> {
+    fn render_by_index(&self, index: usize) -> Result<Arc<ImageWithRegion>> {
         if self.narrow_modular() {
             Arc::clone(&self.renders_narrow[index])
                 .run_with_image()?
-                .blend(None, &self.pool)?
-                .try_clone()
+                .blend(None, &self.pool)
         } else {
             Arc::clone(&self.renders_wide[index])
                 .run_with_image()?
-                .blend(None, &self.pool)?
-                .try_clone()
+                .blend(None, &self.pool)
         }
     }
 
@@ -558,26 +556,25 @@ impl RenderContext {
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
     #[inline]
-    pub fn render(&mut self) -> Result<ImageWithRegion> {
+    pub fn render(&mut self) -> Result<Arc<ImageWithRegion>> {
         self.render_keyframe(0)
     }
 
     /// Renders the keyframe.
     ///
     /// The keyframe should be loaded in prior to rendering, with one of the loading methods.
-    pub fn render_keyframe(&self, keyframe_idx: usize) -> Result<ImageWithRegion> {
+    pub fn render_keyframe(&self, keyframe_idx: usize) -> Result<Arc<ImageWithRegion>> {
         let idx = *self
             .keyframes
             .get(keyframe_idx)
             .ok_or(Error::IncompleteFrame)?;
-        let mut grid = self.render_by_index(idx)?;
+        let grid = self.render_by_index(idx)?;
         let frame = &*self.frames[idx];
 
-        self.postprocess_keyframe(frame, &mut grid)?;
-        Ok(grid)
+        self.postprocess_keyframe(frame, grid)
     }
 
-    pub fn render_loading_keyframe(&mut self) -> Result<(&IndexedFrame, ImageWithRegion)> {
+    pub fn render_loading_keyframe(&mut self) -> Result<(&IndexedFrame, Arc<ImageWithRegion>)> {
         let mut current_frame_grid = None;
         if self.loading_frame().is_some() {
             let ret = self.render_loading_frame();
@@ -588,9 +585,9 @@ impl RenderContext {
             }
         }
 
-        let (frame, mut grid) = if let Some(grid) = current_frame_grid {
+        let (frame, grid) = if let Some(grid) = current_frame_grid {
             let frame = self.loading_frame().unwrap();
-            (frame, grid)
+            (frame, Arc::new(grid))
         } else if let Some(idx) = self.keyframe_in_progress {
             let grid = self.render_by_index(idx)?;
             let frame = &*self.frames[idx];
@@ -599,7 +596,7 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         };
 
-        self.postprocess_keyframe(frame, &mut grid)?;
+        let grid = self.postprocess_keyframe(frame, grid)?;
         Ok((frame, grid))
     }
 
@@ -769,110 +766,95 @@ impl RenderContext {
         }
     }
 
-    fn postprocess_keyframe(&self, frame: &IndexedFrame, grid: &mut ImageWithRegion) -> Result<()> {
+    fn postprocess_keyframe(
+        &self,
+        frame: &IndexedFrame,
+        grid: Arc<ImageWithRegion>,
+    ) -> Result<Arc<ImageWithRegion>> {
         let frame_header = frame.header();
-
-        /*
-        let oriented_image_region = util::apply_orientation_to_image_region(
-            &self.image_header,
-            self.requested_image_region,
-        );
-        let frame_region = oriented_image_region.translate(-frame_header.x0, -frame_header.y0);
-
-        if grid.region() != frame_region {
-            let mut new_grid = ImageWithRegion::from_region_and_tracker(
-                grid.channels(),
-                frame_region,
-                grid.ct_done(),
-                self.tracker.as_ref(),
-            )?;
-            for (ch, g) in new_grid.buffer_mut().iter_mut().enumerate() {
-                grid.clone_region_channel(frame_region, ch, g);
-            }
-            *grid = new_grid;
-        }
-        */
-
         let metadata = self.metadata();
 
-        tracing::trace_span!("Transform to requested color encoding").in_scope(
-            || -> Result<()> {
-                let header_color_encoding = &metadata.colour_encoding;
-                let frame_color_encoding = if !grid.ct_done() && metadata.xyb_encoded {
-                    ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
-                        jxl_color::RenderingIntent::Perceptual,
-                    ))
-                } else if let ColourEncoding::Enum(encoding) = header_color_encoding {
-                    ColorEncodingWithProfile::new(encoding.clone())
-                } else {
-                    ColorEncodingWithProfile::with_icc(&self.embedded_icc)?
-                };
-                tracing::trace!(?frame_color_encoding);
-                tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
-                tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
+        tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<_> {
+            let header_color_encoding = &metadata.colour_encoding;
+            let frame_color_encoding = if !grid.ct_done() && metadata.xyb_encoded {
+                ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
+                    jxl_color::RenderingIntent::Perceptual,
+                ))
+            } else if let ColourEncoding::Enum(encoding) = header_color_encoding {
+                ColorEncodingWithProfile::new(encoding.clone())
+            } else {
+                ColorEncodingWithProfile::with_icc(&self.embedded_icc)?
+            };
+            tracing::trace!(?frame_color_encoding);
+            tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
+            tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-                if !grid.ct_done() && frame_header.do_ycbcr {
-                    grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
-                    jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
-                }
-                if grid.ct_done() {
-                    return Ok(());
-                }
+            if grid.ct_done() {
+                return Ok(grid);
+            }
 
-                let mut transform = jxl_color::ColorTransform::builder();
-                transform.set_srgb_icc(!self.cms.supports_linear_tf());
-                let transform = transform.build(
-                    &frame_color_encoding,
-                    &self.requested_color_encoding,
-                    &metadata.opsin_inverse_matrix,
-                    &metadata.tone_mapping,
-                )?;
-                if transform.is_noop() {
-                    grid.set_ct_done(true);
-                    return Ok(());
-                }
+            let mut transform = jxl_color::ColorTransform::builder();
+            transform.set_srgb_icc(!self.cms.supports_linear_tf());
+            let transform = transform.build(
+                &frame_color_encoding,
+                &self.requested_color_encoding,
+                &metadata.opsin_inverse_matrix,
+                &metadata.tone_mapping,
+            )?;
+            if transform.is_noop() && !frame_header.do_ycbcr {
+                return Ok(grid);
+            }
 
-                let encoded_color_channels = frame_header.encoded_color_channels();
-                if encoded_color_channels < 3 {
-                    grid.clone_gray()?;
-                }
+            let mut grid = grid.try_clone()?;
 
+            if !grid.ct_done() && frame_header.do_ycbcr {
                 grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
-                let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
-                let mut channels = Vec::new();
-                for grid in color_channels {
-                    channels.push(grid.as_float_mut().unwrap().buf_mut());
-                }
+                jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
+            }
+            if transform.is_noop() {
+                let output_channels = transform.output_channels();
+                grid.remove_color_channels(output_channels);
+                return Ok(Arc::new(grid));
+            }
 
-                let mut has_black = false;
-                for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
-                    if ec_info.is_black() {
-                        channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
-                        has_black = true;
-                        break;
+            let encoded_color_channels = frame_header.encoded_color_channels();
+            if encoded_color_channels < 3 {
+                grid.clone_gray()?;
+            }
+
+            grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
+            let (color_channels, extra_channels) = grid.buffer_mut().split_at_mut(3);
+            let mut channels = Vec::new();
+            for grid in color_channels {
+                channels.push(grid.as_float_mut().unwrap().buf_mut());
+            }
+
+            let mut has_black = false;
+            for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
+                if ec_info.is_black() {
+                    channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
+                    has_black = true;
+                    break;
+                }
+            }
+
+            if has_black {
+                // 0 means full ink; invert samples
+                for grid in channels.iter_mut() {
+                    for v in &mut **grid {
+                        *v = 1.0 - *v;
                     }
                 }
+            }
 
-                if has_black {
-                    // 0 means full ink; invert samples
-                    for grid in channels.iter_mut() {
-                        for v in &mut **grid {
-                            *v = 1.0 - *v;
-                        }
-                    }
-                }
-
-                let output_channels =
-                    transform.run_with_threads(&mut channels, &*self.cms, &self.pool)?;
-                if output_channels < 3 {
-                    grid.remove_color_channels(output_channels);
-                }
-                grid.set_ct_done(true);
-                Ok(())
-            },
-        )?;
-
-        Ok(())
+            let output_channels =
+                transform.run_with_threads(&mut channels, &*self.cms, &self.pool)?;
+            if output_channels < 3 {
+                grid.remove_color_channels(output_channels);
+            }
+            grid.set_ct_done(true);
+            Ok(Arc::new(grid))
+        })
     }
 }
 

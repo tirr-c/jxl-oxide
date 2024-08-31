@@ -524,6 +524,22 @@ impl ColorTransform {
         self.ops.is_empty()
     }
 
+    #[inline]
+    pub fn input_channels(&self) -> usize {
+        self.begin_channels
+    }
+
+    #[inline]
+    pub fn output_channels(&self) -> usize {
+        let mut channels = self.begin_channels;
+        for op in &self.ops {
+            if let Some(x) = op.outputs() {
+                channels = x;
+            }
+        }
+        channels
+    }
+
     /// Performs the prepared color transformation on the samples.
     ///
     /// Returns the number of final channels after transformation.
