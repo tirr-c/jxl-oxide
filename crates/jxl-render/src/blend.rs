@@ -248,8 +248,8 @@ pub(crate) fn blend<S: Sample>(
                 can_overwrite = false;
             }
 
-            let base_grid = Arc::clone(&grid.image).run_with_image()?;
-            let mut base_grid = base_grid.blend(Some(output_image_region), pool)?;
+            let base_grid_render = Arc::clone(&grid.image).run_with_image()?;
+            let base_grid = base_grid_render.blend(Some(output_image_region), pool)?;
             assert_eq!(base_grid.color_channels(), color_channels);
 
             if base_grid.regions_and_shifts()[idx].0.is_empty() {
@@ -267,8 +267,12 @@ pub(crate) fn blend<S: Sample>(
                     output_image_region.translate(-base_frame_header.x0, -base_frame_header.y0);
 
                 target_grid = if can_overwrite {
-                    let buffer = &mut base_grid.buffer_mut()[idx];
-                    std::mem::replace(buffer, ImageBuffer::F32(AlignedGrid::empty()))
+                    if let Some(mut image) = base_grid_render.try_take_blended() {
+                        let buffer = &mut image.buffer_mut()[idx];
+                        std::mem::replace(buffer, ImageBuffer::F32(AlignedGrid::empty()))
+                    } else {
+                        base_grid.buffer()[idx].try_clone()?
+                    }
                 } else {
                     base_grid.buffer()[idx].try_clone()?
                 };
@@ -413,7 +417,7 @@ pub(crate) fn blend<S: Sample>(
 pub fn patch(
     image_header: &ImageHeader,
     base_grid: &mut ImageWithRegion,
-    patch_ref_grid: &mut ImageWithRegion,
+    patch_ref_grid: &ImageWithRegion,
     patch_ref: &PatchRef,
 ) -> Result<()> {
     use jxl_frame::data::PatchBlendMode;
@@ -474,8 +478,6 @@ pub fn patch(
             )
             .then_some(blending_info.alpha_channel as usize);
 
-            patch_ref_grid.buffer_mut()[idx].convert_to_float_modular(bit_depth)?;
-
             let base_alpha;
             let new_alpha;
             let premultiplied;
@@ -498,8 +500,6 @@ pub fn patch(
                         (&mut r[0], &l[alpha_idx + color_channels])
                     };
                     base_alpha = Some(alpha.as_float().unwrap().as_subgrid());
-                    patch_ref_grid.buffer_mut()[alpha_idx + color_channels]
-                        .convert_to_float_modular(alpha_bit_depth)?;
                     new_alpha = Some(
                         patch_ref_grid.buffer()[alpha_idx + color_channels]
                             .as_float()

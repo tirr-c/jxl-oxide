@@ -254,10 +254,16 @@ impl RenderResult {
     #[wasm_bindgen(js_name = encodeToPng)]
     pub fn into_png(self) -> Result<Vec<u8>, String> {
         let image = self.image;
+        let mut stream = image.stream();
+        let mut fb = jxl_oxide::FrameBuffer::new(
+            stream.width() as usize,
+            stream.height() as usize,
+            stream.channels() as usize,
+        );
+        stream.write_to_buffer(fb.buf_mut());
 
-        let fb = image.image();
         let mut out = Vec::new();
-        let mut encoder = png::Encoder::new(&mut out, fb.width() as u32, fb.height() as u32);
+        let mut encoder = png::Encoder::new(&mut out, stream.width(), stream.height());
         let color = match self.pixfmt {
             PixelFormat::Gray => png::ColorType::Grayscale,
             PixelFormat::Graya => png::ColorType::GrayscaleAlpha,

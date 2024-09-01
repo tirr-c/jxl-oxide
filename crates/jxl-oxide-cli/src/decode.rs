@@ -99,7 +99,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     let mps = total_pixels as f64 / 1e6;
 
     if args.output_format == OutputFormat::Npy {
-        image.set_render_spot_colour(false);
+        image.set_render_spot_color(false);
     }
 
     let keyframes = if let Some(num_reps @ 2..) = args.num_reps {
@@ -379,7 +379,7 @@ fn write_npy<W: Write>(
 ) -> std::io::Result<()> {
     let channels = {
         let first_frame = keyframes.first().unwrap();
-        first_frame.color_channels().len() + first_frame.extra_channels().len()
+        first_frame.color_channels().len() + first_frame.extra_channels().0.len()
     };
 
     let mut output = std::io::BufWriter::new(output);

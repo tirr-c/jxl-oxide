@@ -593,7 +593,7 @@ impl ImageWithRegion {
     }
 
     #[inline]
-    pub(crate) fn color_channels(&self) -> usize {
+    pub fn color_channels(&self) -> usize {
         self.color_channels
     }
 
@@ -686,11 +686,11 @@ impl<S: Sample> RenderedImage<S> {
 }
 
 impl<S: Sample> RenderedImage<S> {
-    pub(crate) fn blend<'r>(
-        &'r self,
+    pub(crate) fn blend(
+        &self,
         oriented_image_region: Option<Region>,
         pool: &JxlThreadPool,
-    ) -> Result<BlendResult<'r, S>> {
+    ) -> Result<Arc<ImageWithRegion>> {
         let image_header = self.image.frame.image_header();
         let frame_header = self.image.frame.header();
         let image_region = self.image.image_region;
@@ -712,47 +712,64 @@ impl<S: Sample> RenderedImage<S> {
         };
 
         let mut grid_lock = self.image.render.lock().unwrap();
-        let grid = grid_lock.as_grid_mut().unwrap();
-        if grid.blend_done {
-            return Ok(BlendResult(grid_lock));
+        if let FrameRender::Blended(image) = &*grid_lock {
+            return Ok(Arc::clone(image));
+        }
+
+        let render = std::mem::replace(&mut *grid_lock, FrameRender::ErrTaken);
+        let FrameRender::Done(mut grid) = render else {
+            panic!();
+        };
+
+        if frame_header.can_reference() {
+            let bit_depth_it = std::iter::repeat(image_header.metadata.bit_depth)
+                .take(grid.color_channels)
+                .chain(image_header.metadata.ec_info.iter().map(|ec| ec.bit_depth));
+            for (buffer, bit_depth) in grid.buffer.iter_mut().zip(bit_depth_it) {
+                buffer.convert_to_float_modular(bit_depth)?;
+            }
         }
 
         if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
             grid.blend_done = true;
-            return Ok(BlendResult(grid_lock));
+            let image = Arc::new(grid);
+            *grid_lock = FrameRender::Blended(Arc::clone(&image));
+            return Ok(image);
         }
 
         if !grid.ct_done() {
-            util::convert_color_for_record(image_header, frame_header.do_ycbcr, grid, pool)?;
+            util::convert_color_for_record(image_header, frame_header.do_ycbcr, &mut grid, pool)?;
         }
 
-        let out = crate::blend::blend(
+        let image = crate::blend::blend(
             image_header,
             self.image.refs.clone(),
             &self.image.frame,
-            grid,
+            &mut grid,
             frame_region,
             pool,
         )?;
-        *grid = out;
-        Ok(BlendResult(grid_lock))
+
+        let image = Arc::new(image);
+        *grid_lock = FrameRender::Blended(Arc::clone(&image));
+        Ok(image)
     }
-}
 
-pub struct BlendResult<'r, S: Sample>(std::sync::MutexGuard<'r, FrameRender<S>>);
-
-impl<S: Sample> std::ops::Deref for BlendResult<'_, S> {
-    type Target = ImageWithRegion;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.0.as_grid().unwrap()
-    }
-}
-
-impl<S: Sample> std::ops::DerefMut for BlendResult<'_, S> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_grid_mut().unwrap()
+    pub(crate) fn try_take_blended(&self) -> Option<ImageWithRegion> {
+        let mut grid_lock = self.image.render.lock().unwrap();
+        match std::mem::take(&mut *grid_lock) {
+            FrameRender::Blended(image) => {
+                let cloned_image = Arc::clone(&image);
+                let image_inner = Arc::into_inner(cloned_image);
+                if image_inner.is_none() {
+                    *grid_lock = FrameRender::Blended(image);
+                }
+                image_inner
+            }
+            render => {
+                *grid_lock = render;
+                None
+            }
+        }
     }
 }

@@ -50,6 +50,7 @@ pub enum FrameRender<S: Sample> {
     Rendering,
     InProgress(Box<RenderCache<S>>),
     Done(ImageWithRegion),
+    Blended(Arc<ImageWithRegion>),
     Err(crate::Error),
     ErrTaken,
 }
@@ -61,26 +62,9 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
             Self::Rendering => write!(f, "Rendering"),
             Self::InProgress(_) => write!(f, "InProgress(_)"),
             Self::Done(_) => write!(f, "Done(_)"),
+            Self::Blended(_) => write!(f, "Blended(_)"),
             Self::Err(e) => f.debug_tuple("Err").field(e).finish(),
             Self::ErrTaken => write!(f, "ErrTaken"),
-        }
-    }
-}
-
-impl<S: Sample> FrameRender<S> {
-    pub(crate) fn as_grid(&self) -> Option<&ImageWithRegion> {
-        if let Self::Done(grid) = self {
-            Some(grid)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn as_grid_mut(&mut self) -> Option<&mut ImageWithRegion> {
-        if let Self::Done(grid) = self {
-            Some(grid)
-        } else {
-            None
         }
     }
 }
@@ -223,7 +207,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                     tracing::trace!(index = self.frame.idx, "Waiting...");
                     render_ref = self.condvar.wait(render_ref).unwrap();
                 }
-                FrameRender::Done(_) => {
+                FrameRender::Done(_) | FrameRender::Blended(_) => {
                     *render_ref = render;
                     return Ok(render_ref);
                 }

@@ -188,8 +188,8 @@ fn render_features<S: Sample>(
             let oriented_image_region = Region::with_size(ref_header.width, ref_header.height)
                 .translate(ref_header.x0, ref_header.y0);
             let ref_grid_image = std::sync::Arc::clone(&ref_grid.image).run_with_image()?;
-            let mut ref_grid_image = ref_grid_image.blend(Some(oriented_image_region), pool)?;
-            blend::patch(image_header, grid, &mut ref_grid_image, patch)?;
+            let ref_grid_image = ref_grid_image.blend(Some(oriented_image_region), pool)?;
+            blend::patch(image_header, grid, &ref_grid_image, patch)?;
         }
     }
 

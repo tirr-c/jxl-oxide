@@ -60,7 +60,7 @@ fn run_test(
 ) {
     let debug = std::env::var("JXL_OXIDE_DEBUG").is_ok();
 
-    image.set_render_spot_colour(false);
+    image.set_render_spot_color(false);
 
     if let Some(target_icc) = target_icc {
         image.request_icc(&target_icc).unwrap();
