@@ -919,63 +919,18 @@ impl Render {
         self.orientation
     }
 
-    /// Creates a buffer with interleaved channels, with orientation applied.
+    /// Creates a stream that writes to borrowed buffer.
     ///
-    /// Extra channels other than black and alpha are not included.
-    #[inline]
-    pub fn image(&self) -> FrameBuffer {
-        let buffers = self.image.buffer();
-        let regions_and_shifts = self.image.regions_and_shifts();
-        let color_channels = self.image.color_channels();
-
-        let mut fb: Vec<_> = buffers[..color_channels].iter().collect();
-        let mut bit_depth = vec![self.color_bit_depth; fb.len()];
-        let mut regions: Vec<_> = regions_and_shifts[..color_channels]
-            .iter()
-            .map(|(region, _)| *region)
-            .collect();
-
-        // Find black
-        for (ec_idx, (ec, &(region, _))) in self
-            .extra_channels
-            .iter()
-            .zip(regions_and_shifts)
-            .enumerate()
-        {
-            if ec.is_black() {
-                fb.push(&buffers[color_channels + ec_idx]);
-                bit_depth.push(ec.bit_depth);
-                regions.push(region);
-                break;
-            }
-        }
-        // Find alpha
-        for (ec_idx, (ec, &(region, _))) in self
-            .extra_channels
-            .iter()
-            .zip(regions_and_shifts)
-            .enumerate()
-        {
-            if ec.is_alpha() {
-                fb.push(&buffers[color_channels + ec_idx]);
-                bit_depth.push(ec.bit_depth);
-                regions.push(region);
-                break;
-            }
-        }
-
-        FrameBuffer::from_grids(
-            &fb,
-            &bit_depth,
-            &regions,
-            self.target_frame_region,
-            self.orientation,
-        )
+    /// The stream will include black and alpha channels, if exists, in addition to color channels.
+    /// Orientation is applied.
+    pub fn stream(&self) -> ImageStream {
+        ImageStream::from_render(self)
     }
 
     /// Creates a buffer with interleaved channels, with orientation applied.
     ///
-    /// All extra channels are included.
+    /// All extra channels are included. Use [`stream`](Render::stream) if only color, black and
+    /// alpha channels are needed.
     #[inline]
     pub fn image_all_channels(&self) -> FrameBuffer {
         let fb: Vec<_> = self.image.buffer().iter().collect();
@@ -1044,16 +999,6 @@ impl Render {
     pub fn extra_channels(&self) -> (&[ExtraChannel], &[ImageBuffer]) {
         let color_channels = self.image.color_channels();
         (&self.extra_channels, &self.image.buffer()[color_channels..])
-    }
-}
-
-impl Render {
-    /// Creates a stream that writes to borrowed buffer.
-    ///
-    /// The stream will include black and alpha channels, if exists, in addition to color channels.
-    /// Orientation is applied.
-    pub fn stream(&self) -> ImageStream {
-        ImageStream::from_render(self)
     }
 }
 
