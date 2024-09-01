@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `jxl-oxide`: Remove `Render::image` (#334). Use `Render::stream` instead.
+
 ### Fixed
 - `jxl-modular`: Fix incorrect color with complex inverse palette (#312).
 
