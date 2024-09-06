@@ -3,6 +3,8 @@ pub mod decode;
 #[cfg(feature = "__devtools")]
 pub mod generate_fixture;
 pub mod info;
+#[cfg(feature = "__devtools")]
+pub mod progressive;
 #[cfg(test)]
 pub mod tests;
 
@@ -11,6 +13,8 @@ pub use decode::DecodeArgs;
 #[cfg(feature = "__devtools")]
 pub use generate_fixture::GenerateFixtureArgs;
 pub use info::InfoArgs;
+#[cfg(feature = "__devtools")]
+pub use progressive::ProgressiveArgs;
 
 #[derive(Debug, clap::Parser)]
 #[command(version)]
@@ -43,6 +47,9 @@ pub enum Subcommands {
     /// Print information about JPEG XL image.
     #[command(short_flag = 'I')]
     Info(InfoArgs),
+    /// (devtools) Generate frames for progressive decoding animation.
+    #[cfg(feature = "__devtools")]
+    Progressive(ProgressiveArgs),
     /// (devtools) Generate fixture to use for testing.
     #[cfg(feature = "__devtools")]
     GenerateFixture(GenerateFixtureArgs),
