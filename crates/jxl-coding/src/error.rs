@@ -10,6 +10,7 @@ pub enum Error {
     InvalidPrefixHistogram,
     InvalidCluster,
     UnexpectedLz77Repeat,
+    InvalidLz77Symbol,
 }
 
 impl std::error::Error for Error {
@@ -36,6 +37,7 @@ impl std::fmt::Display for Error {
                 f,
                 "LZ77 repeat symbol encountered without decoding any symbols"
             ),
+            Self::InvalidLz77Symbol => write!(f, "Invalid LZ77 symbol"),
         }
     }
 }

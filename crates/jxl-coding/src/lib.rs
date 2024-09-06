@@ -470,9 +470,14 @@ impl DecoderInner {
 
                 let lz_dist_cluster = self.lz_dist_cluster();
 
-                state.num_to_copy =
-                    self.read_uint_prefilled(bitstream, &state.lz_len_conf, token - min_symbol)
-                        + min_length;
+                let num_to_copy =
+                    self.read_uint_prefilled(bitstream, &state.lz_len_conf, token - min_symbol);
+                let Some(num_to_copy) = num_to_copy.checked_add(min_length) else {
+                    tracing::error!(num_to_copy, min_length, "LZ77 num_to_copy overflow");
+                    return Err(Error::InvalidLz77Symbol);
+                };
+                state.num_to_copy = num_to_copy;
+
                 let token = self.code.read_symbol(bitstream, lz_dist_cluster)?;
                 let distance = self.read_uint_prefilled(
                     bitstream,

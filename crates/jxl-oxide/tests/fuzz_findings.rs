@@ -81,4 +81,5 @@ test_by_include!(
     grayscale_icc,
     icc_large_stride,
     upsample_separate_ec,
+    lz77_num_to_copy_overflow,
 );
