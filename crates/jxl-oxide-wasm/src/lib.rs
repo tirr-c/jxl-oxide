@@ -51,6 +51,12 @@ fn is_hdr_supported() -> bool {
     true
 }
 
+/// Return the version of jxl-oxide-wasm.
+#[wasm_bindgen]
+pub fn version() -> String {
+    String::from(env!("CARGO_PKG_VERSION"))
+}
+
 #[wasm_bindgen(js_class = JxlImage)]
 impl WasmJxlImage {
     #[wasm_bindgen(constructor)]
