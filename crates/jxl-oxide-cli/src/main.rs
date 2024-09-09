@@ -36,6 +36,10 @@ fn main() -> std::process::ExitCode {
             jxl_oxide_cli::generate_fixture::handle_generate_fixture(args);
             Ok(())
         }
+        #[cfg(feature = "__devtools")]
+        Some(Subcommands::Progressive(args)) => {
+            jxl_oxide_cli::progressive::handle_progressive(args)
+        }
     };
 
     if let Err(e) = result {
