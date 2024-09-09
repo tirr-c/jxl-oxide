@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `jxl-oxide-cli`: Use mimalloc (#287, #288).
+- `jxl-oxide-cli`: Add `--num-reps` (#292).
+
+### Changed
+- `jxl-grid`: Reorganize modules (#303). Types are renamed.
+- `jxl-image`: Move `ImageMetadata::encoded_color_channels` into `jxl_frame::FrameHeader` (#322).
+
 ### Removed
 - `jxl-oxide`: Remove `Render::image` (#334). Use `Render::stream` instead.
+
+### Fixed
+- `jxl-render`: Fix typo in forward DCT (#301).
 
 ## [0.8.1] - 2024-07-30
 
