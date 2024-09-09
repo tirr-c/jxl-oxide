@@ -9,7 +9,7 @@ categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 publish = false
 
-version = "0.9.0"
+version = "0.9.0-alpha.0"
 edition = "2021"
 
 [lib]
@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 miniz_oxide = "0.7.2"
 png = "0.17.13"
-wasm-bindgen = "0.2.91"
+wasm-bindgen = "0.2.93"
 
 [dependencies.console_error_panic_hook]
 version = "0.1.7"
@@ -34,7 +34,7 @@ path = "../jxl-oxide"
 default-features = false
 
 [dependencies.web-sys]
-version = "0.3.68"
+version = "0.3.70"
 features = ["Window", "WorkerGlobalScope", "Navigator", "WorkerNavigator"]
 optional = true
 
