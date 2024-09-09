@@ -17,6 +17,13 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut uninit_image = JxlImage::builder().pool(pool.clone()).build_uninit();
 
     let mut input = std::fs::File::open(&args.input).map_err(|e| Error::ReadJxl(e.into()))?;
+    if let Ok(meta) = input.metadata() {
+        let total_iters = meta.len().div_ceil(args.step);
+        tracing::info!(
+            "Will do {total_iters} iteration{}",
+            if total_iters == 1 { "" } else { "s" },
+        );
+    }
     let mut buf = vec![0u8; args.step as usize];
     let mut idx = 0usize;
 
