@@ -100,11 +100,11 @@ jobs:
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack@0.12.1
+          tool: wasm-pack@0.13.0
       - name: Install wasm-bindgen
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen@0.2.92
+          tool: wasm-bindgen@0.2.93
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
