@@ -6,7 +6,7 @@ void jxl_oxide_ffmpeg_log(void *avcl, int level, const char *line);
 void jxl_oxide_ffmpeg_log_c(void *avcl, int level, const char *fmt, va_list vl) {
   char *buf = malloc(65536);
   if (buf == NULL) {
-    return;
+    jxl_oxide_ffmpeg_log(avcl, level, "(cannot allocate buffer for logging)");
   }
 
   vsnprintf(buf, 65536, fmt, vl);
