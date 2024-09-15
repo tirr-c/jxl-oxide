@@ -774,7 +774,11 @@ impl JxlImage {
             .ctx
             .image_region()
             .apply_orientation(&self.image_header);
-        let frame = self.ctx.current_loading_frame().unwrap();
+        let frame = self
+            .ctx
+            .frame(self.ctx.loaded_frames())
+            .or_else(|| self.ctx.frame(self.ctx.loaded_frames() - 1))
+            .unwrap();
         let frame_header = frame.header();
         let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
 
