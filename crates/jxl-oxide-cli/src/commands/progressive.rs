@@ -17,4 +17,8 @@ pub struct ProgressiveArgs {
     #[cfg(feature = "rayon")]
     #[arg(short = 'j', long)]
     pub num_threads: Option<usize>,
+    /// Font to use when displaying frame info
+    #[cfg(feature = "__ffmpeg")]
+    #[arg(long, default_value_t = String::from("monospace"))]
+    pub font: String,
 }

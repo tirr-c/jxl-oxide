@@ -4,7 +4,82 @@ use std::path::Path;
 use jxl_oxide::{JxlImage, JxlThreadPool, Render};
 
 use crate::commands::progressive::*;
-use crate::{output, Error, Result};
+use crate::{Error, Result};
+
+#[cfg(feature = "__ffmpeg")]
+mod mp4;
+mod png_seq;
+
+enum OutputType {
+    PngSequence(png_seq::Context),
+    #[cfg(feature = "__ffmpeg")]
+    Mp4(mp4::Context),
+}
+
+impl OutputType {
+    fn png_sequence(output_dir: impl AsRef<Path>) -> Result<Self> {
+        png_seq::Context::new(output_dir).map(Self::PngSequence)
+    }
+
+    #[cfg(feature = "__ffmpeg")]
+    fn mp4(output_path: impl AsRef<Path>, font: &str) -> Result<Self> {
+        mp4::Context::new(output_path, font).map(Self::Mp4)
+    }
+}
+
+impl OutputType {
+    fn prepare_image(&self, image: &mut JxlImage) {
+        use jxl_oxide::{EnumColourEncoding, RenderingIntent};
+
+        match self {
+            Self::PngSequence(_) => {}
+            Self::Mp4(_) => {
+                if image.is_hdr() {
+                    image.request_color_encoding(EnumColourEncoding::bt2100_pq(
+                        RenderingIntent::Relative,
+                    ));
+                } else {
+                    image.request_color_encoding(EnumColourEncoding::srgb(
+                        RenderingIntent::Relative,
+                    ));
+                }
+            }
+        }
+    }
+
+    fn add_empty_frame(
+        &mut self,
+        image: &JxlImage,
+        description: impl std::fmt::Display,
+    ) -> Result<()> {
+        match self {
+            OutputType::PngSequence(ctx) => ctx.add_empty_frame(image),
+            #[cfg(feature = "__ffmpeg")]
+            OutputType::Mp4(ctx) => ctx.add_empty_frame(image, description),
+        }
+    }
+
+    fn add_frame(
+        &mut self,
+        image: &JxlImage,
+        render: &Render,
+        description: impl std::fmt::Display,
+    ) -> Result<()> {
+        match self {
+            OutputType::PngSequence(ctx) => ctx.add_frame(image, render),
+            #[cfg(feature = "__ffmpeg")]
+            OutputType::Mp4(ctx) => ctx.add_frame(image, render, description),
+        }
+    }
+
+    fn finalize(&mut self) -> Result<()> {
+        match self {
+            OutputType::PngSequence(_) => Ok(()),
+            #[cfg(feature = "__ffmpeg")]
+            OutputType::Mp4(ctx) => ctx.finalize(),
+        }
+    }
+}
 
 pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle progressive subcommand").entered();
@@ -17,22 +92,33 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut uninit_image = JxlImage::builder().pool(pool.clone()).build_uninit();
 
     let mut input = std::fs::File::open(&args.input).map_err(|e| Error::ReadJxl(e.into()))?;
-    if let Ok(meta) = input.metadata() {
-        let total_iters = meta.len().div_ceil(args.step);
-        tracing::info!(
-            "Will do {total_iters} iteration{}",
-            if total_iters == 1 { "" } else { "s" },
-        );
-    }
-    let mut buf = vec![0u8; args.step as usize];
+    let total_bytes = input.metadata().map(|meta| meta.len()).unwrap_or(0);
+
+    let init_step = args.step as usize;
+    let step_cap = total_bytes.div_ceil(args.step * 100) as usize * init_step;
+
+    let mut step = init_step;
+    let mut buf = vec![0u8; step];
     let mut idx = 0usize;
+    let mut bytes_read = 0usize;
 
     let output_dir = args.output.as_deref();
-    if let Some(output_dir) = output_dir {
-        std::fs::create_dir_all(output_dir).map_err(Error::WriteImage)?;
-    } else {
-        tracing::info!("No output path specified, skipping output encoding");
-    }
+    let mut output_ctx = match output_dir {
+        Some(path) => Some(match path.extension() {
+            #[cfg(feature = "__ffmpeg")]
+            Some(ext) if ext == "mp4" => OutputType::mp4(path, &args.font)?,
+            #[cfg(not(feature = "__ffmpeg"))]
+            Some(ext) if ext == "mp4" => {
+                tracing::warn!("FFmpeg support is not active; will output as PNG sequence");
+                OutputType::png_sequence(path)?
+            }
+            _ => OutputType::png_sequence(path)?,
+        }),
+        None => {
+            tracing::info!("No output path specified, skipping output encoding");
+            None
+        }
+    };
 
     let mut image = loop {
         let current_iter = idx;
@@ -42,6 +128,7 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
             tracing::warn!("Partial image");
             return Ok(());
         }
+        bytes_read += buf.len();
 
         uninit_image.feed_bytes(buf).map_err(Error::ReadJxl)?;
         idx += 1;
@@ -49,7 +136,24 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
         match init_result {
             jxl_oxide::InitializeResult::NeedMoreData(image) => uninit_image = image,
             jxl_oxide::InitializeResult::Initialized(mut image) => {
-                run_once(&mut image, current_iter, output_dir)?;
+                if let Some(output) = &mut output_ctx {
+                    output.prepare_image(&mut image);
+
+                    let step = args.step as usize;
+                    for idx in 0..current_iter {
+                        let mut description = progress_desc(step * idx, step, total_bytes as usize);
+                        description.push_str("no frames loaded");
+                        output.add_empty_frame(&image, description)?;
+                    }
+                }
+                run_once(
+                    &mut image,
+                    current_iter,
+                    bytes_read,
+                    step,
+                    total_bytes as usize,
+                    output_ctx.as_mut(),
+                )?;
                 break image;
             }
         }
@@ -59,29 +163,72 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
 
     loop {
         let current_iter = idx;
+        if current_iter >= 120 && current_iter % 60 == 0 && step < step_cap {
+            step = (step * 2).min(step_cap);
+            buf.resize(step, 0);
+            tracing::info!(step, "Increasing step size");
+        }
 
         let buf = fill_buf(&mut input, &mut buf)?;
         if buf.is_empty() {
             break;
         }
+        bytes_read += buf.len();
 
         image.feed_bytes(buf).map_err(Error::ReadJxl)?;
         idx += 1;
-        run_once(&mut image, current_iter, output_dir)?;
+        run_once(
+            &mut image,
+            current_iter,
+            bytes_read,
+            step,
+            total_bytes as usize,
+            output_ctx.as_mut(),
+        )?;
     }
 
     if !image.is_loading_done() {
         tracing::warn!("Partial image");
     }
 
-    if output_dir.is_none() {
+    if let Some(output_ctx) = &mut output_ctx {
+        output_ctx.finalize()?;
+    } else {
         tracing::info!("No output path specified, skipping output encoding");
     }
 
     Ok(())
 }
 
-fn run_once(image: &mut JxlImage, current_iter: usize, output_dir: Option<&Path>) -> Result<()> {
+fn progress_desc(byte_offset: usize, step: usize, total_bytes: usize) -> String {
+    use std::fmt::Write;
+
+    let mut description = String::new();
+    if total_bytes > 0 {
+        let progress = byte_offset as f64 / total_bytes as f64;
+        let percentage = progress * 100.0;
+        writeln!(
+            &mut description,
+            "{percentage:.2}\\% loaded ({step} bytes/frame)"
+        )
+        .ok();
+    } else {
+        writeln!(&mut description, "{step} bytes/frame").ok();
+    }
+
+    description
+}
+
+fn run_once(
+    image: &mut JxlImage,
+    current_iter: usize,
+    byte_offset: usize,
+    step: usize,
+    total_bytes: usize,
+    output_ctx: Option<&mut OutputType>,
+) -> Result<()> {
+    use std::fmt::Write;
+
     match (image.num_loaded_keyframes(), image.is_loading_done()) {
         (0, false) | (1, true) => {}
         _ => {
@@ -90,6 +237,42 @@ fn run_once(image: &mut JxlImage, current_iter: usize, output_dir: Option<&Path>
                 "Progressive decoding doesn't support animation".into(),
             ));
         }
+    }
+
+    let mut description = progress_desc(byte_offset, step, total_bytes);
+
+    let loaded_frames = image.num_loaded_frames();
+    let last_frame = image.frame(loaded_frames).or_else(|| {
+        loaded_frames
+            .checked_sub(1)
+            .and_then(|idx| image.frame(idx))
+    });
+    if let Some(frame) = last_frame {
+        let idx = frame.index();
+        let frame_offset = image.frame_offset(idx).unwrap();
+        let offset_within_frame = byte_offset - frame_offset;
+        let toc = frame.toc();
+        let current_group = toc
+            .iter_bitstream_order()
+            .take_while(|group| offset_within_frame >= group.offset)
+            .last();
+
+        if let Some(current_group) = current_group {
+            if offset_within_frame >= current_group.offset + current_group.size as usize {
+                write!(&mut description, "frame #{idx} fully loaded").ok();
+            } else {
+                write!(
+                    &mut description,
+                    "frame #{idx} decoding {:?}",
+                    current_group.kind
+                )
+                .ok();
+            }
+        } else {
+            write!(&mut description, "frame #{idx} parsing header").ok();
+        }
+    } else {
+        write!(&mut description, "no frames loaded").ok();
     }
 
     fn run_inner(image: &mut JxlImage) -> Result<Option<Render>> {
@@ -120,30 +303,18 @@ fn run_once(image: &mut JxlImage, current_iter: usize, output_dir: Option<&Path>
         tracing::info!(
             "Iteration {current_iter} took {elapsed_msecs:.2} ms; didn't produce an image"
         );
+        if let Some(output_ctx) = output_ctx {
+            output_ctx.add_empty_frame(image, description)?;
+        }
         return Ok(());
     };
+
     tracing::info!("Iteration {current_iter} took {elapsed_msecs:.2} ms");
+    if let Some(output_ctx) = output_ctx {
+        output_ctx.add_frame(image, &render, description)?;
+    }
 
-    let Some(output_dir) = output_dir else {
-        return Ok(());
-    };
-
-    let mut output_path = output_dir.to_owned();
-    output_path.push(format!("frame{current_iter}.png"));
-    let output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
-
-    let width = image.width();
-    let height = image.height();
-    output::write_png(
-        output,
-        image,
-        &[render],
-        image.pixel_format(),
-        None,
-        width,
-        height,
-    )
-    .map_err(Error::WriteImage)
+    Ok(())
 }
 
 fn fill_buf<R: Read>(mut reader: R, buf: &mut [u8]) -> Result<&mut [u8]> {

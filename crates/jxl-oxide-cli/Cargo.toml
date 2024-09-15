@@ -37,12 +37,22 @@ optional = true
 version = "1.8.1"
 optional = true
 
+[dependencies.rusty_ffmpeg]
+version = "0.16.1"
+features = ["link_system_ffmpeg"]
+optional = true
+
 [dependencies.tracing-subscriber]
 version = "0.3.18"
 features = ["env-filter"]
 
+[build-dependencies.cc]
+version = "1.1.18"
+optional = true
+
 [features]
 default = ["rayon", "mimalloc"]
+__ffmpeg = ["dep:rusty_ffmpeg", "dep:cc"]
 mimalloc = ["dep:mimalloc"]
 rayon = ["dep:rayon", "jxl-oxide/rayon"]
 __devtools = []
