@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `jxl-color`: Fix generated `mluc` tag in ICC profile (#347).
+
 ## [0.9.0] - 2024-09-10
 
 ### Added
