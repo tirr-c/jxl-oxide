@@ -165,6 +165,8 @@ enum KnownIccTrc {
     Linear,
     Srgb,
     Bt709,
+    Pq,
+    Hlg,
 }
 
 impl From<KnownIccTrc> for TransferFunction {
@@ -181,6 +183,8 @@ impl From<KnownIccTrc> for TransferFunction {
             KnownIccTrc::Linear => TransferFunction::Linear,
             KnownIccTrc::Srgb => TransferFunction::Srgb,
             KnownIccTrc::Bt709 => TransferFunction::Bt709,
+            KnownIccTrc::Pq => TransferFunction::Pq,
+            KnownIccTrc::Hlg => TransferFunction::Hlg,
         }
     }
 }
@@ -290,10 +294,11 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
     let mut chad: Option<[i32; 9]> = None;
     let mut trcs: [Option<KnownIccTrc>; 4] = [None; 4];
     let mut xyzs: [Option<[i32; 3]>; 3] = [None; 3];
+    let mut cicp: Option<[u8; 4]> = None;
     for tag in profile.tags {
         let data = tag.data;
         let tag = tag.tag;
-        if data.len() < 8 {
+        if data.len() < 4 {
             continue;
         }
 
@@ -452,16 +457,30 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
             {
                 return Err(Error::UnsupportedIccProfile);
             }
+            [b'c', b'i', b'c', b'p'] => {
+                cicp = data[..4].try_into().ok();
+            }
             _ => {}
         }
     }
 
-    let trc_rgb = if let [Some(r), Some(g), Some(b), _] = trcs {
-        Some([r, g, b])
+    let override_trc = if let Some([_, 16, _, _]) = cicp {
+        Some(KnownIccTrc::Pq)
+    } else if let Some([_, 18, _, _]) = cicp {
+        Some(KnownIccTrc::Hlg)
     } else {
         None
     };
-    let trc_k = trcs[3];
+    let trc_rgb = if let [Some(r), Some(g), Some(b), _] = trcs {
+        if let Some(trc) = override_trc {
+            Some([trc; 3])
+        } else {
+            Some([r, g, b])
+        }
+    } else {
+        None
+    };
+    let trc_k = trcs[3].map(|k| override_trc.unwrap_or(k));
     let xyz_rgb = if let [Some(r), Some(g), Some(b)] = xyzs {
         Some([r, g, b])
     } else {
@@ -534,6 +553,17 @@ pub(crate) fn parse_icc(profile: &[u8]) -> Result<EnumColourEncoding> {
     } else {
         Err(Error::UnsupportedIccProfile)
     }
+}
+
+/// Checks whether a ICC profile has CICP tag with HDR transfer function.
+pub fn is_hdr(profile: &[u8]) -> Result<bool> {
+    let profile = parse_icc_raw(profile)?;
+    for tag in profile.tags {
+        if &tag.tag == b"cicp" && matches!(tag.data.get(1), Some(16 | 18)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
