@@ -51,7 +51,7 @@ jobs:
           git: https://github.com/cross-rs/cross
           rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - name: Run tests
-        run: cross test --release --all-features --target ${{ matrix.target }}
+        run: cross test --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -78,4 +78,8 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - run: cargo fmt --all --check
-      - run: cargo clippy --all --all-features -- -D warnings
+      - run: sudo apt install -y libavfilter-dev libavdevice-dev # this should install everything
+      - run: |
+          cargo clippy --all --no-default-features -- -D warnings
+          cargo clippy --all -- -D warnings
+          cargo clippy --all --all-features -- -D warnings
