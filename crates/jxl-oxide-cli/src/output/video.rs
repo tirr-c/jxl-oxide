@@ -7,16 +7,19 @@ mod filter;
 
 pub use context::VideoContext;
 
-extern "C" {
-    fn jxl_oxide_ffmpeg_log_c(vacl: *mut c_void, level: c_int, fmt: *const c_char, vl: *mut i8);
-}
-
-#[no_mangle]
-extern "C" fn jxl_oxide_ffmpeg_log(
-    avcl: *mut *const ffmpeg::AVClass,
+unsafe extern "C" fn jxl_oxide_ffmpeg_log(
+    avcl: *mut c_void,
     level: c_int,
-    line: *const c_char,
+    fmt: *const c_char,
+    vl: ffmpeg::va_list,
 ) {
+    let mut out = vec![0u8; 65536];
+    ffmpeg::vsnprintf(out.as_mut_ptr() as *mut c_char, 65536, fmt, vl);
+
+    let len = out.iter().position(|&v| v == 0).unwrap();
+    let line = String::from_utf8_lossy(&out[..len]);
+    let line = line.trim_end();
+
     let log_level = match level {
         ..=16 => 1,
         17..=24 => 2,
@@ -25,10 +28,7 @@ extern "C" fn jxl_oxide_ffmpeg_log(
         _ => return,
     };
 
-    let line = unsafe { std::ffi::CStr::from_ptr(line) };
-    let line = line.to_string_lossy();
-    let line = line.trim_end();
-
+    let avcl = avcl as *mut *const ffmpeg::AVClass;
     let avc = if avcl.is_null() {
         std::ptr::null()
     } else {
@@ -57,6 +57,6 @@ extern "C" fn jxl_oxide_ffmpeg_log(
 fn init_ffmpeg_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| unsafe {
-        ffmpeg::av_log_set_callback(Some(jxl_oxide_ffmpeg_log_c));
+        ffmpeg::av_log_set_callback(Some(jxl_oxide_ffmpeg_log));
     });
 }

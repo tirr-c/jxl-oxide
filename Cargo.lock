@@ -844,7 +844,6 @@ dependencies = [
 name = "jxl-oxide-cli"
 version = "0.9.0"
 dependencies = [
- "cc",
  "clap",
  "jxl-oxide",
  "lcms2",
