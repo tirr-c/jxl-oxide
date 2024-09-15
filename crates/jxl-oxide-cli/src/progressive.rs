@@ -29,10 +29,14 @@ impl OutputType {
 
 impl OutputType {
     fn prepare_image(&self, image: &mut JxlImage) {
+        #[cfg(feature = "__ffmpeg")]
         use jxl_oxide::{EnumColourEncoding, RenderingIntent};
 
         match self {
-            Self::PngSequence(_) => {}
+            Self::PngSequence(_) => {
+                let _ = image;
+            }
+            #[cfg(feature = "__ffmpeg")]
             Self::Mp4(_) => {
                 if image.is_hdr() {
                     image.request_color_encoding(EnumColourEncoding::bt2100_pq(
@@ -53,7 +57,7 @@ impl OutputType {
         description: impl std::fmt::Display,
     ) -> Result<()> {
         match self {
-            OutputType::PngSequence(ctx) => ctx.add_empty_frame(image),
+            OutputType::PngSequence(ctx) => ctx.add_empty_frame(image, description),
             #[cfg(feature = "__ffmpeg")]
             OutputType::Mp4(ctx) => ctx.add_empty_frame(image, description),
         }
@@ -66,7 +70,7 @@ impl OutputType {
         description: impl std::fmt::Display,
     ) -> Result<()> {
         match self {
-            OutputType::PngSequence(ctx) => ctx.add_frame(image, render),
+            OutputType::PngSequence(ctx) => ctx.add_frame(image, render, description),
             #[cfg(feature = "__ffmpeg")]
             OutputType::Mp4(ctx) => ctx.add_frame(image, render, description),
         }
