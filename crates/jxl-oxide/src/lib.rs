@@ -622,6 +622,20 @@ impl JxlImage {
         }
     }
 
+    pub fn is_hdr(&self) -> bool {
+        use jxl_color::TransferFunction;
+
+        match &self.image_header.metadata.colour_encoding {
+            color::ColourEncoding::Enum(e) => {
+                matches!(e.tf, TransferFunction::Pq | TransferFunction::Hlg)
+            }
+            color::ColourEncoding::IccProfile(_) => {
+                let icc = self.ctx.embedded_icc().unwrap();
+                jxl_color::icc::is_hdr(icc).unwrap_or(false)
+            }
+        }
+    }
+
     /// Requests the decoder to render in specific color encoding, described by an ICC profile.
     ///
     /// # Errors
