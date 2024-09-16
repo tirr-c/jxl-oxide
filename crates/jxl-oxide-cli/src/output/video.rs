@@ -12,10 +12,14 @@ unsafe extern "C" fn jxl_oxide_ffmpeg_log(
     avcl: *mut c_void,
     level: c_int,
     fmt: *const c_char,
-    vl: ffmpeg::va_list,
+    vl: va_list::VaList<'static>,
 ) {
     let mut out = vec![0u8; 65536];
-    ffmpeg::vsnprintf(out.as_mut_ptr() as *mut c_char, 65536, fmt, vl);
+    let vsnprintf = std::mem::transmute::<
+        unsafe extern "C" fn(*mut c_char, std::ffi::c_ulong, *const c_char, _) -> i32,
+        unsafe extern "C" fn(_, _, _, va_list::VaList<'static>) -> i32,
+    >(ffmpeg::vsnprintf);
+    vsnprintf(out.as_mut_ptr() as *mut c_char, 65536, fmt, vl);
 
     let len = out.iter().position(|&v| v == 0).unwrap();
     let line = String::from_utf8_lossy(&out[..len]);
@@ -58,6 +62,7 @@ unsafe extern "C" fn jxl_oxide_ffmpeg_log(
 fn init_ffmpeg_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| unsafe {
-        ffmpeg::av_log_set_callback(Some(jxl_oxide_ffmpeg_log));
+        let cb = std::mem::transmute::<unsafe extern "C" fn(_), unsafe extern "C" fn(*const c_void)>(ffmpeg::av_log_set_callback);
+        cb(jxl_oxide_ffmpeg_log as *const _);
     });
 }

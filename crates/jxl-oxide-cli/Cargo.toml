@@ -46,9 +46,13 @@ optional = true
 version = "0.3.18"
 features = ["env-filter"]
 
+[dependencies.va_list]
+version = "0.2.0"
+optional = true
+
 [features]
 default = ["rayon", "mimalloc"]
-__ffmpeg = ["dep:rusty_ffmpeg"]
+__ffmpeg = ["dep:rusty_ffmpeg", "dep:va_list"]
 mimalloc = ["dep:mimalloc"]
 rayon = ["dep:rayon", "jxl-oxide/rayon"]
 __devtools = []
