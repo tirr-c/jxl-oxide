@@ -6,6 +6,7 @@ use std::{
 use jxl_oxide::{PixelFormat, Render};
 use rusty_ffmpeg::ffi as ffmpeg;
 
+use super::FfmpegErrorExt;
 use crate::{Error, Result};
 
 trait BufTypeHelp: Copy {
@@ -49,7 +50,7 @@ impl<W: Write + Seek> VideoContext<W> {
             loop {
                 let output_fmt = ffmpeg::av_muxer_iterate(&mut it);
                 if output_fmt.is_null() {
-                    return Err(Error::WriteVideo("output format mp4 not found"));
+                    return Err(Error::from_ffmpeg_msg("output format mp4 not found"));
                 }
                 let name = std::ffi::CStr::from_ptr((*output_fmt).name);
                 if name == c"mp4" {
@@ -96,7 +97,7 @@ impl<W: Write + Seek> VideoContext<W> {
             );
             if ctx.is_null() {
                 ffmpeg::av_free(buffer as *mut _);
-                return Err(Error::WriteVideo("failed to allocate avio context"));
+                return Err(Error::from_ffmpeg_msg("failed to allocate avio context"));
             }
             ctx
         };
@@ -105,7 +106,9 @@ impl<W: Write + Seek> VideoContext<W> {
         let muxer_ctx = unsafe {
             let ctx_ptr = ffmpeg::avformat_alloc_context();
             if ctx_ptr.is_null() {
-                return Err(Error::WriteVideo("failed to allocate avformat context"));
+                return Err(Error::from_ffmpeg_msg(
+                    "failed to allocate avformat context",
+                ));
             }
 
             let ctx = &mut *ctx_ptr;
@@ -193,7 +196,7 @@ impl<W> VideoContext<W> {
             PixelFormat::Gray | PixelFormat::Graya => ffmpeg::AV_PIX_FMT_GRAY16,
             PixelFormat::Rgb | PixelFormat::Rgba => ffmpeg::AV_PIX_FMT_RGB48,
             PixelFormat::Cmyk | PixelFormat::Cmyka => {
-                return Err(Error::WriteVideo("CMYK not supported"))
+                return Err(Error::from_ffmpeg_msg("CMYK not supported"))
             }
         };
 
@@ -226,13 +229,13 @@ impl<W> VideoContext<W> {
                     codec = ffmpeg::avcodec_find_encoder_by_name(c"libx265".as_ptr());
                 }
                 if codec.is_null() {
-                    return Err(Error::WriteVideo("codec for HDR not found"));
+                    return Err(Error::from_ffmpeg_msg("codec for HDR not found"));
                 }
                 codec
             } else {
                 let codec = ffmpeg::avcodec_find_encoder_by_name(c"libx264".as_ptr());
                 if codec.is_null() {
-                    return Err(Error::WriteVideo("codec libx264 not found"));
+                    return Err(Error::from_ffmpeg_msg("codec libx264 not found"));
                 }
                 codec
             }
@@ -242,7 +245,7 @@ impl<W> VideoContext<W> {
         let video_ctx = unsafe {
             let ctx = ffmpeg::avcodec_alloc_context3(self.video_codec);
             if ctx.is_null() {
-                return Err(Error::WriteVideo("failed to allocate avcodec context"));
+                return Err(Error::from_ffmpeg_msg("failed to allocate avcodec context"));
             }
             ctx
         };
@@ -251,7 +254,7 @@ impl<W> VideoContext<W> {
         let video_stream = unsafe {
             let stream = ffmpeg::avformat_new_stream(self.muxer_ctx, self.video_codec);
             if stream.is_null() {
-                return Err(Error::WriteVideo("failed to add stream to format"));
+                return Err(Error::from_ffmpeg_msg("failed to add stream to format"));
             }
             stream
         };
@@ -260,7 +263,7 @@ impl<W> VideoContext<W> {
         let packet_ptr = unsafe {
             let packet = ffmpeg::av_packet_alloc();
             if packet.is_null() {
-                return Err(Error::WriteVideo("failed to allocate packet"));
+                return Err(Error::from_ffmpeg_msg("failed to allocate packet"));
             }
             packet
         };
@@ -361,15 +364,10 @@ impl<W> VideoContext<W> {
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"18".as_ptr(), 0);
             }
 
-            let ret = ffmpeg::avcodec_open2(video_ctx, self.video_codec, std::ptr::null_mut());
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
-
-            let ret = ffmpeg::avcodec_parameters_from_context(video_stream.codecpar, video_ctx);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::avcodec_open2(video_ctx, self.video_codec, std::ptr::null_mut())
+                .into_ffmpeg_result()?;
+            ffmpeg::avcodec_parameters_from_context(video_stream.codecpar, video_ctx)
+                .into_ffmpeg_result()?;
         }
 
         let source_frame_ptr = Self::init_frame(|frame| {
@@ -395,10 +393,8 @@ impl<W> VideoContext<W> {
         self.video_frame_ptr = video_frame_ptr;
 
         unsafe {
-            let ret = ffmpeg::avformat_write_header(self.muxer_ctx, std::ptr::null_mut());
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::avformat_write_header(self.muxer_ctx, std::ptr::null_mut())
+                .into_ffmpeg_result()?;
         }
 
         Ok(())
@@ -408,7 +404,7 @@ impl<W> VideoContext<W> {
         let mut frame_ptr = unsafe {
             let frame_ptr = ffmpeg::av_frame_alloc();
             if frame_ptr.is_null() {
-                return Err(Error::WriteVideo("failed to allocate frame"));
+                return Err(Error::from_ffmpeg_msg("failed to allocate frame"));
             }
             frame_ptr
         };
@@ -417,10 +413,9 @@ impl<W> VideoContext<W> {
             let frame = &mut *frame_ptr;
             config_fn(frame);
 
-            let ret = ffmpeg::av_frame_get_buffer(frame_ptr, 0);
-            if ret < 0 {
+            if let Err(e) = ffmpeg::av_frame_get_buffer(frame_ptr, 0).into_ffmpeg_result() {
                 ffmpeg::av_frame_free(&mut frame_ptr);
-                return Err(Error::Ffmpeg(ret));
+                return Err(e);
             }
         }
 
@@ -429,10 +424,7 @@ impl<W> VideoContext<W> {
 
     fn push_frame(&mut self) -> Result<()> {
         unsafe {
-            let ret = ffmpeg::av_frame_make_writable(self.video_frame_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_frame_make_writable(self.video_frame_ptr).into_ffmpeg_result()?;
 
             self.filters
                 .filter(self.source_frame_ptr as *const _, self.video_frame_ptr)?;
@@ -456,18 +448,21 @@ impl<W> VideoContext<W> {
     unsafe fn send_frame(&mut self, frame_ptr: *mut ffmpeg::AVFrame) -> Result<()> {
         let start = std::time::Instant::now();
 
-        let ret = ffmpeg::avcodec_send_frame(self.video_ctx, frame_ptr);
-        if ret < 0 {
-            return Err(Error::Ffmpeg(ret));
-        }
+        ffmpeg::avcodec_send_frame(self.video_ctx, frame_ptr).into_ffmpeg_result()?;
 
         loop {
-            let ret = ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr);
-            if ret == ffmpeg::AVERROR(ffmpeg::EAGAIN) || ret == ffmpeg::AVERROR_EOF {
-                break;
-            }
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
+            match ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr)
+                .into_ffmpeg_result()
+            {
+                Err(Error::Ffmpeg {
+                    averror: Some(e), ..
+                }) if e == ffmpeg::AVERROR(ffmpeg::EAGAIN) || e == ffmpeg::AVERROR_EOF => {
+                    break;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+                Ok(_) => {}
             }
 
             ffmpeg::av_packet_rescale_ts(
@@ -477,10 +472,7 @@ impl<W> VideoContext<W> {
             );
             (*self.packet_ptr).stream_index = (*self.video_stream).index;
 
-            let ret = ffmpeg::av_write_frame(self.muxer_ctx, self.packet_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_write_frame(self.muxer_ctx, self.packet_ptr).into_ffmpeg_result()?;
         }
 
         let elapsed = start.elapsed();
@@ -498,12 +490,12 @@ impl<W> VideoContext<W> {
         description: impl std::fmt::Display,
     ) -> Result<()> {
         if self.video_ctx.is_null() {
-            return Err(Error::WriteVideo("video context not initialized"));
+            return Err(Error::from_ffmpeg_msg("video context not initialized"));
         }
 
         let description = format!("{}\0", description);
         let c_description = CStr::from_bytes_with_nul(description.as_bytes())
-            .map_err(|_| Error::WriteVideo("invalid description"))?;
+            .map_err(|_| Error::from_ffmpeg_msg("invalid description"))?;
 
         let frame_ptr = self.source_frame_ptr;
         let channels = unsafe {
@@ -519,10 +511,7 @@ impl<W> VideoContext<W> {
         let height = stream.height() as usize;
 
         let (data, linesize) = unsafe {
-            let ret = ffmpeg::av_frame_make_writable(frame_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_frame_make_writable(frame_ptr).into_ffmpeg_result()?;
 
             (*frame_ptr).pts = self.pts as i64;
             ((*frame_ptr).data, (*frame_ptr).linesize)
@@ -557,12 +546,12 @@ impl<W> VideoContext<W> {
 
     pub fn write_empty_frame(&mut self, description: impl std::fmt::Display) -> Result<()> {
         if self.video_ctx.is_null() {
-            return Err(Error::WriteVideo("video context not initialized"));
+            return Err(Error::from_ffmpeg_msg("video context not initialized"));
         }
 
         let description = format!("{}\0", description);
         let c_description = CStr::from_bytes_with_nul(description.as_bytes())
-            .map_err(|_| Error::WriteVideo("invalid description"))?;
+            .map_err(|_| Error::from_ffmpeg_msg("invalid description"))?;
 
         let frame_ptr = self.source_frame_ptr;
         let channels = unsafe {
@@ -575,10 +564,7 @@ impl<W> VideoContext<W> {
         let video_height = unsafe { (*frame_ptr).height } as usize;
 
         let (data, linesize) = unsafe {
-            let ret = ffmpeg::av_frame_make_writable(frame_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_frame_make_writable(frame_ptr).into_ffmpeg_result()?;
 
             (*frame_ptr).pts = self.pts as i64;
             ((*frame_ptr).data, (*frame_ptr).linesize)
@@ -613,10 +599,7 @@ impl<W> VideoContext<W> {
         tracing::info!("Flushing video");
         unsafe {
             self.send_frame(std::ptr::null_mut())?;
-            let ret = ffmpeg::av_write_trailer(self.muxer_ctx);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_write_trailer(self.muxer_ctx).into_ffmpeg_result()?;
         }
         Ok(())
     }

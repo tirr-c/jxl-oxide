@@ -7,6 +7,21 @@ mod filter;
 
 pub use context::VideoContext;
 
+trait FfmpegErrorExt {
+    fn into_ffmpeg_result(self) -> crate::Result<()>;
+}
+
+impl FfmpegErrorExt for c_int {
+    #[inline]
+    fn into_ffmpeg_result(self) -> crate::Result<()> {
+        if self < 0 {
+            Err(crate::Error::from_averror(self))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[allow(improper_ctypes_definitions)]
 unsafe extern "C" fn jxl_oxide_ffmpeg_log(
     avcl: *mut c_void,

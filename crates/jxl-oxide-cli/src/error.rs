@@ -7,9 +7,30 @@ pub enum Error {
     WriteImage(std::io::Error),
     Render(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[cfg(feature = "__ffmpeg")]
-    Ffmpeg(std::ffi::c_int),
+    Ffmpeg {
+        msg: Option<&'static str>,
+        averror: Option<std::ffi::c_int>,
+    },
+}
+
+impl Error {
     #[cfg(feature = "__ffmpeg")]
-    WriteVideo(&'static str),
+    #[inline]
+    pub(crate) fn from_averror(averror: std::ffi::c_int) -> Self {
+        Self::Ffmpeg {
+            msg: None,
+            averror: Some(averror),
+        }
+    }
+
+    #[cfg(feature = "__ffmpeg")]
+    #[inline]
+    pub(crate) fn from_ffmpeg_msg(msg: &'static str) -> Self {
+        Self::Ffmpeg {
+            msg: Some(msg),
+            averror: None,
+        }
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -21,12 +42,24 @@ impl std::fmt::Display for Error {
             Error::WriteImage(e) => write!(f, "failed writing output image: {e}"),
             Error::Render(e) => write!(f, "failed to render image: {e}"),
             #[cfg(feature = "__ffmpeg")]
-            Error::Ffmpeg(averror) => {
-                let e = rusty_ffmpeg::ffi::av_err2str(*averror);
-                write!(f, "FFmpeg error: {e}")
+            Error::Ffmpeg { msg, averror } => {
+                write!(f, "FFmpeg error")?;
+                let e = averror.map(rusty_ffmpeg::ffi::av_err2str);
+                match (msg, e) {
+                    (None, None) => {}
+                    (Some(msg), None) => {
+                        write!(f, ": {msg}")?;
+                    }
+                    (None, Some(e)) => {
+                        write!(f, ": {e}")?;
+                    }
+                    (Some(msg), Some(e)) => {
+                        write!(f, ": {msg} ({e})")?;
+                    }
+                }
+
+                Ok(())
             }
-            #[cfg(feature = "__ffmpeg")]
-            Error::WriteVideo(e) => write!(f, "failed to write video: {e}"),
         }
     }
 }
@@ -40,7 +73,7 @@ impl std::error::Error for Error {
             Error::WriteImage(e) => Some(e),
             Error::Render(e) => Some(&**e),
             #[cfg(feature = "__ffmpeg")]
-            Error::Ffmpeg(_) | Error::WriteVideo(_) => None,
+            Error::Ffmpeg { .. } => None,
         }
     }
 }

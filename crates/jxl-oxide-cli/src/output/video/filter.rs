@@ -2,6 +2,7 @@ use std::ffi::{c_int, CStr};
 
 use rusty_ffmpeg::ffi as ffmpeg;
 
+use super::FfmpegErrorExt;
 use crate::{Error, Result};
 
 pub(super) struct VideoFilter {
@@ -27,7 +28,7 @@ impl VideoFilter {
         let filter = ffmpeg::avfilter_get_by_name(filter.as_ptr());
         if filter.is_null() {
             tracing::error!(name = ?filter, "filter not found");
-            return Err(Error::WriteVideo("filter not found"));
+            return Err(Error::from_ffmpeg_msg("filter not found"));
         }
 
         let filter_ctx = ffmpeg::avfilter_graph_alloc_filter(
@@ -37,7 +38,7 @@ impl VideoFilter {
         );
         if filter_ctx.is_null() {
             tracing::error!(filter_name = ?filter, ?name, "cannot allocate filter");
-            return Err(Error::WriteVideo("cannot allocate filter"));
+            return Err(Error::from_ffmpeg_msg("cannot allocate filter"));
         }
 
         Ok(filter_ctx)
@@ -60,7 +61,7 @@ impl VideoFilter {
 
         let graph_ptr = unsafe { ffmpeg::avfilter_graph_alloc() };
         if graph_ptr.is_null() {
-            return Err(Error::WriteVideo("failed to allocate filter graph"));
+            return Err(Error::from_ffmpeg_msg("failed to allocate filter graph"));
         }
         self.graph_ptr = graph_ptr;
 
@@ -86,11 +87,9 @@ impl VideoFilter {
                 0,
             );
             ffmpeg::av_dict_set(&mut params, c"time_base".as_ptr(), c"1/30".as_ptr(), 0);
-            let ret = ffmpeg::avfilter_init_dict(filter_ctx, &mut params);
+            let result = ffmpeg::avfilter_init_dict(filter_ctx, &mut params).into_ffmpeg_result();
             ffmpeg::av_dict_free(&mut params);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            result?;
 
             filter_ctx
         };
@@ -122,11 +121,9 @@ impl VideoFilter {
             ffmpeg::av_dict_set_int(&mut params, c"fontsize".as_ptr(), fontsize as i64, 0);
             ffmpeg::av_dict_set_int(&mut params, c"borderw".as_ptr(), borderw, 0);
             ffmpeg::av_dict_set(&mut params, c"font".as_ptr(), font.as_ptr(), 0);
-            let ret = ffmpeg::avfilter_init_dict(filter_ctx, &mut params);
+            let result = ffmpeg::avfilter_init_dict(filter_ctx, &mut params).into_ffmpeg_result();
             ffmpeg::av_dict_free(&mut params);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            result?;
 
             filter_ctx
         };
@@ -134,66 +131,46 @@ impl VideoFilter {
         let output_ctx = unsafe {
             let filter_ctx = self.alloc_filter(c"buffersink", None)?;
 
-            let ret = ffmpeg::avfilter_init_str(filter_ctx, std::ptr::null());
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::avfilter_init_str(filter_ctx, std::ptr::null()).into_ffmpeg_result()?;
 
             let pix_fmts = [video_pix_fmt];
             let color_spaces = [video_colorspace];
             let color_ranges = [video_color_range];
 
-            let ret = ffmpeg::av_opt_set_bin(
+            ffmpeg::av_opt_set_bin(
                 filter_ctx as *mut _,
                 c"pix_fmts".as_ptr(),
                 pix_fmts.as_ptr() as *const _,
                 size_of_val(&pix_fmts[0]) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
-            );
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            )
+            .into_ffmpeg_result()?;
 
-            let ret = ffmpeg::av_opt_set_bin(
+            ffmpeg::av_opt_set_bin(
                 filter_ctx as *mut _,
                 c"color_spaces".as_ptr(),
                 color_spaces.as_ptr() as *const _,
                 size_of_val(&color_spaces[0]) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
-            );
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            )
+            .into_ffmpeg_result()?;
 
-            let ret = ffmpeg::av_opt_set_bin(
+            ffmpeg::av_opt_set_bin(
                 filter_ctx as *mut _,
                 c"color_ranges".as_ptr(),
                 color_ranges.as_ptr() as *const _,
                 size_of_val(&color_ranges[0]) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
-            );
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            )
+            .into_ffmpeg_result()?;
 
             filter_ctx
         };
 
         unsafe {
-            let ret = ffmpeg::avfilter_link(input_ctx, 0, drawtext_ctx, 0);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
-
-            let ret = ffmpeg::avfilter_link(drawtext_ctx, 0, output_ctx, 0);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
-
-            let ret = ffmpeg::avfilter_graph_config(graph_ptr, std::ptr::null_mut());
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::avfilter_link(input_ctx, 0, drawtext_ctx, 0).into_ffmpeg_result()?;
+            ffmpeg::avfilter_link(drawtext_ctx, 0, output_ctx, 0).into_ffmpeg_result()?;
+            ffmpeg::avfilter_graph_config(graph_ptr, std::ptr::null_mut()).into_ffmpeg_result()?;
         }
 
         self.input_ctx = input_ctx;
@@ -217,15 +194,10 @@ impl VideoFilter {
         dest_frame_ptr: *mut ffmpeg::AVFrame,
     ) -> Result<()> {
         unsafe {
-            let ret = ffmpeg::av_buffersrc_write_frame(self.input_ctx, source_frame_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
-
-            let ret = ffmpeg::av_buffersink_get_frame(self.output_ctx, dest_frame_ptr);
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            ffmpeg::av_buffersrc_write_frame(self.input_ctx, source_frame_ptr)
+                .into_ffmpeg_result()?;
+            ffmpeg::av_buffersink_get_frame(self.output_ctx, dest_frame_ptr)
+                .into_ffmpeg_result()?;
         }
 
         Ok(())
@@ -233,7 +205,7 @@ impl VideoFilter {
 
     pub fn update_text(&mut self, text: &CStr) -> Result<()> {
         unsafe {
-            let ret = ffmpeg::avfilter_graph_send_command(
+            ffmpeg::avfilter_graph_send_command(
                 self.graph_ptr,
                 c"text".as_ptr(),
                 c"text".as_ptr(),
@@ -241,10 +213,8 @@ impl VideoFilter {
                 std::ptr::null_mut(),
                 0,
                 0,
-            );
-            if ret < 0 {
-                return Err(Error::Ffmpeg(ret));
-            }
+            )
+            .into_ffmpeg_result()?;
         }
         Ok(())
     }
