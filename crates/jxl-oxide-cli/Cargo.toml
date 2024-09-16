@@ -23,6 +23,11 @@ tracing.workspace = true
 version = "4.5.1"
 features = ["derive"]
 
+[dependencies.jxl-color]
+version = "0.8.0"
+path = "../jxl-color"
+optional = true
+
 [dependencies.jxl-oxide]
 version = "0.9.0"
 path = "../jxl-oxide"
@@ -52,7 +57,7 @@ optional = true
 
 [features]
 default = ["rayon", "mimalloc"]
-__ffmpeg = ["dep:rusty_ffmpeg", "dep:va_list"]
+__ffmpeg = ["dep:rusty_ffmpeg", "dep:va_list", "dep:jxl-color"]
 mimalloc = ["dep:mimalloc"]
 rayon = ["dep:rayon", "jxl-oxide/rayon"]
 __devtools = []

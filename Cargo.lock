@@ -845,6 +845,7 @@ name = "jxl-oxide-cli"
 version = "0.9.0"
 dependencies = [
  "clap",
+ "jxl-color",
  "jxl-oxide",
  "lcms2",
  "mimalloc",

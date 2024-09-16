@@ -22,8 +22,8 @@ impl OutputType {
     }
 
     #[cfg(feature = "__ffmpeg")]
-    fn mp4(output_path: impl AsRef<Path>, font: &str) -> Result<Self> {
-        mp4::Context::new(output_path, font).map(Self::Mp4)
+    fn mp4(output_path: impl AsRef<Path>, cll: Option<(f32, f32)>, font: &str) -> Result<Self> {
+        mp4::Context::new(output_path, cll, font).map(Self::Mp4)
     }
 }
 
@@ -150,6 +150,9 @@ impl std::fmt::Display for LoadProgress {
 }
 
 pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
+    #[cfg(feature = "__ffmpeg")]
+    use jxl_color::{ColorEncodingWithProfile, EnumColourEncoding};
+
     let _guard = tracing::trace_span!("Handle progressive subcommand").entered();
 
     #[cfg(feature = "rayon")]
@@ -169,7 +172,62 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut output_ctx = match output_dir {
         Some(path) => Some(match path.extension() {
             #[cfg(feature = "__ffmpeg")]
-            Some(ext) if ext == "mp4" => OutputType::mp4(path, &args.font)?,
+            Some(ext) if ext == "mp4" => {
+                let mut full_image = JxlImage::builder()
+                    .pool(pool.clone())
+                    .open(&args.input)
+                    .map_err(Error::ReadJxl)?;
+                let cll = if full_image.is_hdr() {
+                    tracing::info!("Computing MaxCLL and MaxFALL");
+
+                    let pq_rel =
+                        EnumColourEncoding::bt2100_pq(jxl_color::RenderingIntent::Relative);
+                    full_image.request_color_encoding(pq_rel.clone());
+
+                    let metadata = &full_image.image_header().metadata;
+                    let render = full_image.render_frame(0).map_err(Error::ReadJxl)?;
+                    let transformer = jxl_color::ColorTransformBuilder::new()
+                        .build(
+                            &ColorEncodingWithProfile::new(pq_rel),
+                            &ColorEncodingWithProfile::new(EnumColourEncoding {
+                                tf: jxl_color::TransferFunction::Linear,
+                                ..EnumColourEncoding::gray_srgb(
+                                    jxl_color::RenderingIntent::Relative,
+                                )
+                            }),
+                            &metadata.opsin_inverse_matrix,
+                            &metadata.tone_mapping,
+                        )
+                        .unwrap();
+
+                    let mut buf = render
+                        .image_planar()
+                        .into_iter()
+                        .map(|buf| buf.buf().to_vec())
+                        .collect::<Vec<_>>();
+                    let mut buf_slice = buf.iter_mut().map(|buf| &mut **buf).collect::<Vec<_>>();
+                    transformer
+                        .run_with_threads(&mut buf_slice, &jxl_color::NullCms, &pool)
+                        .unwrap();
+
+                    let sample_count = buf[0].len();
+                    let (max, sum) = buf[0]
+                        .iter()
+                        .fold((0f32, 0f32), |(max, sum), &l| (max.max(l), sum + l));
+                    let avg = sum / sample_count as f32;
+
+                    let intensity_target = metadata.tone_mapping.intensity_target;
+                    let max = max * intensity_target;
+                    let avg = avg * intensity_target;
+
+                    tracing::info!(max_cll = max, max_fall = avg);
+                    Some((max, avg))
+                } else {
+                    None
+                };
+
+                OutputType::mp4(path, cll, &args.font)?
+            }
             #[cfg(not(feature = "__ffmpeg"))]
             Some(ext) if ext == "mp4" => {
                 tracing::warn!("FFmpeg support is not active; will output as PNG sequence");
