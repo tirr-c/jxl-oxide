@@ -8,6 +8,22 @@ use rusty_ffmpeg::ffi as ffmpeg;
 
 use crate::{Error, Result};
 
+trait BufTypeHelp: Copy {
+    fn as_const(self) -> *const u8;
+}
+
+impl BufTypeHelp for *const u8 {
+    fn as_const(self) -> *const u8 {
+        self
+    }
+}
+
+impl BufTypeHelp for *mut u8 {
+    fn as_const(self) -> *const u8 {
+        self as *const u8
+    }
+}
+
 pub struct VideoContext<W> {
     writer_ptr: *mut W,
     avio_ctx: *mut ffmpeg::AVIOContext,
@@ -103,11 +119,12 @@ impl<W: Write + Seek> VideoContext<W> {
         Ok(output)
     }
 
-    unsafe extern "C" fn cb_write_packet(
+    unsafe extern "C" fn cb_write_packet<Buf: BufTypeHelp>(
         opaque: *mut c_void,
-        buf: *const u8,
+        buf: Buf,
         buf_size: c_int,
     ) -> c_int {
+        let buf = buf.as_const();
         let result = std::panic::catch_unwind(|| {
             let buf = std::slice::from_raw_parts(buf, buf_size as usize);
             let writer = &mut *(opaque as *mut W);

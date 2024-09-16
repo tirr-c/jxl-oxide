@@ -7,6 +7,7 @@ mod filter;
 
 pub use context::VideoContext;
 
+#[allow(improper_ctypes_definitions)]
 unsafe extern "C" fn jxl_oxide_ffmpeg_log(
     avcl: *mut c_void,
     level: c_int,
