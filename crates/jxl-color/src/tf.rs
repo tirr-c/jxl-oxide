@@ -123,6 +123,11 @@ pub fn hlg_inverse_oo(
     [lr, lg, lb]: [f32; 3],
     intensity_target: f32,
 ) {
+    // System gamma results to ~1 in this range.
+    if (295.0..=305.0).contains(&intensity_target) {
+        return;
+    }
+
     let gamma = 1.2f32 * 1.111f32.powf((intensity_target / 1e3).log2());
     // 1/g - 1
     let exp = (1.0 - gamma) / gamma;

@@ -810,6 +810,7 @@ impl RenderContext {
 
             let mut transform = jxl_color::ColorTransform::builder();
             transform.set_srgb_icc(!self.cms.supports_linear_tf());
+            transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
             let transform = transform.build(
                 &frame_color_encoding,
                 &self.requested_color_encoding,
