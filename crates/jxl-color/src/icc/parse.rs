@@ -555,15 +555,9 @@ pub(crate) fn parse_icc(profile: &[u8]) -> Result<EnumColourEncoding> {
     }
 }
 
-/// Checks whether a ICC profile has CICP tag with HDR transfer function.
-pub fn is_hdr(profile: &[u8]) -> Result<bool> {
-    let profile = parse_icc_raw(profile)?;
-    for tag in profile.tags {
-        if &tag.tag == b"cicp" && matches!(tag.data.get(1), Some(16 | 18)) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+#[inline]
+pub fn icc_tf(profile: &[u8]) -> Option<TransferFunction> {
+    parse_icc(profile).ok().map(|profile| profile.tf)
 }
 
 #[cfg(test)]
