@@ -85,6 +85,70 @@ impl OutputType {
     }
 }
 
+struct LoadProgress {
+    iter: usize,
+    unit_step: usize,
+    current_step: usize,
+    bytes_read: usize,
+    total_bytes: usize,
+}
+
+impl LoadProgress {
+    fn new(unit_step: usize, total_bytes: usize) -> Self {
+        Self {
+            iter: 0,
+            unit_step,
+            current_step: unit_step,
+            bytes_read: 0,
+            total_bytes,
+        }
+    }
+
+    #[inline]
+    fn add_iter(&mut self, bytes_read: usize) {
+        self.bytes_read += bytes_read;
+        self.iter += 1;
+    }
+
+    #[inline]
+    fn double_step(&mut self) -> usize {
+        self.current_step = (self.current_step * 2).min(self.step_cap());
+        self.current_step
+    }
+
+    #[inline]
+    fn iter(&self) -> usize {
+        self.iter
+    }
+
+    #[inline]
+    fn current_step(&self) -> usize {
+        self.current_step
+    }
+
+    #[inline]
+    fn step_cap(&self) -> usize {
+        self.total_bytes.div_ceil(self.unit_step * 100) * self.unit_step
+    }
+
+    #[inline]
+    fn progress(&self) -> f64 {
+        self.bytes_read as f64 / self.total_bytes as f64
+    }
+}
+
+impl std::fmt::Display for LoadProgress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let step = self.current_step;
+        if self.total_bytes > 0 {
+            let percentage = self.progress() * 100.0;
+            write!(f, "{percentage:.2}\\% loaded ({step} bytes/frame)")
+        } else {
+            write!(f, "{step} bytes/frame")
+        }
+    }
+}
+
 pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle progressive subcommand").entered();
 
@@ -98,13 +162,8 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut input = std::fs::File::open(&args.input).map_err(|e| Error::ReadJxl(e.into()))?;
     let total_bytes = input.metadata().map(|meta| meta.len()).unwrap_or(0);
 
-    let init_step = args.step as usize;
-    let step_cap = total_bytes.div_ceil(args.step * 100) as usize * init_step;
-
-    let mut step = init_step;
-    let mut buf = vec![0u8; step];
-    let mut idx = 0usize;
-    let mut bytes_read = 0usize;
+    let mut progress = LoadProgress::new(args.step as usize, total_bytes as usize);
+    let mut buf = vec![0u8; progress.current_step()];
 
     let output_dir = args.output.as_deref();
     let mut output_ctx = match output_dir {
@@ -124,18 +183,18 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
         }
     };
 
+    let mut empty_frame_desc = Vec::<String>::new();
     let mut image = loop {
-        let current_iter = idx;
+        let current_iter = progress.iter();
 
         let buf = fill_buf(&mut input, &mut buf)?;
         if buf.is_empty() {
             tracing::warn!("Partial image");
             return Ok(());
         }
-        bytes_read += buf.len();
+        progress.add_iter(buf.len());
 
         uninit_image.feed_bytes(buf).map_err(Error::ReadJxl)?;
-        idx += 1;
         let init_result = uninit_image.try_init().map_err(Error::ReadJxl)?;
         match init_result {
             jxl_oxide::InitializeResult::NeedMoreData(image) => uninit_image = image,
@@ -143,52 +202,39 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
                 if let Some(output) = &mut output_ctx {
                     output.prepare_image(&mut image);
 
-                    let step = args.step as usize;
-                    for idx in 0..current_iter {
-                        let mut description = progress_desc(step * idx, step, total_bytes as usize);
-                        description.push_str("no frames loaded");
+                    for mut description in empty_frame_desc {
+                        description.push_str("\nno frames loaded");
                         output.add_empty_frame(&image, description)?;
                     }
                 }
-                run_once(
-                    &mut image,
-                    current_iter,
-                    bytes_read,
-                    step,
-                    total_bytes as usize,
-                    output_ctx.as_mut(),
-                )?;
+                run_once(&mut image, &progress, output_ctx.as_mut())?;
                 break image;
             }
         }
 
+        empty_frame_desc.push(progress.to_string());
         tracing::info!("Iteration {current_iter} didn't produce an image");
     };
 
     loop {
-        let current_iter = idx;
-        if current_iter >= 120 && current_iter % 60 == 0 && step < step_cap {
-            step = (step * 2).min(step_cap);
-            buf.resize(step, 0);
-            tracing::info!(step, "Increasing step size");
+        let current_iter = progress.iter();
+        if current_iter >= 120 && current_iter % 60 == 0 {
+            let prev_step = progress.current_step();
+            let new_step = progress.double_step();
+            if prev_step != new_step {
+                buf.resize(new_step, 0);
+                tracing::info!(new_step, "Increasing step size");
+            }
         }
 
         let buf = fill_buf(&mut input, &mut buf)?;
         if buf.is_empty() {
             break;
         }
-        bytes_read += buf.len();
+        progress.add_iter(buf.len());
 
         image.feed_bytes(buf).map_err(Error::ReadJxl)?;
-        idx += 1;
-        run_once(
-            &mut image,
-            current_iter,
-            bytes_read,
-            step,
-            total_bytes as usize,
-            output_ctx.as_mut(),
-        )?;
+        run_once(&mut image, &progress, output_ctx.as_mut())?;
     }
 
     if !image.is_loading_done() {
@@ -204,35 +250,11 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     Ok(())
 }
 
-fn progress_desc(byte_offset: usize, step: usize, total_bytes: usize) -> String {
-    use std::fmt::Write;
-
-    let mut description = String::new();
-    if total_bytes > 0 {
-        let progress = byte_offset as f64 / total_bytes as f64;
-        let percentage = progress * 100.0;
-        writeln!(
-            &mut description,
-            "{percentage:.2}\\% loaded ({step} bytes/frame)"
-        )
-        .ok();
-    } else {
-        writeln!(&mut description, "{step} bytes/frame").ok();
-    }
-
-    description
-}
-
 fn run_once(
     image: &mut JxlImage,
-    current_iter: usize,
-    byte_offset: usize,
-    step: usize,
-    total_bytes: usize,
+    progress: &LoadProgress,
     output_ctx: Option<&mut OutputType>,
 ) -> Result<()> {
-    use std::fmt::Write;
-
     match (image.num_loaded_keyframes(), image.is_loading_done()) {
         (0, false) | (1, true) => {}
         _ => {
@@ -243,7 +265,7 @@ fn run_once(
         }
     }
 
-    let mut description = progress_desc(byte_offset, step, total_bytes);
+    let current_iter = progress.iter() - 1;
 
     let loaded_frames = image.num_loaded_frames();
     let last_frame = image.frame(loaded_frames).or_else(|| {
@@ -251,33 +273,16 @@ fn run_once(
             .checked_sub(1)
             .and_then(|idx| image.frame(idx))
     });
-    if let Some(frame) = last_frame {
+    let load_position_str = if let Some(frame) = last_frame {
         let idx = frame.index();
-        let frame_offset = image.frame_offset(idx).unwrap();
-        let offset_within_frame = byte_offset - frame_offset;
-        let toc = frame.toc();
-        let current_group = toc
-            .iter_bitstream_order()
-            .take_while(|group| offset_within_frame >= group.offset)
-            .last();
-
-        if let Some(current_group) = current_group {
-            if offset_within_frame >= current_group.offset + current_group.size as usize {
-                write!(&mut description, "frame #{idx} fully loaded").ok();
-            } else {
-                write!(
-                    &mut description,
-                    "frame #{idx} decoding {:?}",
-                    current_group.kind
-                )
-                .ok();
-            }
+        if let Some(current_group) = frame.current_loading_group() {
+            format!("frame #{idx} decoding {:?}", current_group.kind)
         } else {
-            write!(&mut description, "frame #{idx} parsing header").ok();
+            format!("frame #{idx} fully loaded")
         }
     } else {
-        write!(&mut description, "no frames loaded").ok();
-    }
+        String::from("no frames loaded")
+    };
 
     fn run_inner(image: &mut JxlImage) -> Result<Option<Render>> {
         Ok(if image.is_loading_done() {
@@ -308,14 +313,18 @@ fn run_once(
             "Iteration {current_iter} took {elapsed_msecs:.2} ms; didn't produce an image"
         );
         if let Some(output_ctx) = output_ctx {
-            output_ctx.add_empty_frame(image, description)?;
+            output_ctx.add_empty_frame(image, format_args!("{progress}\n{load_position_str}"))?;
         }
         return Ok(());
     };
 
     tracing::info!("Iteration {current_iter} took {elapsed_msecs:.2} ms");
     if let Some(output_ctx) = output_ctx {
-        output_ctx.add_frame(image, &render, description)?;
+        output_ctx.add_frame(
+            image,
+            &render,
+            format_args!("{progress}\n{load_position_str}"),
+        )?;
     }
 
     Ok(())
