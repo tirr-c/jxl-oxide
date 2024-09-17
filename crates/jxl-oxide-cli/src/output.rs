@@ -2,6 +2,11 @@ use std::io::prelude::*;
 
 use jxl_oxide::{FrameBuffer, JxlImage, PixelFormat, Render};
 
+#[cfg(feature = "__ffmpeg")]
+mod video;
+#[cfg(feature = "__ffmpeg")]
+pub(crate) use video::VideoContext;
+
 pub(crate) fn write_png<W: Write>(
     output: W,
     image: &JxlImage,

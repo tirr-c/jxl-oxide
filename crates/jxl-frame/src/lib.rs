@@ -271,6 +271,11 @@ impl Frame {
     }
 
     #[inline]
+    pub fn current_loading_group(&self) -> Option<TocGroup> {
+        self.toc.iter_bitstream_order().nth(self.reading_data_index)
+    }
+
+    #[inline]
     pub fn is_loading_done(&self) -> bool {
         self.reading_data_index >= self.data.len()
     }
