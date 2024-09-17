@@ -170,6 +170,21 @@ impl RenderContext {
         self.cms = Box::new(cms);
     }
 
+    pub fn suggested_hdr_tf(&self) -> Option<jxl_color::TransferFunction> {
+        let tf = match &self.image_header.metadata.colour_encoding {
+            jxl_color::ColourEncoding::Enum(e) => e.tf,
+            jxl_color::ColourEncoding::IccProfile(_) => {
+                let icc = self.embedded_icc().unwrap();
+                jxl_color::icc::icc_tf(icc)?
+            }
+        };
+
+        match tf {
+            jxl_color::TransferFunction::Pq | jxl_color::TransferFunction::Hlg => Some(tf),
+            _ => None,
+        }
+    }
+
     #[inline]
     pub fn request_color_encoding(&mut self, encoding: ColorEncodingWithProfile) {
         self.requested_color_encoding = encoding;
@@ -795,6 +810,7 @@ impl RenderContext {
 
             let mut transform = jxl_color::ColorTransform::builder();
             transform.set_srgb_icc(!self.cms.supports_linear_tf());
+            transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
             let transform = transform.build(
                 &frame_color_encoding,
                 &self.requested_color_encoding,

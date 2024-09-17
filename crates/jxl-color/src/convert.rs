@@ -113,6 +113,7 @@ impl ColorEncodingWithProfile {
 pub struct ColorTransformBuilder {
     detect_peak: bool,
     srgb_icc: bool,
+    from_pq: bool,
 }
 
 impl Default for ColorTransformBuilder {
@@ -127,6 +128,7 @@ impl ColorTransformBuilder {
         Self {
             detect_peak: false,
             srgb_icc: false,
+            from_pq: false,
         }
     }
 
@@ -137,6 +139,11 @@ impl ColorTransformBuilder {
 
     pub fn set_srgb_icc(&mut self, value: bool) -> &mut Self {
         self.srgb_icc = value;
+        self
+    }
+
+    pub fn from_pq(&mut self, from_pq: bool) -> &mut Self {
+        self.from_pq = from_pq;
         self
     }
 
@@ -193,6 +200,7 @@ impl ColorTransform {
         let ColorTransformBuilder {
             detect_peak,
             srgb_icc,
+            from_pq,
         } = builder;
         let connecting_tf = if srgb_icc {
             TransferFunction::Srgb
@@ -456,7 +464,7 @@ impl ColorTransform {
         );
         let luminances = [mat[3], mat[4], mat[5]];
 
-        let hdr_params = HdrParams {
+        let mut hdr_params = HdrParams {
             luminances,
             intensity_target,
             min_nits,
@@ -483,6 +491,40 @@ impl ColorTransform {
                     });
                 }
             }
+        }
+
+        // PQ to HLG: tonemap to peak 1000 nits before applying inverse OOTF.
+        if from_pq && target_encoding.tf == TransferFunction::Hlg {
+            if !(999.0..=1001.0).contains(&hdr_params.intensity_target) {
+                if current_encoding.colour_space == ColourSpace::Grey {
+                    ops.push(ColorTransformOp::ToneMapLumaRec2408 {
+                        hdr_params,
+                        target_display_luminance: 1000.0,
+                        detect_peak: false,
+                    });
+                } else {
+                    ops.push(ColorTransformOp::ToneMapRec2408 {
+                        hdr_params,
+                        target_display_luminance: 1000.0,
+                        detect_peak: false,
+                    });
+                }
+
+                hdr_params.intensity_target = 1000.0;
+                ops.push(ColorTransformOp::HlgInverseOotf(hdr_params));
+            }
+
+            if current_encoding.colour_space != ColourSpace::Grey
+                && current_encoding.rendering_intent == RenderingIntent::Perceptual
+            {
+                ops.push(ColorTransformOp::GamutMap {
+                    luminances,
+                    saturation_factor: 0.1,
+                });
+            }
+
+            // Skip inverse OOTF in transfer funcion conversion.
+            hdr_params.intensity_target = 300.0;
         }
 
         if target_encoding.tf != TransferFunction::Linear {
@@ -663,6 +705,7 @@ enum ColorTransformOp {
         hdr_params: HdrParams,
         inverse: bool,
     },
+    HlgInverseOotf(HdrParams),
     ToneMapRec2408 {
         hdr_params: HdrParams,
         target_display_luminance: f32,
@@ -734,6 +777,9 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("target_display_luminance", target_display_luminance)
                 .field("detect_peak", detect_peak)
                 .finish(),
+            Self::HlgInverseOotf(hdr_params) => {
+                f.debug_tuple("HlgInverseOotf").field(hdr_params).finish()
+            }
             Self::GamutMap {
                 luminances,
                 saturation_factor,
@@ -773,6 +819,7 @@ impl ColorTransformOp {
                 ..
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
+            ColorTransformOp::HlgInverseOotf(_) => Some(3),
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
@@ -793,6 +840,7 @@ impl ColorTransformOp {
                 ..
             } => Some(3),
             ColorTransformOp::TransferFunction { .. } => None,
+            ColorTransformOp::HlgInverseOotf(_) => Some(3),
             ColorTransformOp::ToneMapRec2408 { .. } => Some(3),
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
@@ -879,6 +927,18 @@ impl ColorTransformOp {
                     *hdr_params,
                 );
                 num_input_channels
+            }
+            Self::HlgInverseOotf(HdrParams {
+                luminances,
+                intensity_target,
+                ..
+            }) => {
+                // FIXME: allow grayscale images.
+                let [r, g, b, ..] = channels else {
+                    unreachable!()
+                };
+                tf::hlg_inverse_oo([r, g, b], *luminances, *intensity_target);
+                3
             }
             Self::ToneMapRec2408 {
                 hdr_params,

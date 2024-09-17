@@ -622,18 +622,12 @@ impl JxlImage {
         }
     }
 
-    pub fn is_hdr(&self) -> bool {
-        use jxl_color::TransferFunction;
-
-        match &self.image_header.metadata.colour_encoding {
-            color::ColourEncoding::Enum(e) => {
-                matches!(e.tf, TransferFunction::Pq | TransferFunction::Hlg)
-            }
-            color::ColourEncoding::IccProfile(_) => {
-                let icc = self.ctx.embedded_icc().unwrap();
-                jxl_color::icc::is_hdr(icc).unwrap_or(false)
-            }
-        }
+    pub fn hdr_type(&self) -> Option<HdrType> {
+        self.ctx.suggested_hdr_tf().and_then(|tf| match tf {
+            jxl_color::TransferFunction::Pq => Some(HdrType::Pq),
+            jxl_color::TransferFunction::Hlg => Some(HdrType::Hlg),
+            _ => None,
+        })
     }
 
     /// Requests the decoder to render in specific color encoding, described by an ICC profile.
@@ -874,6 +868,15 @@ impl PixelFormat {
     pub fn has_black(self) -> bool {
         matches!(self, PixelFormat::Cmyk | PixelFormat::Cmyka)
     }
+}
+
+/// HDR transfer function type, returned by [`JxlImage::hdr_type`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HdrType {
+    /// Perceptual quantizer.
+    Pq,
+    /// Hybrid log-gamma.
+    Hlg,
 }
 
 /// The result of loading the keyframe.
