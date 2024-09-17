@@ -36,6 +36,7 @@ pub struct VideoContext<W> {
     source_frame_ptr: *mut ffmpeg::AVFrame,
     video_frame_ptr: *mut ffmpeg::AVFrame,
     filters: super::filter::VideoFilter,
+    muxer_use_global_header: bool,
     pts: usize,
 }
 
@@ -59,6 +60,9 @@ impl<W: Write + Seek> VideoContext<W> {
             }
         };
 
+        let muxer_use_global_header =
+            unsafe { (*fmt_mp4).flags as u32 & ffmpeg::AVFMT_GLOBALHEADER != 0 };
+
         let mut output = Self {
             writer_ptr: std::ptr::null_mut(),
             avio_ctx: std::ptr::null_mut(),
@@ -70,6 +74,7 @@ impl<W: Write + Seek> VideoContext<W> {
             source_frame_ptr: std::ptr::null_mut(),
             video_frame_ptr: std::ptr::null_mut(),
             filters: super::filter::VideoFilter::new(),
+            muxer_use_global_header,
             pts: 0,
         };
 
@@ -378,8 +383,13 @@ impl<W> VideoContext<W> {
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"18".as_ptr(), 0);
             }
 
+            if self.muxer_use_global_header {
+                video.flags |= ffmpeg::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
+            }
+
             ffmpeg::avcodec_open2(video_ctx, self.video_codec, std::ptr::null_mut())
                 .into_ffmpeg_result()?;
+
             ffmpeg::avcodec_parameters_from_context(video_stream.codecpar, video_ctx)
                 .into_ffmpeg_result()?;
         }
