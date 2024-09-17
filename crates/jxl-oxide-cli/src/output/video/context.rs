@@ -302,7 +302,10 @@ impl<W> VideoContext<W> {
             video.color_range = video_color_range;
 
             video.time_base = self.filters.time_base();
+            video.framerate = self.filters.frame_rate();
             video_stream.time_base = video.time_base;
+            video_stream.avg_frame_rate = video.framerate;
+            video_stream.r_frame_rate = video.framerate;
 
             if (*video_codec).id == ffmpeg::AV_CODEC_ID_AV1 {
                 ffmpeg::av_opt_set(video.priv_data, c"preset".as_ptr(), c"10".as_ptr(), 0);

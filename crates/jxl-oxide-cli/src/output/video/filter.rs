@@ -88,6 +88,7 @@ impl VideoFilter {
                 0,
             );
             ffmpeg::av_dict_set(&mut params, c"time_base".as_ptr(), c"1/30".as_ptr(), 0);
+            ffmpeg::av_dict_set(&mut params, c"frame_rate".as_ptr(), c"30/1".as_ptr(), 0);
             let result = ffmpeg::avfilter_init_dict(filter_ctx, &mut params).into_ffmpeg_result();
             ffmpeg::av_dict_free(&mut params);
             result?;
@@ -188,6 +189,15 @@ impl VideoFilter {
             ffmpeg::AVRational { num: 0, den: 1 }
         } else {
             unsafe { ffmpeg::av_buffersink_get_time_base(self.output_ctx as *const _) }
+        }
+    }
+
+    #[inline]
+    pub fn frame_rate(&self) -> ffmpeg::AVRational {
+        if self.output_ctx.is_null() {
+            ffmpeg::AVRational { num: 0, den: 1 }
+        } else {
+            unsafe { ffmpeg::av_buffersink_get_frame_rate(self.output_ctx as *const _) }
         }
     }
 
