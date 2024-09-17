@@ -7,9 +7,12 @@ use clap::Parser;
 pub struct ProgressiveArgs {
     /// Input file
     pub input: PathBuf,
-    /// Bytes to feed per frame, in bytes
-    #[arg(short, long)]
-    pub step: u64,
+    /// Unit size of bytes to feed per frame
+    ///
+    /// Bytes per frame increases to 2x at 10% of the image, 4x at 25% and 8x at 50%.
+    /// Default value is computed so that the first 10% of the image is loaded in about 5 seconds.
+    #[arg(short = 's', long, default_value_t = 0)]
+    pub unit_step: u64,
     /// Output directory path
     #[arg(short, long)]
     pub output: Option<PathBuf>,

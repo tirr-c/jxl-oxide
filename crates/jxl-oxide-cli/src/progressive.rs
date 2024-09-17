@@ -97,7 +97,12 @@ struct LoadProgress {
 }
 
 impl LoadProgress {
-    fn new(unit_step: usize, total_bytes: usize) -> Self {
+    fn new(mut unit_step: usize, total_bytes: usize) -> Self {
+        if unit_step == 0 {
+            // divide by 1500 (10% divided by 30 * 5), round up to unit of 100 bytes
+            unit_step = total_bytes.div_ceil(150000) * 100;
+        }
+
         Self {
             iter: 0,
             unit_step,
@@ -114,9 +119,21 @@ impl LoadProgress {
     }
 
     #[inline]
-    fn double_step(&mut self) -> usize {
-        self.current_step = (self.current_step * 2).min(self.step_cap());
-        self.current_step
+    fn try_increase_step(&mut self) -> Option<usize> {
+        let progress_int = self.bytes_read * 100 / self.total_bytes;
+        let multiplier = match progress_int {
+            ..=9 => 1,
+            10..=24 => 2,
+            25..=49 => 4,
+            _ => 8,
+        };
+        let new_step = (self.unit_step * multiplier).min(self.step_cap());
+        if self.current_step != new_step {
+            self.current_step = new_step;
+            Some(new_step)
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -143,9 +160,17 @@ impl LoadProgress {
 impl std::fmt::Display for LoadProgress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let step = self.current_step;
-        if self.total_bytes > 0 {
+        let total_bytes = self.total_bytes;
+        if total_bytes > 0 {
             let percentage = self.progress() * 100.0;
-            write!(f, "{percentage:.2}\\% loaded ({step} bytes/frame)")
+            if self.bytes_read >= total_bytes {
+                write!(f, "{percentage:.2}\\% loaded\ntotal {total_bytes} bytes")
+            } else {
+                write!(
+                    f,
+                    "{percentage:.2}\\% loaded\n{step} bytes/frame, total {total_bytes} bytes"
+                )
+            }
         } else {
             write!(f, "{step} bytes/frame")
         }
@@ -168,7 +193,7 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut input = std::fs::File::open(&args.input).map_err(|e| Error::ReadJxl(e.into()))?;
     let total_bytes = input.metadata().map(|meta| meta.len()).unwrap_or(0);
 
-    let mut progress = LoadProgress::new(args.step as usize, total_bytes as usize);
+    let mut progress = LoadProgress::new(args.unit_step as usize, total_bytes as usize);
     let mut buf = vec![0u8; progress.current_step()];
 
     let output_dir = args.output.as_deref();
@@ -265,14 +290,9 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     };
 
     loop {
-        let current_iter = progress.iter();
-        if current_iter >= 120 && current_iter % 60 == 0 {
-            let prev_step = progress.current_step();
-            let new_step = progress.double_step();
-            if prev_step != new_step {
-                buf.resize(new_step, 0);
-                tracing::info!(new_step, "Increasing step size");
-            }
+        if let Some(new_step) = progress.try_increase_step() {
+            buf.resize(new_step, 0);
+            tracing::info!(new_step, "Increasing step size");
         }
 
         let buf = fill_buf(&mut input, &mut buf)?;
