@@ -112,7 +112,8 @@ impl<W: Write + Seek> VideoContext<W> {
             }
 
             let ctx = &mut *ctx_ptr;
-            ctx.oformat = fmt_mp4;
+            // `oformat` is `*mut AVOutputFormat` in ffmpeg4.
+            ctx.oformat = fmt_mp4.cast_mut();
             ctx.pb = avio_ctx;
 
             ctx_ptr
