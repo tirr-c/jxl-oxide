@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `jxl-color`: Use better PQ to HLG method (#348).
+
 ### Fixed
 - `jxl-color`: Fix generated `mluc` tag in ICC profile (#347).
 
