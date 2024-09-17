@@ -6,23 +6,27 @@ use crate::{output::VideoContext, Error, Result};
 
 pub struct Context {
     inner: VideoContext<File>,
-    cll: f32,
-    fall: f32,
+    mastering_luminances: Option<(f32, f32)>,
+    cll: Option<(f32, f32)>,
     font: std::ffi::CString,
     inited: bool,
     idx: usize,
 }
 
 impl Context {
-    pub fn new(output_path: impl AsRef<Path>, cll: Option<(f32, f32)>, font: &str) -> Result<Self> {
+    pub fn new(
+        output_path: impl AsRef<Path>,
+        mastering_luminances: Option<(f32, f32)>,
+        cll: Option<(f32, f32)>,
+        font: &str,
+    ) -> Result<Self> {
         let file = File::create(output_path).map_err(Error::WriteImage)?;
         let inner = VideoContext::new(file)?;
-        let (cll, fall) = cll.unwrap_or((0.0, 0.0));
         let c_font = format!("{font}\0");
         Ok(Self {
             inner,
+            mastering_luminances,
             cll,
-            fall,
             font: std::ffi::CString::from_vec_with_nul(c_font.into_bytes()).unwrap(),
             inited: false,
             idx: 0,
@@ -34,20 +38,16 @@ impl Context {
             return Ok(());
         }
 
-        let is_bt2100 = image.is_hdr();
         let width = image.width();
         let height = image.height();
         let pixel_format = image.pixel_format();
-        let hdr_luminance = is_bt2100.then(|| {
-            let tone_mapping = &image.image_header().metadata.tone_mapping;
-            (tone_mapping.min_nits, tone_mapping.intensity_target)
-        });
         self.inner.init_video(
             width,
             height,
             pixel_format,
-            hdr_luminance,
-            (self.cll, self.fall),
+            self.mastering_luminances,
+            self.cll,
+            image.hdr_type(),
             &self.font,
         )?;
 

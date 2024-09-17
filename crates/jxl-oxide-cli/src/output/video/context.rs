@@ -3,7 +3,7 @@ use std::{
     io::prelude::*,
 };
 
-use jxl_oxide::{PixelFormat, Render};
+use jxl_oxide::{HdrType, PixelFormat, Render};
 use rusty_ffmpeg::ffi as ffmpeg;
 
 use super::FfmpegErrorExt;
@@ -178,13 +178,15 @@ impl<W: Write + Seek> VideoContext<W> {
 }
 
 impl<W> VideoContext<W> {
+    #[allow(clippy::too_many_arguments)]
     pub fn init_video(
         &mut self,
         width: u32,
         height: u32,
         pixel_format: PixelFormat,
-        hdr_luminance: Option<(f32, f32)>,
-        cll: (f32, f32),
+        mastering_luminances: Option<(f32, f32)>,
+        cll: Option<(f32, f32)>,
+        hdr_type: Option<HdrType>,
         font: &CStr,
     ) -> Result<()> {
         use std::fmt::Write;
@@ -201,29 +203,32 @@ impl<W> VideoContext<W> {
             }
         };
 
-        let (primaries, colorspace, trc, video_color_range, video_pix_fmt) =
-            if hdr_luminance.is_some() {
-                // BT.2100 PQ, rgb48 full range -> BT.2100 PQ, yuv420p10 full range
-                (
-                    ffmpeg::AVCOL_PRI_BT2020,
-                    ffmpeg::AVCOL_SPC_BT2020_NCL,
-                    ffmpeg::AVCOL_TRC_SMPTEST2084,
-                    ffmpeg::AVCOL_RANGE_JPEG,
-                    ffmpeg::AV_PIX_FMT_YUV420P10,
-                )
+        let (primaries, colorspace, trc, video_color_range, video_pix_fmt);
+        if cll.is_some() {
+            // BT.2100, rgb48 full range -> BT.2100, yuv420p10 full range
+            primaries = ffmpeg::AVCOL_PRI_BT2020;
+            colorspace = ffmpeg::AVCOL_SPC_BT2020_NCL;
+            video_color_range = ffmpeg::AVCOL_RANGE_JPEG;
+            video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10;
+
+            if mastering_luminances.is_some() {
+                // PQ
+                trc = ffmpeg::AVCOL_TRC_SMPTE2084;
             } else {
-                // sRGB, rgb48 full range -> BT.709, yuv420p limited range
-                (
-                    ffmpeg::AVCOL_PRI_BT709,
-                    ffmpeg::AVCOL_SPC_BT709,
-                    ffmpeg::AVCOL_TRC_IEC61966_2_1,
-                    ffmpeg::AVCOL_RANGE_MPEG,
-                    ffmpeg::AV_PIX_FMT_YUV420P,
-                )
-            };
+                // HLG
+                trc = ffmpeg::AVCOL_TRC_ARIB_STD_B67;
+            }
+        } else {
+            // sRGB, rgb48 full range -> BT.709, yuv420p limited range
+            primaries = ffmpeg::AVCOL_PRI_BT709;
+            colorspace = ffmpeg::AVCOL_SPC_RGB;
+            trc = ffmpeg::AVCOL_TRC_BT709;
+            video_color_range = ffmpeg::AVCOL_RANGE_MPEG;
+            video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P;
+        }
 
         let video_codec = unsafe {
-            if hdr_luminance.is_some() {
+            if cll.is_some() {
                 let mut codec = ffmpeg::avcodec_find_encoder_by_name(c"libsvtav1".as_ptr());
                 if codec.is_null() {
                     tracing::warn!("codec libsvtav1 not found, trying libx265");
@@ -278,7 +283,7 @@ impl<W> VideoContext<W> {
             colorspace,
             video_pix_fmt,
             video_color_range,
-            hdr_luminance.is_some(),
+            hdr_type,
             font,
         )?;
 
@@ -302,27 +307,26 @@ impl<W> VideoContext<W> {
             if (*video_codec).id == ffmpeg::AV_CODEC_ID_AV1 {
                 ffmpeg::av_opt_set(video.priv_data, c"preset".as_ptr(), c"10".as_ptr(), 0);
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"24".as_ptr(), 0);
-                if let Some((lmin, lmax)) = hdr_luminance {
-                    let mut libsvtav1_opts = String::from("enable-hdr=1:");
+                if let Some((cll, fall)) = cll {
+                    let max_cll = cll as i32;
+                    let max_fall = fall as i32;
+                    let mut libsvtav1_opts =
+                        format!("enable-hdr=1:content-light={max_cll},{max_fall}");
+                    if let Some((lmin, lmax)) = mastering_luminances {
+                        let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100.as_chromaticity();
+                        let d65_wtpt = jxl_oxide::color::WhitePoint::D65.as_chromaticity();
 
-                    let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100.as_chromaticity();
-                    let d65_wtpt = jxl_oxide::color::WhitePoint::D65.as_chromaticity();
+                        write!(
+                            &mut libsvtav1_opts,
+                            ":mastering-display=G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})",
+                            gx = bt2100_chrm[1][0], gy = bt2100_chrm[1][1],
+                            bx = bt2100_chrm[2][0], by = bt2100_chrm[2][1],
+                            rx = bt2100_chrm[0][0], ry = bt2100_chrm[0][1],
+                            wpx = d65_wtpt[0], wpy = d65_wtpt[1],
+                        ).ok();
+                    }
 
-                    write!(
-                        &mut libsvtav1_opts,
-                        "mastering-display=G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})",
-                        gx = bt2100_chrm[1][0], gy = bt2100_chrm[1][1],
-                        bx = bt2100_chrm[2][0], by = bt2100_chrm[2][1],
-                        rx = bt2100_chrm[0][0], ry = bt2100_chrm[0][1],
-                        wpx = d65_wtpt[0], wpy = d65_wtpt[1],
-                    ).ok();
-
-                    let max_cll = cll.0 as i32;
-                    let max_fall = cll.1 as i32;
-                    write!(&mut libsvtav1_opts, ":content-light={max_cll},{max_fall}").ok();
-
-                    libsvtav1_opts.push('\0');
-                    let c_opts = CString::from_vec_with_nul(libsvtav1_opts.into_bytes()).unwrap();
+                    let c_opts = CString::new(libsvtav1_opts).unwrap();
                     ffmpeg::av_opt_set(
                         video.priv_data,
                         c"svtav1-params".as_ptr(),
@@ -332,34 +336,33 @@ impl<W> VideoContext<W> {
                 }
             } else if (*video_codec).id == ffmpeg::AV_CODEC_ID_HEVC {
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"24".as_ptr(), 0);
-                if let Some((lmin, lmax)) = hdr_luminance {
-                    let mut libx265_opts = String::from("hdr-opt=1:repeat-headers=1:");
+                if let Some((cll, fall)) = cll {
+                    let max_cll = cll as i32;
+                    let max_fall = fall as i32;
+                    let mut libx265_opts =
+                        format!("hdr-opt=1:repeat-headers=1:max-cll={max_cll},{max_fall}");
+                    if let Some((lmin, lmax)) = mastering_luminances {
+                        let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100
+                            .as_chromaticity()
+                            .map(|xy| xy.map(|v| (v * 50000.0 + 0.5) as i32));
+                        let d65_wtpt = jxl_oxide::color::WhitePoint::D65
+                            .as_chromaticity()
+                            .map(|v| (v * 50000.0 + 0.5) as i32);
+                        let min_luminance = (lmin * 10000.0 + 0.5) as i32;
+                        let max_luminance = (lmax * 10000.0 + 0.5) as i32;
 
-                    let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100
-                        .as_chromaticity()
-                        .map(|xy| xy.map(|v| (v * 50000.0 + 0.5) as i32));
-                    let d65_wtpt = jxl_oxide::color::WhitePoint::D65
-                        .as_chromaticity()
-                        .map(|v| (v * 50000.0 + 0.5) as i32);
-                    let min_luminance = (lmin * 10000.0 + 0.5) as i32;
-                    let max_luminance = (lmax * 10000.0 + 0.5) as i32;
+                        write!(
+                            &mut libx265_opts,
+                            ":master-display=G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})",
+                            gx = bt2100_chrm[1][0], gy = bt2100_chrm[1][1],
+                            bx = bt2100_chrm[2][0], by = bt2100_chrm[2][1],
+                            rx = bt2100_chrm[0][0], ry = bt2100_chrm[0][1],
+                            wpx = d65_wtpt[0], wpy = d65_wtpt[1],
+                            lmax = max_luminance, lmin = min_luminance,
+                        ).ok();
+                    }
 
-                    write!(
-                        &mut libx265_opts,
-                        "master-display=G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})",
-                        gx = bt2100_chrm[1][0], gy = bt2100_chrm[1][1],
-                        bx = bt2100_chrm[2][0], by = bt2100_chrm[2][1],
-                        rx = bt2100_chrm[0][0], ry = bt2100_chrm[0][1],
-                        wpx = d65_wtpt[0], wpy = d65_wtpt[1],
-                        lmax = max_luminance, lmin = min_luminance,
-                    ).ok();
-
-                    let max_cll = cll.0 as i32;
-                    let max_fall = cll.1 as i32;
-                    write!(&mut libx265_opts, ":max-cll={max_cll},{max_fall}").ok();
-
-                    libx265_opts.push('\0');
-                    let c_opts = CString::from_vec_with_nul(libx265_opts.into_bytes()).unwrap();
+                    let c_opts = CString::new(libx265_opts).unwrap();
                     ffmpeg::av_opt_set(
                         video.priv_data,
                         c"x265-params".as_ptr(),

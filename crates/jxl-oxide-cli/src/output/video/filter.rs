@@ -1,5 +1,6 @@
 use std::ffi::{c_int, CStr};
 
+use jxl_oxide::HdrType;
 use rusty_ffmpeg::ffi as ffmpeg;
 
 use super::FfmpegErrorExt;
@@ -54,7 +55,7 @@ impl VideoFilter {
         video_colorspace: u32,
         video_pix_fmt: i32,
         video_color_range: u32,
-        is_bt2100: bool,
+        hdr_type: Option<HdrType>,
         font: &CStr,
     ) -> Result<()> {
         assert!(self.graph_ptr.is_null());
@@ -107,17 +108,19 @@ impl VideoFilter {
                 c",".as_ptr(),
                 0,
             );
-            if is_bt2100 {
-                // SDR reference white
-                ffmpeg::av_dict_set(
-                    &mut params,
-                    c"fontcolor".as_ptr(),
-                    c"white@0.58".as_ptr(),
-                    0,
-                );
-            } else {
-                ffmpeg::av_dict_set(&mut params, c"fontcolor".as_ptr(), c"white".as_ptr(), 0);
-            }
+
+            let sdr_white_level = match hdr_type {
+                Some(HdrType::Pq) => c"white@0.58",
+                Some(HdrType::Hlg) => c"white@0.75",
+                None => c"white",
+            };
+            ffmpeg::av_dict_set(
+                &mut params,
+                c"fontcolor".as_ptr(),
+                sdr_white_level.as_ptr(),
+                0,
+            );
+
             ffmpeg::av_dict_set_int(&mut params, c"fontsize".as_ptr(), fontsize as i64, 0);
             ffmpeg::av_dict_set_int(&mut params, c"borderw".as_ptr(), borderw, 0);
             ffmpeg::av_dict_set(&mut params, c"font".as_ptr(), font.as_ptr(), 0);

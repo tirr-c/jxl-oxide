@@ -22,8 +22,13 @@ impl OutputType {
     }
 
     #[cfg(feature = "__ffmpeg")]
-    fn mp4(output_path: impl AsRef<Path>, cll: Option<(f32, f32)>, font: &str) -> Result<Self> {
-        mp4::Context::new(output_path, cll, font).map(Self::Mp4)
+    fn mp4(
+        output_path: impl AsRef<Path>,
+        mastering_luminances: Option<(f32, f32)>,
+        cll: Option<(f32, f32)>,
+        font: &str,
+    ) -> Result<Self> {
+        mp4::Context::new(output_path, mastering_luminances, cll, font).map(Self::Mp4)
     }
 }
 
@@ -38,15 +43,13 @@ impl OutputType {
             }
             #[cfg(feature = "__ffmpeg")]
             Self::Mp4(_) => {
-                if image.is_hdr() {
-                    image.request_color_encoding(EnumColourEncoding::bt2100_pq(
-                        RenderingIntent::Relative,
-                    ));
-                } else {
-                    image.request_color_encoding(EnumColourEncoding::srgb(
-                        RenderingIntent::Relative,
-                    ));
-                }
+                let intent = RenderingIntent::Relative;
+                let encoding = match image.hdr_type() {
+                    Some(jxl_oxide::HdrType::Pq) => EnumColourEncoding::bt2100_pq(intent),
+                    Some(jxl_oxide::HdrType::Hlg) => EnumColourEncoding::bt2100_hlg(intent),
+                    None => EnumColourEncoding::srgb(intent),
+                };
+                image.request_color_encoding(encoding);
             }
         }
     }
@@ -151,7 +154,7 @@ impl std::fmt::Display for LoadProgress {
 
 pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     #[cfg(feature = "__ffmpeg")]
-    use jxl_color::{ColorEncodingWithProfile, EnumColourEncoding};
+    use jxl_color::EnumColourEncoding;
 
     let _guard = tracing::trace_span!("Handle progressive subcommand").entered();
 
@@ -177,41 +180,26 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
                     .pool(pool.clone())
                     .open(&args.input)
                     .map_err(Error::ReadJxl)?;
-                let cll = if full_image.is_hdr() {
+                let (mastering_luminances, cll) = if let Some(hdr_type) = full_image.hdr_type() {
+                    let mastering_luminances = (hdr_type == jxl_oxide::HdrType::Pq).then(|| {
+                        let tone_mapping = &full_image.image_header().metadata.tone_mapping;
+                        (tone_mapping.min_nits, tone_mapping.intensity_target)
+                    });
+
                     tracing::info!("Computing MaxCLL and MaxFALL");
 
-                    let pq_rel =
-                        EnumColourEncoding::bt2100_pq(jxl_color::RenderingIntent::Relative);
-                    full_image.request_color_encoding(pq_rel.clone());
+                    let gray_lin = EnumColourEncoding {
+                        tf: jxl_color::TransferFunction::Linear,
+                        ..EnumColourEncoding::gray_srgb(jxl_color::RenderingIntent::Relative)
+                    };
+                    full_image.request_color_encoding(gray_lin);
 
                     let metadata = &full_image.image_header().metadata;
                     let render = full_image.render_frame(0).map_err(Error::ReadJxl)?;
-                    let transformer = jxl_color::ColorTransformBuilder::new()
-                        .build(
-                            &ColorEncodingWithProfile::new(pq_rel),
-                            &ColorEncodingWithProfile::new(EnumColourEncoding {
-                                tf: jxl_color::TransferFunction::Linear,
-                                ..EnumColourEncoding::gray_srgb(
-                                    jxl_color::RenderingIntent::Relative,
-                                )
-                            }),
-                            &metadata.opsin_inverse_matrix,
-                            &metadata.tone_mapping,
-                        )
-                        .unwrap();
-
-                    let mut buf = render
-                        .image_planar()
-                        .into_iter()
-                        .map(|buf| buf.buf().to_vec())
-                        .collect::<Vec<_>>();
-                    let mut buf_slice = buf.iter_mut().map(|buf| &mut **buf).collect::<Vec<_>>();
-                    transformer
-                        .run_with_threads(&mut buf_slice, &jxl_color::NullCms, &pool)
-                        .unwrap();
-
-                    let sample_count = buf[0].len();
-                    let (max, sum) = buf[0]
+                    let buf = render.image_planar();
+                    let buf = buf[0].buf();
+                    let sample_count = buf.len();
+                    let (max, sum) = buf
                         .iter()
                         .fold((0f32, 0f32), |(max, sum), &l| (max.max(l), sum + l));
                     let avg = sum / sample_count as f32;
@@ -221,12 +209,14 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
                     let avg = avg * intensity_target;
 
                     tracing::info!(max_cll = max, max_fall = avg);
-                    Some((max, avg))
+                    let cll = Some((max, avg));
+
+                    (mastering_luminances, cll)
                 } else {
-                    None
+                    (None, None)
                 };
 
-                OutputType::mp4(path, cll, &args.font)?
+                OutputType::mp4(path, mastering_luminances, cll, &args.font)?
             }
             #[cfg(not(feature = "__ffmpeg"))]
             Some(ext) if ext == "mp4" => {
