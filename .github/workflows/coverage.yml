@@ -57,7 +57,7 @@ jobs:
           echo "CARGO_TARGET_${target_uppercase}_RUSTFLAGS=-C instrument-coverage -Z coverage-options=branch" >>"$GITHUB_ENV"
           echo "RUSTC_SYSROOT=$(rustc --print sysroot)" >>"$GITHUB_ENV"
       - name: Run tests
-        run: cross test --no-fail-fast --all-features --target ${{ matrix.target }}
+        run: cross test --no-fail-fast --target ${{ matrix.target }}
       - name: Collect coverage data
         run: |
           llvm_profdata="$(find $RUSTC_SYSROOT -name llvm-profdata)"
@@ -65,7 +65,7 @@ jobs:
           profiles="$(find . -name '*.profraw')"
           $llvm_profdata merge -sparse $profiles -o coverage.profdata
           testbins=$( \
-            cross test --no-run --message-format=json --all-features --target ${{ matrix.target }} \
+            cross test --no-run --message-format=json --target ${{ matrix.target }} \
             | jq -r "select(.profile.test == true) | .filenames[]" \
             | grep -v dSYM \
           )
