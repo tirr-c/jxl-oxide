@@ -1,97 +1,270 @@
-use crate::Error;
+pub mod box_header;
 
-#[derive(Debug, Clone)]
-pub struct ContainerBoxHeader {
-    ty: ContainerBoxType,
-    size: Option<u64>,
-    is_last: bool,
+use box_header::*;
+
+/// Wrapper that detects container format from underlying reader.
+#[derive(Default)]
+pub struct ContainerDetectingReader {
+    state: DetectState,
+    buf: Vec<u8>,
+    codestream: Vec<u8>,
+    aux_boxes: Vec<(ContainerBoxType, Vec<u8>)>,
+    next_jxlp_index: u32,
 }
 
-pub enum HeaderParseResult {
-    Done {
+impl std::fmt::Debug for ContainerDetectingReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContainerDetectingReader")
+            .field("state", &self.state)
+            .field("next_jxlp_index", &self.next_jxlp_index)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Default)]
+enum DetectState {
+    #[default]
+    WaitingSignature,
+    WaitingBoxHeader,
+    WaitingJxlpIndex(ContainerBoxHeader),
+    InAuxBox {
         header: ContainerBoxHeader,
-        size: usize,
+        data: Vec<u8>,
+        bytes_left: Option<usize>,
     },
-    NeedMoreData,
+    InCodestream {
+        kind: BitstreamKind,
+        bytes_left: Option<usize>,
+    },
+    Done(BitstreamKind),
 }
 
-impl ContainerBoxHeader {
-    pub fn parse(buf: &[u8]) -> std::io::Result<HeaderParseResult> {
-        if buf.len() < 8 {
-            return Ok(HeaderParseResult::NeedMoreData);
+/// Structure of the decoded bitstream.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BitstreamKind {
+    /// Decoder can't determine structure of the bitstream.
+    Unknown,
+    /// Bitstream is a direct JPEG XL codestream without box structure.
+    BareCodestream,
+    /// Bitstream is a JPEG XL container with box structure.
+    Container,
+    /// Bitstream is not a valid JPEG XL image.
+    Invalid,
+}
+
+impl ContainerDetectingReader {
+    const CODESTREAM_SIG: [u8; 2] = [0xff, 0x0a];
+    const CONTAINER_SIG: [u8; 12] = [0, 0, 0, 0xc, b'J', b'X', b'L', b' ', 0xd, 0xa, 0x87, 0xa];
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn kind(&self) -> BitstreamKind {
+        match self.state {
+            DetectState::WaitingSignature => BitstreamKind::Unknown,
+            DetectState::WaitingBoxHeader
+            | DetectState::WaitingJxlpIndex(..)
+            | DetectState::InAuxBox { .. } => BitstreamKind::Container,
+            DetectState::InCodestream { kind, .. } | DetectState::Done(kind) => kind,
         }
+    }
 
-        let (tbox, size, header_size) = match *buf {
-            [0, 0, 0, 1, t0, t1, t2, t3, s0, s1, s2, s3, s4, s5, s6, s7, ..] => {
-                let xlbox = u64::from_be_bytes([s0, s1, s2, s3, s4, s5, s6, s7]);
-                let tbox = ContainerBoxType([t0, t1, t2, t3]);
-                let xlbox = xlbox.checked_sub(16).ok_or(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    Error::InvalidBoxSize,
-                ))?;
-                (tbox, Some(xlbox), 16)
+    pub fn feed_bytes(&mut self, input: &[u8]) -> std::io::Result<()> {
+        let state = &mut self.state;
+        let buf = &mut self.buf;
+        buf.extend_from_slice(input);
+
+        loop {
+            match state {
+                DetectState::WaitingSignature => {
+                    if buf.starts_with(&Self::CODESTREAM_SIG) {
+                        tracing::debug!("Codestream signature found");
+                        *state = DetectState::InCodestream {
+                            kind: BitstreamKind::BareCodestream,
+                            bytes_left: None,
+                        };
+                        continue;
+                    }
+                    if buf.starts_with(&Self::CONTAINER_SIG) {
+                        tracing::debug!("Container signature found");
+                        *state = DetectState::WaitingBoxHeader;
+                        buf.drain(..Self::CONTAINER_SIG.len());
+                        continue;
+                    }
+                    if !Self::CODESTREAM_SIG.starts_with(buf)
+                        && !Self::CONTAINER_SIG.starts_with(buf)
+                    {
+                        tracing::error!("Invalid signature");
+                        *state = DetectState::InCodestream {
+                            kind: BitstreamKind::Invalid,
+                            bytes_left: None,
+                        };
+                        continue;
+                    }
+                    return Ok(());
+                }
+                DetectState::WaitingBoxHeader => match ContainerBoxHeader::parse(buf)? {
+                    HeaderParseResult::Done { header, size } => {
+                        buf.drain(..size);
+                        let tbox = header.box_type();
+                        if tbox == ContainerBoxType::CODESTREAM {
+                            if self.next_jxlp_index == u32::MAX {
+                                tracing::error!("Duplicate jxlc box found");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "Duplicate jxlc box found",
+                                ));
+                            }
+                            if self.next_jxlp_index != 0 {
+                                tracing::error!("Found jxlc box instead of jxlp box");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "Found jxlc box instead of jxlp box",
+                                ));
+                            }
+
+                            self.next_jxlp_index = u32::MAX;
+                            *state = DetectState::InCodestream {
+                                kind: BitstreamKind::Container,
+                                bytes_left: header.size().map(|x| x as usize),
+                            };
+                        } else if tbox == ContainerBoxType::PARTIAL_CODESTREAM {
+                            if let Some(box_size) = header.size() {
+                                if box_size < 4 {
+                                    return Err(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        "jxlp box too small",
+                                    ));
+                                }
+                            }
+
+                            if self.next_jxlp_index == u32::MAX {
+                                tracing::error!("jxlp box found after jxlc box");
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "jxlp box found after jxlc box",
+                                ));
+                            }
+
+                            if self.next_jxlp_index >= 0x80000000 {
+                                tracing::error!(
+                                    "jxlp box #{} should be the last one, found the next one",
+                                    self.next_jxlp_index ^ 0x80000000,
+                                );
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "another jxlp box found after the signalled last one",
+                                ));
+                            }
+
+                            *state = DetectState::WaitingJxlpIndex(header);
+                        } else {
+                            let bytes_left = header.size().map(|x| x as usize);
+                            *state = DetectState::InAuxBox {
+                                header,
+                                data: Vec::new(),
+                                bytes_left,
+                            };
+                        }
+                        continue;
+                    }
+                    HeaderParseResult::NeedMoreData => return Ok(()),
+                },
+                DetectState::WaitingJxlpIndex(header) => {
+                    if buf.len() < 4 {
+                        return Ok(());
+                    }
+
+                    let index = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                    buf.drain(..4);
+                    let is_last = index & 0x80000000 != 0;
+                    let index = index & 0x7fffffff;
+                    tracing::trace!(index, is_last);
+                    if index != self.next_jxlp_index {
+                        tracing::error!(
+                            "Out-of-order jxlp box found: expected {}, got {}",
+                            self.next_jxlp_index,
+                            index,
+                        );
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Out-of-order jxlp box found",
+                        ));
+                    }
+
+                    if is_last {
+                        self.next_jxlp_index = index | 0x80000000;
+                    } else {
+                        self.next_jxlp_index += 1;
+                    }
+
+                    *state = DetectState::InCodestream {
+                        kind: BitstreamKind::Container,
+                        bytes_left: header.size().map(|x| x as usize - 4),
+                    };
+                }
+                DetectState::InCodestream {
+                    bytes_left: None, ..
+                } => {
+                    self.codestream.extend_from_slice(buf);
+                    buf.clear();
+                    return Ok(());
+                }
+                DetectState::InCodestream {
+                    bytes_left: Some(bytes_left),
+                    ..
+                } => {
+                    if *bytes_left <= buf.len() {
+                        self.codestream.extend(buf.drain(..*bytes_left));
+                        *state = DetectState::WaitingBoxHeader;
+                    } else {
+                        *bytes_left -= buf.len();
+                        self.codestream.extend_from_slice(buf);
+                        buf.clear();
+                        return Ok(());
+                    }
+                }
+                DetectState::InAuxBox {
+                    data,
+                    bytes_left: None,
+                    ..
+                } => {
+                    data.extend_from_slice(buf);
+                    buf.clear();
+                    return Ok(());
+                }
+                DetectState::InAuxBox {
+                    header,
+                    data,
+                    bytes_left: Some(bytes_left),
+                } => {
+                    if *bytes_left <= buf.len() {
+                        data.extend(buf.drain(..*bytes_left));
+                        self.aux_boxes
+                            .push((header.box_type(), std::mem::take(data)));
+                        *state = DetectState::WaitingBoxHeader;
+                    } else {
+                        *bytes_left -= buf.len();
+                        data.extend_from_slice(buf);
+                        buf.clear();
+                        return Ok(());
+                    }
+                }
+                DetectState::Done(_) => return Ok(()),
             }
-            [s0, s1, s2, s3, t0, t1, t2, t3, ..] => {
-                let sbox = u32::from_be_bytes([s0, s1, s2, s3]);
-                let tbox = ContainerBoxType([t0, t1, t2, t3]);
-                let sbox = if sbox == 0 {
-                    None
-                } else if let Some(sbox) = sbox.checked_sub(8) {
-                    Some(sbox as u64)
-                } else {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        Error::InvalidBoxSize,
-                    ));
-                };
-                (tbox, sbox, 8)
-            }
-            _ => return Ok(HeaderParseResult::NeedMoreData),
-        };
-        let is_last = size.is_none();
-
-        let header = Self {
-            ty: tbox,
-            size,
-            is_last,
-        };
-        Ok(HeaderParseResult::Done {
-            header,
-            size: header_size,
-        })
-    }
-}
-
-impl ContainerBoxHeader {
-    #[inline]
-    pub fn box_type(&self) -> ContainerBoxType {
-        self.ty
+        }
     }
 
-    #[inline]
-    pub fn size(&self) -> Option<u64> {
-        self.size
+    pub fn take_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.codestream)
     }
 
-    #[inline]
-    pub fn is_last(&self) -> bool {
-        self.is_last
+    pub fn finish(&mut self) {
+        if let DetectState::InAuxBox { header, data, .. } = &mut self.state {
+            self.aux_boxes
+                .push((header.box_type(), std::mem::take(data)));
+        }
+        self.state = DetectState::Done(self.kind());
     }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct ContainerBoxType(pub [u8; 4]);
-
-impl ContainerBoxType {
-    pub const JXL: Self = Self(*b"JXL ");
-    pub const FILE_TYPE: Self = Self(*b"ftyp");
-    pub const JXL_LEVEL: Self = Self(*b"jxll");
-    pub const JUMBF: Self = Self(*b"jumb");
-    pub const EXIF: Self = Self(*b"Exif");
-    pub const XML: Self = Self(*b"xml ");
-    pub const BROTLI_COMPRESSED: Self = Self(*b"brob");
-    pub const FRAME_INDEX: Self = Self(*b"jxli");
-    pub const CODESTREAM: Self = Self(*b"jxlc");
-    pub const PARTIAL_CODESTREAM: Self = Self(*b"jxlp");
-    pub const JPEG_RECONSTRUCTION: Self = Self(*b"jbrd");
 }

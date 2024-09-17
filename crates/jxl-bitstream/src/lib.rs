@@ -1,15 +1,13 @@
 //! This crate provides a JPEG XL bitstream reader and helper macros. The bitstream reader supports both
 //! bare codestream and container format, and it can detect which format to read.
 
-mod container;
+mod bitstream;
+pub mod container;
 mod error;
-mod memory;
-mod reader;
 
-pub use container::*;
+pub use bitstream::{Bitstream, U32Specifier, U};
+pub use container::{BitstreamKind, ContainerDetectingReader};
 pub use error::{Error, Result};
-pub use memory::{Bitstream, U32Specifier, U};
-pub use reader::{BitstreamKind, ContainerDetectingReader};
 
 /// Perform `UnpackSigned` for `u32`, as specified in the JPEG XL specification.
 #[inline]
