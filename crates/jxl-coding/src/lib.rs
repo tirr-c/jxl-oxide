@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use jxl_bitstream::{read_bits, Bitstream};
+use jxl_bitstream::{Bitstream, U};
 
 mod ans;
 mod error;
@@ -40,7 +40,7 @@ impl Decoder {
     }
 
     fn parse_assume_no_lz77(bitstream: &mut Bitstream, num_dist: u32) -> Result<Self> {
-        let lz77_enabled = read_bits!(bitstream, Bool)?;
+        let lz77_enabled = bitstream.read_bool()?;
         if lz77_enabled {
             return Err(Error::Lz77NotAllowed);
         }
@@ -273,10 +273,10 @@ enum Lz77 {
 
 impl Lz77 {
     fn parse(bitstream: &mut Bitstream) -> Result<Self> {
-        Ok(if read_bits!(bitstream, Bool)? {
+        Ok(if bitstream.read_bool()? {
             // enabled
-            let min_symbol = read_bits!(bitstream, U32(224, 512, 4096, 8 + u(15)))?;
-            let min_length = read_bits!(bitstream, U32(3, 4, 5 + u(2), 9 + u(8)))?;
+            let min_symbol = bitstream.read_u32(224, 512, 4096, 8 + U(15))?;
+            let min_length = bitstream.read_u32(3, 4, 5 + U(2), 9 + U(8))?;
             let lz_len_conf = IntegerConfig::parse(bitstream, 8)?;
             Self::Enabled {
                 min_symbol,
@@ -367,7 +367,7 @@ struct DecoderInner {
 impl DecoderInner {
     fn parse(bitstream: &mut Bitstream, num_dist: u32) -> Result<Self> {
         let (num_clusters, clusters) = read_clusters(bitstream, num_dist)?;
-        let use_prefix_code = read_bits!(bitstream, Bool)?;
+        let use_prefix_code = bitstream.read_bool()?;
         let log_alphabet_size = if use_prefix_code {
             15
         } else {
@@ -379,7 +379,7 @@ impl DecoderInner {
         let code = if use_prefix_code {
             let counts = (0..num_clusters)
                 .map(|_| -> Result<_> {
-                    let count = if read_bits!(bitstream, Bool)? {
+                    let count = if bitstream.read_bool()? {
                         let n = bitstream.read_bits(4)? as usize;
                         1 + (1 << n) + bitstream.read_bits(n)?
                     } else {
@@ -643,7 +643,7 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
             .map(|_| bitstream.read_bits(nbits).map(|b| b as u8))
             .collect::<std::result::Result<Vec<_>, _>>()?
     } else {
-        let use_mtf = read_bits!(bitstream, Bool)?;
+        let use_mtf = bitstream.read_bool()?;
         let mut decoder = if num_dist <= 2 {
             Decoder::parse_assume_no_lz77(bitstream, 1)?
         } else {

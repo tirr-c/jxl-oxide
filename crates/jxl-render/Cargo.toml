@@ -42,6 +42,10 @@ path = "../jxl-image"
 version = "0.8.0"
 path = "../jxl-modular"
 
+[dependencies.jxl-oxide-common]
+version = "0.1.0"
+path = "../jxl-oxide-common"
+
 [dependencies.jxl-threadpool]
 version = "0.1.1"
 path = "../jxl-threadpool"

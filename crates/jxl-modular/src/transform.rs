@@ -1,5 +1,6 @@
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
+use jxl_oxide_common::{define_bundle, read_bits, Bundle};
 use jxl_threadpool::JxlThreadPool;
 
 use super::{

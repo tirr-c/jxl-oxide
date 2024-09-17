@@ -1,7 +1,8 @@
 //! Types related to color encoding.
 
 #![allow(clippy::excessive_precision)]
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Error, Result};
+use jxl_bitstream::{Bitstream, Error, Result};
+use jxl_oxide_common::{define_bundle, read_bits, Bundle};
 
 use crate::consts::*;
 

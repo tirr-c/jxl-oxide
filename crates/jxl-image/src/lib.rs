@@ -5,8 +5,9 @@
 //!
 //! Image header is at the beginning of the bitstream. One can parse [`ImageHeader`] from the
 //! bitstream to retrieve information about the image.
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Name, Result};
+use jxl_bitstream::{Bitstream, Result};
 use jxl_color::header::*;
+use jxl_oxide_common::{define_bundle, read_bits, Bundle, Name};
 
 /// JPEG XL image header.
 ///

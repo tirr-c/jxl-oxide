@@ -25,3 +25,7 @@ path = "../jxl-color"
 [dependencies.jxl-grid]
 version = "0.5.0"
 path = "../jxl-grid"
+
+[dependencies.jxl-oxide-common]
+version = "0.1.0"
+path = "../jxl-oxide-common"

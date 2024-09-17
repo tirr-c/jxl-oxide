@@ -50,6 +50,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
+ "jxl-oxide-common",
  "jxl-threadpool",
  "tracing",
 ]
@@ -63,6 +64,7 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-modular",
+ "jxl-oxide-common",
  "jxl-threadpool",
  "jxl-vardct",
  "tracing",
@@ -82,6 +84,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-color",
  "jxl-grid",
+ "jxl-oxide-common",
  "tracing",
 ]
 
@@ -92,6 +95,7 @@ dependencies = [
  "jxl-bitstream",
  "jxl-coding",
  "jxl-grid",
+ "jxl-oxide-common",
  "jxl-threadpool",
  "tracing",
 ]
@@ -105,9 +109,17 @@ dependencies = [
  "jxl-frame",
  "jxl-grid",
  "jxl-image",
+ "jxl-oxide-common",
  "jxl-render",
  "jxl-threadpool",
  "tracing",
+]
+
+[[package]]
+name = "jxl-oxide-common"
+version = "0.1.0"
+dependencies = [
+ "jxl-bitstream",
 ]
 
 [[package]]
@@ -136,6 +148,7 @@ dependencies = [
  "jxl-grid",
  "jxl-image",
  "jxl-modular",
+ "jxl-oxide-common",
  "jxl-threadpool",
  "jxl-vardct",
  "tracing",
@@ -156,6 +169,7 @@ dependencies = [
  "jxl-coding",
  "jxl-grid",
  "jxl-modular",
+ "jxl-oxide-common",
  "jxl-threadpool",
  "tracing",
 ]

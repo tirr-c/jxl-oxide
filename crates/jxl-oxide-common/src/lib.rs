@@ -1,39 +1,28 @@
+use jxl_bitstream::Bitstream;
+
 #[macro_export]
 macro_rules! expand_u32 {
     ($bitstream:ident; $($rest:tt)*) => {
-        $bitstream.read_bits(2)
-            .and_then(|selector| $crate::expand_u32!(@expand $bitstream, selector, 0; $($rest)*,))
+        $crate::expand_u32!(@convert $bitstream; (); ($($rest)*,))
     };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr;) => {
-        unreachable!()
+    (@convert $bitstream:ident; ($($done:tt)*); ()) => {
+        $bitstream.read_u32($($done)*)
     };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; $c:literal, $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, $c)
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
+    (@convert $bitstream:ident; ($($done:tt)*); ($c:literal, $($rest:tt)*)) => {
+        $crate::expand_u32!(@convert $bitstream; ($($done)* $c,); ($($rest)*))
     };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; u($n:literal), $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, u($n))
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
+    (@convert $bitstream:ident; ($($done:tt)*); (u($n:literal), $($rest:tt)*)) => {
+        $crate::expand_u32!(@convert $bitstream; ($($done)* ::jxl_bitstream::U($n),); ($($rest)*))
     };
-    (@expand $bitstream:ident, $selector:ident, $counter:expr; $c:literal + u($n:literal), $($rest:tt)*) => {
-        if $selector == $counter {
-            $crate::read_bits!($bitstream, $c + u($n))
-        } else {
-            $crate::expand_u32!(@expand $bitstream, $selector, $counter + 1; $($rest)*)
-        }
+    (@convert $bitstream:ident; ($($done:tt)*); ($c:literal + u($n:literal), $($rest:tt)*)) => {
+        $crate::expand_u32!(@convert $bitstream; ($($done)* $c + ::jxl_bitstream::U($n),); ($($rest)*))
     };
 }
 
 #[macro_export]
 macro_rules! read_bits {
     ($bistream:ident, $c:literal $(, $ctx:expr)?) => {
-        $crate::Result::Ok($c)
+        ::jxl_bitstream::Result::Ok($c)
     };
     ($bitstream:ident, u($n:literal) $(, $ctx:expr)?) => {
         $bitstream.read_bits($n)
@@ -68,7 +57,7 @@ macro_rules! read_bits {
     ($bitstream:ident, Enum($enumtype:ty) $(, $ctx:expr)?) => {
         $crate::read_bits!($bitstream, U32(0, 1, 2 + u(4), 18 + u(6)))
             .and_then(|v| {
-                <$enumtype as TryFrom<u32>>::try_from(v).map_err(|_| $crate::Error::InvalidEnum {
+                <$enumtype as TryFrom<u32>>::try_from(v).map_err(|_| ::jxl_bitstream::Error::InvalidEnum {
                     name: stringify!($enumtype),
                     value: v,
                 })
@@ -78,10 +67,10 @@ macro_rules! read_bits {
         $bitstream.zero_pad_to_byte()
     };
     ($bitstream:ident, Bundle($bundle:ty)) => {
-        $bitstream.read_bundle::<$bundle>()
+        <$bundle as $crate::Bundle<()>>::parse($bitstream, ())
     };
     ($bitstream:ident, Bundle($bundle:ty), $ctx:expr) => {
-        $bitstream.read_bundle_with_ctx::<$bundle, _>($ctx)
+        <$bundle as $crate::Bundle<_>>::parse($bitstream, $ctx)
     };
     ($bitstream:ident, Vec[$($inner:tt)*]; $count:expr $(, $ctx:expr)?) => {
         {
@@ -165,7 +154,7 @@ macro_rules! make_parse {
         $ctx_id
     };
     (@select_error_ty;) => {
-        $crate::Error
+        ::jxl_bitstream::Error
     };
     (@select_error_ty; $err:ty) => {
         $err
@@ -177,7 +166,7 @@ macro_rules! make_parse {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
             #[allow(unused_variables)]
-            fn parse(bitstream: &mut $crate::Bitstream, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+            fn parse(bitstream: &mut ::jxl_bitstream::Bitstream, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;
@@ -212,7 +201,7 @@ macro_rules! make_parse {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
             #[allow(unused_variables)]
-            fn parse(bitstream: &mut $crate::Bitstream, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+            fn parse(bitstream: &mut ::jxl_bitstream::Bitstream, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
                 $(
                     let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
                         @parse bitstream;
@@ -263,8 +252,73 @@ macro_rules! define_bundle {
     };
 }
 
-/// Perform `UnpackSigned` for `u32`, as specified in the JPEG XL specification.
+pub trait Bundle<Ctx = ()>: Sized {
+    type Error;
+
+    /// Parses a value from the bitstream with the given context.
+    fn parse(bitstream: &mut Bitstream<'_>, ctx: Ctx) -> Result<Self, Self::Error>;
+}
+
+pub trait BundleDefault<Ctx = ()>: Sized {
+    /// Creates a default value with the given context.
+    fn default_with_context(ctx: Ctx) -> Self;
+}
+
+impl<T, Ctx> BundleDefault<Ctx> for T
+where
+    T: Default + Sized,
+{
+    fn default_with_context(_: Ctx) -> Self {
+        Default::default()
+    }
+}
+
+impl<T, Ctx> Bundle<Ctx> for Option<T>
+where
+    T: Bundle<Ctx>,
+{
+    type Error = T::Error;
+
+    fn parse(bitstream: &mut Bitstream, ctx: Ctx) -> Result<Self, Self::Error> {
+        T::parse(bitstream, ctx).map(Some)
+    }
+}
+
+/// Name type which is read by some JPEG XL headers.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Name(String);
+
+impl<Ctx> Bundle<Ctx> for Name {
+    type Error = jxl_bitstream::Error;
+
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> Result<Self, Self::Error> {
+        let len = read_bits!(bitstream, U32(0, u(4), 16 + u(5), 48 + u(10)))? as usize;
+        let mut data = vec![0u8; len];
+        for b in &mut data {
+            *b = bitstream.read_bits(8)? as u8;
+        }
+        let name = String::from_utf8(data)
+            .map_err(|_| jxl_bitstream::Error::ValidationFailed("non-UTF-8 name"))?;
+        Ok(Self(name))
+    }
+}
+
+impl std::ops::Deref for Name {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Name {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[inline]
+#[doc(hidden)]
 pub fn unpack_signed(x: u32) -> i32 {
     let bit = x & 1;
     let base = x >> 1;
@@ -272,8 +326,8 @@ pub fn unpack_signed(x: u32) -> i32 {
     (base ^ flip) as i32
 }
 
-/// Perform `UnpackSigned` for `u64`, as specified in the JPEG XL specification.
 #[inline]
+#[doc(hidden)]
 pub fn unpack_signed_u64(x: u64) -> i64 {
     let bit = x & 1;
     let base = x >> 1;

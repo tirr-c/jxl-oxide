@@ -1,4 +1,4 @@
-use jxl_bitstream::{read_bits, Bitstream};
+use jxl_bitstream::Bitstream;
 
 use crate::{Error, Result};
 
@@ -41,8 +41,8 @@ impl Histogram {
 
         let alphabet_size;
         let mut dist = vec![0u16; table_size];
-        if read_bits!(bitstream, Bool)? {
-            if read_bits!(bitstream, Bool)? {
+        if bitstream.read_bool()? {
+            if bitstream.read_bool()? {
                 // binary
                 let v0 = Self::read_u8(bitstream)? as usize;
                 let v1 = Self::read_u8(bitstream)? as usize;
@@ -67,7 +67,7 @@ impl Histogram {
 
                 dist[val] = 1 << 12;
             }
-        } else if read_bits!(bitstream, Bool)? {
+        } else if bitstream.read_bool()? {
             // evenly distributed
             alphabet_size = Self::read_u8(bitstream)? as usize + 1;
             if alphabet_size > table_size {
@@ -82,7 +82,7 @@ impl Histogram {
             // compressed distribution info
             let mut len = 0usize;
             while len < 3 {
-                if read_bits!(bitstream, Bool)? {
+                if bitstream.read_bool()? {
                     len += 1;
                 } else {
                     break;
@@ -258,7 +258,7 @@ impl Histogram {
     }
 
     fn read_u8(bitstream: &mut Bitstream) -> Result<u8> {
-        Ok(if read_bits!(bitstream, Bool)? {
+        Ok(if bitstream.read_bool()? {
             let n = bitstream.read_bits(3)?;
             ((1 << n) + bitstream.read_bits(n as usize)?) as u8
         } else {

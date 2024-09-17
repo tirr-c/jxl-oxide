@@ -1,9 +1,10 @@
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
 use jxl_modular::{
     ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams, Sample,
 };
+use jxl_oxide_common::{define_bundle, read_bits, Bundle};
 use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
 use crate::{header::Encoding, FrameHeader, Result};
@@ -224,7 +225,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
         };
         let ma_config = bitstream
             .read_bool()?
-            .then(|| bitstream.read_bundle_with_ctx::<MaConfig, _>(ma_config_params))
+            .then(|| MaConfig::parse(bitstream, ma_config_params))
             .transpose()?;
 
         let color_width = header.color_sample_width();

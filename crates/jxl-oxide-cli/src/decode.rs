@@ -13,9 +13,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     #[cfg(not(feature = "rayon"))]
     let pool = JxlThreadPool::none();
 
-    let mut image_builder = JxlImage::builder()
-        .pool(pool.clone())
-        .lz77_mode(args.lz77_mode.into());
+    let mut image_builder = JxlImage::builder().pool(pool.clone());
     if args.approx_memory_limit != 0 {
         let tracker = AllocTracker::with_limit(args.approx_memory_limit);
         image_builder = image_builder.alloc_tracker(tracker);

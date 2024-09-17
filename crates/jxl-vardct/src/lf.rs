@@ -1,6 +1,7 @@
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_bitstream::{Bitstream, U};
 use jxl_grid::AllocTracker;
 use jxl_modular::{ChannelShift, MaConfig, Modular, ModularParams, Sample};
+use jxl_oxide_common::{define_bundle, Bundle};
 
 use crate::Result;
 
@@ -79,17 +80,15 @@ impl<Ctx> Bundle<Ctx> for HfBlockContext {
                 let num_lf_thresholds = bitstream.read_bits(4)?;
                 bsize *= num_lf_thresholds + 1;
                 for _ in 0..num_lf_thresholds {
-                    let t = read_bits!(
-                        bitstream,
-                        U32(u(4), 16 + u(8), 272 + u(16), 65808 + u(32)); UnpackSigned
-                    )?;
+                    let t = bitstream.read_u32(U(4), 16 + U(8), 272 + U(16), 65808 + U(32))?;
+                    let t = jxl_bitstream::unpack_signed(t);
                     thr.push(t);
                 }
             }
             let num_qf_thresholds = bitstream.read_bits(4)?;
             bsize *= num_qf_thresholds + 1;
             for _ in 0..num_qf_thresholds {
-                let t = read_bits!(bitstream, U32(u(2), 4 + u(3), 12 + u(5), 44 + u(8)))?;
+                let t = bitstream.read_u32(U(2), 4 + U(3), 12 + U(5), 44 + U(8))?;
                 qf_thresholds.push(1 + t);
             }
 

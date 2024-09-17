@@ -1,7 +1,8 @@
-use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_grid::AllocTracker;
 use jxl_image::ImageMetadata;
 use jxl_modular::{MaConfig, Sample};
+use jxl_oxide_common::Bundle;
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::{DequantMatrixSet, DequantMatrixSetParams, HfBlockContext, HfPass, HfPassParams};
 

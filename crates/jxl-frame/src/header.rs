@@ -1,6 +1,7 @@
 use crate::Result;
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Name};
+use jxl_bitstream::Bitstream;
 use jxl_image::{BitDepth, Extensions, ImageHeader, SizeHeader};
+use jxl_oxide_common::{define_bundle, read_bits, Bundle, Name};
 
 define_bundle! {
     /// Frame header.

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use jxl_oxide::{CropInfo, EnumColourEncoding, Lz77Mode};
+use jxl_oxide::{CropInfo, EnumColourEncoding};
 
 #[derive(Debug, Parser)]
 #[non_exhaustive]
@@ -73,9 +73,6 @@ pub struct DecodeArgs {
     /// Number of repeated decoding, used for benchmarking
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub num_reps: Option<u32>,
-    #[arg(value_enum, hide = true, long, default_value_t = Lz77ModeArg::IncludeMeta)]
-    #[doc(hidden)]
-    pub lz77_mode: Lz77ModeArg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -131,20 +128,4 @@ fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {
         left: x,
         top: y,
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[doc(hidden)]
-pub enum Lz77ModeArg {
-    IncludeMeta,
-    ExcludeMeta,
-}
-
-impl From<Lz77ModeArg> for Lz77Mode {
-    fn from(value: Lz77ModeArg) -> Self {
-        match value {
-            Lz77ModeArg::IncludeMeta => Lz77Mode::IncludeMeta,
-            Lz77ModeArg::ExcludeMeta => Lz77Mode::ExcludeMeta,
-        }
-    }
 }

@@ -1,5 +1,5 @@
-use jxl_bitstream::define_bundle;
 use jxl_grid::MutableSubgrid;
+use jxl_oxide_common::define_bundle;
 
 use crate::Sample;
 

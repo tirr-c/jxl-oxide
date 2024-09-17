@@ -1,6 +1,7 @@
-use jxl_bitstream::{Bitstream, Bundle, BundleDefault};
+use jxl_bitstream::Bitstream;
 use jxl_grid::AllocTracker;
 use jxl_modular::{Modular, ModularParams};
+use jxl_oxide_common::{Bundle, BundleDefault};
 
 use crate::{Result, TransformType};
 
