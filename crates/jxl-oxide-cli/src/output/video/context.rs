@@ -205,31 +205,30 @@ impl<W> VideoContext<W> {
         };
 
         let (primaries, colorspace, trc, video_color_range, video_pix_fmt);
-        if cll.is_some() {
-            // BT.2100, rgb48 full range -> BT.2100, yuv420p10 full range
-            primaries = ffmpeg::AVCOL_PRI_BT2020;
-            colorspace = ffmpeg::AVCOL_SPC_BT2020_NCL;
-            video_color_range = ffmpeg::AVCOL_RANGE_JPEG;
-            video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10;
-
-            if mastering_luminances.is_some() {
-                // PQ
-                trc = ffmpeg::AVCOL_TRC_SMPTE2084;
-            } else {
-                // HLG
-                trc = ffmpeg::AVCOL_TRC_ARIB_STD_B67;
+        match hdr_type {
+            Some(hdr_type) => {
+                // BT.2100, rgb48 full range -> BT.2100, yuv420p10 full range
+                primaries = ffmpeg::AVCOL_PRI_BT2020;
+                colorspace = ffmpeg::AVCOL_SPC_BT2020_NCL;
+                video_color_range = ffmpeg::AVCOL_RANGE_JPEG;
+                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10;
+                trc = match hdr_type {
+                    HdrType::Pq => ffmpeg::AVCOL_TRC_SMPTE2084,
+                    HdrType::Hlg => ffmpeg::AVCOL_TRC_ARIB_STD_B67,
+                };
             }
-        } else {
-            // sRGB, rgb48 full range -> BT.709, yuv420p limited range
-            primaries = ffmpeg::AVCOL_PRI_BT709;
-            colorspace = ffmpeg::AVCOL_SPC_RGB;
-            trc = ffmpeg::AVCOL_TRC_BT709;
-            video_color_range = ffmpeg::AVCOL_RANGE_MPEG;
-            video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P;
+            None => {
+                // sRGB, rgb48 full range -> BT.709, yuv420p limited range
+                primaries = ffmpeg::AVCOL_PRI_BT709;
+                colorspace = ffmpeg::AVCOL_SPC_RGB;
+                trc = ffmpeg::AVCOL_TRC_BT709;
+                video_color_range = ffmpeg::AVCOL_RANGE_MPEG;
+                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P;
+            }
         }
 
         let video_codec = unsafe {
-            if cll.is_some() {
+            if hdr_type.is_some() {
                 let mut codec = ffmpeg::avcodec_find_encoder_by_name(c"libsvtav1".as_ptr());
                 if codec.is_null() {
                     tracing::warn!("codec libsvtav1 not found, trying libx265");
@@ -309,8 +308,8 @@ impl<W> VideoContext<W> {
                 ffmpeg::av_opt_set(video.priv_data, c"preset".as_ptr(), c"10".as_ptr(), 0);
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"24".as_ptr(), 0);
                 if let Some((cll, fall)) = cll {
-                    let max_cll = cll as i32;
-                    let max_fall = fall as i32;
+                    let max_cll = (cll + 0.5) as i32;
+                    let max_fall = (fall + 0.5) as i32;
                     let mut libsvtav1_opts =
                         format!("enable-hdr=1:content-light={max_cll},{max_fall}");
                     if let Some((lmin, lmax)) = mastering_luminances {
@@ -338,8 +337,8 @@ impl<W> VideoContext<W> {
             } else if (*video_codec).id == ffmpeg::AV_CODEC_ID_HEVC {
                 ffmpeg::av_opt_set(video.priv_data, c"crf".as_ptr(), c"24".as_ptr(), 0);
                 if let Some((cll, fall)) = cll {
-                    let max_cll = cll as i32;
-                    let max_fall = fall as i32;
+                    let max_cll = (cll + 0.5) as i32;
+                    let max_fall = (fall + 0.5) as i32;
                     let mut libx265_opts =
                         format!("hdr-opt=1:repeat-headers=1:max-cll={max_cll},{max_fall}");
                     if let Some((lmin, lmax)) = mastering_luminances {
