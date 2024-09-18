@@ -11,5 +11,5 @@ edition = "2021"
 [dependencies]
 
 [dependencies.jxl-bitstream]
-version = "0.4.1"
+version = "0.5.0-alpha.0"
 path = "../jxl-bitstream"
