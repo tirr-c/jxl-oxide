@@ -4,6 +4,7 @@ description = "Common helpers for jxl-oxide"
 authors = ["Wonwoo Choi <chwo9843@gmail.com>"]
 repository = "https://github.com/tirr-c/jxl-oxide.git"
 readme = "README.md"
+license = "MIT OR Apache-2.0"
 
 version = "0.1.0"
 edition = "2021"
