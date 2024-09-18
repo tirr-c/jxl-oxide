@@ -1,6 +1,6 @@
-use jxl_bitstream::Bitstream;
+use jxl_bitstream::{Bitstream, U};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
-use jxl_oxide_common::{define_bundle, read_bits, Bundle};
+use jxl_oxide_common::{define_bundle, Bundle};
 use jxl_threadpool::JxlThreadPool;
 
 use super::{
@@ -98,9 +98,9 @@ impl Bundle<&WpHeader> for TransformInfo {
     fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> crate::Result<Self> {
         let tr = bitstream.read_bits(2)?;
         match tr {
-            0 => read_bits!(bitstream, Bundle(Rct)).map(Self::Rct),
-            1 => read_bits!(bitstream, Bundle(Palette), wp_header).map(Self::Palette),
-            2 => read_bits!(bitstream, Bundle(Squeeze)).map(Self::Squeeze),
+            0 => Rct::parse(bitstream, ()).map(Self::Rct),
+            1 => Palette::parse(bitstream, wp_header).map(Self::Palette),
+            2 => Squeeze::parse(bitstream, ()).map(Self::Squeeze),
             value => Err(crate::Error::Bitstream(jxl_bitstream::Error::InvalidEnum {
                 name: "TransformId",
                 value,
@@ -145,13 +145,10 @@ impl Bundle<&WpHeader> for Palette {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, wp_header: &WpHeader) -> Result<Self> {
-        let begin_c = read_bits!(bitstream, U32(u(3), 8 + u(6), 72 + u(10), 1096 + u(13)))?;
-        let num_c = read_bits!(bitstream, U32(1, 3, 4, 1 + u(13)))?;
-        let nb_colours = read_bits!(
-            bitstream,
-            U32(u(8), 256 + u(10), 1280 + u(12), 5376 + u(16))
-        )?;
-        let nb_deltas = read_bits!(bitstream, U32(0, 1 + u(8), 257 + u(10), 1281 + u(16)))?;
+        let begin_c = bitstream.read_u32(U(3), 8 + U(6), 72 + U(10), 1096 + U(13))?;
+        let num_c = bitstream.read_u32(1, 3, 4, 1 + U(13))?;
+        let nb_colours = bitstream.read_u32(U(8), 256 + U(10), 1280 + U(12), 5376 + U(16))?;
+        let nb_deltas = bitstream.read_u32(0, 1 + U(8), 257 + U(10), 1281 + U(16))?;
         let d_pred = Predictor::try_from(bitstream.read_bits(4)?)?;
         Ok(Self {
             begin_c,

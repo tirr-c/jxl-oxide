@@ -4,7 +4,7 @@
 //! images are used mainly for lossless images, but lossy VarDCT images also use them to store
 //! various information, such as quantized LF images and varblock configurations.
 use jxl_bitstream::Bitstream;
-use jxl_oxide_common::{define_bundle, read_bits, Bundle};
+use jxl_oxide_common::{define_bundle, Bundle};
 
 mod error;
 pub mod image;
@@ -44,7 +44,7 @@ impl<S: Sample> Bundle<ModularParams<'_, '_>> for Modular<S> {
         let inner = if params.channels.is_empty() {
             None
         } else {
-            Some(read_bits!(bitstream, Bundle(ModularData::<S>), params)?)
+            Some(ModularData::<S>::parse(bitstream, params)?)
         };
         Ok(Self { inner })
     }

@@ -5,9 +5,9 @@
 //!
 //! Image header is at the beginning of the bitstream. One can parse [`ImageHeader`] from the
 //! bitstream to retrieve information about the image.
-use jxl_bitstream::{Bitstream, Result};
+use jxl_bitstream::{Bitstream, Result, U};
 use jxl_color::header::*;
-use jxl_oxide_common::{define_bundle, read_bits, Bundle, Name};
+use jxl_oxide_common::{define_bundle, Bundle, Name};
 
 /// JPEG XL image header.
 ///
@@ -296,9 +296,9 @@ impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
             return Ok(Self::default());
         }
 
-        let ty_id = read_bits!(bitstream, Enum(ExtraChannelTypeRaw))?;
+        let ty_id = bitstream.read_enum::<ExtraChannelTypeRaw>()?;
         let bit_depth = BitDepth::parse(bitstream, ())?;
-        let dim_shift = read_bits!(bitstream, U32(0, 3, 4, 1 + u(3)))?;
+        let dim_shift = bitstream.read_u32(0, 3, 4, 1 + U(3))?;
         let name = Name::parse(bitstream, ())?;
 
         let ty = match ty_id {
@@ -315,7 +315,7 @@ impl<Ctx> Bundle<Ctx> for ExtraChannelInfo {
             ExtraChannelTypeRaw::SelectionMask => ExtraChannelType::SelectionMask,
             ExtraChannelTypeRaw::Black => ExtraChannelType::Black,
             ExtraChannelTypeRaw::Cfa => ExtraChannelType::Cfa {
-                cfa_channel: read_bits!(bitstream, U32(1, u(2), 3 + u(4), 19 + u(8)))?,
+                cfa_channel: bitstream.read_u32(1, U(2), 3 + U(4), 19 + U(8))?,
             },
             ExtraChannelTypeRaw::Thermal => ExtraChannelType::Thermal,
             ExtraChannelTypeRaw::NonOptional => ExtraChannelType::NonOptional,
@@ -495,8 +495,8 @@ impl<Ctx> Bundle<Ctx> for BitDepth {
     fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
         if bitstream.read_bool()? {
             // float_sample
-            let bits_per_sample = read_bits!(bitstream, U32(32, 16, 24, 1 + u(6)))?;
-            let exp_bits = read_bits!(bitstream, 1 + u(4))?;
+            let bits_per_sample = bitstream.read_u32(32, 16, 24, 1 + U(6))?;
+            let exp_bits = bitstream.read_bits(4)? + 1;
             if !(2..=8).contains(&exp_bits) {
                 return Err(jxl_bitstream::Error::ValidationFailed(
                     "Invalid exp_bits per float sample",
@@ -513,7 +513,7 @@ impl<Ctx> Bundle<Ctx> for BitDepth {
                 exp_bits,
             })
         } else {
-            let bits_per_sample = read_bits!(bitstream, U32(8, 10, 12, 1 + u(6)))?;
+            let bits_per_sample = bitstream.read_u32(8, 10, 12, 1 + U(6))?;
             if bits_per_sample > 31 {
                 return Err(jxl_bitstream::Error::ValidationFailed(
                     "Invalid bits_per_sample",

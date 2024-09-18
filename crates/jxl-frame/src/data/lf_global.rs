@@ -4,7 +4,7 @@ use jxl_image::ImageHeader;
 use jxl_modular::{
     ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams, Sample,
 };
-use jxl_oxide_common::{define_bundle, read_bits, Bundle};
+use jxl_oxide_common::{define_bundle, Bundle};
 use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
 use crate::{header::Encoding, FrameHeader, Result};
@@ -103,7 +103,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for LfGlobal<S> {
                 NoiseParameters::parse(bitstream, ())
             })
             .transpose()?;
-        let lf_dequant = read_bits!(bitstream, Bundle(LfChannelDequantization))?;
+        let lf_dequant = LfChannelDequantization::parse(bitstream, ())?;
 
         let modular_dequants = [
             lf_dequant.m_x_lf_unscaled(),
@@ -119,7 +119,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for LfGlobal<S> {
         }
 
         let vardct = (header.encoding == crate::header::Encoding::VarDct)
-            .then(|| read_bits!(bitstream, Bundle(LfGlobalVarDct)))
+            .then(|| LfGlobalVarDct::parse(bitstream, ()))
             .transpose()?;
 
         if let Some(splines) = &splines {
@@ -154,7 +154,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for LfGlobal<S> {
             }
         }
 
-        let gmodular = read_bits!(bitstream, Bundle(GlobalModular::<S>), params)?;
+        let gmodular = GlobalModular::<S>::parse(bitstream, params)?;
 
         Ok(Self {
             patches,
@@ -288,7 +288,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
             ma_config.as_ref(),
             tracker,
         );
-        let mut modular = read_bits!(bitstream, Bundle(Modular::<S>), modular_params)?;
+        let mut modular = Modular::<S>::parse(bitstream, modular_params)?;
         if let Some(image) = modular.image_mut() {
             let mut gmodular = image.prepare_gmodular()?;
             gmodular.decode(bitstream, 0, allow_partial)?;

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use jxl_bitstream::Bitstream;
 use jxl_grid::AllocTracker;
 use jxl_image::ImageHeader;
-use jxl_oxide_common::{read_bits, Bundle};
+use jxl_oxide_common::Bundle;
 
 pub mod data;
 mod error;
@@ -98,7 +98,7 @@ impl Bundle<FrameContext<'_>> for Frame {
 
         bitstream.zero_pad_to_byte()?;
         let base_offset = bitstream.num_read_bits() / 8;
-        let header = read_bits!(bitstream, Bundle(FrameHeader), &image_header)?;
+        let header = FrameHeader::parse(bitstream, &image_header)?;
 
         let width = header.width as u64;
         let height = header.height as u64;
@@ -189,7 +189,7 @@ impl Bundle<FrameContext<'_>> for Frame {
             .into());
         }
 
-        let mut toc = read_bits!(bitstream, Bundle(Toc), &header)?;
+        let mut toc = Toc::parse(bitstream, &header)?;
         toc.adjust_offsets(base_offset);
         let data = toc.iter_bitstream_order().map(GroupData::from).collect();
 

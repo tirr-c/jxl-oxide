@@ -1,6 +1,7 @@
 use jxl_bitstream::Bitstream;
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! expand_u32 {
     ($bitstream:ident; $($rest:tt)*) => {
         $crate::expand_u32!(@convert $bitstream; (); ($($rest)*,))
@@ -20,6 +21,7 @@ macro_rules! expand_u32 {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! read_bits {
     ($bistream:ident, $c:literal $(, $ctx:expr)?) => {
         ::jxl_bitstream::Result::Ok($c)
@@ -90,6 +92,7 @@ macro_rules! read_bits {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! make_def {
     (@ty; $c:literal) => { u32 };
     (@ty; u($n:literal)) => { u32 };
@@ -117,6 +120,7 @@ macro_rules! make_def {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! make_parse {
     (@parse $bitstream:ident; cond($cond:expr); default($def_expr:expr); ty($($spec:tt)*); ctx($ctx:expr)) => {
         if $cond {

@@ -2,7 +2,7 @@
 
 #![allow(clippy::excessive_precision)]
 use jxl_bitstream::{Bitstream, Error, Result};
-use jxl_oxide_common::{define_bundle, read_bits, Bundle};
+use jxl_oxide_common::{define_bundle, Bundle};
 
 use crate::consts::*;
 
@@ -30,7 +30,7 @@ impl<Ctx> Bundle<Ctx> for ColourEncoding {
             Self::default()
         } else {
             let want_icc = bitstream.read_bool()?;
-            let colour_space = read_bits!(bitstream, Enum(ColourSpace))?;
+            let colour_space = bitstream.read_enum::<ColourSpace>()?;
             if want_icc {
                 Self::IccProfile(colour_space)
             } else {
@@ -45,7 +45,7 @@ impl<Ctx> Bundle<Ctx> for ColourEncoding {
                     Primaries::parse(bitstream, ())?
                 };
                 let tf = TransferFunction::parse(bitstream, ())?;
-                let rendering_intent = read_bits!(bitstream, Enum(RenderingIntent))?;
+                let rendering_intent = bitstream.read_enum::<RenderingIntent>()?;
                 Self::Enum(EnumColourEncoding {
                     colour_space,
                     white_point,
@@ -412,13 +412,13 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
     type Error = Error;
 
     fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
-        let d = read_bits!(bitstream, Enum(WhitePointDiscriminator))?;
+        let d = bitstream.read_enum::<WhitePointDiscriminator>()?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
             WhitePointDiscriminator::E => Self::E,
             WhitePointDiscriminator::Dci => Self::Dci,
             WhitePointDiscriminator::Custom => {
-                let white = read_bits!(bitstream, Bundle(Customxy))?;
+                let white = Customxy::parse(bitstream, ())?;
                 Self::Custom(white)
             }
         })
@@ -485,15 +485,15 @@ impl<Ctx> Bundle<Ctx> for Primaries {
     type Error = Error;
 
     fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
-        let d = read_bits!(bitstream, Enum(PrimariesDiscriminator))?;
+        let d = bitstream.read_enum::<PrimariesDiscriminator>()?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
             PrimariesDiscriminator::Bt2100 => Self::Bt2100,
             PrimariesDiscriminator::P3 => Self::P3,
             PrimariesDiscriminator::Custom => {
-                let red = read_bits!(bitstream, Bundle(Customxy))?;
-                let green = read_bits!(bitstream, Bundle(Customxy))?;
-                let blue = read_bits!(bitstream, Bundle(Customxy))?;
+                let red = Customxy::parse(bitstream, ())?;
+                let green = Customxy::parse(bitstream, ())?;
+                let blue = Customxy::parse(bitstream, ())?;
                 Self::Custom { red, green, blue }
             }
         })
@@ -613,7 +613,9 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
                 inverted: true,
             })
         } else {
-            read_bits!(bitstream, Enum(TransferFunction)).map_err(From::from)
+            bitstream
+                .read_enum::<TransferFunction>()
+                .map_err(From::from)
         }
     }
 }
