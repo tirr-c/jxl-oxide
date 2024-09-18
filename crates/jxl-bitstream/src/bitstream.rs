@@ -1,34 +1,5 @@
 use crate::{Error, Result};
 
-/// Bit specifier for [`Bitstream::read_u32`].
-pub enum U32Specifier {
-    Constant(u32),
-    BitsOffset(u32, usize),
-}
-
-/// Bit count for use in [`Bitstream::read_u32`].
-pub struct U(pub usize);
-
-impl From<u32> for U32Specifier {
-    fn from(value: u32) -> Self {
-        Self::Constant(value)
-    }
-}
-
-impl From<U> for U32Specifier {
-    fn from(value: U) -> Self {
-        Self::BitsOffset(0, value.0)
-    }
-}
-
-impl std::ops::Add<U> for u32 {
-    type Output = U32Specifier;
-
-    fn add(self, rhs: U) -> Self::Output {
-        U32Specifier::BitsOffset(self, rhs.0)
-    }
-}
-
 /// Bitstream reader with borrowed in-memory buffer.
 ///
 /// Implementation is mostly from [jxl-rs].
@@ -327,5 +298,43 @@ impl Bitstream<'_> {
             let bitpattern = mantissa | (exponent << 23) | neg_bit;
             Ok(f32::from_bits(bitpattern))
         }
+    }
+
+    /// Reads an enum as defined in the JPEG XL specification.
+    pub fn read_enum<E: TryFrom<u32>>(&mut self) -> Result<E> {
+        let v = self.read_u32(0, 1, 2 + U(4), 18 + U(6))?;
+        E::try_from(v).map_err(|_| Error::InvalidEnum {
+            name: std::any::type_name::<E>(),
+            value: v,
+        })
+    }
+}
+
+/// Bit specifier for [`Bitstream::read_u32`].
+pub enum U32Specifier {
+    Constant(u32),
+    BitsOffset(u32, usize),
+}
+
+/// Bit count for use in [`Bitstream::read_u32`].
+pub struct U(pub usize);
+
+impl From<u32> for U32Specifier {
+    fn from(value: u32) -> Self {
+        Self::Constant(value)
+    }
+}
+
+impl From<U> for U32Specifier {
+    fn from(value: U) -> Self {
+        Self::BitsOffset(0, value.0)
+    }
+}
+
+impl std::ops::Add<U> for u32 {
+    type Output = U32Specifier;
+
+    fn add(self, rhs: U) -> Self::Output {
+        U32Specifier::BitsOffset(self, rhs.0)
     }
 }

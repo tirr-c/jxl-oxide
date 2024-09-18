@@ -28,25 +28,25 @@ macro_rules! read_bits {
         $bitstream.read_bits($n)
     };
     ($bitstream:ident, u($n:literal); UnpackSigned $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n).map($crate::unpack_signed)
+        $bitstream.read_bits($n).map(::jxl_bitstream::unpack_signed)
     };
     ($bitstream:ident, $c:literal + u($n:literal) $(, $ctx:expr)?) => {
         $bitstream.read_bits($n).map(|v| v.wrapping_add($c))
     };
     ($bitstream:ident, $c:literal + u($n:literal); UnpackSigned $(, $ctx:expr)?) => {
-        $bitstream.read_bits($n).map(|v| $crate::unpack_signed(v.wrapping_add($c)))
+        $bitstream.read_bits($n).map(|v| ::jxl_bitstream::unpack_signed(v.wrapping_add($c)))
     };
     ($bitstream:ident, U32($($args:tt)+) $(, $ctx:expr)?) => {
         $crate::expand_u32!($bitstream; $($args)+)
     };
     ($bitstream:ident, U32($($args:tt)+); UnpackSigned $(, $ctx:expr)?) => {
-        $crate::expand_u32!($bitstream; $($args)+).map($crate::unpack_signed)
+        $crate::expand_u32!($bitstream; $($args)+).map(::jxl_bitstream::unpack_signed)
     };
     ($bitstream:ident, U64 $(, $ctx:expr)?) => {
         $bitstream.read_u64()
     };
     ($bitstream:ident, U64; UnpackSigned $(, $ctx:expr)?) => {
-        read_bits!($bitstream, U64 $(, $ctx)?).map($crate::unpack_signed_u64)
+        $bitstream.read_u64().map(::jxl_bitstream::unpack_signed_u64)
     };
     ($bitstream:ident, F16 $(, $ctx:expr)?) => {
         $bitstream.read_f16_as_f32()
@@ -55,13 +55,7 @@ macro_rules! read_bits {
         $bitstream.read_bool()
     };
     ($bitstream:ident, Enum($enumtype:ty) $(, $ctx:expr)?) => {
-        $crate::read_bits!($bitstream, U32(0, 1, 2 + u(4), 18 + u(6)))
-            .and_then(|v| {
-                <$enumtype as TryFrom<u32>>::try_from(v).map_err(|_| ::jxl_bitstream::Error::InvalidEnum {
-                    name: stringify!($enumtype),
-                    value: v,
-                })
-            })
+        $bitstream.read_enum::<$enumtype>()
     };
     ($bitstream:ident, ZeroPadToByte $(, $ctx:expr)?) => {
         $bitstream.zero_pad_to_byte()
@@ -315,22 +309,4 @@ impl std::ops::DerefMut for Name {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-}
-
-#[inline]
-#[doc(hidden)]
-pub fn unpack_signed(x: u32) -> i32 {
-    let bit = x & 1;
-    let base = x >> 1;
-    let flip = 0u32.wrapping_sub(bit);
-    (base ^ flip) as i32
-}
-
-#[inline]
-#[doc(hidden)]
-pub fn unpack_signed_u64(x: u64) -> i64 {
-    let bit = x & 1;
-    let base = x >> 1;
-    let flip = 0u64.wrapping_sub(bit);
-    (base ^ flip) as i64
 }
