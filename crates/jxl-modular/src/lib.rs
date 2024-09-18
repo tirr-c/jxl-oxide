@@ -3,7 +3,8 @@
 //! A Modular image represents a set of grids (two-dimensional arrays) of integer values. Modular
 //! images are used mainly for lossless images, but lossy VarDCT images also use them to store
 //! various information, such as quantized LF images and varblock configurations.
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
+use jxl_oxide_common::{define_bundle, Bundle};
 
 mod error;
 pub mod image;
@@ -43,7 +44,7 @@ impl<S: Sample> Bundle<ModularParams<'_, '_>> for Modular<S> {
         let inner = if params.channels.is_empty() {
             None
         } else {
-            Some(read_bits!(bitstream, Bundle(ModularData::<S>), params)?)
+            Some(ModularData::<S>::parse(bitstream, params)?)
         };
         Ok(Self { inner })
     }
@@ -204,7 +205,7 @@ fn read_and_validate_local_modular_header(
     global_ma_config: Option<&MaConfig>,
     tracker: Option<&AllocTracker>,
 ) -> Result<(ModularHeader, MaConfig)> {
-    let mut header = bitstream.read_bundle::<ModularHeader>()?;
+    let mut header = ModularHeader::parse(bitstream, ())?;
     if header.nb_transforms > 512 {
         tracing::error!(
             nb_transforms = header.nb_transforms,
@@ -237,7 +238,7 @@ fn read_and_validate_local_modular_header(
             tracker,
             node_limit: (1024 + local_samples).min(1 << 20) as usize,
         };
-        bitstream.read_bundle_with_ctx(params)?
+        MaConfig::parse(bitstream, params)?
     };
     if ma_ctx.tree_depth() > 2048 {
         tracing::error!(

@@ -1,5 +1,5 @@
 //! Prefix code based on Brotli
-use jxl_bitstream::{read_bits, Bitstream};
+use jxl_bitstream::Bitstream;
 
 use crate::{Error, Result};
 
@@ -129,7 +129,7 @@ impl Histogram {
             return Ok(Self::with_single_symbol(0));
         }
 
-        let hskip = read_bits!(bitstream, u(2))?;
+        let hskip = bitstream.read_bits(2)?;
         if hskip == 1 {
             Self::parse_simple(bitstream, alphabet_size)
         } else {
@@ -139,7 +139,7 @@ impl Histogram {
 
     fn parse_simple(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
         let alphabet_bits = alphabet_size.next_power_of_two().trailing_zeros() as usize;
-        let nsym = read_bits!(bitstream, u(2))? + 1;
+        let nsym = bitstream.read_bits(2)? + 1;
         let it = match nsym {
             1 => {
                 let sym = bitstream.read_bits(alphabet_bits)?;
@@ -207,10 +207,10 @@ impl Histogram {
         let mut nonzero_sym = 0;
         for idx in CODE_LENGTH_ORDER.into_iter().skip(hskip as usize) {
             // Read single code length code.
-            let base = read_bits!(bitstream, U32(0, 4, 3, 8))?;
+            let base = bitstream.read_u32(0, 4, 3, 8)? as u8;
             let len = if base == 8 {
-                if read_bits!(bitstream, Bool)? {
-                    if read_bits!(bitstream, Bool)? {
+                if bitstream.read_bool()? {
+                    if bitstream.read_bool()? {
                         // 1111
                         5
                     } else {

@@ -3,7 +3,7 @@ pub struct NoiseParameters {
     pub lut: [f32; 8],
 }
 
-impl<Ctx> jxl_bitstream::Bundle<Ctx> for NoiseParameters {
+impl<Ctx> jxl_oxide_common::Bundle<Ctx> for NoiseParameters {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut jxl_bitstream::Bitstream, _: Ctx) -> crate::Result<Self> {

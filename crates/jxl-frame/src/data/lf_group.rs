@@ -1,6 +1,7 @@
-use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_grid::AllocTracker;
 use jxl_modular::{image::TransformedModularSubimage, MaConfig, Sample};
+use jxl_oxide_common::Bundle;
 use jxl_vardct::{HfMetadata, HfMetadataParams, LfCoeff, LfCoeffParams, Quantizer};
 
 use crate::{

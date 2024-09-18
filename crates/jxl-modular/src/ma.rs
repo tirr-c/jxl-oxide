@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
+use jxl_bitstream::{unpack_signed, Bitstream};
 use jxl_coding::Decoder;
 use jxl_grid::{AllocHandle, AllocTracker};
+use jxl_oxide_common::Bundle;
 
 use super::predictor::{Predictor, Properties};
 use crate::{sample::Sealed, Result, Sample};

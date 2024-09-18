@@ -1,5 +1,6 @@
 use crate::Result;
-use jxl_bitstream::{read_bits, Bitstream, Bundle};
+use jxl_bitstream::{Bitstream, U};
+use jxl_oxide_common::Bundle;
 
 /// Table of contents of a frame.
 ///
@@ -205,12 +206,7 @@ impl Bundle<&crate::FrameHeader> for Toc {
 
         bitstream.zero_pad_to_byte()?;
         let sizes = (0..entry_count)
-            .map(|_| {
-                read_bits!(
-                    bitstream,
-                    U32(u(10), 1024 + u(14), 17408 + u(22), 4211712 + u(30))
-                )
-            })
+            .map(|_| bitstream.read_u32(U(10), 1024 + U(14), 17408 + U(22), 4211712 + U(30)))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         bitstream.zero_pad_to_byte()?;
 

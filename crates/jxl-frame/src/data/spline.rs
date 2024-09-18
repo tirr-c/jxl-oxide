@@ -1,5 +1,6 @@
-use jxl_bitstream::{unpack_signed, Bitstream, Bundle};
+use jxl_bitstream::{unpack_signed, Bitstream};
 use jxl_coding::Decoder;
+use jxl_oxide_common::Bundle;
 
 use crate::{FrameHeader, Result};
 

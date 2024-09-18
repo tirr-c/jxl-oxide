@@ -1,4 +1,4 @@
-use crate::{Bundle, Error, Lz77Mode, Result};
+use crate::{Error, Result};
 
 /// Bitstream reader with borrowed in-memory buffer.
 ///
@@ -11,10 +11,6 @@ pub struct Bitstream<'buf> {
     buf: u64,
     num_read_bits: usize,
     remaining_buf_bits: usize,
-    /// LZ77 dist_multiplier mode.
-    ///
-    /// It shouldn't be here, this is a hack to avoid API breakage.
-    lz77_mode: Lz77Mode,
 }
 
 impl std::fmt::Debug for Bitstream<'_> {
@@ -44,7 +40,6 @@ impl<'buf> Bitstream<'buf> {
             buf: 0,
             num_read_bits: 0,
             remaining_buf_bits: 0,
-            lz77_mode: Lz77Mode::IncludeMeta,
         }
     }
 
@@ -52,18 +47,6 @@ impl<'buf> Bitstream<'buf> {
     #[inline]
     pub fn num_read_bits(&self) -> usize {
         self.num_read_bits
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    pub fn lz77_mode(&self) -> Lz77Mode {
-        self.lz77_mode
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    pub fn set_lz77_mode(&mut self, lz77_mode: Lz77Mode) {
-        self.lz77_mode = lz77_mode;
     }
 }
 
@@ -224,6 +207,39 @@ impl Bitstream<'_> {
 }
 
 impl Bitstream<'_> {
+    /// Reads an `U32` as defined in the JPEG XL specification.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use jxl_bitstream::{Bitstream, U};
+    ///
+    /// let buf = [0b110010];
+    /// let mut bitstream = Bitstream::new(&buf);
+    /// let val = bitstream.read_u32(1, U(2), 3 + U(4), 19 + U(8)).expect("failed to read data");
+    /// assert_eq!(val, 15);
+    /// ```
+    #[inline]
+    pub fn read_u32(
+        &mut self,
+        d0: impl Into<U32Specifier>,
+        d1: impl Into<U32Specifier>,
+        d2: impl Into<U32Specifier>,
+        d3: impl Into<U32Specifier>,
+    ) -> Result<u32> {
+        let d = match self.read_bits(2)? {
+            0 => d0.into(),
+            1 => d1.into(),
+            2 => d2.into(),
+            3 => d3.into(),
+            _ => unreachable!(),
+        };
+        match d {
+            U32Specifier::Constant(x) => Ok(x),
+            U32Specifier::BitsOffset(offset, n) => self.read_bits(n).map(|x| x + offset),
+        }
+    }
+
     /// Reads an `U64` as defined in the JPEG XL specification.
     pub fn read_u64(&mut self) -> Result<u64> {
         let selector = self.read_bits(2)?;
@@ -284,16 +300,41 @@ impl Bitstream<'_> {
         }
     }
 
-    #[inline]
-    pub fn read_bundle<B: Bundle<()>>(&mut self) -> std::result::Result<B, B::Error> {
-        B::parse(self, ())
+    /// Reads an enum as defined in the JPEG XL specification.
+    pub fn read_enum<E: TryFrom<u32>>(&mut self) -> Result<E> {
+        let v = self.read_u32(0, 1, 2 + U(4), 18 + U(6))?;
+        E::try_from(v).map_err(|_| Error::InvalidEnum {
+            name: std::any::type_name::<E>(),
+            value: v,
+        })
     }
+}
 
-    #[inline]
-    pub fn read_bundle_with_ctx<B: Bundle<Ctx>, Ctx>(
-        &mut self,
-        ctx: Ctx,
-    ) -> std::result::Result<B, B::Error> {
-        B::parse(self, ctx)
+/// Bit specifier for [`Bitstream::read_u32`].
+pub enum U32Specifier {
+    Constant(u32),
+    BitsOffset(u32, usize),
+}
+
+/// Bit count for use in [`Bitstream::read_u32`].
+pub struct U(pub usize);
+
+impl From<u32> for U32Specifier {
+    fn from(value: u32) -> Self {
+        Self::Constant(value)
+    }
+}
+
+impl From<U> for U32Specifier {
+    fn from(value: U) -> Self {
+        Self::BitsOffset(0, value.0)
+    }
+}
+
+impl std::ops::Add<U> for u32 {
+    type Output = U32Specifier;
+
+    fn add(self, rhs: U) -> Self::Output {
+        U32Specifier::BitsOffset(self, rhs.0)
     }
 }

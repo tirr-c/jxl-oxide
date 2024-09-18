@@ -7,7 +7,7 @@ use crate::{Error, Result};
 
 /// Reads the encoded ICC profile stream from the given bitstream.
 pub fn read_icc(bitstream: &mut Bitstream) -> Result<Vec<u8>> {
-    let enc_size = jxl_bitstream::read_bits!(bitstream, U64)?;
+    let enc_size = bitstream.read_u64()?;
     tracing::trace!(enc_size);
 
     if enc_size > (1 << 28) {

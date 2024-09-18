@@ -1,6 +1,7 @@
 use crate::Result;
-use jxl_bitstream::{define_bundle, read_bits, Bitstream, Bundle, Name};
+use jxl_bitstream::{Bitstream, U};
 use jxl_image::{BitDepth, Extensions, ImageHeader, SizeHeader};
+use jxl_oxide_common::{define_bundle, Bundle, Name};
 
 define_bundle! {
     /// Frame header.
@@ -482,7 +483,7 @@ impl<Ctx> Bundle<Ctx> for BlendMode {
     type Error = crate::Error;
 
     fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
-        Ok(match read_bits!(bitstream, U32(0, 1, 2, 3 + u(2)))? {
+        Ok(match bitstream.read_u32(0, 1, 2, 3 + U(2))? {
             0 => Self::Replace,
             1 => Self::Add,
             2 => Self::Blend,

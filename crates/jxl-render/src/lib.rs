@@ -1,7 +1,7 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
 use std::sync::Arc;
 
-use jxl_bitstream::{Bitstream, Bundle};
+use jxl_bitstream::Bitstream;
 use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, ColourSpace,
     EnumColourEncoding,
@@ -10,6 +10,7 @@ use jxl_frame::{header::FrameType, Frame, FrameContext};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::Sample;
+use jxl_oxide_common::Bundle;
 use jxl_threadpool::JxlThreadPool;
 
 mod blend;
