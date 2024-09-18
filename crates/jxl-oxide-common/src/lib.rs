@@ -63,10 +63,10 @@ macro_rules! read_bits {
         $bitstream.zero_pad_to_byte()
     };
     ($bitstream:ident, Bundle($bundle:ty)) => {
-        <$bundle as $crate::Bundle<()>>::parse($bitstream, ())
+        <$bundle>::parse($bitstream, ())
     };
     ($bitstream:ident, Bundle($bundle:ty), $ctx:expr) => {
-        <$bundle as $crate::Bundle<_>>::parse($bitstream, $ctx)
+        <$bundle>::parse($bitstream, $ctx)
     };
     ($bitstream:ident, Vec[$($inner:tt)*]; $count:expr $(, $ctx:expr)?) => {
         {
@@ -133,16 +133,16 @@ macro_rules! make_parse {
         if $cond {
             $crate::read_bits!($bitstream, $($spec)*, $ctx)?
         } else {
-            $crate::BundleDefault::default_with_context($ctx)
+            <$crate::make_def!(@ty; $($spec)*)>::default_with_context($ctx)
         }
     };
     (@parse $bitstream:ident; $(default($def_expr:expr);)? ty($($spec:tt)*); ctx($ctx:expr)) => {
         $crate::read_bits!($bitstream, $($spec)*, $ctx)?
     };
-    (@default; ; $ctx:expr) => {
-        $crate::BundleDefault::default_with_context($ctx)
+    (@default($($spec:tt)*); ; $ctx:expr) => {
+        <$crate::make_def!(@ty; $($spec)*)>::default_with_context($ctx)
     };
-    (@default; $def_expr:expr $(; $ctx:expr)?) => {
+    (@default($($spec:tt)*); $def_expr:expr $(; $ctx:expr)?) => {
         $def_expr
     };
     (@select_ctx; $ctx_id:ident; $ctx:expr) => {
@@ -163,10 +163,11 @@ macro_rules! make_parse {
         impl<Ctx: Copy> $crate::Bundle<Ctx> for $bundle_name {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
-            #[allow(unused_variables)]
+            #[allow(unused)]
             fn parse(bitstream: &mut ::jxl_bitstream::Bitstream, ctx: Ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+                use $crate::{Bundle, BundleDefault};
                 $(
-                    let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
+                    let $field = $crate::make_parse!(
                         @parse bitstream;
                         $(cond($cond);)?
                         $(default($def_expr);)?
@@ -179,11 +180,12 @@ macro_rules! make_parse {
         }
 
         impl<Ctx: Copy> $crate::BundleDefault<Ctx> for $bundle_name {
-            #[allow(unused_variables)]
+            #[allow(unused)]
             fn default_with_context(_ctx: Ctx) -> Self where Self: Sized {
+                use $crate::BundleDefault;
                 $(
-                    let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
-                        @default;
+                    let $field = $crate::make_parse!(
+                        @default($($expr)*);
                         $($def_expr)?;
                         $crate::make_parse!(@select_ctx; _ctx; $($ctx_for_field)?)
                     );
@@ -198,10 +200,11 @@ macro_rules! make_parse {
         impl $crate::Bundle<$ctx> for $bundle_name {
             type Error = $crate::make_parse!(@select_error_ty; $($err)?);
 
-            #[allow(unused_variables)]
+            #[allow(unused)]
             fn parse(bitstream: &mut ::jxl_bitstream::Bitstream, $ctx_id: $ctx) -> ::std::result::Result<Self, Self::Error> where Self: Sized {
+                use $crate::{Bundle, BundleDefault};
                 $(
-                    let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
+                    let $field = $crate::make_parse!(
                         @parse bitstream;
                         $(cond($cond);)?
                         $(default($def_expr);)?
@@ -214,11 +217,12 @@ macro_rules! make_parse {
         }
 
         impl $crate::BundleDefault<$ctx> for $bundle_name {
-            #[allow(unused_variables)]
+            #[allow(unused)]
             fn default_with_context($ctx_id: $ctx) -> Self where Self: Sized {
+                use $crate::BundleDefault;
                 $(
-                    let $field: $crate::make_def!(@ty; $($expr)*) = $crate::make_parse!(
-                        @default;
+                    let $field = $crate::make_parse!(
+                        @default($($expr)*);
                         $($def_expr)?;
                         $crate::make_parse!(@select_ctx; $ctx_id; $($ctx_for_field)?)
                     );
