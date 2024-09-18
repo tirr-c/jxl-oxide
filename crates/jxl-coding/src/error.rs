@@ -5,10 +5,19 @@ pub enum Error {
     Lz77NotAllowed,
     InvalidAnsHistogram,
     InvalidAnsStream,
-    InvalidIntegerConfig,
+    InvalidIntegerConfig {
+        split_exponent: u32,
+        msb_in_token: u32,
+        lsb_in_token: Option<u32>,
+    },
     InvalidPermutation,
     InvalidPrefixHistogram,
-    InvalidCluster,
+    PrefixSymbolTooLarge(usize),
+    InvalidCluster(u32),
+    ClusterHole {
+        num_expected_clusters: u32,
+        num_actual_clusters: u32,
+    },
     UnexpectedLz77Repeat,
     InvalidLz77Symbol,
 }
@@ -29,10 +38,19 @@ impl std::fmt::Display for Error {
             Self::Lz77NotAllowed => write!(f, "LZ77-enabled decoder when it is not allowed"),
             Self::InvalidAnsHistogram => write!(f, "invalid ANS distribution"),
             Self::InvalidAnsStream => write!(f, "ANS stream verification failed"),
-            Self::InvalidIntegerConfig => write!(f, "invalid hybrid integer configuration"),
+            Self::InvalidIntegerConfig {
+                split_exponent,
+                msb_in_token,
+                lsb_in_token,
+            } => write!(f, "invalid hybrid integer configuration; {} + {msb_in_token} > {split_exponent}", lsb_in_token.unwrap_or(0)),
             Self::InvalidPermutation => write!(f, "invalid permutation"),
             Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
-            Self::InvalidCluster => write!(f, "invalid cluster"),
+            Self::PrefixSymbolTooLarge(size) => write!(f, "prefix code symbol too large ({size})"),
+            Self::InvalidCluster(id) => write!(f, "invalid cluster ID {id}"),
+            Self::ClusterHole {
+                num_expected_clusters,
+                num_actual_clusters,
+            } => write!(f, "distribution cluster has a hole; expected {num_expected_clusters}, actual {num_actual_clusters}"),
             Self::UnexpectedLz77Repeat => write!(
                 f,
                 "LZ77 repeat symbol encountered without decoding any symbols"

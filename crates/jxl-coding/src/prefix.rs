@@ -3,6 +3,7 @@ use jxl_bitstream::Bitstream;
 
 use crate::{Error, Result};
 
+const MAX_PREFIX_BITS: usize = 15;
 const MAX_TOPLEVEL_BITS: usize = 10;
 
 #[derive(Debug)]
@@ -22,7 +23,7 @@ struct Entry {
 
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> Result<Self> {
-        let mut syms_for_length = Vec::with_capacity(15);
+        let mut syms_for_length = Vec::with_capacity(MAX_PREFIX_BITS);
         for (sym, len) in code_lengths.into_iter().enumerate() {
             let sym = sym as u16;
             if len > 0 {
@@ -127,6 +128,10 @@ impl Histogram {
     pub fn parse(bitstream: &mut Bitstream, alphabet_size: u32) -> Result<Self> {
         if alphabet_size == 1 {
             return Ok(Self::with_single_symbol(0));
+        }
+
+        if alphabet_size > 1u32 << MAX_PREFIX_BITS {
+            return Err(Error::PrefixSymbolTooLarge(alphabet_size as usize));
         }
 
         let hskip = bitstream.read_bits(2)?;
@@ -302,17 +307,17 @@ impl Histogram {
             }
 
             if *len != 0 {
-                bitacc += 32768 >> *len;
+                bitacc += 1 << MAX_PREFIX_BITS.saturating_sub(*len as usize);
 
-                if bitacc > 32768 {
-                    return Err(Error::InvalidPrefixHistogram);
-                } else if bitacc == 32768 && repeat_count == 0 {
+                if bitacc > 1 << MAX_PREFIX_BITS {
+                    return Err(Error::PrefixSymbolTooLarge(bitacc));
+                } else if bitacc == 1 << MAX_PREFIX_BITS && repeat_count == 0 {
                     break;
                 }
             }
         }
 
-        if bitacc != 32768 || repeat_count > 0 {
+        if bitacc != 1 << MAX_PREFIX_BITS || repeat_count > 0 {
             return Err(Error::InvalidPrefixHistogram);
         }
         Self::with_code_lengths(code_lengths)
@@ -328,7 +333,7 @@ impl Histogram {
             ref toplevel_entries,
             ref second_level_entries,
         } = *self;
-        let peeked = bitstream.peek_bits_const::<15>();
+        let peeked = bitstream.peek_bits_const::<MAX_PREFIX_BITS>();
         let toplevel_offset = peeked & toplevel_mask;
         let toplevel_entry = toplevel_entries[toplevel_offset as usize];
         if toplevel_entry.nested {

@@ -337,7 +337,11 @@ impl IntegerConfig {
             let msb_bits = add_log2_ceil(split_exponent) as usize;
             let msb_in_token = bitstream.read_bits(msb_bits)?;
             if msb_in_token > split_exponent {
-                return Err(Error::InvalidIntegerConfig);
+                return Err(Error::InvalidIntegerConfig {
+                    split_exponent,
+                    msb_in_token,
+                    lsb_in_token: None,
+                });
             }
             let lsb_bits = add_log2_ceil(split_exponent - msb_in_token) as usize;
             let lsb_in_token = bitstream.read_bits(lsb_bits)?;
@@ -346,7 +350,11 @@ impl IntegerConfig {
             (0u32, 0u32)
         };
         if lsb_in_token + msb_in_token > split_exponent {
-            return Err(Error::InvalidIntegerConfig);
+            return Err(Error::InvalidIntegerConfig {
+                split_exponent,
+                msb_in_token,
+                lsb_in_token: Some(lsb_in_token),
+            });
         }
         Ok(Self {
             split_exponent,
@@ -653,7 +661,7 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
         let mut ret = (0..num_dist)
             .map(|_| -> Result<_> {
                 let b = decoder.read_varint(bitstream, 0)?;
-                u8::try_from(b).map_err(|_| Error::InvalidCluster)
+                u8::try_from(b).map_err(|_| Error::InvalidCluster(b))
             })
             .collect::<Result<Vec<_>>>()?;
         decoder.finalize()?;
@@ -677,9 +685,18 @@ pub fn read_clusters(bitstream: &mut Bitstream, num_dist: u32) -> Result<(u32, V
         .iter()
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    if set.len() != num_clusters as usize {
-        tracing::error!("distribution cluster has a hole");
-        Err(Error::InvalidCluster)
+    let num_expected_clusters = num_clusters;
+    let num_actual_clusters = set.len() as u32;
+    if num_actual_clusters != num_expected_clusters {
+        tracing::error!(
+            num_expected_clusters,
+            num_actual_clusters,
+            "distribution cluster has a hole"
+        );
+        Err(Error::ClusterHole {
+            num_expected_clusters,
+            num_actual_clusters,
+        })
     } else {
         Ok((num_clusters, cluster))
     }
