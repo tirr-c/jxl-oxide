@@ -195,6 +195,7 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
 
     let mut progress = LoadProgress::new(args.unit_step as usize, total_bytes as usize);
     let mut buf = vec![0u8; progress.current_step()];
+    let mut buf_valid = 0usize;
 
     let output_dir = args.output.as_deref();
     let mut output_ctx = match output_dir {
@@ -260,14 +261,20 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
     let mut image = loop {
         let current_iter = progress.iter();
 
-        let buf = fill_buf(&mut input, &mut buf)?;
-        if buf.is_empty() {
+        let filled_buf = fill_buf(&mut input, &mut buf[buf_valid..])?;
+        if filled_buf.is_empty() {
             tracing::warn!("Partial image");
             return Ok(());
         }
-        progress.add_iter(buf.len());
+        progress.add_iter(filled_buf.len());
+        buf_valid += filled_buf.len();
 
-        uninit_image.feed_bytes(buf).map_err(Error::ReadJxl)?;
+        let consumed = uninit_image
+            .feed_bytes(&buf[..buf_valid])
+            .map_err(Error::ReadJxl)?;
+        buf.copy_within(consumed..buf_valid, 0);
+        buf_valid -= consumed;
+
         let init_result = uninit_image.try_init().map_err(Error::ReadJxl)?;
         match init_result {
             jxl_oxide::InitializeResult::NeedMoreData(image) => uninit_image = image,
@@ -295,13 +302,19 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
             tracing::info!(new_step, "Increasing step size");
         }
 
-        let buf = fill_buf(&mut input, &mut buf)?;
-        if buf.is_empty() {
+        let filled_buf = fill_buf(&mut input, &mut buf[buf_valid..])?;
+        if filled_buf.is_empty() {
             break;
         }
-        progress.add_iter(buf.len());
+        progress.add_iter(filled_buf.len());
+        buf_valid += filled_buf.len();
 
-        image.feed_bytes(buf).map_err(Error::ReadJxl)?;
+        let consumed = image
+            .feed_bytes(&buf[..buf_valid])
+            .map_err(Error::ReadJxl)?;
+        buf.copy_within(consumed..buf_valid, 0);
+        buf_valid -= consumed;
+
         run_once(&mut image, &progress, output_ctx.as_mut())?;
     }
 
