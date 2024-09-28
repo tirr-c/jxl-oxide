@@ -82,4 +82,5 @@ test_by_include!(
     icc_large_stride,
     upsample_separate_ec,
     lz77_num_to_copy_overflow,
+    bitstream_u32_overflow,
 );
