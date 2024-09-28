@@ -79,13 +79,12 @@ impl WasmJxlImage {
     }
 
     #[wasm_bindgen(js_name = feedBytes)]
-    pub fn feed_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
+    pub fn feed_bytes(&mut self, bytes: &[u8]) -> Result<usize, String> {
         match &mut self.inner {
             WasmJxlImageInner::Uninit(image) => image.feed_bytes(bytes),
             WasmJxlImageInner::Init(image) => image.feed_bytes(bytes),
         }
-        .map_err(|e| e.to_string())?;
-        Ok(())
+        .map_err(|e| e.to_string())
     }
 
     #[wasm_bindgen(js_name = tryInit)]

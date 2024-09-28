@@ -145,7 +145,7 @@
 use std::sync::Arc;
 
 use image::BitDepth;
-use jxl_bitstream::{Bitstream, ContainerDetectingReader};
+use jxl_bitstream::{Bitstream, ContainerDetectingReader, ParseEvent};
 use jxl_frame::FrameContext;
 use jxl_oxide_common::{Bundle, Name};
 use jxl_render::ImageBuffer;
@@ -218,8 +218,9 @@ impl JxlImageBuilder {
     pub fn read(self, mut reader: impl std::io::Read) -> Result<JxlImage> {
         let mut uninit = self.build_uninit();
         let mut buf = vec![0u8; 4096];
+        let mut buf_valid = 0usize;
         let mut image = loop {
-            let count = reader.read(&mut buf)?;
+            let count = reader.read(&mut buf[buf_valid..])?;
             if count == 0 {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
@@ -227,8 +228,10 @@ impl JxlImageBuilder {
                 )
                 .into());
             }
-            let buf = &buf[..count];
-            uninit.feed_bytes(buf)?;
+            buf_valid += count;
+            let consumed = uninit.feed_bytes(&buf[..buf_valid])?;
+            buf.copy_within(consumed..buf_valid, 0);
+            buf_valid -= consumed;
 
             match uninit.try_init()? {
                 InitializeResult::NeedMoreData(x) => {
@@ -240,15 +243,18 @@ impl JxlImageBuilder {
             }
         };
 
-        while !image.end_of_image {
-            let count = reader.read(&mut buf)?;
+        while !image.inner.end_of_image {
+            let count = reader.read(&mut buf[buf_valid..])?;
             if count == 0 {
                 break;
             }
-            let buf = &buf[..count];
-            image.feed_bytes(buf)?;
+            buf_valid += count;
+            let consumed = image.feed_bytes(&buf[..buf_valid])?;
+            buf.copy_within(consumed..buf_valid, 0);
+            buf_valid -= consumed;
         }
 
+        buf.truncate(buf_valid);
         Ok(image)
     }
 
@@ -292,10 +298,18 @@ pub struct UninitializedJxlImage {
 
 impl UninitializedJxlImage {
     /// Feeds more data into the decoder.
-    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
-        self.reader.feed_bytes(buf)?;
-        self.buffer.extend(self.reader.take_bytes());
-        Ok(())
+    ///
+    /// Returns total consumed bytes from the buffer.
+    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<usize> {
+        for event in self.reader.feed_bytes(buf) {
+            match event? {
+                ParseEvent::BitstreamKind(_) => {}
+                ParseEvent::Codestream(buf) => {
+                    self.buffer.extend_from_slice(buf);
+                }
+            }
+        }
+        Ok(self.reader.previous_consumed_bytes())
     }
 
     /// Returns the internal reader.
@@ -394,12 +408,14 @@ impl UninitializedJxlImage {
             image_header,
             ctx,
             render_spot_color,
-            end_of_image: false,
-            buffer: Vec::new(),
-            buffer_offset: bytes_read,
-            frame_offsets: Vec::new(),
+            inner: JxlImageInner {
+                end_of_image: false,
+                buffer: Vec::new(),
+                buffer_offset: bytes_read,
+                frame_offsets: Vec::new(),
+            },
         };
-        image.feed_bytes_inner(&self.buffer)?;
+        image.inner.feed_bytes_inner(&mut image.ctx, &self.buffer)?;
 
         Ok(InitializeResult::Initialized(image))
     }
@@ -421,10 +437,7 @@ pub struct JxlImage {
     image_header: Arc<ImageHeader>,
     ctx: RenderContext,
     render_spot_color: bool,
-    end_of_image: bool,
-    buffer: Vec<u8>,
-    buffer_offset: usize,
-    frame_offsets: Vec<usize>,
+    inner: JxlImageInner,
 }
 
 impl JxlImage {
@@ -435,13 +448,31 @@ impl JxlImage {
     }
 
     /// Feeds more data into the decoder.
-    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<()> {
-        self.reader.feed_bytes(buf)?;
-        let buf = &*self.reader.take_bytes();
-        self.feed_bytes_inner(buf)
+    ///
+    /// Returns total consumed bytes from the buffer.
+    pub fn feed_bytes(&mut self, buf: &[u8]) -> Result<usize> {
+        for event in self.reader.feed_bytes(buf) {
+            match event? {
+                ParseEvent::BitstreamKind(_) => {}
+                ParseEvent::Codestream(buf) => {
+                    self.inner.feed_bytes_inner(&mut self.ctx, buf)?;
+                }
+            }
+        }
+        Ok(self.reader.previous_consumed_bytes())
     }
+}
 
-    fn feed_bytes_inner(&mut self, mut buf: &[u8]) -> Result<()> {
+#[derive(Debug)]
+struct JxlImageInner {
+    end_of_image: bool,
+    buffer: Vec<u8>,
+    buffer_offset: usize,
+    frame_offsets: Vec<usize>,
+}
+
+impl JxlImageInner {
+    fn feed_bytes_inner(&mut self, ctx: &mut RenderContext, mut buf: &[u8]) -> Result<()> {
         if buf.is_empty() {
             return Ok(());
         }
@@ -451,7 +482,7 @@ impl JxlImage {
             return Ok(());
         }
 
-        if let Some(loading_frame) = self.ctx.current_loading_frame() {
+        if let Some(loading_frame) = ctx.current_loading_frame() {
             debug_assert!(self.buffer.is_empty());
             let len = buf.len();
             buf = loading_frame.feed_bytes(buf);
@@ -460,7 +491,7 @@ impl JxlImage {
 
             if loading_frame.is_loading_done() {
                 let is_last = loading_frame.header().is_last;
-                self.ctx.finalize_current_frame();
+                ctx.finalize_current_frame();
                 if is_last {
                     self.end_of_image = true;
                     self.buffer = buf.to_vec();
@@ -476,7 +507,7 @@ impl JxlImage {
         let mut buf = &*self.buffer;
         while !buf.is_empty() {
             let mut bitstream = Bitstream::new(buf);
-            let frame = match self.ctx.load_frame_header(&mut bitstream) {
+            let frame = match ctx.load_frame_header(&mut bitstream) {
                 Ok(x) => x,
                 Err(e) if e.unexpected_eof() => {
                     self.buffer = buf.to_vec();
@@ -499,7 +530,7 @@ impl JxlImage {
 
             if frame.is_loading_done() {
                 let is_last = frame.header().is_last;
-                self.ctx.finalize_current_frame();
+                ctx.finalize_current_frame();
                 if is_last {
                     self.end_of_image = true;
                     self.buffer = buf.to_vec();
@@ -673,7 +704,7 @@ impl JxlImage {
     /// partially loaded frames.
     #[inline]
     pub fn is_loading_done(&self) -> bool {
-        self.end_of_image
+        self.inner.end_of_image
     }
 
     /// Returns frame data by keyframe index.
@@ -701,7 +732,7 @@ impl JxlImage {
 
     /// Returns the offset of frame within codestream, in bytes.
     pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
-        self.frame_offsets.get(frame_index).copied()
+        self.inner.frame_offsets.get(frame_index).copied()
     }
 }
 

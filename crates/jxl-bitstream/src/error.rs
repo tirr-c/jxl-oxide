@@ -2,8 +2,8 @@
 #[non_exhaustive]
 pub enum Error {
     Io(std::io::Error),
-    /// Container box size was invalid.
-    InvalidBoxSize,
+    /// Container was invalid.
+    InvalidBox,
     /// `PadZeroToByte` read non-zero bits.
     NonZeroPadding,
     /// Parsed floating point value was Infinity or NaN.
@@ -39,7 +39,7 @@ impl std::fmt::Display for Error {
             Self::Io(e) => {
                 write!(f, "I/O error: {}", e)
             }
-            Self::InvalidBoxSize => write!(f, "invalid box size"),
+            Self::InvalidBox => write!(f, "invalid container"),
             Self::NonZeroPadding => {
                 write!(f, "PadZeroToByte() read non-zero bits")
             }

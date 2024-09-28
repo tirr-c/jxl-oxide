@@ -6,7 +6,7 @@ pub mod container;
 mod error;
 
 pub use bitstream::{Bitstream, U32Specifier, U};
-pub use container::{BitstreamKind, ContainerDetectingReader};
+pub use container::{BitstreamKind, ContainerDetectingReader, ParseEvent};
 pub use error::{Error, Result};
 
 /// Perform `UnpackSigned` for `u32`, as specified in the JPEG XL specification.
