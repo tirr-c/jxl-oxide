@@ -236,7 +236,9 @@ impl Bitstream<'_> {
         };
         match d {
             U32Specifier::Constant(x) => Ok(x),
-            U32Specifier::BitsOffset(offset, n) => self.read_bits(n).map(|x| x + offset),
+            U32Specifier::BitsOffset(offset, n) => {
+                self.read_bits(n).map(|x| x.wrapping_add(offset))
+            }
         }
     }
 
