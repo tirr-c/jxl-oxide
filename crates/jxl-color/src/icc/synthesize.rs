@@ -44,7 +44,7 @@ fn create_mluc(locale: [u8; 4], strings: &[&str]) -> Vec<u8> {
         data.extend(s.encode_utf16());
         out.extend_from_slice(&locale);
         out.extend_from_slice(&((data.len() as u32 - offset) * 2).to_be_bytes());
-        out.extend_from_slice(&(0x14 + strings.len() as u32 * 12 + offset * 2).to_be_bytes());
+        out.extend_from_slice(&(0x10 + strings.len() as u32 * 12 + offset * 2).to_be_bytes());
     }
     for c in data {
         let b = c.to_be_bytes();
