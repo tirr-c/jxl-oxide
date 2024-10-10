@@ -109,55 +109,47 @@
           };
         };
 
-        naerskBuildPackageNative =
-          let
-            isMinGW = pkgs.stdenv.cc.isGNU or false && pkgs.hostPlatform.isWindows;
-          in
-          {
-            useClang ? isMinGW,
-            ...
-          }@naerskArgs:
-          let
-            stdenv = if useClang then pkgs.clangStdenv else pkgs.stdenv;
-          in
-          naerskForNative.buildPackage (
-            commonBuildArgs
-            // naerskArgs
-            // {
-              depsBuildBuild = [ stdenv.cc ];
-            }
+        # Hack to avoid mcfgthreads dependency.
+        wrapMingwStdenv =
+          stdenv:
+          pkgs.overrideCC stdenv (
+            stdenv.cc.override (old: {
+              cc = old.cc.override {
+                threadsCross = {
+                  model = "win32";
+                  package = null;
+                };
+              };
+            })
           );
+
+        naerskBuildPackageNative = naerskArgs: naerskForNative.buildPackage (commonBuildArgs // naerskArgs);
 
         naerskBuildPackageCross =
           {
             target,
             isStatic,
             nixSystem ? target,
+            naerskArgs ? { },
           }:
           let
             pkgsCross = pkgsCrossFor nixSystem;
-            inherit (pkgsCross) hostPlatform;
+            inherit (pkgsCross) hostPlatform stdenv;
             targetForCargoEnv = toScreamingSnakeCase target;
             isMinGW = pkgsCross.stdenv.cc.isGNU or false && hostPlatform.isWindows;
+            stdenv' = if isMinGW then wrapMingwStdenv stdenv else stdenv;
             naersk' = naerskFor target;
-          in
-          {
-            useClang ? isMinGW,
-            ...
-          }@naerskArgs:
-          let
-            stdenv = if useClang then pkgsCross.clangStdenv else pkgsCross.stdenv;
           in
           naersk'.buildPackage (
             commonBuildArgs
             // naerskArgs
             // rec {
               depsBuildBuild = [
-                stdenv.cc
+                stdenv'.cc
               ] ++ lib.optional isMinGW pkgsCross.windows.pthreads;
 
               CARGO_BUILD_TARGET = target;
-              TARGET_CC = "${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc";
+              TARGET_CC = "${stdenv'.cc}/bin/${stdenv'.cc.targetPrefix}cc";
               "CARGO_TARGET_${targetForCargoEnv}_LINKER" = TARGET_CC;
             }
             // lib.optionalAttrs isStatic {
@@ -169,7 +161,7 @@
           spec@{ target, ... }:
           {
             name = target;
-            value = naerskBuildPackageCross spec { };
+            value = naerskBuildPackageCross spec;
           }
         ) crossTargets;
       in
