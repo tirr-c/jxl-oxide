@@ -7,5 +7,6 @@ version = "0.1.40"
 default-features = false
 features = ["std"]
 
-[profile.release]
+[profile.opt]
+inherits = "release"
 debug = 1
