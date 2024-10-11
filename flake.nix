@@ -24,33 +24,33 @@
       crossTargets = [
         {
           target = "x86_64-unknown-linux-gnu";
-          isStatic = false;
+          static = false;
         }
         {
           target = "x86_64-unknown-linux-musl";
-          isStatic = true;
+          static = true;
         }
         {
           target = "x86_64-pc-windows-gnu";
-          isStatic = false;
+          static = false;
           nixSystem = "x86_64-w64-mingw32";
         }
         {
           target = "aarch64-unknown-linux-gnu";
-          isStatic = false;
+          static = false;
         }
         {
           target = "aarch64-unknown-linux-musl";
-          isStatic = true;
+          static = true;
         }
         {
           target = "armv7-unknown-linux-gnueabihf";
-          isStatic = false;
+          static = false;
           nixSystem = "armv7l-unknown-linux-gnueabihf";
         }
         {
           target = "armv7-unknown-linux-musleabihf";
-          isStatic = true;
+          static = true;
           nixSystem = "armv7l-unknown-linux-musleabihf";
         }
       ];
@@ -71,12 +71,10 @@
         inherit (builtins)
           map
           listToAttrs
-          replaceStrings
           isNull
           ;
 
         mapListToAttrs = f: l: listToAttrs (map f l);
-        toScreamingSnakeCase = s: replaceStrings [ "-" ] [ "_" ] (lib.strings.toUpper s);
 
         rustVersion = "stable";
         toolchainBase = fenix.packages.${system};
@@ -98,17 +96,6 @@
           };
         naerskForNative = naerskFor null;
 
-        commonBuildArgs = {
-          pname = "jxl-oxide";
-          src = ./.;
-          strictDeps = true;
-          overrideMain = old: {
-            preConfigure = ''
-              cargo_build_options="$cargo_build_options -p jxl-oxide-cli"
-            '';
-          };
-        };
-
         # Hack to avoid mcfgthreads dependency.
         wrapMingwStdenv =
           stdenv:
@@ -123,39 +110,35 @@
             })
           );
 
-        naerskBuildPackageNative = naerskArgs: naerskForNative.buildPackage (commonBuildArgs // naerskArgs);
+        buildPackage = pkgs.callPackage ./build.nix;
+
+        naerskBuildPackageNative =
+          extraArgs:
+          buildPackage {
+            naersk = naerskForNative;
+          }
+          // extraArgs;
 
         naerskBuildPackageCross =
           {
             target,
-            isStatic,
+            static,
             nixSystem ? target,
-            naerskArgs ? { },
+            args ? { },
           }:
           let
             pkgsCross = pkgsCrossFor nixSystem;
             inherit (pkgsCross) hostPlatform stdenv;
-            targetForCargoEnv = toScreamingSnakeCase target;
             isMinGW = pkgsCross.stdenv.cc.isGNU or false && hostPlatform.isWindows;
-            stdenv' = if isMinGW then wrapMingwStdenv stdenv else stdenv;
-            naersk' = naerskFor target;
           in
-          naersk'.buildPackage (
-            commonBuildArgs
-            // naerskArgs
-            // rec {
-              depsBuildBuild = [
-                stdenv'.cc
-              ] ++ lib.optional isMinGW pkgsCross.windows.pthreads;
-
-              CARGO_BUILD_TARGET = target;
-              TARGET_CC = "${stdenv'.cc}/bin/${stdenv'.cc.targetPrefix}cc";
-              "CARGO_TARGET_${targetForCargoEnv}_LINKER" = TARGET_CC;
-            }
-            // lib.optionalAttrs isStatic {
-              "CARGO_TARGET_${targetForCargoEnv}_RUSTFLAGS" = "-C target-feature=+crt-static";
-            }
-          );
+          buildPackage {
+            pkgs = pkgsCross;
+            naersk = naerskFor target;
+            stdenv = if isMinGW then wrapMingwStdenv stdenv else stdenv;
+            crossTarget = target;
+            inherit static;
+          }
+          // args;
 
         crossPackages = mapListToAttrs (
           spec@{ target, ... }:
@@ -169,37 +152,14 @@
         packages = {
           native = naerskBuildPackageNative { };
           native-devtools = naerskBuildPackageNative {
-            cargoBuildOptions =
-              args:
-              args
-              ++ [
-                "--features"
-                "__devtools"
-              ];
+            enableDevtools = true;
           };
         } // crossPackages;
         defaultPackage = packages.native;
 
-        devShell =
-          let
-            pkgsFromNixpkgs = with pkgs; [
-              ffmpeg_7-headless
-              pkg-config
-
-              rustPlatform.bindgenHook
-            ];
-            rustToolchain = toolchainBase.${rustVersion}.withComponents [
-              "cargo"
-              "clippy"
-              "rust-analyzer"
-              "rust-src"
-              "rustc"
-              "rustfmt"
-            ];
-          in
-          pkgs.mkShell {
-            nativeBuildInputs = pkgsFromNixpkgs ++ [ rustToolchain ];
-          };
+        devShell = pkgs.callPackage ./shell.nix {
+          fenix = toolchainBase;
+        };
 
         formatter = pkgs.nixfmt-rfc-style;
       }
