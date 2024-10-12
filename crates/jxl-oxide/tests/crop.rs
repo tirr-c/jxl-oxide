@@ -6,9 +6,6 @@ use rand::prelude::*;
 mod util;
 
 fn run_test(buf: &[u8], name: &str) {
-    let is_ci = std::env::var_os("CI")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false);
     let mut rng = rand::rngs::SmallRng::from_entropy();
 
     let image = JxlImage::builder()
@@ -35,19 +32,14 @@ fn run_test(buf: &[u8], name: &str) {
             width: crop_width,
             height: crop_height,
         };
-        eprintln!("  Crop region: {:?}", crop);
         tester_image.set_image_region(crop);
-        test_crop_region(&image, &tester_image, crop, name, is_ci);
+        test_crop_region(&image, &tester_image, crop, name);
     }
 }
 
-fn test_crop_region(
-    image: &JxlImage,
-    tester_image: &JxlImage,
-    crop: CropInfo,
-    name: &str,
-    is_ci: bool,
-) {
+fn test_crop_region(image: &JxlImage, tester_image: &JxlImage, crop: CropInfo, name: &str) {
+    eprintln!("Testing crop region {crop:?}");
+
     let CropInfo {
         width: crop_width,
         left: crop_left,
@@ -66,10 +58,11 @@ fn test_crop_region(
             .render_frame_cropped(idx)
             .expect("Failed to render cropped image");
 
-        for (expected, actual) in full_render
+        for (c, (expected, actual)) in full_render
             .image_planar()
             .into_iter()
             .zip(cropped_render.image_planar())
+            .enumerate()
         {
             let expected = expected.buf();
             let actual = actual.buf();
@@ -82,26 +75,36 @@ fn test_crop_region(
                 let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
                 for (x, (expected, actual)) in expected_row.iter().zip(actual_row).enumerate() {
                     if (expected - actual).abs() > 1e-6 {
-                        if is_ci {
-                            eprintln!("Test failed at x={x}, y={y} (expected={expected}, actual={actual})");
-                            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                            path.push("tests/.artifact");
-                            std::fs::create_dir_all(&path).unwrap();
+                        eprintln!("Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})");
 
-                            let mut full = path.clone();
-                            full.push(format!("{name}-full.npy"));
-                            write_npy(&full_render, full);
+                        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                        path.push("tests/.artifact");
+                        std::fs::create_dir_all(&path).unwrap();
 
-                            let mut cropped = path.clone();
-                            cropped.push(format!("{name}-cropped.npy"));
-                            write_npy(&cropped_render, cropped);
-                        }
-                        panic!();
+                        let mut full = path.clone();
+                        full.push(format!("{name}-full.npy"));
+                        write_npy(&full_render, &full);
+                        eprintln!("Full frame data written at {}", full.to_string_lossy());
+
+                        let mut cropped = path.clone();
+                        cropped.push(format!("{name}-cropped.npy"));
+                        write_npy(&cropped_render, &cropped);
+                        eprintln!(
+                            "Cropped frame data written at {}",
+                            cropped.to_string_lossy()
+                        );
+
+                        panic!("Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})");
                     }
                 }
             }
         }
+
+        eprintln!("Frame #{idx} OK");
     }
+
+    eprintln!("Crop region {crop:?} OK");
+    eprintln!();
 }
 
 macro_rules! testcase {
@@ -124,7 +127,6 @@ macro_rules! testcase_with_crop {
             #[test]
             $(#[$attr])*
             fn $name() {
-                let is_ci = std::env::var_os("CI").map(|v| !v.is_empty()).unwrap_or(false);
                 let path = util::conformance_path(stringify!($testimage));
                 let buf = std::fs::read(path).expect("Failed to open file");
 
@@ -136,9 +138,8 @@ macro_rules! testcase_with_crop {
                 ];
 
                 for region in regions {
-                    eprintln!("{:?}", region);
                     tester_image.set_image_region(region);
-                    test_crop_region(&mut image, &mut tester_image, region, stringify!($name), is_ci);
+                    test_crop_region(&mut image, &mut tester_image, region, stringify!($name));
                 }
             }
         )*
@@ -184,6 +185,8 @@ testcase_with_crop! {
         CropInfo { width: 1421, height: 814, left: 1568, top: 1460 },
     ],
     crop_bike_0: bike[CropInfo { width: 936, height: 137, left: 877, top: 2353 }],
+    #[ignore = "fails only on CI with emulated aarch64"]
+    crop_upsampling_0: upsampling[CropInfo { width: 368, height: 128, left: 90, top: 460 }],
 }
 
 fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
