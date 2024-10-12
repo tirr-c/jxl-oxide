@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `jxl-color`: Use better PQ to HLG method (#348).
 
+## [0.9.1] - 2024-10-12
+
 ### Fixed
 - `jxl-color`: Fix generated `mluc` tag in ICC profile (#347).
+- `jxl-oxide`: Fix panic while decoding fully loaded intermediate frame (#345).
 
 ## [0.9.0] - 2024-09-10
 
@@ -137,7 +140,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
-[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.9.1...HEAD
+[0.9.1]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.9.1
 [0.9.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.9.0
 [0.8.1]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.8.1
 [0.8.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.8.0
