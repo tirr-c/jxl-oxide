@@ -361,6 +361,11 @@ impl<'g, V: Copy> MutableSubgrid<'g, V> {
         group_width: usize,
         group_height: usize,
     ) -> Vec<MutableSubgrid<'g, V>> {
+        assert!(
+            group_width > 0 && group_height > 0,
+            "expected group width and height to be nonzero, got width = {group_width}, height = {group_height}"
+        );
+
         let num_cols = (self.width + group_width - 1) / group_width;
         let num_rows = (self.height + group_height - 1) / group_height;
         self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
