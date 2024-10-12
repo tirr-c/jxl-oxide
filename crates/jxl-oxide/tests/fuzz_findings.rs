@@ -83,4 +83,5 @@ test_by_include!(
     upsample_separate_ec,
     lz77_num_to_copy_overflow,
     bitstream_u32_overflow,
+    rct_zero_sized,
 );

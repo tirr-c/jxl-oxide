@@ -113,6 +113,9 @@ unsafe fn run_rows_unsafe<S: Sample>(
     assert_eq!(width, grids[2].width());
     assert_eq!(height, grids[1].height());
     assert_eq!(height, grids[2].height());
+    if width == 0 || height == 0 {
+        return;
+    }
 
     let [mut a, mut b, mut c] = grids.map(|g| g.borrow_mut().into_groups(width, 16));
     let mut jobs = Vec::new();
