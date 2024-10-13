@@ -78,7 +78,8 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - run: cargo fmt --all --check
-      - run: sudo apt install -y libavfilter-dev libavdevice-dev # this should install everything
+      # these should install everything
+      - run: sudo apt update && sudo apt install -y libavfilter-dev libavdevice-dev
       - run: |
           cargo clippy --all --no-default-features -- -D warnings
           cargo clippy --all -- -D warnings
