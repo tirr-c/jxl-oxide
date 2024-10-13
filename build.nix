@@ -1,18 +1,7 @@
-let
-  inherit (builtins) fetchTarball fromJSON readFile;
-  getFlake =
-    name: with (fromJSON (readFile ./flake.lock)).nodes.${name}.locked; {
-      inherit rev;
-      outPath = fetchTarball {
-        url = "https://github.com/${owner}/${repo}/archive/${rev}.tar.gz";
-        sha256 = narHash;
-      };
-    };
-in
-
 {
   pkgs,
   lib ? pkgs.lib,
+  darwin ? pkgs.darwin,
   windows ? pkgs.windows,
   hostPlatform ? pkgs.hostPlatform,
   stdenv ? pkgs.stdenv,
@@ -73,6 +62,7 @@ naersk.buildPackage (
   commonBuildArgs
   // {
     cargoBuildOptions = args: args ++ cargoBuildArgs;
+    buildInputs = lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
   }
   // lib.optionalAttrs (!isNull crossTarget) rec {
     depsBuildBuild = [
