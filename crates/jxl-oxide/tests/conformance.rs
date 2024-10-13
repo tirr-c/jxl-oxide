@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use jxl_oxide::JxlImage;
 
 mod util;
@@ -31,18 +33,43 @@ fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<
     fb.chunks_exact(chunk_size).map(|b| b.to_vec()).collect()
 }
 
-fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
-    let url = format!(
-        "https://storage.googleapis.com/storage/v1/b/jxl-conformance/o/objects%2F{hash}?alt=media"
-    );
-    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("tests/cache");
-    path.push(hash);
-    path.set_extension(ext);
+fn cache_dir() -> PathBuf {
+    let cache_env = std::env::var_os("JXL_OXIDE_CACHE");
+    match cache_env {
+        Some(cache_dir) if !cache_dir.is_empty() => PathBuf::from(cache_dir),
+        _ => {
+            let mut cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            cache_dir.push("tests/cache");
+            cache_dir
+        }
+    }
+}
+
+fn download_object_with_cache(
+    cache_dir: impl AsRef<std::path::Path>,
+    hash: &str,
+    ext: &str,
+) -> Vec<u8> {
+    let cache_dir = cache_dir.as_ref();
+    let path = cache_file_path(cache_dir, hash, ext);
 
     if let Ok(buf) = std::fs::read(&path) {
         buf
     } else {
+        let forbid_net = std::env::var_os("JXL_OXIDE_DISABLE_NETWORK")
+            .map(|var| !var.is_empty())
+            .unwrap_or(false);
+        if forbid_net {
+            panic!(
+                "Fixture {hash}.{ext} not found in {}, but network is disabled",
+                cache_dir.to_string_lossy()
+            );
+        }
+
+        let url = format!(
+            "https://storage.googleapis.com/storage/v1/b/jxl-conformance/o/objects%2F{hash}?alt=media"
+        );
+
         let bytes = reqwest::blocking::get(url)
             .and_then(|resp| resp.error_for_status())
             .and_then(|resp| resp.bytes())
@@ -50,6 +77,12 @@ fn download_object_with_cache(hash: &str, ext: &str) -> Vec<u8> {
         std::fs::write(path, &bytes).ok();
         bytes.to_vec()
     }
+}
+
+fn cache_file_path(cache_dir: impl AsRef<std::path::Path>, hash: &str, ext: &str) -> PathBuf {
+    let mut path = cache_dir.as_ref().join(hash);
+    path.set_extension(ext);
+    path
 }
 
 fn run_test(
@@ -136,8 +169,9 @@ macro_rules! conformance_test {
         fn $name() {
             let perform_ct = $icc_hash != "skip";
 
-            let buf = download_object_with_cache($npy_hash, "npy");
-            let target_icc = perform_ct.then(|| download_object_with_cache($icc_hash, "icc"));
+            let cache_dir = cache_dir();
+            let buf = download_object_with_cache(&cache_dir, $npy_hash, "npy");
+            let target_icc = perform_ct.then(|| download_object_with_cache(&cache_dir, $icc_hash, "icc"));
 
             let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
 

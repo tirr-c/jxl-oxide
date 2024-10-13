@@ -110,7 +110,7 @@
             })
           );
 
-        buildPackage = pkgs.callPackage ./build.nix;
+        buildPackage = pkgs.callPackage ./nix/build.nix;
 
         naerskBuildPackageNative =
           extraArgs:
@@ -157,7 +157,7 @@
         } // crossPackages;
         defaultPackage = packages.native;
 
-        devShell = pkgs.callPackage ./shell.nix {
+        devShell = pkgs.callPackage ./nix/shell.nix {
           fenix = toolchainBase;
         };
 

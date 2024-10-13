@@ -23,22 +23,10 @@ let
     isNull
     ;
 
-  jxlOxideCliToml = builtins.fromTOML (builtins.readFile ./crates/jxl-oxide-cli/Cargo.toml);
+  jxlOxideCliToml = builtins.fromTOML (builtins.readFile ../crates/jxl-oxide-cli/Cargo.toml);
 
   toScreamingSnakeCase = s: replaceStrings [ "-" ] [ "_" ] (lib.strings.toUpper s);
   cargoEnvPrefix = "CARGO_TARGET_${toScreamingSnakeCase crossTarget}_";
-
-  commonBuildArgs = {
-    inherit (jxlOxideCliToml.package) name version;
-    pname = "jxl-oxide";
-    src = ./.;
-    strictDeps = true;
-    overrideMain = old: {
-      preConfigure = ''
-        cargo_build_options="$cargo_build_options -p jxl-oxide-cli"
-      '';
-    };
-  };
 
   cargoBuildArgs =
     let
@@ -50,19 +38,57 @@ let
         ++ lib.optional enableFfmpeg "__ffmpeg";
       featureListStr = concatStringsSep "," featureList;
     in
-    [ "--no-default-features" ]
+    [ "-p" "jxl-oxide-cli" "--no-default-features" ]
     ++ lib.optionals (featureList != [ ]) [
       "--features"
       featureListStr
     ];
+
+  conformance = pkgs.callPackage ./conformance.nix { };
+
+  cargoTestArgs =
+    let
+      featureList =
+        [ ]
+        ++ lib.optional enableRayon "rayon";
+      featureListStr = concatStringsSep "," featureList;
+    in
+    [ "-p" "jxl-oxide" "--no-default-features" ]
+    ++ lib.optionals (featureList != [ ]) [
+      "--features"
+      featureListStr
+    ]
+    ++ [ "--test" "conformance" ]; # conformance tests only
+
+  commonBuildArgs = {
+    inherit (jxlOxideCliToml.package) name version;
+    pname = "jxl-oxide";
+    src = ../.;
+    strictDeps = true;
+
+    cargoBuildOptions = args: args ++ cargoBuildArgs;
+    buildInputs = lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
+
+    doCheck = true;
+    cargoTestOptions = args: args ++ cargoTestArgs;
+    checkInputs = [ conformance ];
+    preCheck = ''
+      export JXL_OXIDE_CACHE=${conformance}/cache
+      export JXL_OXIDE_TESTCASES=${conformance}/testcases
+      export JXL_OXIDE_DISABLE_NETWORK=1
+    '';
+    postCheck = ''
+      unset JXL_OXIDE_CACHE
+      unset JXL_OXIDE_TESTCASES
+      unset JXL_OXIDE_DISABLE_NETWORK
+    '';
+  };
 
   isMinGW = stdenv.cc.isGNU or false && hostPlatform.isWindows;
 in
 naersk.buildPackage (
   commonBuildArgs
   // {
-    cargoBuildOptions = args: args ++ cargoBuildArgs;
-    buildInputs = lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
   }
   // lib.optionalAttrs (!isNull crossTarget) rec {
     depsBuildBuild = [

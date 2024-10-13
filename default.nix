@@ -21,6 +21,6 @@ let
   };
 in
 
-pkgs.callPackage ./build.nix {
+pkgs.callPackage ./nix/build.nix {
   inherit naersk;
 }
