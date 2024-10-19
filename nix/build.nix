@@ -49,16 +49,16 @@ let
   cargoTestArgs =
     let
       featureList =
-        [ ]
+        [ "conformance" ] # conformance tests only
+        ++ lib.optional enableMimalloc "mimalloc"
         ++ lib.optional enableRayon "rayon";
       featureListStr = concatStringsSep "," featureList;
     in
-    [ "-p" "jxl-oxide" "--no-default-features" ]
+    [ "-p" "jxl-oxide-tests" "--no-default-features" ]
     ++ lib.optionals (featureList != [ ]) [
       "--features"
       featureListStr
-    ]
-    ++ [ "--test" "conformance" ]; # conformance tests only
+    ];
 
   commonBuildArgs = {
     inherit (jxlOxideCliToml.package) name version;
@@ -74,13 +74,11 @@ let
     checkInputs = [ conformance ];
     preCheck = ''
       export JXL_OXIDE_CACHE=${conformance}/cache
-      export JXL_OXIDE_TESTCASES=${conformance}/testcases
-      export JXL_OXIDE_DISABLE_NETWORK=1
+      export JXL_OXIDE_CONFORMANCE_TESTCASES=${conformance}/testcases
     '';
     postCheck = ''
       unset JXL_OXIDE_CACHE
-      unset JXL_OXIDE_TESTCASES
-      unset JXL_OXIDE_DISABLE_NETWORK
+      unset JXL_OXIDE_CONFORMANCE_TESTCASES
     '';
   };
 

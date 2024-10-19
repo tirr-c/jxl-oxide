@@ -1,5 +1,4 @@
-use jxl_grid::AllocTracker;
-use jxl_oxide::JxlImage;
+use jxl_oxide::{AllocTracker, JxlImage};
 
 fn fuzz_decode(data: &[u8]) {
     let image = JxlImage::builder()
@@ -20,7 +19,7 @@ macro_rules! test_by_include {
             #[test]
             $(#[$attr])*
             fn $name() {
-                let data = include_bytes!(concat!("fuzz_findings/", stringify!($name), ".fuzz"));
+                let data = include_bytes!(concat!(stringify!($name), ".fuzz"));
                 fuzz_decode(data);
             }
         )*

@@ -828,7 +828,6 @@ dependencies = [
 name = "jxl-oxide"
 version = "0.10.0"
 dependencies = [
- "criterion",
  "jxl-bitstream",
  "jxl-color",
  "jxl-frame",
@@ -838,11 +837,7 @@ dependencies = [
  "jxl-render",
  "jxl-threadpool",
  "lcms2",
- "mimalloc",
- "rand",
- "reqwest",
  "tracing",
- "zstd",
 ]
 
 [[package]]
@@ -875,6 +870,19 @@ name = "jxl-oxide-fuzz"
 version = "0.0.0"
 dependencies = [
  "jxl-oxide",
+]
+
+[[package]]
+name = "jxl-oxide-tests"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "jxl-oxide",
+ "mimalloc",
+ "rand",
+ "reqwest",
+ "tracing",
+ "zstd",
 ]
 
 [[package]]
