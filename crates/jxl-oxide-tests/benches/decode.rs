@@ -9,7 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn decode(c: &mut Criterion) {
     let mut bench_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    bench_path.push("tests/decode/benchmark-data");
+    bench_path.push("decode/benchmark-data");
 
     #[cfg(feature = "rayon")]
     let pool = JxlThreadPool::rayon(None);
