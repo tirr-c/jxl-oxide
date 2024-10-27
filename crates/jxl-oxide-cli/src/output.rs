@@ -1,6 +1,6 @@
 use std::io::prelude::*;
 
-use jxl_oxide::{FrameBuffer, JxlImage, PixelFormat, Render};
+use jxl_oxide::{JxlImage, PixelFormat, Render};
 
 #[cfg(feature = "__ffmpeg")]
 mod video;
@@ -90,27 +90,27 @@ pub(crate) fn write_png<W: Write>(
         }
 
         let mut stream = keyframe.stream();
-        let mut fb = FrameBuffer::new(
-            stream.width() as usize,
-            stream.height() as usize,
-            stream.channels() as usize,
-        );
-        stream.write_to_buffer(fb.buf_mut());
 
         if sixteen_bits {
-            let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels() * 2];
-            for (b, s) in buf.chunks_exact_mut(2).zip(fb.buf()) {
-                let w = (*s * 65535.0 + 0.5).clamp(0.0, 65535.0) as u16;
-                let [b0, b1] = w.to_be_bytes();
-                b[0] = b0;
-                b[1] = b1;
+            let mut fb_row = vec![0u16; (stream.width() * stream.channels()) as usize];
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels() * 2) as usize];
+
+            let buf_it = buf.chunks_exact_mut((stream.width() * stream.channels() * 2) as usize);
+            for buf_row in buf_it {
+                stream.write_to_buffer(&mut fb_row);
+                for (b, s) in buf_row.chunks_exact_mut(2).zip(&fb_row) {
+                    let [b0, b1] = s.to_be_bytes();
+                    b[0] = b0;
+                    b[1] = b1;
+                }
             }
+
             writer.write_image_data(&buf)?;
         } else {
-            let mut buf = vec![0u8; fb.width() * fb.height() * fb.channels()];
-            for (b, s) in buf.iter_mut().zip(fb.buf()) {
-                *b = (*s * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            }
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels()) as usize];
+            stream.write_to_buffer(&mut buf);
             writer.write_image_data(&buf)?;
         }
     }

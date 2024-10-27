@@ -170,7 +170,7 @@ mod lcms2;
 
 #[cfg(feature = "lcms2")]
 pub use self::lcms2::Lcms2;
-pub use fb::{FrameBuffer, ImageStream};
+pub use fb::{FrameBuffer, FrameBufferSample, ImageStream};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 

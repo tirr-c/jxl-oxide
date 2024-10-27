@@ -543,7 +543,6 @@ impl<W> VideoContext<W> {
 
         let data_ptr = data[0];
         let stride = linesize[0];
-        let mut tmp = vec![0f32; width * channels];
         for y in 0..height {
             let output_row = unsafe {
                 let base_ptr = if stride < 0 {
@@ -555,10 +554,7 @@ impl<W> VideoContext<W> {
                 std::slice::from_raw_parts_mut(base_ptr as *mut u16, video_width * channels)
             };
             let (output_row, output_trailing) = output_row.split_at_mut(width * channels);
-            stream.write_to_buffer(&mut tmp);
-            for (o, i) in output_row.iter_mut().zip(&tmp) {
-                *o = (*i * 65535.0 + 0.5).max(0.0) as u16;
-            }
+            stream.write_to_buffer(output_row);
             output_trailing.fill(0);
         }
 
