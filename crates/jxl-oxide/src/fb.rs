@@ -1,5 +1,6 @@
 use jxl_image::BitDepth;
 use jxl_render::{ImageBuffer, Region};
+use private::Sealed;
 
 /// Frame buffer representing a decoded image.
 #[derive(Debug, Clone)]
@@ -301,7 +302,7 @@ impl ImageStream<'_> {
     }
 
     /// Writes next samples to the buffer, returning how many samples are written.
-    pub fn write_to_buffer(&mut self, buf: &mut [f32]) -> usize {
+    pub fn write_to_buffer<Sample: FrameBufferSample>(&mut self, buf: &mut [Sample]) -> usize {
         let channels = self.grids.len() as u32;
         let mut buf_it = buf.iter_mut();
         let mut count = 0usize;
@@ -317,7 +318,7 @@ impl ImageStream<'_> {
                         orig_x.checked_add_signed(start_x),
                         orig_y.checked_add_signed(start_y),
                     ) else {
-                        *v = 0.0;
+                        *v = Sample::default();
                         count += 1;
                         self.c += 1;
                         continue;
@@ -326,17 +327,13 @@ impl ImageStream<'_> {
                     let y = y as usize;
                     let grid = &self.grids[self.c as usize];
                     let bit_depth = self.bit_depth[self.c as usize];
-                    *v = match grid {
-                        ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
-                        ImageBuffer::I32(g) => {
-                            bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
-                        }
-                        ImageBuffer::I16(g) => {
-                            bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
-                        }
-                    };
 
-                    if self.c < 3 {
+                    if self.c >= 3 || self.spot_colors.is_empty() {
+                        v.copy_from_grid(grid, x, y, bit_depth);
+                    } else {
+                        let mut tmp_sample = 0f32;
+                        tmp_sample.copy_from_grid(grid, x, y, bit_depth);
+
                         for spot in &self.spot_colors {
                             let ImageStreamSpotColor {
                                 grid,
@@ -353,21 +350,17 @@ impl ImageStream<'_> {
                             let mix = if let (Some(x), Some(y)) = xy {
                                 let x = x as usize;
                                 let y = y as usize;
-                                let val = match grid {
-                                    ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
-                                    ImageBuffer::I32(g) => bit_depth
-                                        .parse_integer_sample(g.get(x, y).copied().unwrap_or(0)),
-                                    ImageBuffer::I16(g) => bit_depth.parse_integer_sample(
-                                        g.get(x, y).copied().unwrap_or(0) as i32,
-                                    ),
-                                };
+                                let mut val = 0f32;
+                                val.copy_from_grid(grid, x, y, bit_depth);
                                 val * solidity
                             } else {
                                 0.0
                             };
 
-                            *v = color * mix + *v * (1.0 - mix);
+                            tmp_sample = color * mix + tmp_sample * (1.0 - mix);
                         }
+
+                        v.copy_from_f32(tmp_sample);
                     }
 
                     count += 1;
@@ -406,4 +399,112 @@ struct ImageStreamSpotColor<'r> {
     bit_depth: BitDepth,
     rgb: (f32, f32, f32),
     solidity: f32,
+}
+
+/// Marker trait for supported output sample types.
+pub trait FrameBufferSample: private::Sealed {}
+
+/// Output as 32-bit float samples, with nominal range of `[0, 1]`.
+impl FrameBufferSample for f32 {}
+
+/// Output as 16-bit unsigned integer samples.
+impl FrameBufferSample for u16 {}
+
+/// Output as 8-bit unsigned integer samples.
+impl FrameBufferSample for u8 {}
+
+mod private {
+    use jxl_image::BitDepth;
+    use jxl_render::ImageBuffer;
+
+    pub trait Sealed: Sized + Default {
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth);
+        fn copy_from_f32(&mut self, val: f32);
+    }
+
+    impl Sealed for f32 {
+        #[inline]
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
+            *self = match grid {
+                ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                ImageBuffer::I32(g) => {
+                    bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                }
+                ImageBuffer::I16(g) => {
+                    bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
+                }
+            };
+        }
+
+        #[inline]
+        fn copy_from_f32(&mut self, val: f32) {
+            *self = val;
+        }
+    }
+
+    impl Sealed for u16 {
+        #[inline]
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
+            if matches!(
+                bit_depth,
+                BitDepth::IntegerSample {
+                    bits_per_sample: 16
+                }
+            ) {
+                *self = match grid {
+                    ImageBuffer::F32(g) => (g.get(x, y).copied().unwrap_or(0.0) * 65535.0 + 0.5)
+                        .clamp(0.0, 65535.0) as u16,
+                    ImageBuffer::I32(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 65535) as u16,
+                    ImageBuffer::I16(g) => g.get(x, y).copied().unwrap_or(0).max(0) as u16,
+                };
+            } else {
+                let flt = match grid {
+                    ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                    ImageBuffer::I32(g) => {
+                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                    }
+                    ImageBuffer::I16(g) => {
+                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
+                    }
+                };
+                self.copy_from_f32(flt);
+            }
+        }
+
+        #[inline]
+        fn copy_from_f32(&mut self, val: f32) {
+            *self = (val * 65535.0 + 0.5).clamp(0.0, 65535.0) as u16;
+        }
+    }
+
+    impl Sealed for u8 {
+        #[inline]
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
+            if matches!(bit_depth, BitDepth::IntegerSample { bits_per_sample: 8 }) {
+                *self = match grid {
+                    ImageBuffer::F32(g) => {
+                        (g.get(x, y).copied().unwrap_or(0.0) * 255.0 + 0.5).clamp(0.0, 255.0) as u8
+                    }
+                    ImageBuffer::I32(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 255) as u8,
+                    ImageBuffer::I16(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 255) as u8,
+                };
+            } else {
+                let flt = match grid {
+                    ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                    ImageBuffer::I32(g) => {
+                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                    }
+                    ImageBuffer::I16(g) => {
+                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
+                    }
+                };
+                self.copy_from_f32(flt);
+            }
+        }
+
+        #[inline]
+        fn copy_from_f32(&mut self, val: f32) {
+            *self = (val * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+        }
+    }
 }

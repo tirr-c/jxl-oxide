@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `jxl-oxide`: Accept `u8` and `u16` output buffers in `ImageStream::write_to_buffer` (#366).
+
 ### Changed
 - `jxl-color`: Use better PQ to HLG method (#348).
 
