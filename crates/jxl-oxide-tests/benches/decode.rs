@@ -1,9 +1,9 @@
 use std::{io::Cursor, path::Path, time::Duration};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use jxl_oxide::{EnumColourEncoding, RenderingIntent};
-use jxl_threadpool::JxlThreadPool;
+use jxl_oxide::{EnumColourEncoding, JxlThreadPool, RenderingIntent};
 
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

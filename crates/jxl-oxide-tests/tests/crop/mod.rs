@@ -1,9 +1,8 @@
 use std::io::Cursor;
 
 use jxl_oxide::{CropInfo, JxlImage, Render};
+use jxl_oxide_tests as util;
 use rand::prelude::*;
-
-mod util;
 
 fn run_test(buf: &[u8], name: &str) {
     let mut rng = rand::rngs::SmallRng::from_entropy();

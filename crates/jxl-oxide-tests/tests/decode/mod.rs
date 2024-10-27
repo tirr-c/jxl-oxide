@@ -1,5 +1,7 @@
 use std::io::prelude::*;
 
+use jxl_oxide_tests as util;
+
 #[derive(Debug)]
 struct FixtureHeader {
     width: u32,
@@ -52,8 +54,8 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
         // Peak error threshold of Level 10 tests, from 18181-3
         let frame_header = image.frame_header(idx).unwrap();
         let color_peak_error_threshold = match frame_header.encoding {
-            jxl_frame::header::Encoding::VarDct => (0.004 * 65535.0) as u16,
-            jxl_frame::header::Encoding::Modular => 1u16 << 14u32.saturating_sub(bit_depth),
+            jxl_oxide::frame::Encoding::VarDct => (0.004 * 65535.0) as u16,
+            jxl_oxide::frame::Encoding::Modular => 1u16 << 14u32.saturating_sub(bit_depth),
         };
         let mut thresholds = vec![color_peak_error_threshold; num_color_channels];
         for ec in &image_header.ec_info {
@@ -77,31 +79,13 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
     }
 }
 
-fn download_url_with_cache(url: &str, name: &str) -> Vec<u8> {
-    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("tests/cache");
-    path.push(name);
-
-    if let Ok(buf) = std::fs::read(&path) {
-        buf
-    } else {
-        let bytes = reqwest::blocking::get(url)
-            .and_then(|resp| resp.error_for_status())
-            .and_then(|resp| resp.bytes())
-            .expect("Cannot download the given URL");
-        std::fs::write(path, &bytes).ok();
-        bytes.to_vec()
-    }
-}
-
 macro_rules! test {
     ($($(#[$attr:meta])* $name:ident),* $(,)?) => {
         $(
             #[test]
             $(#[$attr])*
             fn $name() {
-                let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                path.push("tests/decode");
+                let mut path = util::decode_testcases_dir();
                 path.push(stringify!($name));
 
                 let mut input_jxl = path.clone();
@@ -122,7 +106,7 @@ macro_rules! test {
                         let output_url = std::fs::read_to_string(output_url).expect("Failed to get fixture URL");
 
                         let filename = concat!(stringify!($name), ".buf.zst");
-                        let resp = download_url_with_cache(output_url.trim(), filename);
+                        let resp = util::download_url_with_cache(output_url.trim(), filename);
                         let resp = std::io::Cursor::new(resp);
                         let expected = zstd::Decoder::new(resp).expect("Failed to open Zstandard stream");
                         decode(&input, expected);
