@@ -262,12 +262,7 @@ fn stream_to_buf<Sample: crate::FrameBufferSample>(
         stream.width() as usize * stream.channels() as usize * std::mem::size_of::<Sample>();
     assert_eq!(buf.len(), stride * stream.height() as usize);
 
-    if (buf.as_ptr() as *const Sample).is_aligned() {
-        let buf = unsafe {
-            let data = buf.as_mut_ptr() as *mut Sample;
-            let len = stream.width() as usize * stream.height() as usize;
-            std::slice::from_raw_parts_mut(data, len)
-        };
+    if let Ok(buf) = bytemuck::try_cast_slice_mut::<u8, Sample>(buf) {
         stream.write_to_buffer(buf);
     } else {
         let mut row = Vec::with_capacity(stream.width() as usize);
@@ -275,10 +270,7 @@ fn stream_to_buf<Sample: crate::FrameBufferSample>(
         for buf_row in buf.chunks_exact_mut(stride) {
             stream.write_to_buffer(&mut row);
 
-            let row = unsafe {
-                let data = row.as_ptr() as *const u8;
-                std::slice::from_raw_parts(data, stride)
-            };
+            let row = bytemuck::cast_slice::<Sample, u8>(&row);
             buf_row.copy_from_slice(row);
         }
     }

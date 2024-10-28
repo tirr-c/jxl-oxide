@@ -420,7 +420,14 @@ mod private {
     use jxl_image::BitDepth;
     use jxl_render::ImageBuffer;
 
+    #[cfg(not(feature = "image"))]
     pub trait Sealed: Sized + Default {
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth);
+        fn copy_from_f32(&mut self, val: f32);
+    }
+
+    #[cfg(feature = "image")]
+    pub trait Sealed: Sized + Default + bytemuck::NoUninit + bytemuck::AnyBitPattern {
         fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth);
         fn copy_from_f32(&mut self, val: f32);
     }
