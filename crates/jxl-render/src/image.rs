@@ -730,15 +730,19 @@ impl<S: Sample> RenderedImage<S> {
             }
         }
 
-        if !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas {
+        let skip_blending =
+            !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas;
+
+        if !(grid.ct_done() || frame_header.save_before_ct || skip_blending && frame_header.is_last)
+        {
+            util::convert_color_for_record(image_header, frame_header.do_ycbcr, &mut grid, pool)?;
+        }
+
+        if skip_blending {
             grid.blend_done = true;
             let image = Arc::new(grid);
             *grid_lock = FrameRender::Blended(Arc::clone(&image));
             return Ok(image);
-        }
-
-        if !grid.ct_done() {
-            util::convert_color_for_record(image_header, frame_header.do_ycbcr, &mut grid, pool)?;
         }
 
         let image = crate::blend::blend(

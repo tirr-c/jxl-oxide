@@ -805,10 +805,6 @@ impl RenderContext {
             tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
             tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-            if grid.ct_done() {
-                return Ok(grid);
-            }
-
             let mut transform = jxl_color::ColorTransform::builder();
             transform.set_srgb_icc(!self.cms.supports_linear_tf());
             transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
@@ -818,7 +814,7 @@ impl RenderContext {
                 &metadata.opsin_inverse_matrix,
                 &metadata.tone_mapping,
             )?;
-            if transform.is_noop() && !frame_header.do_ycbcr {
+            if grid.ct_done() || (transform.is_noop() && !frame_header.do_ycbcr) {
                 return Ok(grid);
             }
 
