@@ -141,12 +141,13 @@
 //!
 //! # Feature flags
 //! - `rayon`: Enable multithreading with Rayon. (*default*)
+//! - `image`: Enable integration with `image` crate.
 //! - `lcms2`: Enable integration with Little CMS 2.
 use std::sync::Arc;
 
-use image::BitDepth;
 use jxl_bitstream::{Bitstream, ContainerDetectingReader, ParseEvent};
 use jxl_frame::FrameContext;
+use jxl_image::BitDepth;
 use jxl_oxide_common::{Bundle, Name};
 use jxl_render::ImageBuffer;
 use jxl_render::ImageWithRegion;
@@ -165,6 +166,8 @@ pub use jxl_image::{ExtraChannelType, ImageHeader};
 pub use jxl_threadpool::JxlThreadPool;
 
 mod fb;
+#[cfg(feature = "image")]
+pub mod integration;
 #[cfg(feature = "lcms2")]
 mod lcms2;
 
