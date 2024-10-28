@@ -75,6 +75,15 @@ impl<R: Read> JxlDecoder<R> {
             ))
         })?;
 
+        // Convert CMYK to sRGB
+        if decoder.image.pixel_format().has_black() {
+            decoder
+                .image
+                .request_color_encoding(jxl_color::EnumColourEncoding::srgb(
+                    jxl_color::RenderingIntent::Relative,
+                ));
+        }
+
         Ok(decoder)
     }
 
