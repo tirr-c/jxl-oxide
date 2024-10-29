@@ -215,6 +215,10 @@ impl IccProfile<'_> {
             ColourSpace::Unknown
         }
     }
+
+    pub(crate) fn is_cmyk(&self) -> bool {
+        &self.header.color_space == b"CMYK"
+    }
 }
 
 struct RawTag<'a> {

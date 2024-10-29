@@ -12,6 +12,7 @@ mod tone_map;
 pub struct ColorEncodingWithProfile {
     encoding: ColourEncoding,
     icc_profile: Vec<u8>,
+    is_cmyk: bool,
 }
 
 impl std::fmt::Debug for ColorEncodingWithProfile {
@@ -22,6 +23,7 @@ impl std::fmt::Debug for ColorEncodingWithProfile {
                 "icc_profile",
                 &format_args!("({} byte(s))", self.icc_profile.len()),
             )
+            .field("is_cmyk", &self.is_cmyk)
             .finish()
     }
 }
@@ -32,6 +34,7 @@ impl ColorEncodingWithProfile {
         Self {
             encoding: ColourEncoding::Enum(encoding),
             icc_profile: Vec::new(),
+            is_cmyk: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl ColorEncodingWithProfile {
                 Ok(Self {
                     encoding: ColourEncoding::IccProfile(raw.color_space()),
                     icc_profile: icc_profile.to_vec(),
+                    is_cmyk: raw.is_cmyk(),
                 })
             }
             Err(e) => Err(e),
@@ -72,6 +76,12 @@ impl ColorEncodingWithProfile {
             ColourEncoding::Enum(encoding) => encoding.colour_space == ColourSpace::Grey,
             ColourEncoding::IccProfile(color_space) => *color_space == ColourSpace::Grey,
         }
+    }
+
+    /// Returns whether the color encoding represents CMYK color space.
+    #[inline]
+    pub fn is_cmyk(&self) -> bool {
+        self.is_cmyk
     }
 }
 

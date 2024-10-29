@@ -211,19 +211,22 @@ impl<'r> ImageStream<'r> {
         }
 
         // Find black
-        for (ec_idx, (ec, (region, _))) in render
-            .extra_channels
-            .iter()
-            .zip(&regions_and_shifts[color_channels..])
-            .enumerate()
-        {
-            if ec.is_black() {
-                grids.push(&fb[color_channels + ec_idx]);
-                bit_depth.push(ec.bit_depth);
-                start_offset_xy.push((left - region.left, top - region.top));
-                break;
+        if render.is_cmyk {
+            for (ec_idx, (ec, (region, _))) in render
+                .extra_channels
+                .iter()
+                .zip(&regions_and_shifts[color_channels..])
+                .enumerate()
+            {
+                if ec.is_black() {
+                    grids.push(&fb[color_channels + ec_idx]);
+                    bit_depth.push(ec.bit_depth);
+                    start_offset_xy.push((left - region.left, top - region.top));
+                    break;
+                }
             }
         }
+
         // Find alpha
         for (ec_idx, (ec, (region, _))) in render
             .extra_channels

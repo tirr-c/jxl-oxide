@@ -599,28 +599,9 @@ impl JxlImage {
 
     /// Returns the pixel format of the rendered image.
     pub fn pixel_format(&self) -> PixelFormat {
-        use jxl_color::{ColourEncoding, ColourSpace};
-
         let encoding = self.ctx.requested_color_encoding();
-        let (is_grayscale, has_black) = match encoding.encoding() {
-            ColourEncoding::Enum(EnumColourEncoding {
-                colour_space: ColourSpace::Grey,
-                ..
-            }) => (true, false),
-            ColourEncoding::Enum(_) => (false, false),
-            ColourEncoding::IccProfile(_) => {
-                let profile = encoding.icc_profile();
-                if profile.len() < 0x14 {
-                    (false, false)
-                } else {
-                    match &profile[0x10..0x14] {
-                        [b'G', b'R', b'A', b'Y'] => (true, false),
-                        [b'C', b'M', b'Y', b'K'] => (false, true),
-                        _ => (false, false),
-                    }
-                }
-            }
-        };
+        let is_grayscale = encoding.is_grayscale();
+        let has_black = encoding.is_cmyk();
         let mut has_alpha = false;
         for ec_info in &self.image_header.metadata.ec_info {
             if ec_info.is_alpha() {
@@ -754,6 +735,7 @@ impl JxlImage {
         let frame_header = frame.header();
         let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
 
+        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
         let result = Render {
             keyframe_index,
             name: frame_header.name.clone(),
@@ -763,6 +745,7 @@ impl JxlImage {
             extra_channels: self.convert_ec_info(),
             target_frame_region,
             color_bit_depth: self.image_header.metadata.bit_depth,
+            is_cmyk,
             render_spot_color: self.render_spot_color,
         };
         Ok(result)
@@ -792,6 +775,7 @@ impl JxlImage {
         let frame_header = frame.header();
         let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
 
+        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
         let result = Render {
             keyframe_index: self.ctx.loaded_keyframes(),
             name,
@@ -801,6 +785,7 @@ impl JxlImage {
             extra_channels: self.convert_ec_info(),
             target_frame_region,
             color_bit_depth: self.image_header.metadata.bit_depth,
+            is_cmyk,
             render_spot_color: self.render_spot_color,
         };
         Ok(result)
@@ -928,6 +913,7 @@ pub struct Render {
     extra_channels: Vec<ExtraChannel>,
     target_frame_region: Region,
     color_bit_depth: BitDepth,
+    is_cmyk: bool,
     render_spot_color: bool,
 }
 
