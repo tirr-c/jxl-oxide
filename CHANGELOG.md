@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `jxl-render`: Fix requested color encoding not applied in some cases (#369).
+- `jxl-oxide`: Fix CMYK to RGB conversion (#370).
 
 ## [0.9.1] - 2024-10-12
 
