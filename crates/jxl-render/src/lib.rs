@@ -111,7 +111,17 @@ impl RenderContextBuilder {
                             )
                             .into());
                         }
-                        (!image_header.metadata.xyb_encoded).then_some(parsed_icc)
+
+                        let is_supported_icc = parsed_icc.icc_profile().is_empty();
+                        if !is_supported_icc {
+                            tracing::trace!(
+                                "Failed to convert embedded ICC into enum color encoding"
+                            );
+                        }
+
+                        let allow_parsed_icc =
+                            !image_header.metadata.xyb_encoded || is_supported_icc;
+                        allow_parsed_icc.then_some(parsed_icc)
                     }
                     Err(e) => {
                         tracing::warn!(%e, "Malformed embedded ICC profile");
@@ -132,6 +142,11 @@ impl RenderContextBuilder {
                 }
             }
         };
+
+        tracing::debug!(
+            default_color_encoding = ?requested_color_encoding,
+            "Setting default output color encoding"
+        );
 
         let full_image_region = Region::with_size(
             image_header.width_with_orientation(),

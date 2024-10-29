@@ -124,6 +124,7 @@ impl<R: Read> JxlDecoder<R> {
         })?;
         let stream = render.stream();
 
+        let pixel_format = self.image.pixel_format();
         let image_header = self.image.image_header();
         let first_frame = self.image.frame_by_keyframe(0).unwrap();
         let first_frame_header = first_frame.header();
@@ -136,7 +137,7 @@ impl<R: Read> JxlDecoder<R> {
             || first_frame_header.encoding == jxl_frame::header::Encoding::VarDct;
         let need_16bit = image_header.metadata.bit_depth.bits_per_sample() > 8;
 
-        if is_float {
+        if is_float && !pixel_format.is_grayscale() {
             stream_to_buf::<f32>(stream, buf);
         } else if need_16bit {
             stream_to_buf::<u16>(stream, buf);
@@ -179,10 +180,10 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
             (false, true, false, false) => ColorType::Rgba8,
             (false, true, false, true) => ColorType::Rgba16,
             (false, true, true, _) => ColorType::Rgba32F,
-            (true, false, false, false) => ColorType::L8,
-            (true, false, false, true) | (true, false, true, _) => ColorType::L16,
-            (true, true, false, false) => ColorType::La8,
-            (true, true, false, true) | (true, true, true, _) => ColorType::La16,
+            (true, false, _, false) => ColorType::L8,
+            (true, false, _, true) => ColorType::L16,
+            (true, true, _, false) => ColorType::La8,
+            (true, true, _, true) => ColorType::La16,
         }
     }
 

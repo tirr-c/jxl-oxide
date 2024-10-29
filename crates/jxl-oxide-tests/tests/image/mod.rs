@@ -41,7 +41,19 @@ fn decode_f32() {
 }
 
 #[test]
-fn decode_gray() {
+fn decode_gray_xyb() {
+    let path = util::conformance_path("grayscale");
+    let file = File::open(path).unwrap();
+    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+
+    let image = DynamicImage::from_decoder(decoder).unwrap();
+    assert_eq!(image.color(), image::ColorType::L8);
+    assert_eq!(image.width(), 200);
+    assert_eq!(image.height(), 200);
+}
+
+#[test]
+fn decode_gray_modular() {
     let path = util::conformance_path("grayscale_public_university");
     let file = File::open(path).unwrap();
     let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
