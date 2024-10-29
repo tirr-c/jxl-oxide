@@ -6,6 +6,7 @@ use jxl_grid::AllocTracker;
 
 use crate::{CropInfo, InitializeResult, JxlImage};
 
+/// JPEG XL decoder which implements `image::ImageDecoder`.
 pub struct JxlDecoder<R> {
     reader: R,
     image: JxlImage,
@@ -16,6 +17,65 @@ pub struct JxlDecoder<R> {
 }
 
 impl<R: Read> JxlDecoder<R> {
+    /// Initializes a decoder which reads from given image stream.
+    ///
+    /// Decoder will be initialized with default thread pool.
+    pub fn new(reader: R) -> ImageResult<Self> {
+        let builder = JxlImage::builder().alloc_tracker(AllocTracker::with_limit(usize::MAX));
+
+        Self::init(builder, reader)
+    }
+
+    /// Initializes a decoder which reads from given image stream, with custom thread pool.
+    pub fn with_thread_pool(reader: R, pool: crate::JxlThreadPool) -> ImageResult<Self> {
+        let builder = JxlImage::builder()
+            .pool(pool)
+            .alloc_tracker(AllocTracker::with_limit(usize::MAX));
+
+        Self::init(builder, reader)
+    }
+
+    fn init(builder: crate::JxlImageBuilder, mut reader: R) -> ImageResult<Self> {
+        let mut buf = vec![0u8; 4096];
+        let mut buf_valid = 0usize;
+        let image = Self::init_image(builder, &mut reader, &mut buf, &mut buf_valid)
+            .map_err(|e| ImageError::Decoding(DecodingError::new(ImageFormatHint::Unknown, e)))?;
+
+        let crop = CropInfo {
+            width: image.width(),
+            height: image.height(),
+            left: 0,
+            top: 0,
+        };
+
+        let mut decoder = Self {
+            reader,
+            image,
+            current_memory_limit: usize::MAX,
+            current_crop: crop,
+            buf,
+            buf_valid,
+        };
+
+        decoder.load_until_first_keyframe().map_err(|e| {
+            ImageError::Decoding(DecodingError::new(
+                ImageFormatHint::PathExtension("jxl".into()),
+                e,
+            ))
+        })?;
+
+        // Convert CMYK to sRGB
+        if decoder.image.pixel_format().has_black() {
+            decoder
+                .image
+                .request_color_encoding(jxl_color::EnumColourEncoding::srgb(
+                    jxl_color::RenderingIntent::Relative,
+                ));
+        }
+
+        Ok(decoder)
+    }
+
     fn init_image(
         builder: crate::JxlImageBuilder,
         reader: &mut R,
@@ -49,51 +109,6 @@ impl<R: Read> JxlDecoder<R> {
         };
 
         Ok(image)
-    }
-
-    pub fn with_default_threadpool(mut reader: R) -> ImageResult<Self> {
-        let current_memory_limit = usize::MAX;
-        let builder =
-            JxlImage::builder().alloc_tracker(AllocTracker::with_limit(current_memory_limit));
-
-        let mut buf = vec![0u8; 4096];
-        let mut buf_valid = 0usize;
-        let image = Self::init_image(builder, &mut reader, &mut buf, &mut buf_valid)
-            .map_err(|e| ImageError::Decoding(DecodingError::new(ImageFormatHint::Unknown, e)))?;
-
-        let crop = CropInfo {
-            width: image.width(),
-            height: image.height(),
-            left: 0,
-            top: 0,
-        };
-
-        let mut decoder = Self {
-            reader,
-            image,
-            current_memory_limit,
-            current_crop: crop,
-            buf,
-            buf_valid,
-        };
-
-        decoder.load_until_first_keyframe().map_err(|e| {
-            ImageError::Decoding(DecodingError::new(
-                ImageFormatHint::PathExtension("jxl".into()),
-                e,
-            ))
-        })?;
-
-        // Convert CMYK to sRGB
-        if decoder.image.pixel_format().has_black() {
-            decoder
-                .image
-                .request_color_encoding(jxl_color::EnumColourEncoding::srgb(
-                    jxl_color::RenderingIntent::Relative,
-                ));
-        }
-
-        Ok(decoder)
     }
 
     fn load_until_first_keyframe(&mut self) -> crate::Result<()> {

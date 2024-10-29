@@ -8,7 +8,7 @@ use jxl_oxide_tests as util;
 fn decode_u8() {
     let path = util::conformance_path("lz77_flower");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::Rgb8);
@@ -20,7 +20,7 @@ fn decode_u8() {
 fn decode_u16() {
     let path = util::conformance_path("sunset_logo");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::Rgba16);
@@ -32,7 +32,7 @@ fn decode_u16() {
 fn decode_f32() {
     let path = util::conformance_path("lossless_pfm");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::Rgb32F);
@@ -44,7 +44,7 @@ fn decode_f32() {
 fn decode_gray_xyb() {
     let path = util::conformance_path("grayscale");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::L8);
@@ -56,7 +56,7 @@ fn decode_gray_xyb() {
 fn decode_gray_modular() {
     let path = util::conformance_path("grayscale_public_university");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::L8);
@@ -68,7 +68,7 @@ fn decode_gray_modular() {
 fn decode_cmyk() {
     let path = util::conformance_path("cmyk_layers");
     let file = File::open(path).unwrap();
-    let decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
 
     let image = DynamicImage::from_decoder(decoder).unwrap();
     assert_eq!(image.color(), image::ColorType::Rgba8);
@@ -80,7 +80,7 @@ fn decode_cmyk() {
 fn icc_profile() {
     let path = util::conformance_path("grayscale");
     let file = File::open(path).unwrap();
-    let mut decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let mut decoder = JxlDecoder::new(file).unwrap();
     let icc = image::ImageDecoder::icc_profile(&mut decoder)
         .unwrap()
         .unwrap();

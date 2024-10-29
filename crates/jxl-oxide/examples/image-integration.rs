@@ -12,7 +12,7 @@ fn main() {
     assert!(args.next().is_none(), "extra command line argument found");
 
     let file = std::fs::File::open(path).expect("cannot open file");
-    let mut decoder = JxlDecoder::with_default_threadpool(file).expect("cannot decode image");
+    let mut decoder = JxlDecoder::new(file).expect("cannot decode image");
 
     #[allow(unused)]
     let icc = decoder.icc_profile().unwrap();
