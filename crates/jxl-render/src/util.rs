@@ -325,6 +325,8 @@ pub(crate) fn convert_color_for_record(
         if metadata.colour_encoding.colour_space() == ColourSpace::Grey {
             fb.remove_color_channels(1);
         }
+
+        fb.set_ct_done(true);
     } else if metadata.xyb_encoded {
         // want_icc = false || is_last = true
         // in any case, blending does not occur when want_icc = true
@@ -367,10 +369,10 @@ pub(crate) fn convert_color_for_record(
             fb.remove_color_channels(output_channels);
             Ok(())
         })?;
+
+        fb.set_ct_done(true);
     }
 
-    // color transform is done
-    fb.set_ct_done(true);
     Ok(())
 }
 
