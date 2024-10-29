@@ -63,3 +63,14 @@ fn decode_cmyk() {
     assert_eq!(image.width(), 512);
     assert_eq!(image.height(), 512);
 }
+
+#[test]
+fn icc_profile() {
+    let path = util::conformance_path("grayscale");
+    let file = File::open(path).unwrap();
+    let mut decoder = JxlDecoder::with_default_threadpool(file).unwrap();
+    let icc = image::ImageDecoder::icc_profile(&mut decoder)
+        .unwrap()
+        .unwrap();
+    assert_eq!(&icc, include_bytes!("./grayscale.icc"));
+}
