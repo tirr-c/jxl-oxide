@@ -134,6 +134,26 @@ impl<R: Read> JxlDecoder<R> {
         Ok(())
     }
 
+    #[inline]
+    fn is_float(&self) -> bool {
+        use crate::BitDepth;
+
+        let metadata = &self.image.image_header().metadata;
+        matches!(
+            metadata.bit_depth,
+            BitDepth::FloatSample { .. }
+                | BitDepth::IntegerSample {
+                    bits_per_sample: 17..
+                }
+        )
+    }
+
+    #[inline]
+    fn need_16bit(&self) -> bool {
+        let metadata = &self.image.image_header().metadata;
+        metadata.bit_depth.bits_per_sample() > 8
+    }
+
     fn read_image_inner(
         &mut self,
         crop: CropInfo,
@@ -158,24 +178,11 @@ impl<R: Read> JxlDecoder<R> {
         })?;
         let stream = render.stream();
 
-        let pixel_format = self.image.pixel_format();
-        let image_header = self.image.image_header();
-        let first_frame = self.image.frame_by_keyframe(0).unwrap();
-        let first_frame_header = first_frame.header();
-
-        let is_float = image_header.metadata.xyb_encoded
-            || matches!(
-                image_header.metadata.bit_depth,
-                jxl_image::BitDepth::FloatSample { .. }
-            )
-            || first_frame_header.encoding == jxl_frame::header::Encoding::VarDct;
-        let need_16bit = image_header.metadata.bit_depth.bits_per_sample() > 8;
-
         let stride_base = stream.width() as usize * stream.channels() as usize;
-        if is_float && !pixel_format.is_grayscale() {
+        if self.is_float() && !self.image.pixel_format().is_grayscale() {
             let stride = buf_stride.unwrap_or(stride_base * std::mem::size_of::<f32>());
             stream_to_buf::<f32>(stream, buf, stride);
-        } else if need_16bit {
+        } else if self.need_16bit() {
             let stride = buf_stride.unwrap_or(stride_base * std::mem::size_of::<u16>());
             stream_to_buf::<u16>(stream, buf, stride);
         } else {
@@ -194,23 +201,12 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
 
     fn color_type(&self) -> image::ColorType {
         let pixel_format = self.image.pixel_format();
-        let image_header = self.image.image_header();
-        let first_frame = self.image.frame_by_keyframe(0).unwrap();
-        let first_frame_header = first_frame.header();
-
-        let is_float = image_header.metadata.xyb_encoded
-            || matches!(
-                image_header.metadata.bit_depth,
-                jxl_image::BitDepth::FloatSample { .. }
-            )
-            || first_frame_header.encoding == jxl_frame::header::Encoding::VarDct;
-        let need_16bit = image_header.metadata.bit_depth.bits_per_sample() > 8;
 
         match (
             pixel_format.is_grayscale(),
             pixel_format.has_alpha(),
-            is_float,
-            need_16bit,
+            self.is_float(),
+            self.need_16bit(),
         ) {
             (false, false, false, false) => ColorType::Rgb8,
             (false, false, false, true) => ColorType::Rgb16,
