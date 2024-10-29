@@ -711,7 +711,7 @@ impl<S: Sample> RenderedImage<S> {
             frame_region
         };
 
-        let mut grid_lock = self.image.render.lock().unwrap();
+        let mut grid_lock = self.image.wait_until_render()?;
         if let FrameRender::Blended(image) = &*grid_lock {
             return Ok(Arc::clone(image));
         }
@@ -745,6 +745,9 @@ impl<S: Sample> RenderedImage<S> {
             return Ok(image);
         }
 
+        *grid_lock = FrameRender::Rendering;
+        drop(grid_lock);
+
         let image = crate::blend::blend(
             image_header,
             self.image.refs.clone(),
@@ -755,7 +758,10 @@ impl<S: Sample> RenderedImage<S> {
         )?;
 
         let image = Arc::new(image);
-        *grid_lock = FrameRender::Blended(Arc::clone(&image));
+        drop(
+            self.image
+                .done_render(FrameRender::Blended(Arc::clone(&image))),
+        );
         Ok(image)
     }
 
