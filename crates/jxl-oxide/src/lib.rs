@@ -1069,7 +1069,7 @@ impl ExtraChannel {
 }
 
 /// Cropping region information.
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub struct CropInfo {
     pub width: u32,
     pub height: u32,

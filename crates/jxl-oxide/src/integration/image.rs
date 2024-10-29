@@ -4,11 +4,12 @@ use image::error::{DecodingError, ImageFormatHint};
 use image::{ColorType, ImageError, ImageResult};
 use jxl_grid::AllocTracker;
 
-use crate::{InitializeResult, JxlImage};
+use crate::{CropInfo, InitializeResult, JxlImage};
 
 pub struct JxlDecoder<R> {
     reader: R,
     image: JxlImage,
+    current_crop: CropInfo,
     current_memory_limit: usize,
     buf: Vec<u8>,
     buf_valid: usize,
@@ -60,10 +61,18 @@ impl<R: Read> JxlDecoder<R> {
         let image = Self::init_image(builder, &mut reader, &mut buf, &mut buf_valid)
             .map_err(|e| ImageError::Decoding(DecodingError::new(ImageFormatHint::Unknown, e)))?;
 
+        let crop = CropInfo {
+            width: image.width(),
+            height: image.height(),
+            left: 0,
+            top: 0,
+        };
+
         let mut decoder = Self {
             reader,
             image,
             current_memory_limit,
+            current_crop: crop,
             buf,
             buf_valid,
         };
@@ -110,7 +119,17 @@ impl<R: Read> JxlDecoder<R> {
         Ok(())
     }
 
-    fn read_image_inner(&mut self, buf: &mut [u8]) -> crate::Result<()> {
+    fn read_image_inner(
+        &mut self,
+        crop: CropInfo,
+        buf: &mut [u8],
+        buf_stride: Option<usize>,
+    ) -> crate::Result<()> {
+        if self.current_crop != crop {
+            self.image.set_image_region(crop);
+            self.current_crop = crop;
+        }
+
         let render = if self.image.num_loaded_keyframes() > 0 {
             self.image.render_frame(0)
         } else {
@@ -137,12 +156,16 @@ impl<R: Read> JxlDecoder<R> {
             || first_frame_header.encoding == jxl_frame::header::Encoding::VarDct;
         let need_16bit = image_header.metadata.bit_depth.bits_per_sample() > 8;
 
+        let stride_base = stream.width() as usize * stream.channels() as usize;
         if is_float && !pixel_format.is_grayscale() {
-            stream_to_buf::<f32>(stream, buf);
+            let stride = buf_stride.unwrap_or(stride_base * std::mem::size_of::<f32>());
+            stream_to_buf::<f32>(stream, buf, stride);
         } else if need_16bit {
-            stream_to_buf::<u16>(stream, buf);
+            let stride = buf_stride.unwrap_or(stride_base * std::mem::size_of::<u16>());
+            stream_to_buf::<u16>(stream, buf, stride);
         } else {
-            stream_to_buf::<u8>(stream, buf);
+            let stride = buf_stride.unwrap_or(stride_base * std::mem::size_of::<u8>());
+            stream_to_buf::<u8>(stream, buf, stride);
         }
 
         Ok(())
@@ -191,7 +214,14 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     where
         Self: Sized,
     {
-        self.read_image_inner(buf).map_err(|e| {
+        let crop = CropInfo {
+            width: self.image.width(),
+            height: self.image.height(),
+            left: 0,
+            top: 0,
+        };
+
+        self.read_image_inner(crop, buf, None).map_err(|e| {
             ImageError::Decoding(DecodingError::new(
                 ImageFormatHint::PathExtension("jxl".into()),
                 e,
@@ -200,7 +230,14 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     }
 
     fn read_image_boxed(mut self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        self.read_image_inner(buf).map_err(|e| {
+        let crop = CropInfo {
+            width: self.image.width(),
+            height: self.image.height(),
+            left: 0,
+            top: 0,
+        };
+
+        self.read_image_inner(crop, buf, None).map_err(|e| {
             ImageError::Decoding(DecodingError::new(
                 ImageFormatHint::PathExtension("jxl".into()),
                 e,
@@ -264,16 +301,52 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     }
 }
 
+impl<R: Read> image::ImageDecoderRect for JxlDecoder<R> {
+    fn read_rect(
+        &mut self,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        buf: &mut [u8],
+        row_pitch: usize,
+    ) -> ImageResult<()> {
+        let crop = CropInfo {
+            width,
+            height,
+            left: x,
+            top: y,
+        };
+
+        self.read_image_inner(crop, buf, Some(row_pitch))
+            .map_err(|e| {
+                ImageError::Decoding(DecodingError::new(
+                    ImageFormatHint::PathExtension("jxl".into()),
+                    e,
+                ))
+            })
+    }
+}
+
 fn stream_to_buf<Sample: crate::FrameBufferSample>(
     mut stream: crate::ImageStream<'_>,
     buf: &mut [u8],
+    buf_stride: usize,
 ) {
     let stride =
         stream.width() as usize * stream.channels() as usize * std::mem::size_of::<Sample>();
-    assert_eq!(buf.len(), stride * stream.height() as usize);
+    assert!(buf_stride >= stride);
+    assert_eq!(buf.len(), buf_stride * stream.height() as usize);
 
     if let Ok(buf) = bytemuck::try_cast_slice_mut::<u8, Sample>(buf) {
-        stream.write_to_buffer(buf);
+        if buf_stride == stride {
+            stream.write_to_buffer(buf);
+        } else {
+            for buf_row in buf.chunks_exact_mut(buf_stride / std::mem::size_of::<Sample>()) {
+                let buf_row = &mut buf_row[..stream.width() as usize];
+                stream.write_to_buffer(buf_row);
+            }
+        }
     } else {
         let mut row = Vec::with_capacity(stream.width() as usize);
         row.fill_with(Sample::default);
@@ -281,7 +354,7 @@ fn stream_to_buf<Sample: crate::FrameBufferSample>(
             stream.write_to_buffer(&mut row);
 
             let row = bytemuck::cast_slice::<Sample, u8>(&row);
-            buf_row.copy_from_slice(row);
+            buf_row[..stride].copy_from_slice(row);
         }
     }
 }
