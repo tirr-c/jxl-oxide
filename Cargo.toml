@@ -2,6 +2,9 @@
 members = ["crates/*"]
 resolver = "2"
 
+[workspace.dependencies.bytemuck]
+version = "1.19.0"
+
 [workspace.dependencies.tracing]
 version = "0.1.40"
 default-features = false

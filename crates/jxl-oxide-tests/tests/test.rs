@@ -7,4 +7,7 @@ mod crop;
 #[cfg(feature = "decode")]
 mod decode;
 
+#[cfg(feature = "image")]
+mod image;
+
 mod fuzz_findings;

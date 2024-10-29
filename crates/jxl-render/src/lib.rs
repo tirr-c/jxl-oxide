@@ -92,41 +92,61 @@ impl RenderContextBuilder {
 
     pub fn build(self, image_header: Arc<ImageHeader>) -> Result<RenderContext> {
         let color_encoding = &image_header.metadata.colour_encoding;
-        let requested_color_encoding = if let ColourEncoding::Enum(encoding) = color_encoding {
-            ColorEncodingWithProfile::new(encoding.clone())
-        } else if image_header.metadata.xyb_encoded {
-            ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
-                jxl_color::RenderingIntent::Relative,
-            ))
-        } else {
-            let ColourEncoding::IccProfile(color_space) = color_encoding else {
-                unreachable!();
-            };
-            match ColorEncodingWithProfile::with_icc(&self.embedded_icc) {
-                Ok(parsed_icc) => {
-                    let header_is_gray = *color_space == ColourSpace::Grey;
-                    let icc_is_gray = parsed_icc.is_grayscale();
-                    if header_is_gray != icc_is_gray {
-                        tracing::error!(
-                            header_is_gray,
-                            icc_is_gray,
-                            "Color channel mismatch between header and ICC profile"
-                        );
-                        return Err(jxl_bitstream::Error::ValidationFailed(
-                            "Color channel mismatch between header and ICC profile",
-                        )
-                        .into());
+        let requested_color_encoding = match color_encoding {
+            ColourEncoding::Enum(encoding) => ColorEncodingWithProfile::new(encoding.clone()),
+            ColourEncoding::IccProfile(color_space) => {
+                let header_is_gray = *color_space == ColourSpace::Grey;
+
+                let parsed_icc = match ColorEncodingWithProfile::with_icc(&self.embedded_icc) {
+                    Ok(parsed_icc) => {
+                        let icc_is_gray = parsed_icc.is_grayscale();
+                        if header_is_gray != icc_is_gray {
+                            tracing::error!(
+                                header_is_gray,
+                                icc_is_gray,
+                                "Color channel mismatch between header and ICC profile"
+                            );
+                            return Err(jxl_bitstream::Error::ValidationFailed(
+                                "Color channel mismatch between header and ICC profile",
+                            )
+                            .into());
+                        }
+
+                        let is_supported_icc = parsed_icc.icc_profile().is_empty();
+                        if !is_supported_icc {
+                            tracing::trace!(
+                                "Failed to convert embedded ICC into enum color encoding"
+                            );
+                        }
+
+                        let allow_parsed_icc =
+                            !image_header.metadata.xyb_encoded || is_supported_icc;
+                        allow_parsed_icc.then_some(parsed_icc)
                     }
-                    parsed_icc
-                }
-                Err(e) => {
-                    tracing::warn!(%e, "Malformed embedded ICC profile");
+                    Err(e) => {
+                        tracing::warn!(%e, "Malformed embedded ICC profile");
+                        None
+                    }
+                };
+
+                if let Some(profile) = parsed_icc {
+                    profile
+                } else if header_is_gray {
+                    ColorEncodingWithProfile::new(EnumColourEncoding::gray_srgb(
+                        jxl_color::RenderingIntent::Relative,
+                    ))
+                } else {
                     ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
                         jxl_color::RenderingIntent::Relative,
                     ))
                 }
             }
         };
+
+        tracing::debug!(
+            default_color_encoding = ?requested_color_encoding,
+            "Setting default output color encoding"
+        );
 
         let full_image_region = Region::with_size(
             image_header.width_with_orientation(),

@@ -14,6 +14,15 @@ edition = "2021"
 [dependencies]
 tracing.workspace = true
 
+[dependencies.bytemuck]
+workspace = true
+optional = true
+
+[dependencies.image]
+version = "0.25.4"
+default-features = false
+optional = true
+
 [dependencies.jxl-bitstream]
 version = "0.5.0-alpha.0"
 path = "../jxl-bitstream"
@@ -52,5 +61,11 @@ optional = true
 
 [features]
 default = ["rayon"]
-rayon = ["jxl-threadpool/rayon"]
+image = ["dep:bytemuck", "dep:image"]
 lcms2 = ["dep:lcms2"]
+rayon = ["jxl-threadpool/rayon"]
+__examples = ["image?/png"]
+
+[[example]]
+name = "image-integration"
+required-features = ["image", "__examples"]
