@@ -57,13 +57,6 @@ impl<R: Read> JxlDecoder<R> {
             buf_valid,
         };
 
-        decoder.load_until_first_keyframe().map_err(|e| {
-            ImageError::Decoding(DecodingError::new(
-                ImageFormatHint::PathExtension("jxl".into()),
-                e,
-            ))
-        })?;
-
         // Convert CMYK to sRGB
         if decoder.image.pixel_format().has_black() {
             decoder
@@ -164,6 +157,8 @@ impl<R: Read> JxlDecoder<R> {
             self.image.set_image_region(crop);
             self.current_crop = crop;
         }
+
+        self.load_until_first_keyframe()?;
 
         let render = if self.image.num_loaded_keyframes() > 0 {
             self.image.render_frame(0)
