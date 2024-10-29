@@ -64,3 +64,8 @@ default = ["rayon"]
 image = ["dep:bytemuck", "dep:image"]
 lcms2 = ["dep:lcms2"]
 rayon = ["jxl-threadpool/rayon"]
+__examples = ["image?/png"]
+
+[[example]]
+name = "image-integration"
+required-features = ["image", "__examples"]
