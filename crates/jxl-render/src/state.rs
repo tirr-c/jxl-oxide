@@ -198,7 +198,7 @@ impl<S: Sample> FrameRenderHandle<S> {
         }
     }
 
-    fn wait_until_render(&self) -> Result<MutexGuard<'_, FrameRender<S>>> {
+    pub(crate) fn wait_until_render(&self) -> Result<MutexGuard<'_, FrameRender<S>>> {
         let mut render_ref = self.render.lock().unwrap();
         loop {
             let render = std::mem::replace(&mut *render_ref, FrameRender::None);
@@ -220,7 +220,7 @@ impl<S: Sample> FrameRenderHandle<S> {
         }
     }
 
-    fn done_render(&self, render: FrameRender<S>) -> MutexGuard<'_, FrameRender<S>> {
+    pub(crate) fn done_render(&self, render: FrameRender<S>) -> MutexGuard<'_, FrameRender<S>> {
         assert!(!matches!(render, FrameRender::Rendering));
         let mut guard = self.render.lock().unwrap();
         *guard = render;
