@@ -125,9 +125,9 @@ impl<S: Sample> FrameRenderHandle<S> {
     }
 
     pub fn run_with_image(self: Arc<Self>) -> Result<RenderedImage<S>> {
-        let _guard = tracing::trace_span!("Run with image", index = self.frame.idx).entered();
-
         let render = if let Some(state) = self.start_render()? {
+            let _guard = tracing::trace_span!("Run with image", index = self.frame.idx).entered();
+
             let render_result = (self.render_op)(state, self.image_region);
             match render_result {
                 FrameRender::InProgress(_) => {
@@ -142,7 +142,6 @@ impl<S: Sample> FrameRenderHandle<S> {
             }
             self.done_render(render_result)
         } else {
-            tracing::trace!("Another thread has started rendering");
             self.wait_until_render()?
         };
         drop(render);
@@ -151,13 +150,11 @@ impl<S: Sample> FrameRenderHandle<S> {
     }
 
     pub fn run(&self, image_region: Region) {
-        let _guard = tracing::trace_span!("Run", index = self.frame.idx).entered();
-
         if let Some(state) = self.start_render_silent() {
+            let _guard = tracing::trace_span!("Run", index = self.frame.idx).entered();
+
             let render_result = (self.render_op)(state, image_region);
             drop(self.done_render(render_result));
-        } else {
-            tracing::trace!("Another thread has started rendering");
         }
     }
 
@@ -205,6 +202,7 @@ impl<S: Sample> FrameRenderHandle<S> {
             match render {
                 FrameRender::Rendering => {
                     tracing::trace!(index = self.frame.idx, "Waiting...");
+                    *render_ref = render;
                     render_ref = self.condvar.wait(render_ref).unwrap();
                 }
                 FrameRender::Done(_) | FrameRender::Blended(_) => {
