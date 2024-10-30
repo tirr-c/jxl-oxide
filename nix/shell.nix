@@ -17,7 +17,7 @@ in
       inherit system;
     };
   },
-  fenix ? import (getFlake "fenix") { },
+  fenix ? (import (getFlake "fenix") { }).packages.${system},
   rustVersion ? "stable",
   ...
 }:
@@ -25,7 +25,10 @@ in
 let
   pkgsFromNixpkgs = with pkgs; [
     ffmpeg_7-headless
+    nodejs
     pkg-config
+    wasm-pack
+    wasm-bindgen-cli
 
     rustPlatform.bindgenHook
   ];
@@ -39,14 +42,20 @@ let
     libiconv
   ];
 
-  rustToolchain = fenix.${rustVersion}.withComponents [
-    "cargo"
-    "clippy"
-    "rust-analyzer"
-    "rust-src"
-    "rustc"
-    "rustfmt"
-  ];
+  rustToolchain = fenix.combine (
+    with fenix.${rustVersion};
+    [
+      cargo
+      clippy
+      rust-analyzer
+      rust-src
+      rustc
+      rustfmt
+    ]
+    ++ [
+      fenix.targets.wasm32-unknown-unknown.${rustVersion}.rust-std
+    ]
+  );
 in
 
 pkgs.mkShell {
