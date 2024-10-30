@@ -330,7 +330,9 @@ impl FlatMaTree {
                     ref indices,
                 } => {
                     let v = properties.get(prop as usize);
-                    let idx = (v - value_base).clamp(0, indices.len() as i32 - 1) as usize;
+                    let idx = v
+                        .saturating_sub(value_base)
+                        .clamp(0, indices.len() as i32 - 1) as usize;
                     let next_node = indices[idx];
                     current_node = &self.nodes[next_node as usize];
                 }

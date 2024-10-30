@@ -83,4 +83,5 @@ test_by_include!(
     lz77_num_to_copy_overflow,
     bitstream_u32_overflow,
     rct_zero_sized,
+    ma_lookup_overflow,
 );
