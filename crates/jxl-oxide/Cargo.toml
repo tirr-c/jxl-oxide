@@ -24,7 +24,7 @@ default-features = false
 optional = true
 
 [dependencies.jxl-bitstream]
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
@@ -36,7 +36,7 @@ version = "0.11.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
-version = "0.5.0"
+version = "0.5.1"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]

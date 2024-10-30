@@ -8,12 +8,12 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 edition = "2021"
 
 [dependencies]
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 path = "../jxl-bitstream"
