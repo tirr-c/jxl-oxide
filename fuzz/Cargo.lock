@@ -30,14 +30,14 @@ dependencies = [
 
 [[package]]
 name = "jxl-bitstream"
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-coding"
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 dependencies = [
  "jxl-bitstream",
  "tracing",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-grid"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "tracing",
 ]
