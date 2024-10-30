@@ -51,7 +51,7 @@ jobs:
           git: https://github.com/cross-rs/cross
           rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - name: Run tests
-        run: cross test --release --target ${{ matrix.target }}
+        run: cross test --release --target ${{ matrix.target }} -- --test-threads 1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
