@@ -114,10 +114,12 @@
 
         naerskBuildPackageNative =
           extraArgs:
-          buildPackage {
-            naersk = naerskForNative;
-          }
-          // extraArgs;
+          buildPackage (
+            {
+              naersk = naerskForNative;
+            }
+            // extraArgs
+          );
 
         naerskBuildPackageCross =
           {
@@ -131,14 +133,16 @@
             inherit (pkgsCross) hostPlatform stdenv;
             isMinGW = pkgsCross.stdenv.cc.isGNU or false && hostPlatform.isWindows;
           in
-          buildPackage {
-            pkgs = pkgsCross;
-            naersk = naerskFor target;
-            stdenv = if isMinGW then wrapMingwStdenv stdenv else stdenv;
-            crossTarget = target;
-            inherit static;
-          }
-          // args;
+          buildPackage (
+            {
+              pkgs = pkgsCross;
+              naersk = naerskFor target;
+              stdenv = if isMinGW then wrapMingwStdenv stdenv else stdenv;
+              crossTarget = target;
+              inherit static;
+            }
+            // args
+          );
 
         crossPackages = mapListToAttrs (
           spec@{ target, ... }:
@@ -153,6 +157,10 @@
           native = naerskBuildPackageNative { };
           native-devtools = naerskBuildPackageNative {
             enableDevtools = true;
+          };
+          native-ffmpeg = naerskBuildPackageNative {
+            enableDevtools = true;
+            enableFfmpeg = true;
           };
         } // crossPackages;
         defaultPackage = packages.native;
