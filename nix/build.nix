@@ -20,7 +20,6 @@ let
   inherit (builtins)
     concatStringsSep
     replaceStrings
-    isNull
     ;
 
   jxlOxideCliToml = builtins.fromTOML (builtins.readFile ../crates/jxl-oxide-cli/Cargo.toml);
@@ -38,7 +37,11 @@ let
         ++ lib.optional enableFfmpeg "__ffmpeg";
       featureListStr = concatStringsSep "," featureList;
     in
-    [ "-p" "jxl-oxide-cli" "--no-default-features" ]
+    [
+      "-p"
+      "jxl-oxide-cli"
+      "--no-default-features"
+    ]
     ++ lib.optionals (featureList != [ ]) [
       "--features"
       featureListStr
@@ -50,11 +53,14 @@ let
     let
       featureList =
         [ "conformance" ] # conformance tests only
-        ++ lib.optional enableMimalloc "mimalloc"
-        ++ lib.optional enableRayon "rayon";
+        ++ lib.optional enableMimalloc "mimalloc" ++ lib.optional enableRayon "rayon";
       featureListStr = concatStringsSep "," featureList;
     in
-    [ "-p" "jxl-oxide-tests" "--no-default-features" ]
+    [
+      "-p"
+      "jxl-oxide-tests"
+      "--no-default-features"
+    ]
     ++ lib.optionals (featureList != [ ]) [
       "--features"
       featureListStr
@@ -67,7 +73,21 @@ let
     strictDeps = true;
 
     cargoBuildOptions = args: args ++ cargoBuildArgs;
-    buildInputs = lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
+    buildInputs =
+      lib.optionals enableFfmpeg (
+        with pkgs;
+        [
+          ffmpeg_7-headless
+          rustPlatform.bindgenHook
+        ]
+      )
+      ++ lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
+    nativeBuildInputs = lib.optionals enableFfmpeg (
+      with pkgs;
+      [
+        pkg-config
+      ]
+    );
 
     doCheck = true;
     cargoTestOptions = args: args ++ cargoTestArgs;
@@ -86,9 +106,7 @@ let
 in
 naersk.buildPackage (
   commonBuildArgs
-  // {
-  }
-  // lib.optionalAttrs (!isNull crossTarget) rec {
+  // lib.optionalAttrs (crossTarget != null) rec {
     depsBuildBuild = [
       stdenv.cc
     ] ++ lib.optional isMinGW windows.pthreads;
