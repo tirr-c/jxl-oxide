@@ -1076,10 +1076,18 @@ impl Render {
 
     /// Creates a stream that writes to borrowed buffer.
     ///
-    /// The stream will include black and alpha channels, if exists, in addition to color channels.
+    /// The stream will include black and alpha channels, if exist, in addition to color channels.
     /// Orientation is applied.
     pub fn stream(&self) -> ImageStream {
-        ImageStream::from_render(self)
+        ImageStream::from_render(self, false)
+    }
+
+    /// Creates a stream that writes to borrowed buffer.
+    ///
+    /// The stream will include black channels if exist, but not alpha channels. Orientation is
+    /// applied.
+    pub fn stream_no_alpha(&self) -> ImageStream {
+        ImageStream::from_render(self, true)
     }
 
     /// Creates a buffer with interleaved channels, with orientation applied.

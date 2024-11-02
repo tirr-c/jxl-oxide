@@ -6,14 +6,12 @@ use jxl_oxide::{JxlImage, JxlThreadPool, Render};
 use crate::commands::progressive::*;
 use crate::{Error, Result};
 
-#[cfg(feature = "__ffmpeg")]
-mod mp4;
 mod png_seq;
 
 enum OutputType {
     PngSequence(png_seq::Context),
     #[cfg(feature = "__ffmpeg")]
-    Mp4(mp4::Context),
+    Mp4(crate::output::Mp4FileEncoder),
 }
 
 impl OutputType {
@@ -28,7 +26,8 @@ impl OutputType {
         cll: Option<(f32, f32)>,
         font: &str,
     ) -> Result<Self> {
-        mp4::Context::new(output_path, mastering_luminances, cll, font).map(Self::Mp4)
+        crate::output::Mp4FileEncoder::new(output_path, mastering_luminances, cll, font)
+            .map(Self::Mp4)
     }
 }
 

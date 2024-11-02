@@ -5,7 +5,7 @@ use jxl_oxide::{JxlImage, PixelFormat, Render};
 #[cfg(feature = "__ffmpeg")]
 mod video;
 #[cfg(feature = "__ffmpeg")]
-pub(crate) use video::VideoContext;
+pub(crate) use video::Mp4FileEncoder;
 
 pub(crate) fn write_png<W: Write>(
     output: W,

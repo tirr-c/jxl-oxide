@@ -8,6 +8,8 @@ pub mod generate_fixture;
 pub mod info;
 #[cfg(feature = "__devtools")]
 pub mod progressive;
+#[cfg(feature = "__ffmpeg")]
+pub mod slow_motion;
 
 mod output;
 
