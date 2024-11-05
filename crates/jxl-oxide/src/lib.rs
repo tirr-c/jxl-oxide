@@ -143,6 +143,9 @@
 //! - `rayon`: Enable multithreading with Rayon. (*default*)
 //! - `image`: Enable integration with `image` crate.
 //! - `lcms2`: Enable integration with Little CMS 2.
+
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 use std::sync::Arc;
 
 use jxl_bitstream::{Bitstream, ContainerDetectingReader, ParseEvent};
