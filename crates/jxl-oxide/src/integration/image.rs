@@ -6,7 +6,57 @@ use jxl_grid::AllocTracker;
 
 use crate::{CropInfo, InitializeResult, JxlImage};
 
-/// JPEG XL decoder which implements `image::ImageDecoder`.
+/// JPEG XL decoder which implements [`ImageDecoder`][image::ImageDecoder].
+///
+/// # Supported features
+///
+/// Currently `JxlDecoder` supports following features:
+/// - Returning images of 8-bit, 16-bit integer and 32-bit float samples
+/// - RGB or luma-only images, with or without alpha
+/// - Returning ICC profiles via `icc_profile`
+/// - Setting decoder limits (caveat: memory limits are not strict)
+/// - Cropped decoding with [`ImageDecoderRect`][image::ImageDecoderRect]
+/// - (When `lcms2` feature is enabled) Converting CMYK images to sRGB color space
+///
+/// Some features are planned but not implemented yet:
+/// - Decoding animations
+///
+/// # Note about color management
+///
+/// `JxlDecoder` doesn't do color management by itself (except for CMYK images, which will be
+/// converted to sRGB color space if `lcms2` is available). Consumers should apply appropriate
+/// color transforms using ICC profile returned by [`icc_profile()`], otherwise colors may be
+/// inaccurate.
+///
+/// # Examples
+///
+/// Converting JPEG XL image to PNG:
+///
+/// ```no_run
+/// use image::{DynamicImage, ImageDecoder};
+/// use jxl_oxide::integration::JxlDecoder;
+///
+/// # type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
+/// # fn do_color_transform(_: &mut DynamicImage, _: Vec<u8>) -> Result<()> { Ok(()) }
+/// # fn main() -> Result<()> {
+/// // Read and decode a JPEG XL image.
+/// let file = std::fs::File::open("image.jxl")?;
+/// let mut decoder = JxlDecoder::new(file)?;
+/// let icc = decoder.icc_profile()?;
+/// let mut image = DynamicImage::from_decoder(decoder)?;
+///
+/// // Perform color transform using the ICC profile.
+/// // Note that ICC profile will be always available for images decoded by `JxlDecoder`.
+/// if let Some(icc) = icc {
+///     do_color_transform(&mut image, icc)?;
+/// }
+///
+/// // Save decoded image to PNG.
+/// image.save("image.png")?;
+/// # Ok(()) }
+/// ```
+///
+/// [`icc_profile()`]: image::ImageDecoder::icc_profile
 pub struct JxlDecoder<R> {
     reader: R,
     image: JxlImage,

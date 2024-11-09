@@ -169,7 +169,6 @@ pub use jxl_image::{ExtraChannelType, ImageHeader};
 pub use jxl_threadpool::JxlThreadPool;
 
 mod fb;
-#[cfg(feature = "image")]
 pub mod integration;
 #[cfg(feature = "lcms2")]
 mod lcms2;
