@@ -10,7 +10,7 @@ which covers various components of jxl-oxide.
 
 ```toml
 [dependencies]
-jxl-oxide = "0.10.0"
+jxl-oxide = "0.10.1"
 ```
 
 ## Installing command line tool
