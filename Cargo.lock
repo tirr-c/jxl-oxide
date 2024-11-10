@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "bytemuck",
  "image",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "clap",
  "jxl-color",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
