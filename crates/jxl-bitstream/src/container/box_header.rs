@@ -3,7 +3,7 @@ use crate::Error;
 /// Box header used in JPEG XL containers.
 #[derive(Debug, Clone)]
 pub struct ContainerBoxHeader {
-    ty: ContainerBoxType,
+    pub(super) ty: ContainerBoxType,
     box_size: Option<u64>,
     is_last: bool,
 }
