@@ -843,6 +843,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-jbr"
+version = "0.1.0"
+dependencies = [
+ "brotli-decompressor",
+ "jxl-bitstream",
+ "jxl-frame",
+ "jxl-image",
+ "jxl-oxide-common",
+ "tracing",
+]
+
+[[package]]
 name = "jxl-modular"
 version = "0.9.0"
 dependencies = [
