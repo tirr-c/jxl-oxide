@@ -64,6 +64,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                         return Ok(None);
                     }
                 }
+
                 DetectState::WaitingBoxHeader => match ContainerBoxHeader::parse(buf)? {
                     HeaderParseResult::Done {
                         header,
@@ -149,6 +150,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                     }
                     HeaderParseResult::NeedMoreData => return Ok(None),
                 },
+
                 DetectState::WaitingJxlpIndex(header) => {
                     let &[b0, b1, b2, b3, ..] = &**buf else {
                         return Ok(None);
@@ -185,6 +187,8 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                         pending_no_more_aux_box: bytes_left.is_none(),
                     };
                 }
+
+                // JXL codestream box is the last box; emit "no more aux box" event.
                 DetectState::InCodestream {
                     pending_no_more_aux_box: pending @ true,
                     ..
@@ -192,6 +196,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                     *pending = false;
                     return Ok(Some(ParseEvent::NoMoreAuxBox));
                 }
+
                 DetectState::InCodestream {
                     bytes_left: None, ..
                 } => {
@@ -216,6 +221,8 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                     };
                     return Ok(Some(ParseEvent::Codestream(payload)));
                 }
+
+                // Read brob payload box type.
                 DetectState::InAuxBox {
                     header:
                         ContainerBoxHeader {
@@ -223,7 +230,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                             ..
                         },
                     brotli_box_type: brotli_box_type @ None,
-                    bytes_left: None,
+                    bytes_left,
                 } => {
                     if buf.len() < 4 {
                         return Ok(None);
@@ -231,85 +238,60 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
 
                     let (ty_slice, remaining) = buf.split_at(4);
                     *buf = remaining;
-
-                    let mut ty = [0u8; 4];
-                    ty.copy_from_slice(ty_slice);
-                    let ty = ContainerBoxType(ty);
-                    *brotli_box_type = Some(ty);
-                    return Ok(Some(ParseEvent::AuxBoxStart {
-                        ty,
-                        brotli_compressed: true,
-                        last_box: true,
-                    }));
-                }
-                DetectState::InAuxBox {
-                    header:
-                        ContainerBoxHeader {
-                            ty: ContainerBoxType::BROTLI_COMPRESSED,
-                            ..
-                        },
-                    brotli_box_type: brotli_box_type @ None,
-                    bytes_left: Some(bytes_left),
-                } => {
-                    if buf.len() < 4 {
-                        return Ok(None);
+                    if let Some(bytes_left) = bytes_left {
+                        *bytes_left -= 4;
                     }
 
-                    let (ty_slice, remaining) = buf.split_at(4);
-                    *buf = remaining;
-                    *bytes_left -= 4;
-
                     let mut ty = [0u8; 4];
                     ty.copy_from_slice(ty_slice);
+                    let is_reserved_box_type =
+                        &ty[..3] == b"jxl" || &ty == b"brob" || &ty == b"jbrd";
+                    if is_reserved_box_type {
+                        return Err(Error::ValidationFailed(
+                            "brob box, jxl boxes and jbrd box cannot be Brotli-compressed",
+                        ));
+                    }
+
                     let ty = ContainerBoxType(ty);
                     *brotli_box_type = Some(ty);
+
                     return Ok(Some(ParseEvent::AuxBoxStart {
                         ty,
                         brotli_compressed: true,
-                        last_box: false,
+                        last_box: bytes_left.is_none(),
                     }));
                 }
+
                 DetectState::InAuxBox {
                     header: ContainerBoxHeader { ty, .. },
                     brotli_box_type,
-                    bytes_left: None,
+                    bytes_left,
                 } => {
                     let ty = if let Some(ty) = brotli_box_type {
                         *ty
                     } else {
                         *ty
                     };
-                    let payload = *buf;
-                    *buf = &[];
-                    return Ok(Some(ParseEvent::AuxBoxData(ty, payload)));
-                }
-                DetectState::InAuxBox {
-                    header: ContainerBoxHeader { ty, .. },
-                    brotli_box_type,
-                    bytes_left: Some(0),
-                } => {
-                    let ty = if let Some(ty) = brotli_box_type {
-                        *ty
-                    } else {
-                        *ty
+
+                    let payload = match bytes_left {
+                        Some(0) => {
+                            *state = DetectState::WaitingBoxHeader;
+                            return Ok(Some(ParseEvent::AuxBoxEnd(ty)));
+                        }
+                        Some(bytes_left) => {
+                            let num_bytes_to_read = (*bytes_left).min(buf.len());
+                            let (payload, remaining) = buf.split_at(num_bytes_to_read);
+                            *bytes_left -= num_bytes_to_read;
+                            *buf = remaining;
+                            payload
+                        }
+                        None => {
+                            let payload = *buf;
+                            *buf = &[];
+                            payload
+                        }
                     };
-                    *state = DetectState::WaitingBoxHeader;
-                    return Ok(Some(ParseEvent::AuxBoxEnd(ty)));
-                }
-                DetectState::InAuxBox {
-                    header: ContainerBoxHeader { ty, .. },
-                    brotli_box_type,
-                    bytes_left: Some(bytes_left),
-                } => {
-                    let ty = if let Some(ty) = brotli_box_type {
-                        *ty
-                    } else {
-                        *ty
-                    };
-                    let num_bytes_to_read = (*bytes_left).min(buf.len());
-                    let (payload, remaining) = buf.split_at(num_bytes_to_read);
-                    *bytes_left -= num_bytes_to_read;
-                    *buf = remaining;
+
                     return Ok(Some(ParseEvent::AuxBoxData(ty, payload)));
                 }
             }
