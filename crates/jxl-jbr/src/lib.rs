@@ -219,20 +219,29 @@ impl Bundle for JpegBitstreamHeader {
 }
 
 impl JpegBitstreamHeader {
-    fn expected_data_len(&self) -> usize {
-        let app_marker_data = self
-            .app_markers
+    fn app_data_len(&self) -> usize {
+        self.app_markers
             .iter()
             .filter_map(|marker| (marker.ty == 0).then_some(marker.length as usize))
-            .sum::<usize>();
-        let com_data = self.com_lengths.iter().map(|&x| x as usize).sum::<usize>();
-        let intermarker_data = self
-            .intermarker_lengths
+            .sum::<usize>()
+    }
+
+    fn com_data_len(&self) -> usize {
+        self.com_lengths.iter().map(|&x| x as usize).sum::<usize>()
+    }
+
+    fn intermarker_data_len(&self) -> usize {
+        self.intermarker_lengths
             .iter()
             .map(|&x| x as usize)
-            .sum::<usize>();
+            .sum::<usize>()
+    }
 
-        app_marker_data + com_data + intermarker_data + self.tail_data_length as usize
+    fn expected_data_len(&self) -> usize {
+        self.app_data_len()
+            + self.com_data_len()
+            + self.intermarker_data_len()
+            + self.tail_data_length as usize
     }
 }
 
@@ -281,10 +290,15 @@ struct Component {
 #[derive(Debug)]
 struct HuffmanCode {
     is_ac: bool,
-    id: u8,
     is_last: bool,
-    counts: [u8; 16],
-    values: Vec<u16>,
+    id_and_counts: [u8; 17],
+    values: Vec<u8>,
+}
+
+impl HuffmanCode {
+    fn encoded_len(&self) -> usize {
+        1 + 16 + self.values.len()
+    }
 }
 
 impl Bundle for HuffmanCode {
@@ -295,9 +309,10 @@ impl Bundle for HuffmanCode {
         let id = bitstream.read_bits(2)? as u8;
         let is_last = bitstream.read_bool()?;
 
-        let mut counts = [0u8; 16];
+        let mut id_and_counts = [0u8; 17];
+        id_and_counts[0] = id;
         let mut sum_counts = 0u32;
-        for count in &mut counts {
+        for count in &mut id_and_counts[1..] {
             let x = bitstream.read_u32(0, 1, 2 + U(3), U(8))?;
             sum_counts += x;
             *count = x as u8;
@@ -306,15 +321,14 @@ impl Bundle for HuffmanCode {
             .map(|_| {
                 bitstream
                     .read_u32(U(2), 4 + U(2), 8 + U(4), 1 + U(8))
-                    .map(|x| x as u16)
+                    .map(|x| x as u8)
             })
             .collect::<Result<_, _>>()?;
 
         Ok(Self {
             is_ac,
-            id,
             is_last,
-            counts,
+            id_and_counts,
             values,
         })
     }
@@ -444,35 +458,38 @@ impl Bundle for Padding {
 
 pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     header: &'jbrd JpegBitstreamHeader,
-    data: Cursor<&'jbrd [u8]>,
     frame: &'frame Frame,
     marker_ptr: usize,
-    app_data_ptr: usize,
-    com_data_ptr: usize,
-    intermarker_data_ptr: usize,
-    huffman_code_ptr: usize,
-    quant_ptr: usize,
+    app_data: Cursor<&'jbrd [u8]>,
+    com_data: Cursor<&'jbrd [u8]>,
+    intermarker_data: Cursor<&'jbrd [u8]>,
+    huffman_code_ptr: &'jbrd [HuffmanCode],
+    quant_ptr: &'jbrd [QuantTable],
     padding_bitstream: Option<Bitstream<'jbrd>>,
     scan_info_ptr: usize,
+    tail_data: &'jbrd [u8],
 }
 
 impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
     fn new(header: &'jbrd JpegBitstreamHeader, data: &'jbrd [u8], frame: &'frame Frame) -> Self {
+        let com_data_start = header.app_data_len();
+        let intermarker_data_start = com_data_start + header.com_data_len();
+        let tail_data_start = intermarker_data_start + header.intermarker_data_len();
         Self {
             header,
-            data: Cursor::new(data),
             frame,
             marker_ptr: 0,
-            app_data_ptr: 0,
-            com_data_ptr: 0,
-            intermarker_data_ptr: 0,
-            huffman_code_ptr: 0,
-            quant_ptr: 0,
+            app_data: Cursor::new(&data[..com_data_start]),
+            com_data: Cursor::new(&data[com_data_start..intermarker_data_start]),
+            intermarker_data: Cursor::new(&data[intermarker_data_start..tail_data_start]),
+            huffman_code_ptr: &header.huffman_codes,
+            quant_ptr: &header.quant_tables,
             padding_bitstream: header
                 .padding_bits
                 .as_ref()
                 .map(|padding| Bitstream::new(&padding.bits)),
             scan_info_ptr: 0,
+            tail_data: &data[tail_data_start..],
         }
     }
 }
@@ -495,22 +512,84 @@ impl JpegBitstreamReconstructor<'_, '_> {
         Ok(match marker {
             // SOF
             0xc0 | 0xc1 | 0xc2 | 0xc9 | 0xca => {
-                todo!()
+                let width = self.frame.image_header().size.width;
+                let height = self.frame.image_header().size.height;
+                let width_bytes = (width as u16).to_be_bytes();
+                let height_bytes = (height as u16).to_be_bytes();
+
+                let num_comps = self.header.components.len();
+                let encoded_len = 8 + num_comps * 3;
+                let encoded_len_bytes = (encoded_len as u16).to_be_bytes();
+
+                let mut header = [0xff, marker, 0, 0, 8, 0, 0, 0, 0, num_comps as u8];
+                header[2..4].copy_from_slice(&encoded_len_bytes);
+                header[5..7].copy_from_slice(&height_bytes);
+                header[7..9].copy_from_slice(&width_bytes);
+
+                let mut jpeg_upsampling_reordered = self.frame.header().jpeg_upsampling;
+                jpeg_upsampling_reordered.swap(0, 1);
+
+                for (idx, comp) in self.header.components.iter().enumerate() {
+                    let sampling_factor = jpeg_upsampling_reordered.get(idx).copied().unwrap_or(0);
+                    let sampling_val = match sampling_factor {
+                        0 => 0b01_0001,
+                        1 => 0b10_0010,
+                        2 => 0b10_0001,
+                        3 => 0b01_0010,
+                        _ => 0b01_0001,
+                    };
+                    let component_bytes = [comp.id, sampling_val, comp.q_idx];
+                    writer
+                        .write_all(&component_bytes)
+                        .map_err(Error::ReconstructionWrite)?;
+                }
+
+                ReconstructionStatus::Done
             }
 
             // DHT
             0xc4 => {
-                todo!()
+                let last_idx = self.huffman_code_ptr.iter().position(|hc| hc.is_last);
+                let num_tables = last_idx.expect("is_last not found") + 1;
+                let (hcs, remainder) = self.huffman_code_ptr.split_at(num_tables);
+                self.huffman_code_ptr = remainder;
+
+                let encoded_len = 2 + hcs.iter().map(|hc| hc.encoded_len()).sum::<usize>();
+                let mut header = [0xff, 0xc4, 0, 0];
+                header[2..].copy_from_slice(&(encoded_len as u16).to_be_bytes());
+                writer
+                    .write_all(&header)
+                    .map_err(Error::ReconstructionWrite)?;
+
+                for hc in hcs {
+                    writer
+                        .write_all(&hc.id_and_counts)
+                        .map_err(Error::ReconstructionWrite)?;
+                    writer
+                        .write_all(&hc.values)
+                        .map_err(Error::ReconstructionWrite)?;
+                }
+
+                ReconstructionStatus::Done
             }
 
             // RSTn
             0xd0..=0xd7 => {
-                todo!()
+                writer
+                    .write_all(&[0xff, marker])
+                    .map_err(Error::ReconstructionWrite)?;
+                ReconstructionStatus::Done
             }
 
             // EOI
             0xd9 => {
-                todo!()
+                writer
+                    .write_all(&[0xff, 0xd9])
+                    .map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(self.tail_data)
+                    .map_err(Error::ReconstructionWrite)?;
+                ReconstructionStatus::Done
             }
 
             // SOS
