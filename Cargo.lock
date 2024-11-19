@@ -851,6 +851,7 @@ dependencies = [
  "jxl-frame",
  "jxl-image",
  "jxl-oxide-common",
+ "jxl-vardct",
  "tracing",
 ]
 

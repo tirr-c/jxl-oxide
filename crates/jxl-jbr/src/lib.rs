@@ -13,11 +13,19 @@ pub enum Error {
     InvalidData,
     ReconstructionWrite(std::io::Error),
     ReconstructionDataIncomplete,
+    FrameDataIncomplete,
+    FrameParse(jxl_frame::Error),
 }
 
 impl From<jxl_bitstream::Error> for Error {
     fn from(value: jxl_bitstream::Error) -> Self {
         Self::Bitstream(value)
+    }
+}
+
+impl From<jxl_frame::Error> for Error {
+    fn from(value: jxl_frame::Error) -> Self {
+        Self::FrameParse(value)
     }
 }
 
@@ -29,6 +37,8 @@ impl std::fmt::Display for Error {
             Error::InvalidData => write!(f, "invalid reconstruction data"),
             Error::ReconstructionWrite(e) => write!(f, "failed to write data: {e}"),
             Error::ReconstructionDataIncomplete => write!(f, "reconstruction data is incomplete"),
+            Error::FrameDataIncomplete => write!(f, "JPEG XL frame data is incomplete"),
+            Error::FrameParse(e) => write!(f, "error parsing JPEG XL frame: {e}"),
         }
     }
 }
@@ -39,6 +49,7 @@ impl std::error::Error for Error {
             Error::Bitstream(e) => Some(e),
             Error::Brotli(e) => Some(e),
             Error::ReconstructionWrite(e) => Some(e),
+            Error::FrameParse(e) => Some(e),
             _ => None,
         }
     }
@@ -465,6 +476,7 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     intermarker_data: Cursor<&'jbrd [u8]>,
     huffman_code_ptr: &'jbrd [HuffmanCode],
     quant_ptr: &'jbrd [QuantTable],
+    last_quant_val: Option<Box<[u16; 64]>>,
     padding_bitstream: Option<Bitstream<'jbrd>>,
     scan_info_ptr: usize,
     tail_data: &'jbrd [u8],
@@ -484,6 +496,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             intermarker_data: Cursor::new(&data[intermarker_data_start..tail_data_start]),
             huffman_code_ptr: &header.huffman_codes,
             quant_ptr: &header.quant_tables,
+            last_quant_val: None,
             padding_bitstream: header
                 .padding_bits
                 .as_ref()
@@ -599,7 +612,61 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // DQT
             0xdb => {
-                todo!()
+                let lf_global = self.frame.try_parse_lf_global::<i16>().ok_or(Error::FrameDataIncomplete)??;
+                let hf_global = self.frame.try_parse_hf_global(Some(&lf_global)).ok_or(Error::FrameDataIncomplete)??;
+
+                let last_idx = self.quant_ptr.iter().position(|qt| qt.is_last);
+                let num_tables = last_idx.expect("is_last not found") + 1;
+                let (qts, remainder) = self.quant_ptr.split_at(num_tables);
+                self.quant_ptr = remainder;
+
+                let encoded_len = 2 + 65 * num_tables + 64 * qts.iter().filter(|qt| qt.precision != 0).count();
+                let mut header = [0xff, 0xdb, 0, 0];
+                header[2..].copy_from_slice(&(encoded_len as u16).to_be_bytes());
+                writer
+                    .write_all(&header)
+                    .map_err(Error::ReconstructionWrite)?;
+
+                for qt in qts {
+                    let channel = self.header.components.iter().position(|c| c.q_idx == qt.index);
+                    let q = channel.and_then(|channel| hf_global.dequant_matrices.jpeg_quant_values(channel));
+                    if let Some(q) = q {
+                        if self.last_quant_val.is_none() {
+                            self.last_quant_val = Some(Box::new([0; 64]));
+                        }
+                        let q_val = self.last_quant_val.as_deref_mut().unwrap();
+
+                        for (&(r, c), q_val) in std::iter::zip(jxl_vardct::DCT8_NATURAL_ORDER, q_val) {
+                            *q_val = q[r as usize + 8 * c as usize] as u16
+                        }
+                    }
+
+                    let Some(q_val) = self.last_quant_val.as_deref() else {
+                        return Err(Error::InvalidData);
+                    };
+
+                    let buf = if qt.precision == 0 {
+                        let mut buf = vec![0u8; 65];
+                        buf[0] = qt.index;
+                        for (&q, out) in std::iter::zip(q_val, &mut buf[1..]) {
+                            *out = q as u8;
+                        }
+                        buf
+                    } else {
+                        let mut buf = vec![0u8; 129];
+                        buf[0] = qt.index | (qt.precision << 4);
+                        for (&q, out) in std::iter::zip(q_val, buf[1..].chunks_exact_mut(2)) {
+                            out.copy_from_slice(&q.to_be_bytes());
+                        }
+                        buf
+                    };
+
+                    writer
+                        .write_all(&buf)
+                        .map_err(Error::ReconstructionWrite)?;
+                }
+
+                ReconstructionStatus::Done
             }
 
             // DRI

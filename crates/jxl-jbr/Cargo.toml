@@ -30,3 +30,7 @@ path = "../jxl-image"
 [dependencies.jxl-oxide-common]
 version = "0.1.0"
 path = "../jxl-oxide-common"
+
+[dependencies.jxl-vardct]
+version = "0.9.0"
+path = "../jxl-vardct"
