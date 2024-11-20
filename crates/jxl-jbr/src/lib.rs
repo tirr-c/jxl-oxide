@@ -575,8 +575,13 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     .map_err(Error::ReconstructionWrite)?;
 
                 for hc in hcs {
+                    let mut id_and_counts_modified = hc.id_and_counts;
+                    if let Some(x) = id_and_counts_modified.iter_mut().rev().find(|x| **x != 0) {
+                        *x -= 1;
+                    }
+
                     writer
-                        .write_all(&hc.id_and_counts)
+                        .write_all(&id_and_counts_modified)
                         .map_err(Error::ReconstructionWrite)?;
                     writer
                         .write_all(&hc.values)
