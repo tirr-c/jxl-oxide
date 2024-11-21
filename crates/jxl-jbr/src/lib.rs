@@ -5,6 +5,10 @@ use jxl_bitstream::{Bitstream, U};
 use jxl_frame::Frame;
 use jxl_oxide_common::Bundle;
 
+mod huffman;
+
+use huffman::HuffmanCode;
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -110,10 +114,14 @@ impl JpegBitstreamData {
             frame,
         ))
     }
+
+    pub fn header(&self) -> &JpegBitstreamHeader {
+        &self.header
+    }
 }
 
 #[derive(Debug)]
-struct JpegBitstreamHeader {
+pub struct JpegBitstreamHeader {
     is_gray: bool,
     markers: Vec<u8>,
     app_markers: Vec<AppMarker>,
@@ -142,7 +150,7 @@ impl Bundle for JpegBitstreamHeader {
         let mut num_intermarkers = 0usize;
         let mut has_dri = false;
         while markers.last() != Some(&0xd9) {
-            let marker_bits = bitstream.read_bits(6)? as u8;
+            let marker_bits = bitstream.read_bits(6)? as u8 + 0xc0;
             match marker_bits {
                 0xe0..=0xef => num_app_markers += 1,
                 0xfe => num_com_markers += 1,
@@ -151,20 +159,24 @@ impl Bundle for JpegBitstreamHeader {
                 0xdd => has_dri = true,
                 _ => {}
             }
-            markers.push(0xc0 + marker_bits);
+            markers.push(marker_bits);
         }
+        eprintln!("{markers:#x?}");
 
         let app_markers = (0..num_app_markers)
             .map(|_| AppMarker::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
+        dbg!(&app_markers);
         let com_lengths = (0..num_com_markers)
             .map(|_| bitstream.read_bits(16).map(|x| x + 1))
             .collect::<Result<_, _>>()?;
+        dbg!(&com_lengths);
 
         let num_quant_tables = bitstream.read_bits(2)? + 1;
         let quant_tables = (0..num_quant_tables)
             .map(|_| QuantTable::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
+        dbg!(&quant_tables);
 
         let comp_type = bitstream.read_bits(2)?;
         let component_ids = match comp_type {
@@ -186,11 +198,13 @@ impl Bundle for JpegBitstreamHeader {
                 Ok(Component { id, q_idx })
             })
             .collect::<Result<_, _>>()?;
+        dbg!(&components);
 
         let num_huff = bitstream.read_u32(4, 2 + U(3), 10 + U(4), 26 + U(6))?;
         let huffman_codes = (0..num_huff)
             .map(|_| HuffmanCode::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
+        dbg!(&huffman_codes);
 
         let scan_info = (0..num_scans)
             .map(|_| ScanInfo::parse(bitstream, ()))
@@ -254,6 +268,10 @@ impl JpegBitstreamHeader {
             + self.intermarker_data_len()
             + self.tail_data_length as usize
     }
+
+    fn find_channel_id(&self, component_id: u8) -> Option<usize> {
+        self.components.iter().position(|c| c.id == component_id)
+    }
 }
 
 #[derive(Debug)]
@@ -299,59 +317,11 @@ struct Component {
 }
 
 #[derive(Debug)]
-struct HuffmanCode {
-    is_ac: bool,
-    is_last: bool,
-    id_and_counts: [u8; 17],
-    values: Vec<u8>,
-}
-
-impl HuffmanCode {
-    fn encoded_len(&self) -> usize {
-        1 + 16 + self.values.len()
-    }
-}
-
-impl Bundle for HuffmanCode {
-    type Error = jxl_bitstream::Error;
-
-    fn parse(bitstream: &mut Bitstream, _: ()) -> Result<Self, Self::Error> {
-        let is_ac = bitstream.read_bool()?;
-        let id = bitstream.read_bits(2)? as u8;
-        let is_last = bitstream.read_bool()?;
-
-        let mut id_and_counts = [0u8; 17];
-        id_and_counts[0] = id;
-        let mut sum_counts = 0u32;
-        for count in &mut id_and_counts[1..] {
-            let x = bitstream.read_u32(0, 1, 2 + U(3), U(8))?;
-            sum_counts += x;
-            *count = x as u8;
-        }
-        let values = (0..sum_counts)
-            .map(|_| {
-                bitstream
-                    .read_u32(U(2), 4 + U(2), 8 + U(4), 1 + U(8))
-                    .map(|x| x as u8)
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Self {
-            is_ac,
-            is_last,
-            id_and_counts,
-            values,
-        })
-    }
-}
-
-#[derive(Debug)]
 struct ScanInfo {
-    num_comps: u8,
     ss: u8,
     se: u8,
-    ah: u8,
     al: u8,
+    ah: u8,
     component_info: Vec<ScanComponentInfo>,
     last_needed_pass: u8,
 }
@@ -363,14 +333,13 @@ impl Bundle for ScanInfo {
         let num_comps = bitstream.read_bits(2)? as u8 + 1;
         let ss = bitstream.read_bits(6)? as u8;
         let se = bitstream.read_bits(6)? as u8;
-        let ah = bitstream.read_bits(4)? as u8;
         let al = bitstream.read_bits(4)? as u8;
+        let ah = bitstream.read_bits(4)? as u8;
         let component_info = (0..num_comps)
             .map(|_| ScanComponentInfo::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
         let last_needed_pass = bitstream.read_u32(0, 1, 2, 3 + U(3))? as u8;
         Ok(Self {
-            num_comps,
             ss,
             se,
             ah,
@@ -378,6 +347,12 @@ impl Bundle for ScanInfo {
             component_info,
             last_needed_pass,
         })
+    }
+}
+
+impl ScanInfo {
+    fn num_comps(&self) -> u8 {
+        self.component_info.len() as u8
     }
 }
 
@@ -575,13 +550,15 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     .map_err(Error::ReconstructionWrite)?;
 
                 for hc in hcs {
-                    let mut id_and_counts_modified = hc.id_and_counts;
-                    if let Some(x) = id_and_counts_modified.iter_mut().rev().find(|x| **x != 0) {
+                    let mut id_and_counts = [0u8; 17];
+                    id_and_counts[0] = hc.id | if hc.is_ac { 0x10 } else { 0 };
+                    id_and_counts[1..].copy_from_slice(&hc.counts[1..]);
+                    if let Some(x) = id_and_counts[1..].iter_mut().rev().find(|x| **x != 0) {
                         *x -= 1;
                     }
 
                     writer
-                        .write_all(&id_and_counts_modified)
+                        .write_all(&id_and_counts)
                         .map_err(Error::ReconstructionWrite)?;
                     writer
                         .write_all(&hc.values)
@@ -612,6 +589,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // SOS
             0xda => {
+                let idx = self.scan_info_ptr;
+                let si = &self.header.scan_info[idx];
+                let smi = &self.header.scan_more_info[idx];
+                self.scan_info_ptr += 1;
                 todo!()
             }
 
