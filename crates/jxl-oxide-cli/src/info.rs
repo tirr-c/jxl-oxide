@@ -63,6 +63,19 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         }
     }
 
+    match image.raw_exif_data() {
+        Ok(None) => {}
+        Ok(Some(exif)) => {
+            if let Some(data) = exif.payload() {
+                let size = data.len();
+                println!("Exif metadata: {size} byte(s)");
+            }
+        }
+        Err(e) => {
+            println!("Invalid Exif metadata: {e}");
+        }
+    }
+
     if let Some(animation) = &image_meta.animation {
         println!(
             "  Animated ({}/{} ticks per second)",

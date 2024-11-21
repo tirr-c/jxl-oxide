@@ -20,13 +20,14 @@ enum DetectState {
     WaitingBoxHeader,
     WaitingJxlpIndex(ContainerBoxHeader),
     InAuxBox {
-        #[allow(unused)]
         header: ContainerBoxHeader,
+        brotli_box_type: Option<ContainerBoxType>,
         bytes_left: Option<usize>,
     },
     InCodestream {
         kind: BitstreamKind,
         bytes_left: Option<usize>,
+        pending_no_more_aux_box: bool,
     },
 }
 

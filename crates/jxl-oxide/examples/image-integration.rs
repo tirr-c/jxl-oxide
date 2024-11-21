@@ -16,6 +16,13 @@ fn main() {
 
     #[allow(unused)]
     let icc = decoder.icc_profile().unwrap();
+    let exif = decoder
+        .exif_metadata()
+        .expect("cannot decode Exif metadata");
+    if let Some(exif) = exif {
+        println!("Exif metadata found ({} byte(s))", exif.len());
+    }
+
     let image = DynamicImage::from_decoder(decoder).expect("cannot decode image");
 
     let output_file = std::fs::File::create(output_path).expect("cannot open output file");

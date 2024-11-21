@@ -14,6 +14,7 @@ use crate::{CropInfo, InitializeResult, JxlImage};
 /// - Returning images of 8-bit, 16-bit integer and 32-bit float samples
 /// - RGB or luma-only images, with or without alpha
 /// - Returning ICC profiles via `icc_profile`
+/// - Returning Exif metadata via `exif_metadata`
 /// - Setting decoder limits (caveat: memory limits are not strict)
 /// - Cropped decoding with [`ImageDecoderRect`][image::ImageDecoderRect]
 /// - (When `lcms2` feature is enabled) Converting CMYK images to sRGB color space
@@ -154,8 +155,11 @@ impl<R: Read> JxlDecoder<R> {
         Ok(image)
     }
 
-    fn load_until_first_keyframe(&mut self) -> crate::Result<()> {
-        while self.image.ctx.loaded_keyframes() == 0 {
+    fn load_until_condition(
+        &mut self,
+        mut predicate: impl FnMut(&JxlImage) -> crate::Result<bool>,
+    ) -> crate::Result<()> {
+        while !predicate(&self.image)? {
             let count = self.reader.read(&mut self.buf[self.buf_valid..])?;
             if count == 0 {
                 break;
@@ -166,6 +170,12 @@ impl<R: Read> JxlDecoder<R> {
             self.buf_valid -= consumed;
         }
 
+        Ok(())
+    }
+
+    fn load_until_first_keyframe(&mut self) -> crate::Result<()> {
+        self.load_until_condition(|image| Ok(image.ctx.loaded_frames() > 0))?;
+
         if self.image.frame_by_keyframe(0).is_none() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -175,6 +185,10 @@ impl<R: Read> JxlDecoder<R> {
         }
 
         Ok(())
+    }
+
+    fn load_until_exif(&mut self) -> crate::Result<()> {
+        self.load_until_condition(|image| Ok(image.raw_exif_data()?.is_some()))
     }
 
     #[inline]
@@ -303,6 +317,20 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
 
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
         Ok(Some(self.image.rendered_icc()))
+    }
+
+    fn exif_metadata(&mut self) -> ImageResult<Option<Vec<u8>>> {
+        self.load_until_exif().map_err(|e| {
+            ImageError::Decoding(DecodingError::new(
+                ImageFormatHint::PathExtension("jxl".into()),
+                e,
+            ))
+        })?;
+
+        let Some(exif) = self.image.raw_exif_data().unwrap() else {
+            return Ok(None);
+        };
+        Ok(exif.payload().map(|v| v.to_vec()))
     }
 
     fn set_limits(&mut self, limits: image::Limits) -> ImageResult<()> {
