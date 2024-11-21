@@ -66,6 +66,12 @@ pub struct JpegBitstreamData {
     data_stream: Box<DecompressorWriter<Vec<u8>>>,
 }
 
+impl std::fmt::Debug for JpegBitstreamData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JpegBitstreamData").field("header", &self.header).finish_non_exhaustive()
+    }
+}
+
 impl JpegBitstreamData {
     pub fn try_parse(data: &[u8]) -> Result<Option<Self>> {
         let mut bitstream = Bitstream::new(data);
@@ -91,6 +97,17 @@ impl JpegBitstreamData {
 
     pub fn feed_bytes(&mut self, data: &[u8]) -> Result<()> {
         self.data_stream.write_all(data).map_err(Error::Brotli)
+    }
+
+    pub fn finalize(&mut self) -> Result<()> {
+        self.data_stream.flush().map_err(Error::Brotli)?;
+
+        let decompressed_len = self.data_stream.get_ref().len();
+        if decompressed_len != self.header.expected_data_len() {
+            return Err(Error::InvalidData);
+        }
+
+        Ok(())
     }
 
     pub fn is_complete(&mut self) -> Result<bool> {
@@ -166,17 +183,14 @@ impl Bundle for JpegBitstreamHeader {
         let app_markers = (0..num_app_markers)
             .map(|_| AppMarker::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
-        dbg!(&app_markers);
         let com_lengths = (0..num_com_markers)
             .map(|_| bitstream.read_bits(16).map(|x| x + 1))
             .collect::<Result<_, _>>()?;
-        dbg!(&com_lengths);
 
         let num_quant_tables = bitstream.read_bits(2)? + 1;
         let quant_tables = (0..num_quant_tables)
             .map(|_| QuantTable::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
-        dbg!(&quant_tables);
 
         let comp_type = bitstream.read_bits(2)?;
         let component_ids = match comp_type {
@@ -198,13 +212,11 @@ impl Bundle for JpegBitstreamHeader {
                 Ok(Component { id, q_idx })
             })
             .collect::<Result<_, _>>()?;
-        dbg!(&components);
 
         let num_huff = bitstream.read_u32(4, 2 + U(3), 10 + U(4), 26 + U(6))?;
         let huffman_codes = (0..num_huff)
             .map(|_| HuffmanCode::parse(bitstream, ()))
             .collect::<Result<_, _>>()?;
-        dbg!(&huffman_codes);
 
         let scan_info = (0..num_scans)
             .map(|_| ScanInfo::parse(bitstream, ()))

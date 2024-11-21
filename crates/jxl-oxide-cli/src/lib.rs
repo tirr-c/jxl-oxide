@@ -1,5 +1,7 @@
 pub mod commands;
 pub mod decode;
+#[cfg(feature = "__devtools")]
+pub mod dump_jbrd;
 pub mod error;
 #[cfg(feature = "__devtools")]
 pub mod generate_fixture;

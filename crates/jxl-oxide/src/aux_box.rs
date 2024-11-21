@@ -5,8 +5,10 @@ use brotli_decompressor::DecompressorWriter;
 use crate::Result;
 
 mod exif;
+mod jbrd;
 
 pub use exif::*;
+pub use jbrd::*;
 
 #[derive(Debug, Default)]
 pub struct AuxBoxReader {

@@ -1,6 +1,8 @@
 pub mod color_encoding;
 pub mod decode;
 #[cfg(feature = "__devtools")]
+pub mod dump_jbrd;
+#[cfg(feature = "__devtools")]
 pub mod generate_fixture;
 pub mod info;
 #[cfg(feature = "__devtools")]
@@ -10,6 +12,8 @@ pub mod tests;
 
 pub use color_encoding::parse_color_encoding;
 pub use decode::DecodeArgs;
+#[cfg(feature = "__devtools")]
+pub use dump_jbrd::DumpJbrd;
 #[cfg(feature = "__devtools")]
 pub use generate_fixture::GenerateFixtureArgs;
 pub use info::InfoArgs;
@@ -53,4 +57,7 @@ pub enum Subcommands {
     /// (devtools) Generate fixture to use for testing.
     #[cfg(feature = "__devtools")]
     GenerateFixture(GenerateFixtureArgs),
+    /// (devtools) Dump JPEG bitstream reconstruction data.
+    #[cfg(feature = "__devtools")]
+    DumpJbrd(DumpJbrd),
 }

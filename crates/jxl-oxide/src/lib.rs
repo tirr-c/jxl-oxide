@@ -175,7 +175,7 @@ pub mod integration;
 #[cfg(feature = "lcms2")]
 mod lcms2;
 
-use aux_box::AuxBoxReader;
+use aux_box::{AuxBoxReader, Jbrd};
 
 #[cfg(feature = "lcms2")]
 pub use self::lcms2::Lcms2;
@@ -221,6 +221,7 @@ impl JxlImageBuilder {
             tracker: self.tracker,
             reader: ContainerDetectingReader::new(),
             buffer: Vec::new(),
+            jbrd: Jbrd::new(),
             exif: AuxBoxReader::new(),
         }
     }
@@ -305,6 +306,7 @@ pub struct UninitializedJxlImage {
     tracker: Option<AllocTracker>,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
+    jbrd: Jbrd,
     exif: AuxBoxReader,
 }
 
@@ -333,10 +335,16 @@ impl UninitializedJxlImage {
                     self.exif.finalize()?;
                 }
                 ParseEvent::AuxBoxStart { .. } => {}
+                ParseEvent::AuxBoxData(ContainerBoxType::JPEG_RECONSTRUCTION, buf) => {
+                    self.jbrd.feed_bytes(buf)?;
+                }
                 ParseEvent::AuxBoxData(ContainerBoxType::EXIF, buf) => {
                     self.exif.feed_data(buf)?;
                 }
                 ParseEvent::AuxBoxData(..) => {}
+                ParseEvent::AuxBoxEnd(ContainerBoxType::JPEG_RECONSTRUCTION) => {
+                    self.jbrd.finalize()?;
+                }
                 ParseEvent::AuxBoxEnd(ContainerBoxType::EXIF) => {
                     self.exif.finalize()?;
                 }
@@ -447,6 +455,7 @@ impl UninitializedJxlImage {
                 buffer: Vec::new(),
                 buffer_offset: bytes_read,
                 frame_offsets: Vec::new(),
+                jbrd: self.jbrd,
                 exif: self.exif,
             },
         };
@@ -506,10 +515,16 @@ impl JxlImage {
                     self.inner.exif.finalize()?;
                 }
                 ParseEvent::AuxBoxStart { .. } => {}
+                ParseEvent::AuxBoxData(ContainerBoxType::JPEG_RECONSTRUCTION, buf) => {
+                    self.inner.jbrd.feed_bytes(buf)?;
+                }
                 ParseEvent::AuxBoxData(ContainerBoxType::EXIF, buf) => {
                     self.inner.exif.feed_data(buf)?;
                 }
                 ParseEvent::AuxBoxData(..) => {}
+                ParseEvent::AuxBoxEnd(ContainerBoxType::JPEG_RECONSTRUCTION) => {
+                    self.inner.jbrd.finalize()?;
+                }
                 ParseEvent::AuxBoxEnd(ContainerBoxType::EXIF) => {
                     self.inner.exif.finalize()?;
                 }
@@ -520,6 +535,7 @@ impl JxlImage {
     }
 
     pub fn finalize(&mut self) -> Result<()> {
+        self.inner.jbrd.finalize()?;
         self.inner.exif.finalize()?;
         Ok(())
     }
@@ -531,6 +547,7 @@ struct JxlImageInner {
     buffer: Vec<u8>,
     buffer_offset: usize,
     frame_offsets: Vec<usize>,
+    jbrd: Jbrd,
     exif: AuxBoxReader,
 }
 
@@ -731,6 +748,10 @@ impl JxlImage {
 }
 
 impl JxlImage {
+    pub fn jbrd(&self) -> Option<&jxl_jbr::JpegBitstreamData> {
+        self.inner.jbrd.data()
+    }
+
     /// Returns the raw Exif metadata, if any.
     ///
     /// Returns `Ok(None)` if more data is needed.

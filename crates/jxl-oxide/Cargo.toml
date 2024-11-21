@@ -44,6 +44,10 @@ path = "../jxl-grid"
 version = "0.11.0"
 path = "../jxl-image"
 
+[dependencies.jxl-jbr]
+version = "0.1.0"
+path = "../jxl-jbr"
+
 [dependencies.jxl-oxide-common]
 version = "0.1.0"
 path = "../jxl-oxide-common"
