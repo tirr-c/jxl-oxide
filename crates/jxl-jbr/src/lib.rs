@@ -2,6 +2,7 @@ use std::io::Write;
 
 use brotli_decompressor::DecompressorWriter;
 use jxl_bitstream::{Bitstream, U};
+use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_frame::Frame;
 use jxl_oxide_common::Bundle;
 
@@ -124,11 +125,11 @@ impl JpegBitstreamData {
             ref header,
             ref data_stream,
         } = *self;
-        Ok(JpegBitstreamReconstructor::new(
+        JpegBitstreamReconstructor::new(
             header,
             data_stream.get_ref(),
             frame,
-        ))
+        )
     }
 
     pub fn header(&self) -> &JpegBitstreamHeader {
@@ -455,6 +456,8 @@ impl Bundle for Padding {
 
 pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     state: ReconstructionState,
+    parsed: ParsedFrameData,
+
     header: &'jbrd JpegBitstreamHeader,
     frame: &'frame Frame,
     marker_ptr: usize,
@@ -472,13 +475,40 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     tail_data: &'jbrd [u8],
 }
 
+struct ParsedFrameData {
+    lf_global: LfGlobal<i16>,
+    hf_global: HfGlobal,
+    lf_groups: Vec<LfGroup<i16>>,
+}
+
 impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
-    fn new(header: &'jbrd JpegBitstreamHeader, data: &'jbrd [u8], frame: &'frame Frame) -> Self {
+    fn new(header: &'jbrd JpegBitstreamHeader, data: &'jbrd [u8], frame: &'frame Frame) -> Result<Self> {
         let com_data_start = header.app_data_len();
         let intermarker_data_start = com_data_start + header.com_data_len();
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
-        Self {
+
+        let lf_global = frame.try_parse_lf_global::<i16>().ok_or(Error::FrameDataIncomplete)??;
+        let hf_global = frame.try_parse_hf_global(Some(&lf_global)).ok_or(Error::FrameDataIncomplete)??;
+
+        let lf_global_vardct = lf_global.vardct.as_ref();
+        let global_ma_config = lf_global.gmodular.ma_config();
+        let lf_groups = (0..frame.header().num_lf_groups())
+            .map(|lf_group_idx| {
+                frame
+                    .try_parse_lf_group(lf_global_vardct, global_ma_config, None, lf_group_idx)
+                    .ok_or(Error::FrameDataIncomplete)
+                    .and_then(|r| r.map_err(|e| Error::FrameParse(e)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
             state: ReconstructionState::Init,
+            parsed: ParsedFrameData {
+                lf_global,
+                hf_global,
+                lf_groups,
+            },
+
             header,
             frame,
             marker_ptr: 0,
@@ -497,7 +527,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 .map(|padding| Bitstream::new(&padding.bits)),
             scan_info_ptr: 0,
             tail_data: &data[tail_data_start..],
-        }
+        })
     }
 }
 
@@ -593,6 +623,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     writer
                         .write_all(&hc.values[..hc.values.len() - 1])
                         .map_err(Error::ReconstructionWrite)?;
+                    dbg!(hc.build());
                 }
 
                 ReconstructionStatus::Done
@@ -628,8 +659,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // DQT
             0xdb => {
-                let lf_global = self.frame.try_parse_lf_global::<i16>().ok_or(Error::FrameDataIncomplete)??;
-                let hf_global = self.frame.try_parse_hf_global(Some(&lf_global)).ok_or(Error::FrameDataIncomplete)??;
+                let hf_global = &self.parsed.hf_global;
 
                 let last_idx = self.quant_ptr.iter().position(|qt| qt.is_last);
                 let num_tables = last_idx.expect("is_last not found") + 1;

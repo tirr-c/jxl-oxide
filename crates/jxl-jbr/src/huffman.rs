@@ -97,6 +97,32 @@ pub(crate) struct BulitHuffmanTable {
     bits: Vec<u64>,
 }
 
+impl std::fmt::Debug for BulitHuffmanTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Helper<'a>(&'a BulitHuffmanTable);
+        impl std::fmt::Debug for Helper<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let entries = std::iter::zip(&self.0.lengths, &self.0.bits).enumerate().filter_map(|(sym, (&len, &bit))| {
+                    if len == 0 {
+                        return None;
+                    }
+
+                    let bit = bit >> (64 - len);
+                    let bits_str = format!("{bit:b}");
+                    let pad = len as usize - bits_str.len();
+                    let mut s = "0".repeat(pad);
+                    s.push_str(&bits_str);
+                    Some((sym, s))
+                });
+
+                f.debug_map().entries(entries).finish()
+            }
+        }
+
+        f.debug_struct("BulitHuffmanTable").field("mapping", &Helper(self)).finish()
+    }
+}
+
 impl BulitHuffmanTable {
     pub fn lookup(&self, symbol: u8) -> (u8, u64) {
         let idx = symbol as usize;
