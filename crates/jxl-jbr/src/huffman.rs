@@ -12,7 +12,7 @@ pub(crate) struct HuffmanCode {
 
 impl HuffmanCode {
     pub fn encoded_len(&self) -> usize {
-        1 + 16 + self.values.len()
+        1 + 16 + self.values.len() - 1
     }
 
     pub fn build(&self) -> BulitHuffmanTable {

@@ -7,4 +7,7 @@ use clap::Parser;
 pub struct DumpJbrd {
     /// Input file
     pub input: PathBuf,
+    /// Output file
+    #[arg(short, long)]
+    pub output_jpeg: Option<PathBuf>,
 }

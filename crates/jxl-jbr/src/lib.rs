@@ -1,4 +1,4 @@
-use std::io::{Cursor, Write};
+use std::io::Write;
 
 use brotli_decompressor::DecompressorWriter;
 use jxl_bitstream::{Bitstream, U};
@@ -117,14 +117,13 @@ impl JpegBitstreamData {
     }
 
     pub fn reconstruct<'jbrd, 'frame>(
-        &'jbrd mut self,
+        &'jbrd self,
         frame: &'frame Frame,
     ) -> Result<JpegBitstreamReconstructor<'jbrd, 'frame>> {
         let Self {
             ref header,
-            ref mut data_stream,
+            ref data_stream,
         } = *self;
-        data_stream.close().map_err(Error::Brotli)?;
         Ok(JpegBitstreamReconstructor::new(
             header,
             data_stream.get_ref(),
@@ -455,12 +454,16 @@ impl Bundle for Padding {
 }
 
 pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
+    state: ReconstructionState,
     header: &'jbrd JpegBitstreamHeader,
     frame: &'frame Frame,
     marker_ptr: usize,
-    app_data: Cursor<&'jbrd [u8]>,
-    com_data: Cursor<&'jbrd [u8]>,
-    intermarker_data: Cursor<&'jbrd [u8]>,
+    app_marker_ptr: std::slice::Iter<'jbrd, AppMarker>,
+    app_data: &'jbrd [u8],
+    com_length: std::slice::Iter<'jbrd, u32>,
+    com_data: &'jbrd [u8],
+    intermarker_length: std::slice::Iter<'jbrd, u32>,
+    intermarker_data: &'jbrd [u8],
     huffman_code_ptr: &'jbrd [HuffmanCode],
     quant_ptr: &'jbrd [QuantTable],
     last_quant_val: Option<Box<[u16; 64]>>,
@@ -475,12 +478,16 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         let intermarker_data_start = com_data_start + header.com_data_len();
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
         Self {
+            state: ReconstructionState::Init,
             header,
             frame,
             marker_ptr: 0,
-            app_data: Cursor::new(&data[..com_data_start]),
-            com_data: Cursor::new(&data[com_data_start..intermarker_data_start]),
-            intermarker_data: Cursor::new(&data[intermarker_data_start..tail_data_start]),
+            app_marker_ptr: header.app_markers.iter(),
+            app_data: &data[..com_data_start],
+            com_length: header.com_lengths.iter(),
+            com_data: &data[com_data_start..intermarker_data_start],
+            intermarker_length: header.intermarker_lengths.iter(),
+            intermarker_data: &data[intermarker_data_start..tail_data_start],
             huffman_code_ptr: &header.huffman_codes,
             quant_ptr: &header.quant_tables,
             last_quant_val: None,
@@ -496,6 +503,15 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
 
 impl JpegBitstreamReconstructor<'_, '_> {
     pub fn write(&mut self, mut writer: impl Write) -> Result<ReconstructionStatus> {
+        if self.state == ReconstructionState::Init {
+            self.state = ReconstructionState::Writing;
+            writer.write_all(&[0xff, 0xd8]).map_err(Error::ReconstructionWrite)?;
+        }
+
+        if self.state == ReconstructionState::Done {
+            return Ok(ReconstructionStatus::Done);
+        }
+
         while self.marker_ptr < self.header.markers.len() {
             let status = self.process_next(&mut writer)?;
             self.marker_ptr += 1;
@@ -504,6 +520,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
             }
         }
 
+        self.state = ReconstructionState::Done;
         Ok(ReconstructionStatus::Done)
     }
 
@@ -525,6 +542,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 header[2..4].copy_from_slice(&encoded_len_bytes);
                 header[5..7].copy_from_slice(&height_bytes);
                 header[7..9].copy_from_slice(&width_bytes);
+                writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
 
                 let mut jpeg_upsampling_reordered = self.frame.header().jpeg_upsampling;
                 jpeg_upsampling_reordered.swap(0, 1);
@@ -573,7 +591,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         .write_all(&id_and_counts)
                         .map_err(Error::ReconstructionWrite)?;
                     writer
-                        .write_all(&hc.values)
+                        .write_all(&hc.values[..hc.values.len() - 1])
                         .map_err(Error::ReconstructionWrite)?;
                 }
 
@@ -627,15 +645,21 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                 for qt in qts {
                     let channel = self.header.components.iter().position(|c| c.q_idx == qt.index);
-                    let q = channel.and_then(|channel| hf_global.dequant_matrices.jpeg_quant_values(channel));
+                    let q = channel.and_then(|mut channel| {
+                        if channel <= 1 {
+                            channel ^= 1;
+                        }
+                        hf_global.dequant_matrices.jpeg_quant_values(channel)
+                    });
                     if let Some(q) = q {
                         if self.last_quant_val.is_none() {
                             self.last_quant_val = Some(Box::new([0; 64]));
                         }
                         let q_val = self.last_quant_val.as_deref_mut().unwrap();
 
-                        for (&(r, c), q_val) in std::iter::zip(jxl_vardct::DCT8_NATURAL_ORDER, q_val) {
-                            *q_val = q[r as usize + 8 * c as usize] as u16
+                        // Transposed for DCT8
+                        for (&(y, x), q_val) in std::iter::zip(jxl_vardct::DCT8_NATURAL_ORDER, q_val) {
+                            *q_val = q[x as usize + 8 * y as usize] as u16
                         }
                     }
 
@@ -669,22 +693,63 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // DRI
             0xdd => {
-                todo!()
+                let interval = (self.header.restart_interval as u16).to_be_bytes();
+                let bytes = [0xff, 0xdd, 0, 4, interval[0], interval[1]];
+                writer.write_all(&bytes).map_err(Error::ReconstructionWrite)?;
+                ReconstructionStatus::Done
             }
 
             // APPn
             0xe0..=0xef => {
-                todo!()
+                let am = self.app_marker_ptr.next().ok_or(Error::InvalidData)?;
+                let encoded_len = ((am.length - 1) as u16).to_be_bytes();
+                match am.ty {
+                    0 => {
+                        writer.write_all(&[0xff]).map_err(Error::ReconstructionWrite)?;
+                        let (app_data, next) = self.app_data.split_at(am.length as usize);
+                        self.app_data = next;
+                        writer.write_all(app_data).map_err(Error::ReconstructionWrite)?;
+                        ReconstructionStatus::Done
+                    }
+                    1 => {
+                        let header = [0xff, 0xe2, encoded_len[0], encoded_len[1]];
+                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
+                        writer.write_all(b"ICC_PROFILE\0").map_err(Error::ReconstructionWrite)?;
+                        todo!()
+                    }
+                    2 => {
+                        let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
+                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
+                        writer.write_all(b"Exif\0\0").map_err(Error::ReconstructionWrite)?;
+                        ReconstructionStatus::WriteExif
+                    }
+                    3 => {
+                        let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
+                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
+                        writer.write_all(b"http://ns.adobe.com/xap/1.0/").map_err(Error::ReconstructionWrite)?;
+                        ReconstructionStatus::WriteXml
+                    }
+                    _ => unreachable!(),
+                }
             }
 
             // COM
             0xfe => {
-                todo!()
+                let length = *self.com_length.next().ok_or(Error::InvalidData)?;
+                let (com_data, next) = self.com_data.split_at(length as usize);
+                self.com_data = next;
+                writer.write_all(&[0xff, 0xfe]).map_err(Error::ReconstructionWrite)?;
+                writer.write_all(com_data).map_err(Error::ReconstructionWrite)?;
+                ReconstructionStatus::Done
             }
 
             // Unrecognized
             0xff => {
-                todo!()
+                let length = *self.intermarker_length.next().ok_or(Error::InvalidData)?;
+                let (data, next) = self.intermarker_data.split_at(length as usize);
+                self.intermarker_data = next;
+                writer.write_all(data).map_err(Error::ReconstructionWrite)?;
+                ReconstructionStatus::Done
             }
 
             _ => return Err(Error::InvalidData),
@@ -693,9 +758,19 @@ impl JpegBitstreamReconstructor<'_, '_> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReconstructionState {
+    Init,
+    Writing,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconstructionStatus {
     Done,
-    WriteIcc,
+    WriteIcc {
+        from: usize,
+        len: usize,
+    },
     WriteExif,
     WriteXml,
 }

@@ -16,5 +16,16 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
     };
 
     println!("{:#x?}", jbrd.header());
+
+    let Some(output_path) = args.output_jpeg else {
+        return Ok(());
+    };
+
+    let frame = image.frame_by_keyframe(0).unwrap();
+    let mut reconstructor = jbrd.reconstruct(frame).map_err(|e| Error::Reconstruct(e.into()))?;
+
+    let mut output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
+    reconstructor.write(&mut output).map_err(|e| Error::Reconstruct(e.into()))?;
+
     Ok(())
 }
