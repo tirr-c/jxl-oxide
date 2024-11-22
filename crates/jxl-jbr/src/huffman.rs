@@ -15,7 +15,7 @@ impl HuffmanCode {
         1 + 16 + self.values.len() - 1
     }
 
-    pub fn build(&self) -> BulitHuffmanTable {
+    pub fn build(&self) -> BuiltHuffmanTable {
         let counts = &self.counts;
         let values = &self.values;
 
@@ -52,7 +52,7 @@ impl HuffmanCode {
             reordered_bits[idx] = bit;
         }
 
-        BulitHuffmanTable {
+        BuiltHuffmanTable {
             lengths: reordered_lengths,
             bits: reordered_bits,
         }
@@ -92,14 +92,14 @@ impl Bundle for HuffmanCode {
     }
 }
 
-pub(crate) struct BulitHuffmanTable {
+pub(crate) struct BuiltHuffmanTable {
     lengths: Vec<u8>,
     bits: Vec<u64>,
 }
 
-impl std::fmt::Debug for BulitHuffmanTable {
+impl std::fmt::Debug for BuiltHuffmanTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct Helper<'a>(&'a BulitHuffmanTable);
+        struct Helper<'a>(&'a BuiltHuffmanTable);
         impl std::fmt::Debug for Helper<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let entries = std::iter::zip(&self.0.lengths, &self.0.bits).enumerate().filter_map(|(sym, (&len, &bit))| {
@@ -123,7 +123,7 @@ impl std::fmt::Debug for BulitHuffmanTable {
     }
 }
 
-impl BulitHuffmanTable {
+impl BuiltHuffmanTable {
     pub fn lookup(&self, symbol: u8) -> (u8, u64) {
         let idx = symbol as usize;
         (self.lengths[idx], self.bits[idx])

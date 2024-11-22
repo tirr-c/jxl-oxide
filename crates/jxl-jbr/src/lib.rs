@@ -1,14 +1,17 @@
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
+use bit_writer::BitWriter;
 use brotli_decompressor::DecompressorWriter;
 use jxl_bitstream::{Bitstream, U};
 use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_frame::Frame;
 use jxl_oxide_common::Bundle;
 
+mod bit_writer;
 mod huffman;
 
-use huffman::HuffmanCode;
+use huffman::{BuiltHuffmanTable, HuffmanCode};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -389,8 +392,8 @@ impl Bundle for ScanComponentInfo {
 
 #[derive(Debug)]
 struct ScanMoreInfo {
-    reset_points: Vec<u32>,
-    extra_zero_runs: Vec<ExtraZeroRun>,
+    reset_points: HashSet<u32>,
+    extra_zero_runs: HashMap<u32, u32>,
 }
 
 impl Bundle for ScanMoreInfo {
@@ -404,7 +407,10 @@ impl Bundle for ScanMoreInfo {
 
         let num_extra_zero_runs = bitstream.read_u32(0, 1 + U(2), 4 + U(4), 20 + U(16))?;
         let extra_zero_runs = (0..num_extra_zero_runs)
-            .map(|_| ExtraZeroRun::parse(bitstream, ()))
+            .map(|_| -> Result<_, jxl_bitstream::Error> {
+                let ExtraZeroRun { num_runs, run_length } = ExtraZeroRun::parse(bitstream, ())?;
+                Ok((run_length, num_runs))
+            })
             .collect::<Result<_, _>>()?;
 
         Ok(Self {
@@ -457,6 +463,10 @@ impl Bundle for Padding {
 pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     state: ReconstructionState,
     parsed: ParsedFrameData,
+    is_progressive: bool,
+    restart_interval: Option<u32>,
+    dc_tables: [Option<BuiltHuffmanTable>; 4],
+    ac_tables: [Option<BuiltHuffmanTable>; 4],
 
     header: &'jbrd JpegBitstreamHeader,
     frame: &'frame Frame,
@@ -497,7 +507,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 frame
                     .try_parse_lf_group(lf_global_vardct, global_ma_config, None, lf_group_idx)
                     .ok_or(Error::FrameDataIncomplete)
-                    .and_then(|r| r.map_err(|e| Error::FrameParse(e)))
+                    .and_then(|r| r.map_err(Error::FrameParse))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -508,6 +518,10 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 hf_global,
                 lf_groups,
             },
+            is_progressive: false,
+            restart_interval: None,
+            dc_tables: [None, None, None, None],
+            ac_tables: [None, None, None, None],
 
             header,
             frame,
@@ -559,6 +573,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
         Ok(match marker {
             // SOF
             0xc0 | 0xc1 | 0xc2 | 0xc9 | 0xca => {
+                self.is_progressive = marker == 0xc2 || marker == 0xca;
+
                 let width = self.frame.image_header().size.width;
                 let height = self.frame.image_header().size.height;
                 let width_bytes = (width as u16).to_be_bytes();
@@ -623,7 +639,13 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     writer
                         .write_all(&hc.values[..hc.values.len() - 1])
                         .map_err(Error::ReconstructionWrite)?;
-                    dbg!(hc.build());
+
+                    let table = hc.build();
+                    if hc.is_ac {
+                        self.ac_tables[hc.id as usize] = Some(table);
+                    } else {
+                        self.dc_tables[hc.id as usize] = Some(table);
+                    }
                 }
 
                 ReconstructionStatus::Done
@@ -650,11 +672,147 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // SOS
             0xda => {
+                let frame_header = self.frame.header();
+
                 let idx = self.scan_info_ptr;
                 let si = &self.header.scan_info[idx];
                 let smi = &self.header.scan_more_info[idx];
                 self.scan_info_ptr += 1;
-                todo!()
+
+                let comps = &si.component_info;
+                let jpeg_upsampling = self.frame.header().jpeg_upsampling;
+                let jpeg_upsampling_ycbcr = [1, 0, 2].map(|idx| jpeg_upsampling[idx]);
+                let hsamples = comps
+                    .iter()
+                    .map(|c| [1u32, 2, 2, 1][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                    .collect::<Vec<_>>();
+                let vsamples = comps
+                    .iter()
+                    .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                    .collect::<Vec<_>>();
+
+                let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
+                let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+                let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
+                let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+
+                let ss = si.ss.max(1);
+                let se = si.se + 1;
+                let al = si.al;
+                let ah = si.ah;
+
+                let mut state = ScanState::new(comps.len());
+                let mut block_idx = 0u32;
+                for y8 in 0..h8 {
+                    for x8 in 0..w8 {
+                        let mcu_idx = x8 + w8 * y8;
+
+                        let mut last_ac_table = None;
+                        for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
+                            let dc_table = self
+                                .dc_tables[c.dc_tbl_idx as usize]
+                                .as_ref()
+                                .ok_or(Error::InvalidData)?;
+                            let ac_table = self
+                                .ac_tables[c.ac_tbl_idx as usize]
+                                .as_ref()
+                                .ok_or(Error::InvalidData)?;
+
+                            let idx = c.comp_idx as usize;
+                            for dy8 in 0..=vs {
+                                let y_dc = y8 * vs + dy8;
+                                let y_ac_start = y_dc * 8;
+                                for dx8 in 0..=hs {
+                                    let x_dc = x8 + dx8;
+                                    let x_ac_start = x_dc * 8;
+
+                                    let extra_zero_runs = smi.extra_zero_runs.get(&block_idx).copied().unwrap_or(0);
+
+                                    if si.ss == 0 {
+                                        let coeff: i16 = todo!("get DC coeff using y_dc and x_dc");
+                                        let diff = state.update_dc_pred(cidx, coeff);
+
+                                        let is_neg = diff < 0;
+                                        let mut bits = if is_neg { -diff } else { diff };
+                                        if ah != 0 {
+                                            bits &= (1 << ah) - 1;
+                                        }
+                                        bits >>= al;
+                                        let bitlen = 16 - bits.leading_zeros();
+                                        let bits = if is_neg { bits + 1 } else { bits };
+
+                                        last_ac_table = Some(ac_table);
+                                    }
+
+                                    let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
+                                    let coords = jxl_vardct::DCT8_NATURAL_ORDER.iter().take(se as usize).skip(ss as usize);
+                                    for &(x, y) in coords {
+                                        ac_coeffs.push(todo!());
+                                    }
+
+                                    let mut remaining = &*ac_coeffs;
+                                    while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                                        while nonzero_idx >= 16 {
+                                            let (len, bits) = ac_table.lookup(0xf0);
+                                            state.bit_writer.write_huffman(bits, len);
+                                            nonzero_idx -= 16;
+                                        }
+
+                                        let coeff = remaining[nonzero_idx];
+                                        let is_neg = coeff < 0;
+                                        let mut bits = if is_neg { -coeff } else { coeff };
+                                        if ah != 0 {
+                                            bits &= (1 << ah) - 1;
+                                        }
+                                        bits >>= al;
+                                        let bitlen = 16 - bits.leading_zeros();
+                                        let bits = if is_neg { bits + 1 } else { bits };
+
+                                        remaining = &remaining[nonzero_idx + 1..];
+
+                                        last_ac_table = Some(ac_table);
+                                    }
+
+                                    let mut num_zeros = remaining.len() as i32;
+                                    if let Some(&ezr) = smi.extra_zero_runs.get(&block_idx) {
+                                        let (len, bits) = ac_table.lookup(0xf0);
+                                        for _ in 0..ezr {
+                                            state.bit_writer.write_huffman(bits, len);
+                                        }
+
+                                        num_zeros -= ezr as i32 * 16;
+                                    }
+
+                                    if num_zeros >= 0 {
+                                        if self.is_progressive {
+                                            state.eobrun += 1;
+                                        } else {
+                                            let (len, bits) = ac_table.lookup(0);
+                                            state.bit_writer.write_huffman(bits, len);
+                                        }
+                                    }
+
+                                    block_idx += 1;
+                                    if self.is_progressive && smi.reset_points.contains(&block_idx) {
+                                        state.emit_eobrun(ac_table);
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(restart_interval) = self.restart_interval {
+                            if (mcu_idx + 1) % restart_interval == 0 {
+                                let last_comp = comps.last().unwrap();
+                                let last_ac_table = self.ac_tables[last_comp.ac_tbl_idx as usize].as_ref().unwrap();
+                                state.restart(self.padding_bitstream.as_mut(), last_ac_table, &mut writer)?;
+                            }
+                        }
+                    }
+                }
+
+                state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
+
+                ReconstructionStatus::Done
             }
 
             // DQT
@@ -726,6 +884,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let interval = (self.header.restart_interval as u16).to_be_bytes();
                 let bytes = [0xff, 0xdd, 0, 4, interval[0], interval[1]];
                 writer.write_all(&bytes).map_err(Error::ReconstructionWrite)?;
+                if self.header.restart_interval != 0 {
+                    self.restart_interval = Some(self.header.restart_interval);
+                }
                 ReconstructionStatus::Done
             }
 
@@ -784,6 +945,70 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             _ => return Err(Error::InvalidData),
         })
+    }
+}
+
+struct ScanState {
+    bit_writer: bit_writer::BitWriter,
+    dc_pred: Vec<i16>,
+    eobrun: u32,
+    rst_m: u8,
+}
+
+impl ScanState {
+    fn new(num_comps: usize) -> Self {
+        Self {
+            bit_writer: bit_writer::BitWriter::new(),
+            dc_pred: vec![0; num_comps],
+            eobrun: 0,
+            rst_m: 0,
+        }
+    }
+
+    fn update_dc_pred(&mut self, comp_idx: usize, coeff: i16) -> i16 {
+        let diff = coeff.wrapping_sub(self.dc_pred[comp_idx]);
+        self.dc_pred[comp_idx] = coeff;
+        diff
+    }
+
+    fn emit_eobrun(&mut self, ac_table: &huffman::BuiltHuffmanTable) {
+        if self.eobrun == 0 {
+            return;
+        }
+
+        let eobn = 31 - self.eobrun.trailing_zeros();
+        let (len, bits) = ac_table.lookup(eobn as u8);
+        self.bit_writer.write_huffman(bits, len);
+        let mask = (1u32 << eobn) - 1;
+        self.bit_writer.write_raw((self.eobrun & mask) as u64, eobn as u8);
+        self.eobrun = 0;
+    }
+
+    fn flush_bit_writer(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
+        let mut bit_writer = std::mem::replace(&mut self.bit_writer, BitWriter::new());
+        let padding_needed = bit_writer.padding_bits();
+        if padding_needed != 0 && padding_bitstream.is_some() {
+            let padding_bitstream = padding_bitstream.unwrap();
+            let bits = padding_bitstream.read_bits(padding_needed).map_err(|_| Error::InvalidData)?;
+            bit_writer.write_raw(bits as u64, padding_needed as u8);
+        }
+
+        let bytes = bit_writer.finalize();
+        writer.write_all(&bytes).map_err(Error::ReconstructionWrite)?;
+
+        Ok(())
+    }
+
+    fn restart(&mut self, padding_bitstream: Option<&mut Bitstream>, last_ac_table: &huffman::BuiltHuffmanTable, mut writer: impl Write) -> Result<()> {
+        self.dc_pred.fill(0);
+        self.emit_eobrun(last_ac_table);
+        self.flush_bit_writer(padding_bitstream, &mut writer)?;
+
+        let rst = [0xff, 0xd0 + self.rst_m];
+        writer.write_all(&rst).map_err(Error::ReconstructionWrite)?;
+        self.rst_m = (self.rst_m + 1) % 8;
+
+        Ok(())
     }
 }
 
