@@ -796,6 +796,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 .ac_tables[c.ac_tbl_idx as usize]
                                 .as_ref()
                                 .ok_or(Error::InvalidData)?;
+                            if last_ac_table.is_none() {
+                                last_ac_table = Some(ac_table);
+                            }
 
                             let idx = c.comp_idx as usize;
                             let lf_quant = &lf_quant[idx];
@@ -832,9 +835,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                         let raw_bits = if is_neg { -bits - 1 } else { bits };
 
                                         if self.is_progressive {
-                                            if let Some(last_ac_table) = last_ac_table {
-                                                state.emit_eobrun(last_ac_table);
-                                            }
+                                            state.emit_eobrun(last_ac_table.unwrap());
                                         }
                                         let (len, bits) = dc_table.lookup(bitlen as u8);
                                         state.bit_writer.write_huffman(bits, len);
@@ -864,6 +865,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                         let coeff = remaining[nonzero_idx];
                                         remaining = &remaining[nonzero_idx + 1..];
 
+                                        if self.is_progressive {
+                                            state.emit_eobrun(last_ac_table.unwrap());
+                                        }
+
                                         while nonzero_idx >= 16 {
                                             let (len, bits) = ac_table.lookup(0xf0);
                                             state.bit_writer.write_huffman(bits, len);
@@ -875,11 +880,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                         let bitlen = 16 - bits.leading_zeros();
                                         let raw_bits = if is_neg { coeff - 1 } else { coeff };
 
-                                        if self.is_progressive {
-                                            if let Some(last_ac_table) = last_ac_table {
-                                                state.emit_eobrun(last_ac_table);
-                                            }
-                                        }
                                         let nonzero_idx = nonzero_idx as u8;
                                         let sym = (nonzero_idx << 4) | bitlen as u8;
                                         let (len, bits) = ac_table.lookup(sym);
@@ -892,9 +892,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                     let mut num_zeros = remaining.len() as i32;
                                     if let Some(&ezr) = smi.extra_zero_runs.get(&block_idx) {
                                         if self.is_progressive {
-                                            if let Some(last_ac_table) = last_ac_table {
-                                                state.emit_eobrun(last_ac_table);
-                                            }
+                                            state.emit_eobrun(last_ac_table.unwrap());
                                         }
                                         let (len, bits) = ac_table.lookup(0xf0);
                                         for _ in 0..ezr {
@@ -908,6 +906,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                     if num_zeros > 0 {
                                         if self.is_progressive {
                                             state.eobrun += 1;
+                                            if state.eobrun >= 32767 {
+                                                state.emit_eobrun(last_ac_table.unwrap());
+                                            }
                                         } else {
                                             let (len, bits) = ac_table.lookup(0);
                                             state.bit_writer.write_huffman(bits, len);
@@ -1104,8 +1105,8 @@ impl ScanState {
             return;
         }
 
-        let eobn = 31 - self.eobrun.trailing_zeros();
-        let (len, bits) = ac_table.lookup(eobn as u8);
+        let eobn = 31 - self.eobrun.leading_zeros();
+        let (len, bits) = ac_table.lookup((eobn as u8) << 4);
         self.bit_writer.write_huffman(bits, len);
         let mask = (1u32 << eobn) - 1;
         self.bit_writer.write_raw((self.eobrun & mask) as u64, eobn as u8);
