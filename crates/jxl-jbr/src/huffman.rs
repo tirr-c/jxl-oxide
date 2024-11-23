@@ -37,7 +37,7 @@ impl HuffmanCode {
         for &len in &lengths {
             let shift_len = 64 - len;
             if len != prev_len {
-                next_code <<= 1;
+                next_code <<= len - prev_len;
                 prev_len = len;
             }
             bits.push(next_code << shift_len);
