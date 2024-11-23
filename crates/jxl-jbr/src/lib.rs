@@ -522,6 +522,8 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
 
             pass_groups.push([1, 0, 2].map(|idx| {
                 let (w, h) = upsampling_shifts[idx].shift_size((w, h));
+                let w = (w + 7) & !7;
+                let h = (h + 7) & !7;
                 AlignedGrid::<i32>::with_alloc_tracker(w as usize, h as usize, None).unwrap()
             }));
         }
