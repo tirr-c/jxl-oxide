@@ -523,7 +523,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             let (w, h) = frame_header.group_size_for(group_idx);
 
             pass_groups.push([1, 0, 2].map(|idx| {
-                // let (w, h) = upsampling_shifts[idx].shift_size((w, h));
+                let (w, h) = upsampling_shifts[idx].shift_size((w, h));
                 AlignedGrid::<i32>::with_alloc_tracker(w as usize, h as usize, None).unwrap()
             }));
         }
@@ -540,7 +540,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 let mut bitstream = pass_group.bitstream;
 
                 let pass_group = &pass_groups[group_idx as usize];
-                let hf_coeff_output = std::array::from_fn(|idx| unsafe {
+                let hf_coeff_output = [1, 0, 2].map(|idx| unsafe {
                     pass_group[idx].as_subgrid().as_atomic_i32()
                 });
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
@@ -797,7 +797,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                             let idx = c.comp_idx as usize;
                             let lf_quant = &lf_quant[idx];
-                            let hf_coeff = hf_coeff[[1, 0, 2][idx]];
+                            let hf_coeff = hf_coeff[idx];
                             let shift = upsampling_shifts_ycbcr[idx];
                             let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
                             let group_width_mask = group_width - 1;
@@ -859,14 +859,14 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                                     let mut remaining = &*ac_coeffs;
                                     while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                                        let coeff = remaining[nonzero_idx];
+                                        remaining = &remaining[nonzero_idx + 1..];
+
                                         while nonzero_idx >= 16 {
                                             let (len, bits) = ac_table.lookup(0xf0);
                                             state.bit_writer.write_huffman(bits, len);
                                             nonzero_idx -= 16;
                                         }
-
-                                        let coeff = remaining[nonzero_idx];
-                                        remaining = &remaining[nonzero_idx + 1..];
 
                                         let is_neg = coeff < 0;
                                         let bits = if is_neg { -coeff } else { coeff };
@@ -903,7 +903,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                         last_ac_table = Some(ac_table);
                                     }
 
-                                    if num_zeros >= 0 {
+                                    if num_zeros > 0 {
                                         if self.is_progressive {
                                             state.eobrun += 1;
                                         } else {
@@ -1105,9 +1105,12 @@ impl ScanState {
     fn flush_bit_writer(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
         let mut bit_writer = std::mem::replace(&mut self.bit_writer, BitWriter::new());
         let padding_needed = bit_writer.padding_bits();
-        if padding_needed != 0 && padding_bitstream.is_some() {
-            let padding_bitstream = padding_bitstream.unwrap();
-            let bits = padding_bitstream.read_bits(padding_needed).map_err(|_| Error::InvalidData)?;
+        if padding_needed != 0 {
+            let bits = if let Some(padding_bitstream) = padding_bitstream {
+                padding_bitstream.read_bits(padding_needed).map_err(|_| Error::InvalidData)?
+            } else {
+                (-1i32) as u32
+            };
             bit_writer.write_raw(bits as u64, padding_needed as u8);
         }
 

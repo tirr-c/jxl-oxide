@@ -126,6 +126,7 @@ impl std::fmt::Debug for BuiltHuffmanTable {
 impl BuiltHuffmanTable {
     pub fn lookup(&self, symbol: u8) -> (u8, u64) {
         let idx = symbol as usize;
+        debug_assert_ne!(self.lengths[idx], 0);
         (self.lengths[idx], self.bits[idx])
     }
 }
