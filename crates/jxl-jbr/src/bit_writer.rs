@@ -46,6 +46,9 @@ impl BitWriter {
     }
 
     pub fn write_raw(&mut self, bits: u64, len: u8) {
+        if len == 0 {
+            return;
+        }
         self.write_huffman(bits << (64 - len), len);
     }
 
@@ -75,5 +78,5 @@ impl BitWriter {
 }
 
 fn has_ff_byte(val: u64) -> bool {
-    ((!val - 0x_01010101_01010101u64) & val & 0x_80808080_80808080u64) != 0
+    ((!val).wrapping_sub(0x_01010101_01010101u64) & val & 0x_80808080_80808080u64) != 0
 }

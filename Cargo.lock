@@ -849,8 +849,11 @@ dependencies = [
  "brotli-decompressor",
  "jxl-bitstream",
  "jxl-frame",
+ "jxl-grid",
  "jxl-image",
+ "jxl-modular",
  "jxl-oxide-common",
+ "jxl-threadpool",
  "jxl-vardct",
  "tracing",
 ]
