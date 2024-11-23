@@ -167,6 +167,7 @@ pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::{AlignedGrid, AllocTracker};
 pub use jxl_image as image;
 pub use jxl_image::{ExtraChannelType, ImageHeader};
+pub use jxl_jbr as jpeg_bitstream;
 pub use jxl_threadpool::JxlThreadPool;
 
 mod aux_box;

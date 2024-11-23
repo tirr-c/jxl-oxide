@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::sync::atomic::AtomicI32;
 
 use bit_writer::BitWriter;
 use brotli_decompressor::DecompressorWriter;
 use jxl_bitstream::{Bitstream, U};
-use jxl_frame::data::{decode_pass_group, HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct};
+use jxl_frame::data::{decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct};
 use jxl_frame::Frame;
 use jxl_grid::AlignedGrid;
 use jxl_oxide_common::Bundle;
@@ -144,6 +143,7 @@ impl JpegBitstreamData {
 
 #[derive(Debug)]
 pub struct JpegBitstreamHeader {
+    #[allow(unused)]
     is_gray: bool,
     markers: Vec<u8>,
     app_markers: Vec<AppMarker>,
@@ -285,10 +285,6 @@ impl JpegBitstreamHeader {
             + self.intermarker_data_len()
             + self.tail_data_length as usize
     }
-
-    fn find_channel_id(&self, component_id: u8) -> Option<usize> {
-        self.components.iter().position(|c| c.id == component_id)
-    }
 }
 
 #[derive(Debug)]
@@ -340,6 +336,7 @@ struct ScanInfo {
     al: u8,
     ah: u8,
     component_info: Vec<ScanComponentInfo>,
+    #[allow(unused)]
     last_needed_pass: u8,
 }
 
@@ -441,7 +438,6 @@ impl Bundle for ExtraZeroRun {
 
 #[derive(Debug)]
 struct Padding {
-    num_bits: u32,
     bits: Vec<u8>,
 }
 
@@ -458,7 +454,7 @@ impl Bundle for Padding {
         }
         bits.push(bitstream.read_bits(extra_bits as usize)? as u8);
 
-        Ok(Self { num_bits, bits })
+        Ok(Self { bits })
     }
 }
 
@@ -474,6 +470,9 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     frame: &'frame Frame,
     marker_ptr: usize,
     app_marker_ptr: std::slice::Iter<'jbrd, AppMarker>,
+    next_icc_marker: usize,
+    icc_marker_offset: usize,
+    num_icc_markers: usize,
     app_data: &'jbrd [u8],
     com_length: std::slice::Iter<'jbrd, u32>,
     com_data: &'jbrd [u8],
@@ -488,7 +487,6 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
 }
 
 struct ParsedFrameData {
-    lf_global: LfGlobal<i16>,
     hf_global: HfGlobal,
     lf_groups: Vec<LfGroup<i16>>,
     pass_groups: Vec<[AlignedGrid<i32>; 3]>,
@@ -568,7 +566,6 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         Ok(Self {
             state: ReconstructionState::Init,
             parsed: ParsedFrameData {
-                lf_global,
                 hf_global,
                 lf_groups,
                 pass_groups,
@@ -582,6 +579,9 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             frame,
             marker_ptr: 0,
             app_marker_ptr: header.app_markers.iter(),
+            next_icc_marker: 0,
+            icc_marker_offset: 0,
+            num_icc_markers: header.app_markers.iter().filter(|am| am.ty == 1).count(),
             app_data: &data[..com_data_start],
             com_length: header.com_lengths.iter(),
             com_data: &data[com_data_start..intermarker_data_start],
@@ -734,12 +734,12 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let smi = &self.header.scan_more_info[idx];
                 self.scan_info_ptr += 1;
 
-                let comps = &si.component_info;
-                let num_comps = comps.len();
+                let num_comps = si.num_comps();
                 let header_len_bytes = (6 + 2 * num_comps as u16).to_be_bytes();
-                let header = [0xff, 0xda, header_len_bytes[0], header_len_bytes[1], num_comps as u8];
+                let header = [0xff, 0xda, header_len_bytes[0], header_len_bytes[1], num_comps];
                 writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
 
+                let comps = &si.component_info;
                 for c in comps {
                     let id = self.header.components[c.comp_idx as usize].id;
                     let table = (c.dc_tbl_idx << 4) | c.ac_tbl_idx;
@@ -1024,7 +1024,15 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         let header = [0xff, 0xe2, encoded_len[0], encoded_len[1]];
                         writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
                         writer.write_all(b"ICC_PROFILE\0").map_err(Error::ReconstructionWrite)?;
-                        todo!()
+                        let curr = self.next_icc_marker as u8 + 1;
+                        let total = self.num_icc_markers as u8;
+                        writer.write_all(&[curr, total]).map_err(Error::ReconstructionWrite)?;
+
+                        let from = self.icc_marker_offset;
+                        let len = am.length as usize - 17;
+                        self.next_icc_marker += 1;
+                        self.icc_marker_offset += len;
+                        ReconstructionStatus::WriteIcc { from, len }
                     }
                     2 => {
                         let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];

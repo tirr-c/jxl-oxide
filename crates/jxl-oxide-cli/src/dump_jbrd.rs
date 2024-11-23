@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use jxl_oxide::JxlImage;
 
 use crate::{Error, Result};
@@ -21,11 +23,24 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
         return Ok(());
     };
 
+    let icc = image.original_icc();
     let frame = image.frame_by_keyframe(0).unwrap();
     let mut reconstructor = jbrd.reconstruct(frame).map_err(|e| Error::Reconstruct(e.into()))?;
 
     let mut output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
-    reconstructor.write(&mut output).map_err(|e| Error::Reconstruct(e.into()))?;
+    loop {
+        let status = reconstructor.write(&mut output).map_err(|e| Error::Reconstruct(e.into()))?;
+        match status {
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::Done => break,
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteIcc { from, len } => {
+                let icc = icc.unwrap();
+                let chunk = &icc[from..][..len];
+                output.write_all(chunk).map_err(Error::WriteImage)?;
+            },
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteExif => todo!(),
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteXml => todo!(),
+        }
+    }
 
     Ok(())
 }
