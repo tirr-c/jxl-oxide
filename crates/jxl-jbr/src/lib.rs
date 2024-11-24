@@ -7,6 +7,7 @@ use jxl_bitstream::{Bitstream, U};
 use jxl_frame::data::{decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct};
 use jxl_frame::Frame;
 use jxl_grid::AlignedGrid;
+use jxl_modular::ChannelShift;
 use jxl_oxide_common::Bundle;
 
 mod bit_writer;
@@ -729,8 +730,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // SOS
             0xda => {
-                let frame_header = self.frame.header();
-
                 let idx = self.scan_info_ptr;
                 let si = &self.header.scan_info[idx];
                 let smi = &self.header.scan_more_info[idx];
@@ -753,185 +752,35 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let jpeg_upsampling = self.frame.header().jpeg_upsampling;
                 let jpeg_upsampling_ycbcr = [1, 0, 2].map(|idx| jpeg_upsampling[idx]);
                 let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx));
-                let hsamples = comps
-                    .iter()
-                    .map(|c| [1u32, 2, 2, 1][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
-                    .collect::<Vec<_>>();
-                let vsamples = comps
-                    .iter()
-                    .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
-                    .collect::<Vec<_>>();
 
-                let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
-                let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
-                let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
-                let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+                let (hsamples, vsamples) = if num_comps == 1 {
+                    (vec![1], vec![1])
+                } else {
+                    let hsamples = comps
+                        .iter()
+                        .map(|c| [1u32, 2, 2, 1][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                        .collect::<Vec<_>>();
+                    let vsamples = comps
+                        .iter()
+                        .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                        .collect::<Vec<_>>();
+                    (hsamples, vsamples)
+                };
+                let params = ScanParams {
+                    si,
+                    smi,
+                    upsampling_shifts_ycbcr,
+                    hsamples,
+                    vsamples,
+                };
 
-                let ss = si.ss.max(1);
-                let se = si.se + 1;
-                let al = si.al;
-                let ah = si.ah;
-
-                let group_dim = frame_header.group_dim();
-
-                let mut state = ScanState::new(comps.len());
-                let mut block_idx = 0u32;
-                for y8 in 0..h8 {
-                    for x8 in 0..w8 {
-                        let mcu_idx = x8 + w8 * y8;
-
-                        let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
-                        let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-
-                        let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
-                        let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
-
-                        let mut last_ac_table = None;
-                        for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
-                            let dc_table = self
-                                .dc_tables[c.dc_tbl_idx as usize]
-                                .as_ref()
-                                .ok_or(Error::InvalidData)?;
-                            let ac_table = self
-                                .ac_tables[c.ac_tbl_idx as usize]
-                                .as_ref()
-                                .ok_or(Error::InvalidData)?;
-                            if last_ac_table.is_none() {
-                                last_ac_table = Some(ac_table);
-                            }
-
-                            let idx = c.comp_idx as usize;
-                            let lf_quant = &lf_quant[idx];
-                            let hf_coeff = hf_coeff[idx];
-                            let shift = upsampling_shifts_ycbcr[idx];
-                            let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
-                            let group_width_mask = group_width - 1;
-                            let group_height_mask = group_height - 1;
-
-                            for dy8 in 0..vs {
-                                let y_dc = y8 * vs + dy8;
-                                let y_ac_start = y_dc * 8;
-                                let y_dc = (y_dc & group_height_mask) as usize;
-                                let y_ac_start = (y_ac_start & group_height_mask) as usize;
-                                for dx8 in 0..hs {
-                                    let x_dc = x8 * hs + dx8;
-                                    let x_ac_start = x_dc * 8;
-                                    let x_dc = (x_dc & group_width_mask) as usize;
-                                    let x_ac_start = (x_ac_start & group_width_mask) as usize;
-
-                                    let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
-
-                                    if si.ss == 0 {
-                                        let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
-                                        let diff = state.update_dc_pred(cidx, coeff);
-
-                                        let is_neg = diff < 0;
-                                        let mut bits = if is_neg { -diff } else { diff };
-                                        if ah != 0 {
-                                            bits &= (1 << ah) - 1;
-                                        }
-                                        bits >>= al;
-                                        let bitlen = 16 - bits.leading_zeros();
-                                        let raw_bits = if is_neg { -bits - 1 } else { bits };
-
-                                        if self.is_progressive {
-                                            state.emit_eobrun(last_ac_table.unwrap());
-                                        }
-                                        let (len, bits) = dc_table.lookup(bitlen as u8);
-                                        state.bit_writer.write_huffman(bits, len);
-                                        state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
-
-                                        last_ac_table = Some(ac_table);
-                                    }
-
-                                    let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
-                                    let coords = jxl_vardct::DCT8_NATURAL_ORDER.iter().take(se as usize).skip(ss as usize);
-                                    for &(x, y) in coords {
-                                        let mut coeff = *hf_coeff.get(x as usize, y as usize) as i16;
-                                        if coeff != 0 {
-                                            let is_neg = coeff < 0;
-                                            let mut bits = if is_neg { -coeff } else { coeff };
-                                            if ah != 0 {
-                                                bits &= (1 << ah) - 1;
-                                            }
-                                            bits >>= al;
-                                            coeff = if is_neg { -bits } else { bits };
-                                        }
-                                        ac_coeffs.push(coeff);
-                                    }
-
-                                    let mut remaining = &*ac_coeffs;
-                                    while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
-                                        let coeff = remaining[nonzero_idx];
-                                        remaining = &remaining[nonzero_idx + 1..];
-
-                                        if self.is_progressive {
-                                            state.emit_eobrun(last_ac_table.unwrap());
-                                        }
-
-                                        while nonzero_idx >= 16 {
-                                            let (len, bits) = ac_table.lookup(0xf0);
-                                            state.bit_writer.write_huffman(bits, len);
-                                            nonzero_idx -= 16;
-                                        }
-
-                                        let is_neg = coeff < 0;
-                                        let bits = if is_neg { -coeff } else { coeff };
-                                        let bitlen = 16 - bits.leading_zeros();
-                                        let raw_bits = if is_neg { coeff - 1 } else { coeff };
-
-                                        let nonzero_idx = nonzero_idx as u8;
-                                        let sym = (nonzero_idx << 4) | bitlen as u8;
-                                        let (len, bits) = ac_table.lookup(sym);
-                                        state.bit_writer.write_huffman(bits, len);
-                                        state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
-
-                                        last_ac_table = Some(ac_table);
-                                    }
-
-                                    let mut num_zeros = remaining.len() as i32;
-                                    if let Some(&ezr) = smi.extra_zero_runs.get(&block_idx) {
-                                        if self.is_progressive {
-                                            state.emit_eobrun(last_ac_table.unwrap());
-                                        }
-                                        let (len, bits) = ac_table.lookup(0xf0);
-                                        for _ in 0..ezr {
-                                            state.bit_writer.write_huffman(bits, len);
-                                        }
-
-                                        num_zeros -= ezr as i32 * 16;
-                                        last_ac_table = Some(ac_table);
-                                    }
-
-                                    if num_zeros > 0 {
-                                        if self.is_progressive {
-                                            state.eobrun += 1;
-                                            if state.eobrun >= 32767 {
-                                                state.emit_eobrun(last_ac_table.unwrap());
-                                            }
-                                        } else {
-                                            let (len, bits) = ac_table.lookup(0);
-                                            state.bit_writer.write_huffman(bits, len);
-                                        }
-                                    }
-
-                                    block_idx += 1;
-                                    if self.is_progressive && smi.reset_points.contains(&block_idx) {
-                                        state.emit_eobrun(last_ac_table.unwrap());
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Some(restart_interval) = self.restart_interval {
-                            if (mcu_idx + 1) % restart_interval == 0 {
-                                state.restart(self.padding_bitstream.as_mut(), last_ac_table.unwrap(), &mut writer)?;
-                            }
-                        }
-                    }
+                if !self.is_progressive {
+                    self.process_sequential_scan(params, writer)?;
+                } else if si.ah == 0 {
+                    self.process_progressive_scan(params, writer)?;
+                } else {
+                    self.process_refinement_scan(params, writer)?;
                 }
-
-                state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
 
                 ReconstructionStatus::Done
             }
@@ -1075,12 +924,491 @@ impl JpegBitstreamReconstructor<'_, '_> {
             _ => return Err(Error::InvalidData),
         })
     }
+
+    fn process_sequential_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        let comps = &si.component_info;
+        let frame_header = self.frame.header();
+
+        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
+        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
+        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+
+        let group_dim = frame_header.group_dim();
+
+        let mut state = ScanState::new(comps.len());
+        let mut block_idx = 0u32;
+        for y8 in 0..h8 {
+            for x8 in 0..w8 {
+                let mcu_idx = x8 + w8 * y8;
+
+                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+
+                let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
+                let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
+
+                for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
+                    let dc_table = self
+                        .dc_tables[c.dc_tbl_idx as usize]
+                        .as_ref()
+                        .ok_or(Error::InvalidData)?;
+                    let ac_table = self
+                        .ac_tables[c.ac_tbl_idx as usize]
+                        .as_ref()
+                        .ok_or(Error::InvalidData)?;
+
+                    let idx = c.comp_idx as usize;
+                    let lf_quant = &lf_quant[idx];
+                    let hf_coeff = hf_coeff[idx];
+                    let shift = upsampling_shifts_ycbcr[idx];
+                    let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
+                    let group_width_mask = group_width - 1;
+                    let group_height_mask = group_height - 1;
+
+                    for dy8 in 0..vs {
+                        let y_dc = y8 * vs + dy8;
+                        let y_ac_start = y_dc * 8;
+                        let y_dc = (y_dc & group_height_mask) as usize;
+                        let y_ac_start = (y_ac_start & group_height_mask) as usize;
+                        for dx8 in 0..hs {
+                            let x_dc = x8 * hs + dx8;
+                            let x_ac_start = x_dc * 8;
+                            let x_dc = (x_dc & group_width_mask) as usize;
+                            let x_ac_start = (x_ac_start & group_width_mask) as usize;
+
+                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+
+                            let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                            let diff = state.update_dc_pred(cidx, coeff);
+
+                            let is_neg = diff < 0;
+                            let bits = if is_neg { -diff } else { diff };
+                            let bitlen = 16 - bits.leading_zeros();
+                            let raw_bits = if is_neg { -bits - 1 } else { bits };
+
+                            let (len, bits) = dc_table.lookup(bitlen as u8);
+                            state.bit_writer.write_huffman(bits, len);
+                            state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
+
+                            let mut ac_coeffs: Vec<i16> = Vec::with_capacity(63);
+                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[1..] {
+                                let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
+                                ac_coeffs.push(coeff);
+                            }
+
+                            let mut remaining = &*ac_coeffs;
+                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                                let coeff = remaining[nonzero_idx];
+                                remaining = &remaining[nonzero_idx + 1..];
+
+                                while nonzero_idx >= 16 {
+                                    let (len, bits) = ac_table.lookup(0xf0);
+                                    state.bit_writer.write_huffman(bits, len);
+                                    nonzero_idx -= 16;
+                                }
+
+                                let (raw_bits, bitlen) = if coeff < 0 {
+                                    let coeff = -coeff;
+                                    (!coeff, 16 - coeff.leading_zeros())
+                                } else {
+                                    (coeff, 16 - coeff.leading_zeros())
+                                };
+
+                                let nonzero_idx = nonzero_idx as u8;
+                                let sym = (nonzero_idx << 4) | bitlen as u8;
+                                let (len, bits) = ac_table.lookup(sym);
+                                state.bit_writer.write_huffman(bits, len);
+                                state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
+                            }
+
+                            let mut num_zeros = remaining.len() as i32;
+                            if let Some(&ezr) = smi.extra_zero_runs.get(&block_idx) {
+                                let (len, bits) = ac_table.lookup(0xf0);
+                                for _ in 0..ezr {
+                                    state.bit_writer.write_huffman(bits, len);
+                                }
+
+                                num_zeros -= ezr as i32 * 16;
+                            }
+
+                            if num_zeros > 0 {
+                                let (len, bits) = ac_table.lookup(0);
+                                state.bit_writer.write_huffman(bits, len);
+                            }
+
+                            block_idx += 1;
+                        }
+                    }
+                }
+
+                if let Some(restart_interval) = self.restart_interval {
+                    if (mcu_idx + 1) % restart_interval == 0 {
+                        state.restart(self.padding_bitstream.as_mut(), &mut writer)?;
+                    }
+                }
+            }
+        }
+
+        state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
+
+        Ok(())
+    }
+
+    fn process_progressive_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        let comps = &si.component_info;
+        let frame_header = self.frame.header();
+
+        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
+        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
+        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+
+        let ss = si.ss.max(1);
+        let se = si.se + 1;
+        let al = si.al;
+
+        let group_dim = frame_header.group_dim();
+
+        let mut state = ScanState::new(comps.len());
+        let mut block_idx = 0u32;
+        for y8 in 0..h8 {
+            for x8 in 0..w8 {
+                let mcu_idx = x8 + w8 * y8;
+
+                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+
+                let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
+                let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
+
+                let mut last_ac_table = None;
+                for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
+                    let dc_table = self
+                        .dc_tables[c.dc_tbl_idx as usize]
+                        .as_ref()
+                        .ok_or(Error::InvalidData)?;
+                    let ac_table = self
+                        .ac_tables[c.ac_tbl_idx as usize]
+                        .as_ref()
+                        .ok_or(Error::InvalidData)?;
+                    if last_ac_table.is_none() {
+                        last_ac_table = Some(ac_table);
+                    }
+
+                    let idx = c.comp_idx as usize;
+                    let lf_quant = &lf_quant[idx];
+                    let hf_coeff = hf_coeff[idx];
+                    let shift = upsampling_shifts_ycbcr[idx];
+                    let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
+                    let group_width_mask = group_width - 1;
+                    let group_height_mask = group_height - 1;
+
+                    for dy8 in 0..vs {
+                        let y_dc = y8 * vs + dy8;
+                        let y_ac_start = y_dc * 8;
+                        let y_dc = (y_dc & group_height_mask) as usize;
+                        let y_ac_start = (y_ac_start & group_height_mask) as usize;
+                        for dx8 in 0..hs {
+                            let x_dc = x8 * hs + dx8;
+                            let x_ac_start = x_dc * 8;
+                            let x_dc = (x_dc & group_width_mask) as usize;
+                            let x_ac_start = (x_ac_start & group_width_mask) as usize;
+
+                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+
+                            if si.ss == 0 {
+                                let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                                let coeff = coeff >> al;
+                                let diff = state.update_dc_pred(cidx, coeff);
+
+                                let is_neg = diff < 0;
+                                let bits = if is_neg { -diff } else { diff };
+                                let bitlen = 16 - bits.leading_zeros();
+                                let raw_bits = if is_neg { -bits - 1 } else { bits };
+
+                                state.emit_eobrun(last_ac_table.unwrap());
+                                let (len, bits) = dc_table.lookup(bitlen as u8);
+                                state.bit_writer.write_huffman(bits, len);
+                                state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
+
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
+                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize] {
+                                let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
+                                let coeff = if coeff < 0 {
+                                    -((-coeff) >> al)
+                                } else {
+                                    coeff >> al
+                                };
+                                ac_coeffs.push(coeff);
+                            }
+
+                            let mut remaining = &*ac_coeffs;
+                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                                state.emit_eobrun(last_ac_table.unwrap());
+
+                                let coeff = remaining[nonzero_idx];
+                                remaining = &remaining[nonzero_idx + 1..];
+
+                                while nonzero_idx >= 16 {
+                                    let (len, bits) = ac_table.lookup(0xf0);
+                                    state.bit_writer.write_huffman(bits, len);
+                                    nonzero_idx -= 16;
+                                }
+
+                                let (raw_bits, bitlen) = if coeff < 0 {
+                                    let coeff = -coeff;
+                                    (!coeff, 16 - coeff.leading_zeros())
+                                } else {
+                                    (coeff, 16 - coeff.leading_zeros())
+                                };
+
+                                let nonzero_idx = nonzero_idx as u8;
+                                let sym = (nonzero_idx << 4) | bitlen as u8;
+                                let (len, bits) = ac_table.lookup(sym);
+                                state.bit_writer.write_huffman(bits, len);
+                                state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
+
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            let mut num_zeros = remaining.len() as i32;
+                            if let Some(&ezr) = smi.extra_zero_runs.get(&block_idx) {
+                                state.emit_eobrun(last_ac_table.unwrap());
+                                let (len, bits) = ac_table.lookup(0xf0);
+                                for _ in 0..ezr {
+                                    state.bit_writer.write_huffman(bits, len);
+                                }
+
+                                num_zeros -= ezr as i32 * 16;
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            if num_zeros > 0 {
+                                state.eobrun += 1;
+                                if state.eobrun >= 32767 {
+                                    state.emit_eobrun(last_ac_table.unwrap());
+                                }
+                            }
+
+                            block_idx += 1;
+                            if smi.reset_points.contains(&block_idx) {
+                                state.emit_eobrun(last_ac_table.unwrap());
+                            }
+                        }
+                    }
+                }
+
+                if let Some(restart_interval) = self.restart_interval {
+                    if (mcu_idx + 1) % restart_interval == 0 {
+                        state.emit_eobrun(last_ac_table.unwrap());
+                        state.restart(self.padding_bitstream.as_mut(), &mut writer)?;
+                    }
+                }
+            }
+        }
+
+        state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
+
+        Ok(())
+    }
+
+    fn process_refinement_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        let comps = &si.component_info;
+        let frame_header = self.frame.header();
+
+        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
+        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
+        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+
+        let ss = si.ss.max(1);
+        let se = si.se + 1;
+        let al = si.al;
+
+        let group_dim = frame_header.group_dim();
+
+        let mut state = ScanState::new(comps.len());
+        let mut block_idx = 0u32;
+        for y8 in 0..h8 {
+            for x8 in 0..w8 {
+                let mcu_idx = x8 + w8 * y8;
+
+                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+
+                let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
+                let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
+
+                let mut last_ac_table = None;
+                for (c, (&hs, &vs)) in comps.iter().zip(std::iter::zip(&hsamples, &vsamples)) {
+                    let ac_table = self
+                        .ac_tables[c.ac_tbl_idx as usize]
+                        .as_ref()
+                        .ok_or(Error::InvalidData)?;
+                    if last_ac_table.is_none() {
+                        last_ac_table = Some(ac_table);
+                    }
+
+                    let idx = c.comp_idx as usize;
+                    let lf_quant = &lf_quant[idx];
+                    let hf_coeff = hf_coeff[idx];
+                    let shift = upsampling_shifts_ycbcr[idx];
+                    let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
+                    let group_width_mask = group_width - 1;
+                    let group_height_mask = group_height - 1;
+
+                    for dy8 in 0..vs {
+                        let y_dc = y8 * vs + dy8;
+                        let y_ac_start = y_dc * 8;
+                        let y_dc = (y_dc & group_height_mask) as usize;
+                        let y_ac_start = (y_ac_start & group_height_mask) as usize;
+                        for dx8 in 0..hs {
+                            let x_dc = x8 * hs + dx8;
+                            let x_ac_start = x_dc * 8;
+                            let x_dc = (x_dc & group_width_mask) as usize;
+                            let x_ac_start = (x_ac_start & group_width_mask) as usize;
+
+                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+
+                            if si.ss == 0 {
+                                state.emit_eobrun(last_ac_table.unwrap());
+                                let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                                let coeff = coeff >> al;
+                                state.bit_writer.write_raw(coeff as u64, 1);
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            let mut ac_coeffs = Vec::with_capacity((se - ss) as usize);
+                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize] {
+                                let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
+                                let coeff = if coeff < 0 {
+                                    -((-coeff) >> al)
+                                } else {
+                                    coeff >> al
+                                };
+                                ac_coeffs.push(coeff);
+                            }
+
+                            let mut remaining = &*ac_coeffs;
+                            while let Some(nonzero_idx) = remaining.iter().position(|x| *x == 1 || *x == -1) {
+                                state.emit_eobrun(last_ac_table.unwrap());
+
+                                let mut zero_runs = 0u8;
+                                let mut refinement_bitlen = 0u8;
+                                let mut refinement_bits = 0u64;
+                                for &coeff in &remaining[..nonzero_idx] {
+                                    if coeff == 0 {
+                                        zero_runs += 1;
+                                        if zero_runs == 16 {
+                                            let (len, bits) = ac_table.lookup(0xf0);
+                                            state.bit_writer.write_huffman(bits, len);
+                                            state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                            zero_runs = 0;
+                                            refinement_bitlen = 0;
+                                        }
+                                    } else {
+                                        refinement_bits = (refinement_bits << 1) | (coeff & 1) as u64;
+                                        refinement_bitlen += 1;
+                                    }
+                                }
+
+                                let coeff = remaining[nonzero_idx];
+                                remaining = &remaining[nonzero_idx + 1..];
+
+                                let bit = (coeff == 1) as u64;
+                                let sym = (zero_runs << 4) | 1;
+                                let (len, bits) = ac_table.lookup(sym);
+                                state.bit_writer.write_huffman(bits, len);
+                                state.bit_writer.write_raw(bit, 1);
+                                state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            let mut remaining_zrl = smi.extra_zero_runs.get(&block_idx).copied().unwrap_or(0);
+                            if remaining_zrl > 0 {
+                                state.emit_eobrun(last_ac_table.unwrap());
+                                last_ac_table = Some(ac_table);
+                            }
+
+                            let (zrl_len, zrl_bits) = ac_table.lookup(0xf0);
+                            let mut zero_runs = 0u8;
+                            let mut refinement_bitlen = 0u8;
+                            let mut refinement_bits = 0u64;
+                            for &coeff in remaining {
+                                if coeff == 0 {
+                                    zero_runs += 1;
+                                    if remaining_zrl > 0 && zero_runs == 16 {
+                                        state.bit_writer.write_huffman(zrl_bits, zrl_len);
+                                        state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                        zero_runs = 0;
+                                        refinement_bitlen = 0;
+                                        remaining_zrl -= 1;
+                                    }
+                                } else {
+                                    refinement_bits = (refinement_bits << 1) | (coeff & 1) as u64;
+                                    refinement_bitlen += 1;
+                                }
+                            }
+
+                            for _ in 0..remaining_zrl {
+                                state.bit_writer.write_huffman(zrl_bits, zrl_len);
+                                state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                zero_runs = 0;
+                                refinement_bitlen = 0;
+                            }
+
+                            if zero_runs > 0 || refinement_bitlen > 0 {
+                                state.eobrun += 1;
+                                state.buffer_refinement_bits(refinement_bits, refinement_bitlen);
+                                if state.eobrun >= 32767 {
+                                    state.emit_eobrun(last_ac_table.unwrap());
+                                }
+                            }
+
+                            block_idx += 1;
+                            if smi.reset_points.contains(&block_idx) {
+                                state.emit_eobrun(last_ac_table.unwrap());
+                            }
+                        }
+                    }
+                }
+
+                if let Some(restart_interval) = self.restart_interval {
+                    if (mcu_idx + 1) % restart_interval == 0 {
+                        state.emit_eobrun(last_ac_table.unwrap());
+                        state.restart(self.padding_bitstream.as_mut(), &mut writer)?;
+                    }
+                }
+            }
+        }
+
+        state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
+
+        Ok(())
+    }
+}
+
+struct ScanParams<'jbrd> {
+    si: &'jbrd ScanInfo,
+    smi: &'jbrd ScanMoreInfo,
+    upsampling_shifts_ycbcr: [ChannelShift; 3],
+    hsamples: Vec<u32>,
+    vsamples: Vec<u32>,
 }
 
 struct ScanState {
     bit_writer: bit_writer::BitWriter,
     dc_pred: Vec<i16>,
     eobrun: u32,
+    refinement_bitlen: Vec<u8>,
+    refinement_bits: Vec<u64>,
     rst_m: u8,
 }
 
@@ -1090,6 +1418,8 @@ impl ScanState {
             bit_writer: bit_writer::BitWriter::new(),
             dc_pred: vec![0; num_comps],
             eobrun: 0,
+            refinement_bitlen: Vec::new(),
+            refinement_bits: Vec::new(),
             rst_m: 0,
         }
     }
@@ -1098,6 +1428,11 @@ impl ScanState {
         let diff = coeff.wrapping_sub(self.dc_pred[comp_idx]);
         self.dc_pred[comp_idx] = coeff;
         diff
+    }
+
+    fn buffer_refinement_bits(&mut self, bits: u64, bitlen: u8) {
+        self.refinement_bits.push(bits);
+        self.refinement_bitlen.push(bitlen);
     }
 
     fn emit_eobrun(&mut self, ac_table: &huffman::BuiltHuffmanTable) {
@@ -1111,6 +1446,12 @@ impl ScanState {
         let mask = (1u32 << eobn) - 1;
         self.bit_writer.write_raw((self.eobrun & mask) as u64, eobn as u8);
         self.eobrun = 0;
+
+        let refinement_bits = std::mem::take(&mut self.refinement_bits);
+        let refinement_bitlen = std::mem::take(&mut self.refinement_bitlen);
+        for (bits, bitlen) in std::iter::zip(refinement_bits, refinement_bitlen) {
+            self.bit_writer.write_raw(bits, bitlen);
+        }
     }
 
     fn flush_bit_writer(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
@@ -1131,9 +1472,9 @@ impl ScanState {
         Ok(())
     }
 
-    fn restart(&mut self, padding_bitstream: Option<&mut Bitstream>, last_ac_table: &huffman::BuiltHuffmanTable, mut writer: impl Write) -> Result<()> {
+    fn restart(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
+        assert_eq!(self.eobrun, 0);
         self.dc_pred.fill(0);
-        self.emit_eobrun(last_ac_table);
         self.flush_bit_writer(padding_bitstream, &mut writer)?;
 
         let rst = [0xff, 0xd0 + self.rst_m];
