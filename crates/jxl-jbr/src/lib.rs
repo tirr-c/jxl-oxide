@@ -408,18 +408,47 @@ impl Bundle for ScanMoreInfo {
 
     fn parse(bitstream: &mut Bitstream, _: ()) -> Result<Self, Self::Error> {
         let num_reset_points = bitstream.read_u32(0, 1 + U(2), 4 + U(4), 20 + U(16))?;
+        let mut last_block_idx: Option<u32> = None;
         let reset_points = (0..num_reset_points)
-            .map(|_| bitstream.read_u32(0, 1 + U(3), 9 + U(5), 41 + U(28)))
+            .map(|_| -> Result<_, Self::Error> {
+                let diff = bitstream.read_u32(0, 1 + U(3), 9 + U(5), 41 + U(28))?;
+                let block_idx = if let Some(last_block_idx) = last_block_idx {
+                    last_block_idx.saturating_add(diff + 1)
+                } else {
+                    diff
+                };
+                if block_idx > (3 << 26) {
+                    tracing::error!(value = block_idx, "reset_points too large");
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "reset_points too large",
+                    ));
+                }
+                last_block_idx = Some(block_idx);
+                Ok(block_idx)
+            })
             .collect::<Result<_, _>>()?;
 
         let num_extra_zero_runs = bitstream.read_u32(0, 1 + U(2), 4 + U(4), 20 + U(16))?;
+        let mut last_block_idx: Option<u32> = None;
         let extra_zero_runs = (0..num_extra_zero_runs)
             .map(|_| -> Result<_, jxl_bitstream::Error> {
                 let ExtraZeroRun {
                     num_runs,
                     run_length,
                 } = ExtraZeroRun::parse(bitstream, ())?;
-                Ok((run_length, num_runs))
+                let block_idx = if let Some(last_block_idx) = last_block_idx {
+                    last_block_idx.saturating_add(run_length + 1)
+                } else {
+                    run_length
+                };
+                if block_idx > (3 << 26) {
+                    tracing::error!(block_idx, "extra_zero_runs.block_idx too large");
+                    return Err(jxl_bitstream::Error::ValidationFailed(
+                        "extra_zero_runs.block_idx too large",
+                    ));
+                }
+                last_block_idx = Some(block_idx);
+                Ok((block_idx, num_runs))
             })
             .collect::<Result<_, _>>()?;
 
