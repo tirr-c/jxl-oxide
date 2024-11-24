@@ -3,7 +3,9 @@ use std::io::Write;
 
 use brotli_decompressor::DecompressorWriter;
 use jxl_bitstream::{Bitstream, U};
-use jxl_frame::data::{decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct};
+use jxl_frame::data::{
+    decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct,
+};
 use jxl_frame::Frame;
 use jxl_grid::{AlignedGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
@@ -74,7 +76,9 @@ pub struct JpegBitstreamData {
 
 impl std::fmt::Debug for JpegBitstreamData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JpegBitstreamData").field("header", &self.header).finish_non_exhaustive()
+        f.debug_struct("JpegBitstreamData")
+            .field("header", &self.header)
+            .finish_non_exhaustive()
     }
 }
 
@@ -130,11 +134,7 @@ impl JpegBitstreamData {
             ref header,
             ref data_stream,
         } = *self;
-        JpegBitstreamReconstructor::new(
-            header,
-            data_stream.get_ref(),
-            frame,
-        )
+        JpegBitstreamReconstructor::new(header, data_stream.get_ref(), frame)
     }
 
     pub fn header(&self) -> &JpegBitstreamHeader {
@@ -406,7 +406,10 @@ impl Bundle for ScanMoreInfo {
         let num_extra_zero_runs = bitstream.read_u32(0, 1 + U(2), 4 + U(4), 20 + U(16))?;
         let extra_zero_runs = (0..num_extra_zero_runs)
             .map(|_| -> Result<_, jxl_bitstream::Error> {
-                let ExtraZeroRun { num_runs, run_length } = ExtraZeroRun::parse(bitstream, ())?;
+                let ExtraZeroRun {
+                    num_runs,
+                    run_length,
+                } = ExtraZeroRun::parse(bitstream, ())?;
                 Ok((run_length, num_runs))
             })
             .collect::<Result<_, _>>()?;
@@ -486,7 +489,11 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
 }
 
 impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
-    fn new(header: &'jbrd JpegBitstreamHeader, data: &'jbrd [u8], frame: &'frame Frame) -> Result<Self> {
+    fn new(
+        header: &'jbrd JpegBitstreamHeader,
+        data: &'jbrd [u8],
+        frame: &'frame Frame,
+    ) -> Result<Self> {
         let com_data_start = header.app_data_len();
         let intermarker_data_start = com_data_start + header.com_data_len();
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
@@ -499,8 +506,12 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             return Err(Error::InvalidData);
         }
 
-        let lf_global = frame.try_parse_lf_global::<i16>().ok_or(Error::FrameDataIncomplete)??;
-        let hf_global = frame.try_parse_hf_global(Some(&lf_global)).ok_or(Error::FrameDataIncomplete)??;
+        let lf_global = frame
+            .try_parse_lf_global::<i16>()
+            .ok_or(Error::FrameDataIncomplete)??;
+        let hf_global = frame
+            .try_parse_hf_global(Some(&lf_global))
+            .ok_or(Error::FrameDataIncomplete)??;
 
         for c in 0..3 {
             if hf_global.dequant_matrices.jpeg_quant_values(c).is_none() {
@@ -514,11 +525,16 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         let mut jpeg_upsampling_ycbcr = frame_header.jpeg_upsampling;
         jpeg_upsampling_ycbcr.swap(0, 1);
         let is_subsampled = jpeg_upsampling_ycbcr.iter().any(|&x| x != 0);
-        let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx));
+        let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| {
+            ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx)
+        });
 
         if !is_subsampled {
             let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
-            if lf_chan_corr.colour_factor != 84 || lf_chan_corr.base_correlation_x != 0.0 || lf_chan_corr.base_correlation_b != 0.0 {
+            if lf_chan_corr.colour_factor != 84
+                || lf_chan_corr.base_correlation_x != 0.0
+                || lf_chan_corr.base_correlation_b != 0.0
+            {
                 return Err(Error::InvalidData);
             }
         }
@@ -526,7 +542,12 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         let lf_groups = (0..frame.header().num_lf_groups())
             .map(|lf_group_idx| {
                 frame
-                    .try_parse_lf_group(Some(lf_global_vardct), global_ma_config, None, lf_group_idx)
+                    .try_parse_lf_group(
+                        Some(lf_global_vardct),
+                        global_ma_config,
+                        None,
+                        lf_group_idx,
+                    )
                     .ok_or(Error::FrameDataIncomplete)
                     .and_then(|r| r.map_err(Error::FrameParse))
             })
@@ -557,9 +578,8 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 let mut bitstream = pass_group.bitstream;
 
                 let pass_group = &pass_groups[group_idx as usize];
-                let hf_coeff_output = [1, 0, 2].map(|idx| unsafe {
-                    pass_group[idx].as_subgrid().as_atomic_i32()
-                });
+                let hf_coeff_output =
+                    [1, 0, 2].map(|idx| unsafe { pass_group[idx].as_subgrid().as_atomic_i32() });
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let lf_group = &lf_groups[lf_group_idx as usize];
                 let params = PassGroupParams {
@@ -588,8 +608,12 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
             let dequant_b = hf_global.dequant_matrices.jpeg_quant_values(2).unwrap();
 
-            let dequant_yx = std::iter::zip(dequant_y, dequant_x).map(|(&y, &x)| (1 << 11) * y / x).collect::<Vec<_>>();
-            let dequant_yb = std::iter::zip(dequant_y, dequant_b).map(|(&y, &b)| (1 << 11) * y / b).collect::<Vec<_>>();
+            let dequant_yx = std::iter::zip(dequant_y, dequant_x)
+                .map(|(&y, &x)| (1 << 11) * y / x)
+                .collect::<Vec<_>>();
+            let dequant_yb = std::iter::zip(dequant_y, dequant_b)
+                .map(|(&y, &b)| (1 << 11) * y / b)
+                .collect::<Vec<_>>();
             let quant_ratio = [dequant_yx, dequant_yb];
 
             let groups_per_row = frame_header.groups_per_row();
@@ -605,8 +629,12 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
                 let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
                 let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
-                let x_from_y = x_from_y.as_subgrid().subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
-                let b_from_y = b_from_y.as_subgrid().subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let x_from_y = x_from_y
+                    .as_subgrid()
+                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let b_from_y = b_from_y
+                    .as_subgrid()
+                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
                 let cfl_factor = [x_from_y, b_from_y];
 
                 let [coeff_y, coeff_x, coeff_b] = &mut pass_groups[group_idx as usize];
@@ -614,7 +642,9 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 let width = coeff_y.width();
                 let height = coeff_y.height();
                 let round_const = 1i32 << 10;
-                for ((cfl_factor, coeff), quant_ratio) in std::iter::zip(cfl_factor, coeff).zip(&quant_ratio) {
+                for ((cfl_factor, coeff), quant_ratio) in
+                    std::iter::zip(cfl_factor, coeff).zip(&quant_ratio)
+                {
                     for y in 0..height {
                         let cfl_y = y / 64;
                         let q_y = y % 8;
@@ -681,11 +711,16 @@ struct ParsedFrameData {
 
 impl ParsedFrameData {
     fn hf_coeff(&self, group_idx: u32) -> [SharedSubgrid<'_, i32>; 3] {
-        self.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid())
+        self.pass_groups[group_idx as usize]
+            .each_ref()
+            .map(|g| g.as_subgrid())
     }
 
     fn lf_quant(&self, lf_group_idx: u32) -> &[AlignedGrid<i16>] {
-        let lf_coeff = self.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap();
+        let lf_coeff = self.lf_groups[lf_group_idx as usize]
+            .lf_coeff
+            .as_ref()
+            .unwrap();
         lf_coeff.lf_quant.image().unwrap().image_channels()
     }
 }
@@ -694,7 +729,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
     pub fn write(&mut self, mut writer: impl Write) -> Result<ReconstructionStatus> {
         if self.state == ReconstructionState::Init {
             self.state = ReconstructionState::Writing;
-            writer.write_all(&[0xff, 0xd8]).map_err(Error::ReconstructionWrite)?;
+            writer
+                .write_all(&[0xff, 0xd8])
+                .map_err(Error::ReconstructionWrite)?;
         }
 
         if self.state == ReconstructionState::Done {
@@ -733,7 +770,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 header[2..4].copy_from_slice(&encoded_len_bytes);
                 header[5..7].copy_from_slice(&height_bytes);
                 header[7..9].copy_from_slice(&width_bytes);
-                writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(&header)
+                    .map_err(Error::ReconstructionWrite)?;
 
                 let mut jpeg_upsampling_ycbcr = self.frame.header().jpeg_upsampling;
                 jpeg_upsampling_ycbcr.swap(0, 1);
@@ -829,21 +868,35 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                 let num_comps = si.num_comps();
                 let header_len_bytes = (6 + 2 * num_comps as u16).to_be_bytes();
-                let header = [0xff, 0xda, header_len_bytes[0], header_len_bytes[1], num_comps];
-                writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
+                let header = [
+                    0xff,
+                    0xda,
+                    header_len_bytes[0],
+                    header_len_bytes[1],
+                    num_comps,
+                ];
+                writer
+                    .write_all(&header)
+                    .map_err(Error::ReconstructionWrite)?;
 
                 let comps = &si.component_info;
                 for c in comps {
                     let id = self.header.components[c.comp_idx as usize].id;
                     let table = (c.dc_tbl_idx << 4) | c.ac_tbl_idx;
-                    writer.write_all(&[id, table]).map_err(Error::ReconstructionWrite)?;
+                    writer
+                        .write_all(&[id, table])
+                        .map_err(Error::ReconstructionWrite)?;
                 }
 
-                writer.write_all(&[si.ss, si.se, (si.ah << 4) | si.al]).map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(&[si.ss, si.se, (si.ah << 4) | si.al])
+                    .map_err(Error::ReconstructionWrite)?;
 
                 let mut jpeg_upsampling_ycbcr = self.frame.header().jpeg_upsampling;
                 jpeg_upsampling_ycbcr.swap(0, 1);
-                let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx));
+                let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| {
+                    jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx)
+                });
 
                 let mut hsamples = comps
                     .iter()
@@ -907,7 +960,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let (qts, remainder) = self.quant_ptr.split_at(num_tables);
                 self.quant_ptr = remainder;
 
-                let encoded_len = 2 + 65 * num_tables + 64 * qts.iter().filter(|qt| qt.precision != 0).count();
+                let encoded_len =
+                    2 + 65 * num_tables + 64 * qts.iter().filter(|qt| qt.precision != 0).count();
                 let mut header = [0xff, 0xdb, 0, 0];
                 header[2..].copy_from_slice(&(encoded_len as u16).to_be_bytes());
                 writer
@@ -915,7 +969,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     .map_err(Error::ReconstructionWrite)?;
 
                 for qt in qts {
-                    let channel = self.header.components.iter().position(|c| c.q_idx == qt.index);
+                    let channel = self
+                        .header
+                        .components
+                        .iter()
+                        .position(|c| c.q_idx == qt.index);
                     let q = channel.and_then(|mut channel| {
                         if channel <= 1 {
                             channel ^= 1;
@@ -929,7 +987,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         let q_val = self.last_quant_val.as_deref_mut().unwrap();
 
                         // Transposed for DCT8
-                        for (&(y, x), q_val) in std::iter::zip(jxl_vardct::DCT8_NATURAL_ORDER, q_val) {
+                        for (&(y, x), q_val) in
+                            std::iter::zip(jxl_vardct::DCT8_NATURAL_ORDER, q_val)
+                        {
                             *q_val = q[x as usize + 8 * y as usize] as u16
                         }
                     }
@@ -954,9 +1014,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         buf
                     };
 
-                    writer
-                        .write_all(&buf)
-                        .map_err(Error::ReconstructionWrite)?;
+                    writer.write_all(&buf).map_err(Error::ReconstructionWrite)?;
                 }
 
                 ReconstructionStatus::Done
@@ -966,7 +1024,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
             0xdd => {
                 let interval = (self.header.restart_interval as u16).to_be_bytes();
                 let bytes = [0xff, 0xdd, 0, 4, interval[0], interval[1]];
-                writer.write_all(&bytes).map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(&bytes)
+                    .map_err(Error::ReconstructionWrite)?;
                 if self.header.restart_interval != 0 {
                     self.restart_interval = Some(self.header.restart_interval);
                 }
@@ -979,19 +1039,29 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let encoded_len = ((am.length - 1) as u16).to_be_bytes();
                 match am.ty {
                     0 => {
-                        writer.write_all(&[0xff]).map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(&[0xff])
+                            .map_err(Error::ReconstructionWrite)?;
                         let (app_data, next) = self.app_data.split_at(am.length as usize);
                         self.app_data = next;
-                        writer.write_all(app_data).map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(app_data)
+                            .map_err(Error::ReconstructionWrite)?;
                         ReconstructionStatus::Done
                     }
                     1 => {
                         let header = [0xff, 0xe2, encoded_len[0], encoded_len[1]];
-                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
-                        writer.write_all(b"ICC_PROFILE\0").map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(&header)
+                            .map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(b"ICC_PROFILE\0")
+                            .map_err(Error::ReconstructionWrite)?;
                         let curr = self.next_icc_marker as u8 + 1;
                         let total = self.num_icc_markers as u8;
-                        writer.write_all(&[curr, total]).map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(&[curr, total])
+                            .map_err(Error::ReconstructionWrite)?;
 
                         let from = self.icc_marker_offset;
                         let len = am.length as usize - 17;
@@ -1001,14 +1071,22 @@ impl JpegBitstreamReconstructor<'_, '_> {
                     }
                     2 => {
                         let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
-                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
-                        writer.write_all(b"Exif\0\0").map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(&header)
+                            .map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(b"Exif\0\0")
+                            .map_err(Error::ReconstructionWrite)?;
                         ReconstructionStatus::WriteExif
                     }
                     3 => {
                         let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
-                        writer.write_all(&header).map_err(Error::ReconstructionWrite)?;
-                        writer.write_all(b"http://ns.adobe.com/xap/1.0/").map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(&header)
+                            .map_err(Error::ReconstructionWrite)?;
+                        writer
+                            .write_all(b"http://ns.adobe.com/xap/1.0/")
+                            .map_err(Error::ReconstructionWrite)?;
                         ReconstructionStatus::WriteXml
                     }
                     _ => unreachable!(),
@@ -1020,8 +1098,12 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let length = *self.com_length.next().ok_or(Error::InvalidData)?;
                 let (com_data, next) = self.com_data.split_at(length as usize);
                 self.com_data = next;
-                writer.write_all(&[0xff, 0xfe]).map_err(Error::ReconstructionWrite)?;
-                writer.write_all(com_data).map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(&[0xff, 0xfe])
+                    .map_err(Error::ReconstructionWrite)?;
+                writer
+                    .write_all(com_data)
+                    .map_err(Error::ReconstructionWrite)?;
                 ReconstructionStatus::Done
             }
 
@@ -1038,8 +1120,22 @@ impl JpegBitstreamReconstructor<'_, '_> {
         })
     }
 
-    fn process_sequential_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
+    fn process_sequential_scan(
+        &mut self,
+        params: ScanParams,
+        mut writer: impl Write,
+    ) -> Result<()> {
+        let ScanParams {
+            si,
+            smi,
+            upsampling_shifts_ycbcr,
+            hsamples,
+            vsamples,
+            max_hsample,
+            max_vsample,
+            w8,
+            h8,
+        } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
 
@@ -1051,19 +1147,23 @@ impl JpegBitstreamReconstructor<'_, '_> {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
 
-                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let group_idx = frame_header
+                    .group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample))
+                    .unwrap();
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
 
                 let hf_coeff = self.parsed.hf_coeff(group_idx);
                 let lf_quant = self.parsed.lf_quant(lf_group_idx);
 
-                for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
-                    let dc_table = self
-                        .dc_tables[c.dc_tbl_idx as usize]
+                for ((cidx, c), (&hs, &vs)) in comps
+                    .iter()
+                    .enumerate()
+                    .zip(std::iter::zip(&hsamples, &vsamples))
+                {
+                    let dc_table = self.dc_tables[c.dc_tbl_idx as usize]
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
-                    let ac_table = self
-                        .ac_tables[c.ac_tbl_idx as usize]
+                    let ac_table = self.ac_tables[c.ac_tbl_idx as usize]
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
 
@@ -1088,7 +1188,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             let x_dc = (x_dc & group_width_mask) as usize;
                             let x_ac_start = (x_ac_start & group_width_mask) as usize;
 
-                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+                            let hf_coeff = hf_coeff.subgrid(
+                                x_ac_start..(x_ac_start + 8),
+                                y_ac_start..(y_ac_start + 8),
+                            );
 
                             let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
                             let diff = state.update_dc_pred(cidx, coeff);
@@ -1109,7 +1212,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut remaining = &*ac_coeffs;
-                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0)
+                            {
                                 let coeff = remaining[nonzero_idx];
                                 remaining = &remaining[nonzero_idx + 1..];
 
@@ -1166,8 +1270,22 @@ impl JpegBitstreamReconstructor<'_, '_> {
         Ok(())
     }
 
-    fn process_progressive_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
+    fn process_progressive_scan(
+        &mut self,
+        params: ScanParams,
+        mut writer: impl Write,
+    ) -> Result<()> {
+        let ScanParams {
+            si,
+            smi,
+            upsampling_shifts_ycbcr,
+            hsamples,
+            vsamples,
+            max_hsample,
+            max_vsample,
+            w8,
+            h8,
+        } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
 
@@ -1184,19 +1302,23 @@ impl JpegBitstreamReconstructor<'_, '_> {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
 
-                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let group_idx = frame_header
+                    .group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample))
+                    .unwrap();
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
 
                 let hf_coeff = self.parsed.hf_coeff(group_idx);
                 let lf_quant = self.parsed.lf_quant(lf_group_idx);
 
-                for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
-                    let dc_table = self
-                        .dc_tables[c.dc_tbl_idx as usize]
+                for ((cidx, c), (&hs, &vs)) in comps
+                    .iter()
+                    .enumerate()
+                    .zip(std::iter::zip(&hsamples, &vsamples))
+                {
+                    let dc_table = self.dc_tables[c.dc_tbl_idx as usize]
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
-                    let ac_table = self
-                        .ac_tables[c.ac_tbl_idx as usize]
+                    let ac_table = self.ac_tables[c.ac_tbl_idx as usize]
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
                     if last_ac_table.is_none() {
@@ -1222,7 +1344,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             let x_dc = (x_dc & group_width_mask) as usize;
                             let x_ac_start = (x_ac_start & group_width_mask) as usize;
 
-                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+                            let hf_coeff = hf_coeff.subgrid(
+                                x_ac_start..(x_ac_start + 8),
+                                y_ac_start..(y_ac_start + 8),
+                            );
 
                             if si.ss == 0 {
                                 let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
@@ -1241,7 +1366,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
-                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize] {
+                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize]
+                            {
                                 let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
                                 let coeff = if coeff < 0 {
                                     -((-coeff) >> al)
@@ -1252,7 +1378,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut remaining = &*ac_coeffs;
-                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
+                            while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0)
+                            {
                                 state.emit_eobrun(last_ac_table.unwrap());
 
                                 let coeff = remaining[nonzero_idx];
@@ -1322,8 +1449,22 @@ impl JpegBitstreamReconstructor<'_, '_> {
         Ok(())
     }
 
-    fn process_refinement_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
+    fn process_refinement_scan(
+        &mut self,
+        params: ScanParams,
+        mut writer: impl Write,
+    ) -> Result<()> {
+        let ScanParams {
+            si,
+            smi,
+            upsampling_shifts_ycbcr,
+            hsamples,
+            vsamples,
+            max_hsample,
+            max_vsample,
+            w8,
+            h8,
+        } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
 
@@ -1340,15 +1481,16 @@ impl JpegBitstreamReconstructor<'_, '_> {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
 
-                let group_idx = frame_header.group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample)).unwrap();
+                let group_idx = frame_header
+                    .group_idx_from_coord(x8 << (3 + max_hsample), y8 << (3 + max_vsample))
+                    .unwrap();
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
 
                 let hf_coeff = self.parsed.hf_coeff(group_idx);
                 let lf_quant = self.parsed.lf_quant(lf_group_idx);
 
                 for (c, (&hs, &vs)) in comps.iter().zip(std::iter::zip(&hsamples, &vsamples)) {
-                    let ac_table = self
-                        .ac_tables[c.ac_tbl_idx as usize]
+                    let ac_table = self.ac_tables[c.ac_tbl_idx as usize]
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
                     if last_ac_table.is_none() {
@@ -1374,7 +1516,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             let x_dc = (x_dc & group_width_mask) as usize;
                             let x_ac_start = (x_ac_start & group_width_mask) as usize;
 
-                            let hf_coeff = hf_coeff.subgrid(x_ac_start..(x_ac_start + 8), y_ac_start..(y_ac_start + 8));
+                            let hf_coeff = hf_coeff.subgrid(
+                                x_ac_start..(x_ac_start + 8),
+                                y_ac_start..(y_ac_start + 8),
+                            );
 
                             if si.ss == 0 {
                                 state.emit_eobrun(last_ac_table.unwrap());
@@ -1384,7 +1529,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut ac_coeffs = Vec::with_capacity((se - ss) as usize);
-                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize] {
+                            for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize]
+                            {
                                 let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
                                 let coeff = if coeff < 0 {
                                     -((-coeff) >> al)
@@ -1395,7 +1541,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut remaining = &*ac_coeffs;
-                            while let Some(nonzero_idx) = remaining.iter().position(|x| *x == 1 || *x == -1) {
+                            while let Some(nonzero_idx) =
+                                remaining.iter().position(|x| *x == 1 || *x == -1)
+                            {
                                 state.emit_eobrun(last_ac_table.unwrap());
 
                                 let mut zero_runs = 0u8;
@@ -1407,12 +1555,15 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                         if zero_runs == 16 {
                                             let (len, bits) = ac_table.lookup(0xf0);
                                             state.bit_writer.write_huffman(bits, len);
-                                            state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                            state
+                                                .bit_writer
+                                                .write_raw(refinement_bits, refinement_bitlen);
                                             zero_runs = 0;
                                             refinement_bitlen = 0;
                                         }
                                     } else {
-                                        refinement_bits = (refinement_bits << 1) | (coeff & 1) as u64;
+                                        refinement_bits =
+                                            (refinement_bits << 1) | (coeff & 1) as u64;
                                         refinement_bitlen += 1;
                                     }
                                 }
@@ -1425,10 +1576,13 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 let (len, bits) = ac_table.lookup(sym);
                                 state.bit_writer.write_huffman(bits, len);
                                 state.bit_writer.write_raw(bit, 1);
-                                state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                state
+                                    .bit_writer
+                                    .write_raw(refinement_bits, refinement_bitlen);
                             }
 
-                            let mut remaining_zrl = smi.extra_zero_runs.get(&block_idx).copied().unwrap_or(0);
+                            let mut remaining_zrl =
+                                smi.extra_zero_runs.get(&block_idx).copied().unwrap_or(0);
                             if remaining_zrl > 0 {
                                 state.emit_eobrun(last_ac_table.unwrap());
                             }
@@ -1442,7 +1596,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                     zero_runs += 1;
                                     if remaining_zrl > 0 && zero_runs == 16 {
                                         state.bit_writer.write_huffman(zrl_bits, zrl_len);
-                                        state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                        state
+                                            .bit_writer
+                                            .write_raw(refinement_bits, refinement_bitlen);
                                         zero_runs = 0;
                                         refinement_bitlen = 0;
                                         remaining_zrl -= 1;
@@ -1455,7 +1611,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                             for _ in 0..remaining_zrl {
                                 state.bit_writer.write_huffman(zrl_bits, zrl_len);
-                                state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
+                                state
+                                    .bit_writer
+                                    .write_raw(refinement_bits, refinement_bitlen);
                                 zero_runs = 0;
                                 refinement_bitlen = 0;
                             }
@@ -1508,8 +1666,7 @@ struct ScanParams<'jbrd> {
     h8: u32,
 }
 
-impl<'jbrd> ScanParams<'jbrd> {
-}
+impl<'jbrd> ScanParams<'jbrd> {}
 
 struct ScanState {
     bit_writer: BitWriter,
@@ -1552,7 +1709,8 @@ impl ScanState {
         let (len, bits) = ac_table.lookup((eobn as u8) << 4);
         self.bit_writer.write_huffman(bits, len);
         let mask = (1u32 << eobn) - 1;
-        self.bit_writer.write_raw((self.eobrun & mask) as u64, eobn as u8);
+        self.bit_writer
+            .write_raw((self.eobrun & mask) as u64, eobn as u8);
         self.eobrun = 0;
 
         let refinement_bits = std::mem::take(&mut self.refinement_bits);
@@ -1562,12 +1720,18 @@ impl ScanState {
         }
     }
 
-    fn flush_bit_writer(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
+    fn flush_bit_writer(
+        &mut self,
+        padding_bitstream: Option<&mut Bitstream>,
+        mut writer: impl Write,
+    ) -> Result<()> {
         let mut bit_writer = std::mem::replace(&mut self.bit_writer, BitWriter::new());
         let padding_needed = bit_writer.padding_bits();
         if padding_needed != 0 {
             let bits = if let Some(padding_bitstream) = padding_bitstream {
-                padding_bitstream.read_bits(padding_needed).map_err(|_| Error::InvalidData)?
+                padding_bitstream
+                    .read_bits(padding_needed)
+                    .map_err(|_| Error::InvalidData)?
             } else {
                 (-1i32) as u32
             };
@@ -1575,12 +1739,18 @@ impl ScanState {
         }
 
         let bytes = bit_writer.finalize();
-        writer.write_all(&bytes).map_err(Error::ReconstructionWrite)?;
+        writer
+            .write_all(&bytes)
+            .map_err(Error::ReconstructionWrite)?;
 
         Ok(())
     }
 
-    fn restart(&mut self, padding_bitstream: Option<&mut Bitstream>, mut writer: impl Write) -> Result<()> {
+    fn restart(
+        &mut self,
+        padding_bitstream: Option<&mut Bitstream>,
+        mut writer: impl Write,
+    ) -> Result<()> {
         assert_eq!(self.eobrun, 0);
         self.dc_pred.fill(0);
         self.flush_bit_writer(padding_bitstream, &mut writer)?;
@@ -1603,10 +1773,7 @@ enum ReconstructionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconstructionStatus {
     Done,
-    WriteIcc {
-        from: usize,
-        len: usize,
-    },
+    WriteIcc { from: usize, len: usize },
     WriteExif,
     WriteXml,
 }

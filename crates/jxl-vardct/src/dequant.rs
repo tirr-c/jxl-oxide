@@ -618,13 +618,16 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
         };
 
         let jpeg_matrices = match &param_list[0].encoding {
-            DequantMatrixParamsEncoding::Raw { denominator, params } if (1.0 / denominator).round() as i32 == 2040 => {
-                params.image().map(|image| {
-                    image.image_channels().iter().map(|channel| {
-                        channel.buf().to_vec()
-                    }).collect::<Vec<_>>()
-                })
-            }
+            DequantMatrixParamsEncoding::Raw {
+                denominator,
+                params,
+            } if (1.0 / denominator).round() as i32 == 2040 => params.image().map(|image| {
+                image
+                    .image_channels()
+                    .iter()
+                    .map(|channel| channel.buf().to_vec())
+                    .collect::<Vec<_>>()
+            }),
             _ => None,
         };
         let jpeg_matrices = jpeg_matrices.unwrap_or_default();

@@ -64,7 +64,8 @@ impl BitWriter {
         }
 
         if !has_ff_byte(out) {
-            self.output.extend_from_slice(&out.to_be_bytes()[..valid_bytes]);
+            self.output
+                .extend_from_slice(&out.to_be_bytes()[..valid_bytes]);
             return self.output;
         }
 

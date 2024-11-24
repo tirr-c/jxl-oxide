@@ -102,24 +102,28 @@ impl std::fmt::Debug for BuiltHuffmanTable {
         struct Helper<'a>(&'a BuiltHuffmanTable);
         impl std::fmt::Debug for Helper<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let entries = std::iter::zip(&self.0.lengths, &self.0.bits).enumerate().filter_map(|(sym, (&len, &bit))| {
-                    if len == 0 {
-                        return None;
-                    }
+                let entries = std::iter::zip(&self.0.lengths, &self.0.bits)
+                    .enumerate()
+                    .filter_map(|(sym, (&len, &bit))| {
+                        if len == 0 {
+                            return None;
+                        }
 
-                    let bit = bit >> (64 - len);
-                    let bits_str = format!("{bit:b}");
-                    let pad = len as usize - bits_str.len();
-                    let mut s = "0".repeat(pad);
-                    s.push_str(&bits_str);
-                    Some((sym, s))
-                });
+                        let bit = bit >> (64 - len);
+                        let bits_str = format!("{bit:b}");
+                        let pad = len as usize - bits_str.len();
+                        let mut s = "0".repeat(pad);
+                        s.push_str(&bits_str);
+                        Some((sym, s))
+                    });
 
                 f.debug_map().entries(entries).finish()
             }
         }
 
-        f.debug_struct("BulitHuffmanTable").field("mapping", &Helper(self)).finish()
+        f.debug_struct("BulitHuffmanTable")
+            .field("mapping", &Helper(self))
+            .finish()
     }
 }
 
