@@ -730,6 +730,8 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // SOS
             0xda => {
+                let frame_header = self.frame.header();
+
                 let idx = self.scan_info_ptr;
                 let si = &self.header.scan_info[idx];
                 let smi = &self.header.scan_more_info[idx];
@@ -753,25 +755,46 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let jpeg_upsampling_ycbcr = [1, 0, 2].map(|idx| jpeg_upsampling[idx]);
                 let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| jxl_modular::ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx));
 
-                let (hsamples, vsamples) = if num_comps == 1 {
-                    (vec![1], vec![1])
-                } else {
-                    let hsamples = comps
-                        .iter()
-                        .map(|c| [1u32, 2, 2, 1][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
-                        .collect::<Vec<_>>();
-                    let vsamples = comps
-                        .iter()
-                        .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
-                        .collect::<Vec<_>>();
-                    (hsamples, vsamples)
-                };
+                let mut hsamples = comps
+                    .iter()
+                    .map(|c| [1u32, 2, 2, 1][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                    .collect::<Vec<_>>();
+                let mut vsamples = comps
+                    .iter()
+                    .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
+                    .collect::<Vec<_>>();
+
+                let mut max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
+                let mut max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+                let mut w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
+                let mut h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
+
+                if num_comps == 1 {
+                    let full_w8 = frame_header.width.div_ceil(8);
+                    let full_h8 = frame_header.height.div_ceil(8);
+                    if (1 << max_hsample) == hsamples[0] {
+                        w8 = full_w8;
+                        max_hsample = 0;
+                    }
+                    if (1 << max_vsample) == vsamples[0] {
+                        h8 = full_h8;
+                        max_vsample = 0;
+                    }
+
+                    hsamples = vec![1];
+                    vsamples = vec![1];
+                }
+
                 let params = ScanParams {
                     si,
                     smi,
                     upsampling_shifts_ycbcr,
                     hsamples,
                     vsamples,
+                    max_hsample,
+                    max_vsample,
+                    w8,
+                    h8,
                 };
 
                 if !self.is_progressive {
@@ -926,14 +949,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
     }
 
     fn process_sequential_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
-
-        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
-        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
-        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
-        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
 
         let group_dim = frame_header.group_dim();
 
@@ -1057,14 +1075,10 @@ impl JpegBitstreamReconstructor<'_, '_> {
     }
 
     fn process_progressive_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        dbg!(&params);
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
-
-        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
-        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
-        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
-        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
 
         let ss = si.ss.max(1);
         let se = si.se + 1;
@@ -1133,8 +1147,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 let (len, bits) = dc_table.lookup(bitlen as u8);
                                 state.bit_writer.write_huffman(bits, len);
                                 state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
-
-                                last_ac_table = Some(ac_table);
                             }
 
                             let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
@@ -1173,8 +1185,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 let (len, bits) = ac_table.lookup(sym);
                                 state.bit_writer.write_huffman(bits, len);
                                 state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
-
-                                last_ac_table = Some(ac_table);
                             }
 
                             let mut num_zeros = remaining.len() as i32;
@@ -1186,10 +1196,12 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 }
 
                                 num_zeros -= ezr as i32 * 16;
-                                last_ac_table = Some(ac_table);
                             }
 
                             if num_zeros > 0 {
+                                if state.eobrun == 0 {
+                                    last_ac_table = Some(ac_table);
+                                }
                                 state.eobrun += 1;
                                 if state.eobrun >= 32767 {
                                     state.emit_eobrun(last_ac_table.unwrap());
@@ -1219,14 +1231,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
     }
 
     fn process_refinement_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples } = params;
+        let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
-
-        let max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
-        let max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
-        let w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
-        let h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
 
         let ss = si.ss.max(1);
         let se = si.se + 1;
@@ -1282,7 +1289,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
                                 let coeff = coeff >> al;
                                 state.bit_writer.write_raw(coeff as u64, 1);
-                                last_ac_table = Some(ac_table);
                             }
 
                             let mut ac_coeffs = Vec::with_capacity((se - ss) as usize);
@@ -1328,13 +1334,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 state.bit_writer.write_huffman(bits, len);
                                 state.bit_writer.write_raw(bit, 1);
                                 state.bit_writer.write_raw(refinement_bits, refinement_bitlen);
-                                last_ac_table = Some(ac_table);
                             }
 
                             let mut remaining_zrl = smi.extra_zero_runs.get(&block_idx).copied().unwrap_or(0);
                             if remaining_zrl > 0 {
                                 state.emit_eobrun(last_ac_table.unwrap());
-                                last_ac_table = Some(ac_table);
                             }
 
                             let (zrl_len, zrl_bits) = ac_table.lookup(0xf0);
@@ -1365,6 +1369,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             if zero_runs > 0 || refinement_bitlen > 0 {
+                                if state.eobrun == 0 {
+                                    last_ac_table = Some(ac_table);
+                                }
                                 state.eobrun += 1;
                                 state.buffer_refinement_bits(refinement_bits, refinement_bitlen);
                                 if state.eobrun >= 32767 {
@@ -1395,12 +1402,17 @@ impl JpegBitstreamReconstructor<'_, '_> {
     }
 }
 
+#[derive(Debug)]
 struct ScanParams<'jbrd> {
     si: &'jbrd ScanInfo,
     smi: &'jbrd ScanMoreInfo,
     upsampling_shifts_ycbcr: [ChannelShift; 3],
     hsamples: Vec<u32>,
     vsamples: Vec<u32>,
+    max_hsample: u32,
+    max_vsample: u32,
+    w8: u32,
+    h8: u32,
 }
 
 struct ScanState {
