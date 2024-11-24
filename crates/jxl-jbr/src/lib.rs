@@ -184,7 +184,6 @@ impl Bundle for JpegBitstreamHeader {
             }
             markers.push(marker_bits);
         }
-        eprintln!("{markers:#x?}");
 
         let app_markers = (0..num_app_markers)
             .map(|_| AppMarker::parse(bitstream, ()))
@@ -545,9 +544,10 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                     pass_group[idx].as_subgrid().as_atomic_i32()
                 });
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let lf_group = &lf_groups[lf_group_idx as usize];
                 let params = PassGroupParams {
                     frame_header,
-                    lf_group: &lf_groups[lf_group_idx as usize],
+                    lf_group,
                     pass_idx,
                     group_idx,
                     global_ma_config,
@@ -563,6 +563,59 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 };
 
                 decode_pass_group(&mut bitstream, params).map_err(Error::FrameParse)?;
+            }
+        }
+
+        if !header.is_gray && frame_header.jpeg_upsampling.iter().all(|&x| x == 0) {
+            let dequant_x = hf_global.dequant_matrices.jpeg_quant_values(0).unwrap();
+            let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
+            let dequant_b = hf_global.dequant_matrices.jpeg_quant_values(2).unwrap();
+
+            let dequant_yx = std::iter::zip(dequant_y, dequant_x).map(|(&y, &x)| (1 << 11) * y / x).collect::<Vec<_>>();
+            let dequant_yb = std::iter::zip(dequant_y, dequant_b).map(|(&y, &b)| (1 << 11) * y / b).collect::<Vec<_>>();
+            let quant_ratio = [dequant_yx, dequant_yb];
+
+            let groups_per_row = frame_header.groups_per_row();
+            for group_idx in 0..num_groups {
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let lf_group = &lf_groups[lf_group_idx as usize];
+
+                let group_x_in_lf = (group_idx % groups_per_row) % 8;
+                let group_y_in_lf = (group_idx / groups_per_row) % 8;
+                let cfl_x = group_x_in_lf as usize * 4;
+                let cfl_y = group_y_in_lf as usize * 4;
+                let x_from_y = &lf_group.hf_meta.as_ref().unwrap().x_from_y;
+                let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
+                let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
+                let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
+                let x_from_y = x_from_y.as_subgrid().subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let b_from_y = b_from_y.as_subgrid().subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let cfl_factor = [x_from_y, b_from_y];
+
+                let [coeff_y, coeff_x, coeff_b] = &mut pass_groups[group_idx as usize];
+                let coeff = [coeff_x, coeff_b];
+                let width = coeff_y.width();
+                let height = coeff_y.height();
+                let round_const = 1i32 << 10;
+                for ((cfl_factor, coeff), quant_ratio) in std::iter::zip(cfl_factor, coeff).zip(&quant_ratio) {
+                    for y in 0..height {
+                        let cfl_y = y / 64;
+                        let q_y = y % 8;
+                        for x in 0..width {
+                            let cfl_x = x / 64;
+                            let q_x = x % 8;
+                            // transposed
+                            let q = quant_ratio[q_y + 8 * q_x];
+                            let coeff_y = *coeff_y.get(x, y).unwrap();
+
+                            let factor = *cfl_factor.get(cfl_x, cfl_y);
+                            let scale_factor = factor * (1 << 11) / 84;
+                            let q_scale = (q * scale_factor + round_const) >> 11;
+                            let cfl_factor = (coeff_y * q_scale + round_const) >> 11;
+                            *coeff.get_mut(x, y).unwrap() += cfl_factor;
+                        }
+                    }
+                }
             }
         }
 
@@ -1075,8 +1128,9 @@ impl JpegBitstreamReconstructor<'_, '_> {
     }
 
     fn process_progressive_scan(&mut self, params: ScanParams, mut writer: impl Write) -> Result<()> {
-        dbg!(&params);
         let ScanParams { si, smi, upsampling_shifts_ycbcr, hsamples, vsamples, max_hsample, max_vsample, w8, h8 } = params;
+        // let enable_dbg = si.ss == 1 && si.se == 2 && si.component_info[0].comp_idx == 1;
+        let enable_dbg = false;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
 
@@ -1150,6 +1204,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             }
 
                             let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
+                            if enable_dbg {
+                                for dy in 0..8 {
+                                    eprintln!("{dy}: {:?}", hf_coeff.get_row(dy));
+                                }
+                            }
                             for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize] {
                                 let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
                                 let coeff = if coeff < 0 {
@@ -1159,10 +1218,17 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 };
                                 ac_coeffs.push(coeff);
                             }
+                            if enable_dbg {
+                                eprintln!("{ac_coeffs:?}");
+                            }
 
                             let mut remaining = &*ac_coeffs;
                             while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
-                                state.emit_eobrun(last_ac_table.unwrap());
+                                if enable_dbg {
+                                    state.emit_eobrun_dbg(last_ac_table.unwrap());
+                                } else {
+                                    state.emit_eobrun(last_ac_table.unwrap());
+                                }
 
                                 let coeff = remaining[nonzero_idx];
                                 remaining = &remaining[nonzero_idx + 1..];
@@ -1448,6 +1514,25 @@ impl ScanState {
     }
 
     fn emit_eobrun(&mut self, ac_table: &huffman::BuiltHuffmanTable) {
+        if self.eobrun == 0 {
+            return;
+        }
+
+        let eobn = 31 - self.eobrun.leading_zeros();
+        let (len, bits) = ac_table.lookup((eobn as u8) << 4);
+        self.bit_writer.write_huffman(bits, len);
+        let mask = (1u32 << eobn) - 1;
+        self.bit_writer.write_raw((self.eobrun & mask) as u64, eobn as u8);
+        self.eobrun = 0;
+
+        let refinement_bits = std::mem::take(&mut self.refinement_bits);
+        let refinement_bitlen = std::mem::take(&mut self.refinement_bitlen);
+        for (bits, bitlen) in std::iter::zip(refinement_bits, refinement_bitlen) {
+            self.bit_writer.write_raw(bits, bitlen);
+        }
+    }
+
+    fn emit_eobrun_dbg(&mut self, ac_table: &huffman::BuiltHuffmanTable) {
         if self.eobrun == 0 {
             return;
         }
