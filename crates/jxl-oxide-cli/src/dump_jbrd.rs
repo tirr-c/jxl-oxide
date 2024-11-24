@@ -27,7 +27,8 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
     let frame = image.frame_by_keyframe(0).unwrap();
     let mut reconstructor = jbrd.reconstruct(frame).map_err(|e| Error::Reconstruct(e.into()))?;
 
-    let mut output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
+    let output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
+    let mut output = std::io::BufWriter::new(output);
     loop {
         let status = reconstructor.write(&mut output).map_err(|e| Error::Reconstruct(e.into()))?;
         match status {
