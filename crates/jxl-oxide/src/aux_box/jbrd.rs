@@ -37,7 +37,7 @@ impl Jbrd {
 
     pub fn finalize(&mut self) -> crate::Result<()> {
         match self {
-            Jbrd::Uninit(_) => return Err(jxl_jbr::Error::InvalidData.into()),
+            Jbrd::Uninit(_) => Err(jxl_jbr::Error::InvalidData.into()),
             Jbrd::Init(data) => data.finalize().map_err(From::from),
         }
     }
