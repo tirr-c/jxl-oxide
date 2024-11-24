@@ -7,7 +7,7 @@ use jxl_frame::data::{
     decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct,
 };
 use jxl_frame::header::Encoding;
-use jxl_frame::Frame;
+use jxl_frame::{Frame, FrameHeader};
 use jxl_grid::{AlignedGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
 use jxl_oxide_common::Bundle;
@@ -17,6 +17,9 @@ mod huffman;
 
 use bit_writer::BitWriter;
 use huffman::{BuiltHuffmanTable, HuffmanCode};
+
+const CFL_FIXED_POINT_BITS: usize = 11;
+const CFL_DEFAULT_COLOR_FACTOR: i32 = 84;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -540,7 +543,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
 
         if !is_subsampled {
             let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
-            if lf_chan_corr.colour_factor != 84
+            if lf_chan_corr.colour_factor != CFL_DEFAULT_COLOR_FACTOR as u32
                 || lf_chan_corr.base_correlation_x != 0.0
                 || lf_chan_corr.base_correlation_b != 0.0
             {
@@ -613,66 +616,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         }
 
         if !header.is_gray && !is_subsampled {
-            let dequant_x = hf_global.dequant_matrices.jpeg_quant_values(0).unwrap();
-            let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
-            let dequant_b = hf_global.dequant_matrices.jpeg_quant_values(2).unwrap();
-
-            let dequant_yx = std::iter::zip(dequant_y, dequant_x)
-                .map(|(&y, &x)| (1 << 11) * y / x)
-                .collect::<Vec<_>>();
-            let dequant_yb = std::iter::zip(dequant_y, dequant_b)
-                .map(|(&y, &b)| (1 << 11) * y / b)
-                .collect::<Vec<_>>();
-            let quant_ratio = [dequant_yx, dequant_yb];
-
-            let groups_per_row = frame_header.groups_per_row();
-            for group_idx in 0..num_groups {
-                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-                let lf_group = &lf_groups[lf_group_idx as usize];
-
-                let group_x_in_lf = (group_idx % groups_per_row) % 8;
-                let group_y_in_lf = (group_idx / groups_per_row) % 8;
-                let cfl_x = group_x_in_lf as usize * 4;
-                let cfl_y = group_y_in_lf as usize * 4;
-                let x_from_y = &lf_group.hf_meta.as_ref().unwrap().x_from_y;
-                let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
-                let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
-                let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
-                let x_from_y = x_from_y
-                    .as_subgrid()
-                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
-                let b_from_y = b_from_y
-                    .as_subgrid()
-                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
-                let cfl_factor = [x_from_y, b_from_y];
-
-                let [coeff_y, coeff_x, coeff_b] = &mut pass_groups[group_idx as usize];
-                let coeff = [coeff_x, coeff_b];
-                let width = coeff_y.width();
-                let height = coeff_y.height();
-                let round_const = 1i32 << 10;
-                for ((cfl_factor, coeff), quant_ratio) in
-                    std::iter::zip(cfl_factor, coeff).zip(&quant_ratio)
-                {
-                    for y in 0..height {
-                        let cfl_y = y / 64;
-                        let q_y = y % 8;
-                        for x in 0..width {
-                            let cfl_x = x / 64;
-                            let q_x = x % 8;
-                            // transposed
-                            let q = quant_ratio[q_y + 8 * q_x];
-                            let coeff_y = *coeff_y.get(x, y).unwrap();
-
-                            let factor = *cfl_factor.get(cfl_x, cfl_y);
-                            let scale_factor = factor * (1 << 11) / 84;
-                            let q_scale = (q * scale_factor + round_const) >> 11;
-                            let cfl_factor = (coeff_y * q_scale + round_const) >> 11;
-                            *coeff.get_mut(x, y).unwrap() += cfl_factor;
-                        }
-                    }
-                }
-            }
+            Self::integer_cfl(frame_header, &hf_global, &lf_groups, &mut pass_groups);
         }
 
         Ok(Self {
@@ -709,6 +653,80 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             scan_info_ptr: 0,
             tail_data: &data[tail_data_start..],
         })
+    }
+
+    // Integer chroma-from-luma, copied from libjxl.
+    fn integer_cfl(
+        frame_header: &FrameHeader,
+        hf_global: &HfGlobal,
+        lf_groups: &[LfGroup<i16>],
+        pass_groups: &mut [[AlignedGrid<i32>; 3]],
+    ) {
+        let dequant_x = hf_global.dequant_matrices.jpeg_quant_values(0).unwrap();
+        let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
+        let dequant_b = hf_global.dequant_matrices.jpeg_quant_values(2).unwrap();
+
+        let dequant_yx = std::iter::zip(dequant_y, dequant_x)
+            .map(|(&y, &x)| (1 << CFL_FIXED_POINT_BITS) * y / x)
+            .collect::<Vec<_>>();
+        let dequant_yb = std::iter::zip(dequant_y, dequant_b)
+            .map(|(&y, &b)| (1 << CFL_FIXED_POINT_BITS) * y / b)
+            .collect::<Vec<_>>();
+        let quant_ratio = [dequant_yx, dequant_yb];
+
+        let num_groups = frame_header.num_groups();
+        let groups_per_row = frame_header.groups_per_row();
+        for group_idx in 0..num_groups {
+            let [coeff_y, coeff_x, coeff_b] = &mut pass_groups[group_idx as usize];
+
+            let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+            let lf_group = &lf_groups[lf_group_idx as usize];
+
+            let group_x_in_lf = (group_idx % groups_per_row) % 8;
+            let group_y_in_lf = (group_idx / groups_per_row) % 8;
+            let cfl_x = group_x_in_lf as usize * 4;
+            let cfl_y = group_y_in_lf as usize * 4;
+            let x_from_y = &lf_group.hf_meta.as_ref().unwrap().x_from_y;
+            let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
+            let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
+            let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
+            let x_from_y = x_from_y
+                .as_subgrid()
+                .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+            let b_from_y = b_from_y
+                .as_subgrid()
+                .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+
+            let cfl_factor = [x_from_y, b_from_y];
+            let coeff = [coeff_x, coeff_b];
+            let it = std::iter::zip(cfl_factor, coeff).zip(&quant_ratio);
+
+            let width = coeff_y.width();
+            let height = coeff_y.height();
+            let rounding_const = 1i32 << (CFL_FIXED_POINT_BITS - 1);
+            for ((cfl_factor, coeff), quant_ratio) in it {
+                for y in 0..height {
+                    let cfl_y = y / 64;
+                    let q_y = y % 8;
+                    for x in 0..width {
+                        let cfl_x = x / 64;
+                        let factor = *cfl_factor.get(cfl_x, cfl_y);
+                        let coeff_y = *coeff_y.get(x, y).unwrap();
+
+                        // Dequant matrix is transposed.
+                        let q_x = x % 8;
+                        let q = quant_ratio[q_y + 8 * q_x];
+
+                        let scale_factor =
+                            factor * (1 << CFL_FIXED_POINT_BITS) / CFL_DEFAULT_COLOR_FACTOR;
+                        let q_scale = (q * scale_factor + rounding_const) >> CFL_FIXED_POINT_BITS;
+                        let cfl_factor =
+                            (coeff_y * q_scale + rounding_const) >> CFL_FIXED_POINT_BITS;
+                        *coeff.get_mut(x, y).unwrap() += cfl_factor;
+                    }
+                }
+            }
+        }
     }
 }
 
