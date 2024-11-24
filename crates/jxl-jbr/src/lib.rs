@@ -507,6 +507,10 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         let intermarker_data_start = com_data_start + header.com_data_len();
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
 
+        if frame.image_header().metadata.xyb_encoded {
+            return Err(Error::IncompatibleFrame);
+        }
+
         let frame_header = frame.header();
         if frame_header.encoding != Encoding::VarDct {
             return Err(Error::IncompatibleFrame);
@@ -619,12 +623,23 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
             Self::integer_cfl(frame_header, &hf_global, &lf_groups, &mut pass_groups);
         }
 
+        let dc_offset = if frame_header.do_ycbcr {
+            [0; 3]
+        } else {
+            let dequant_x = hf_global.dequant_matrices.jpeg_quant_values(0).unwrap();
+            let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
+            let dequant_b = hf_global.dequant_matrices.jpeg_quant_values(2).unwrap();
+            let dc_dequant = [dequant_y[0], dequant_x[0], dequant_b[0]];
+            dc_dequant.map(|q| (1024 / q) as i16)
+        };
+
         Ok(Self {
             state: ReconstructionState::Init,
             parsed: ParsedFrameData {
                 hf_global,
                 lf_groups,
                 pass_groups,
+                dc_offset,
             },
             is_progressive: false,
             restart_interval: None,
@@ -734,6 +749,7 @@ struct ParsedFrameData {
     hf_global: HfGlobal,
     lf_groups: Vec<LfGroup<i16>>,
     pass_groups: Vec<[AlignedGrid<i32>; 3]>,
+    dc_offset: [i16; 3],
 }
 
 impl ParsedFrameData {
@@ -980,6 +996,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // DQT
             0xdb => {
+                let do_ycbcr = self.frame.header().do_ycbcr;
                 let hf_global = &self.parsed.hf_global;
 
                 let last_idx = self.quant_ptr.iter().position(|qt| qt.is_last);
@@ -1002,7 +1019,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         .iter()
                         .position(|c| c.q_idx == qt.index);
                     let q = channel.and_then(|mut channel| {
-                        if channel <= 1 {
+                        if do_ycbcr && channel <= 1 {
                             channel ^= 1;
                         }
                         hf_global.dequant_matrices.jpeg_quant_values(channel)
@@ -1165,6 +1182,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
         } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
+        let dc_offset = self.parsed.dc_offset;
 
         let group_dim = frame_header.group_dim();
 
@@ -1194,9 +1212,14 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         .as_ref()
                         .ok_or(Error::InvalidData)?;
 
-                    let idx = c.comp_idx as usize;
+                    let idx = if frame_header.do_ycbcr {
+                        c.comp_idx as usize
+                    } else {
+                        [1, 0, 2][c.comp_idx as usize]
+                    };
                     let lf_quant = &lf_quant[idx];
                     let hf_coeff = hf_coeff[idx];
+                    let dc_offset = dc_offset[idx];
                     let shift = upsampling_shifts_ycbcr[idx];
                     let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
                     let group_width_mask = group_width - 1;
@@ -1220,7 +1243,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                                 y_ac_start..(y_ac_start + 8),
                             );
 
-                            let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                            let coeff = lf_quant
+                                .get(x_dc, y_dc)
+                                .unwrap()
+                                .saturating_sub(dc_offset)
+                                .clamp(-2047, 2047);
                             let diff = state.update_dc_pred(cidx, coeff);
 
                             let is_neg = diff < 0;
@@ -1315,6 +1342,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
         } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
+        let dc_offset = self.parsed.dc_offset;
 
         let ss = si.ss.max(1);
         let se = si.se + 1;
@@ -1352,9 +1380,14 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         last_ac_table = Some(ac_table);
                     }
 
-                    let idx = c.comp_idx as usize;
+                    let idx = if frame_header.do_ycbcr {
+                        c.comp_idx as usize
+                    } else {
+                        [1, 0, 2][c.comp_idx as usize]
+                    };
                     let lf_quant = &lf_quant[idx];
                     let hf_coeff = hf_coeff[idx];
+                    let dc_offset = dc_offset[idx];
                     let shift = upsampling_shifts_ycbcr[idx];
                     let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
                     let group_width_mask = group_width - 1;
@@ -1377,7 +1410,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             );
 
                             if si.ss == 0 {
-                                let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                                let coeff = lf_quant
+                                    .get(x_dc, y_dc)
+                                    .unwrap()
+                                    .saturating_sub(dc_offset)
+                                    .clamp(-2047, 2047);
                                 let coeff = coeff >> al;
                                 let diff = state.update_dc_pred(cidx, coeff);
 
@@ -1494,6 +1531,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
         } = params;
         let comps = &si.component_info;
         let frame_header = self.frame.header();
+        let dc_offset = self.parsed.dc_offset;
 
         let ss = si.ss.max(1);
         let se = si.se + 1;
@@ -1524,9 +1562,14 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         last_ac_table = Some(ac_table);
                     }
 
-                    let idx = c.comp_idx as usize;
+                    let idx = if frame_header.do_ycbcr {
+                        c.comp_idx as usize
+                    } else {
+                        [1, 0, 2][c.comp_idx as usize]
+                    };
                     let lf_quant = &lf_quant[idx];
                     let hf_coeff = hf_coeff[idx];
+                    let dc_offset = dc_offset[idx];
                     let shift = upsampling_shifts_ycbcr[idx];
                     let (group_width, group_height) = shift.shift_size((group_dim, group_dim));
                     let group_width_mask = group_width - 1;
@@ -1550,7 +1593,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                             if si.ss == 0 {
                                 state.emit_eobrun(last_ac_table.unwrap());
-                                let coeff = *lf_quant.get(x_dc, y_dc).unwrap();
+                                let coeff = lf_quant
+                                    .get(x_dc, y_dc)
+                                    .unwrap()
+                                    .saturating_sub(dc_offset)
+                                    .clamp(-2047, 2047);
                                 let coeff = coeff >> al;
                                 state.bit_writer.write_raw(coeff as u64, 1);
                             }
