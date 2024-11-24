@@ -144,7 +144,6 @@ impl JpegBitstreamData {
 
 #[derive(Debug)]
 pub struct JpegBitstreamHeader {
-    #[allow(unused)]
     is_gray: bool,
     markers: Vec<u8>,
     app_markers: Vec<AppMarker>,
@@ -1142,6 +1141,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
         let mut state = ScanState::new(comps.len());
         let mut block_idx = 0u32;
+        let mut last_ac_table = None;
         for y8 in 0..h8 {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
@@ -1152,7 +1152,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
                 let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
 
-                let mut last_ac_table = None;
                 for ((cidx, c), (&hs, &vs)) in comps.iter().enumerate().zip(std::iter::zip(&hsamples, &vsamples)) {
                     let dc_table = self
                         .dc_tables[c.dc_tbl_idx as usize]
@@ -1291,6 +1290,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
             }
         }
 
+        state.emit_eobrun(last_ac_table.unwrap());
         state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
 
         Ok(())
@@ -1309,6 +1309,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
         let mut state = ScanState::new(comps.len());
         let mut block_idx = 0u32;
+        let mut last_ac_table = None;
         for y8 in 0..h8 {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
@@ -1319,7 +1320,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let hf_coeff = self.parsed.pass_groups[group_idx as usize].each_ref().map(|g| g.as_subgrid());
                 let lf_quant = &self.parsed.lf_groups[lf_group_idx as usize].lf_coeff.as_ref().unwrap().lf_quant.image().unwrap().image_channels();
 
-                let mut last_ac_table = None;
                 for (c, (&hs, &vs)) in comps.iter().zip(std::iter::zip(&hsamples, &vsamples)) {
                     let ac_table = self
                         .ac_tables[c.ac_tbl_idx as usize]
@@ -1462,6 +1462,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
             }
         }
 
+        state.emit_eobrun(last_ac_table.unwrap());
         state.flush_bit_writer(self.padding_bitstream.as_mut(), &mut writer)?;
 
         Ok(())
