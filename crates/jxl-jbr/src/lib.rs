@@ -6,6 +6,7 @@ use jxl_bitstream::{Bitstream, U};
 use jxl_frame::data::{
     decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct,
 };
+use jxl_frame::header::Encoding;
 use jxl_frame::Frame;
 use jxl_grid::{AlignedGrid, SharedSubgrid};
 use jxl_modular::ChannelShift;
@@ -27,6 +28,7 @@ pub enum Error {
     ReconstructionDataIncomplete,
     FrameDataIncomplete,
     FrameParse(jxl_frame::Error),
+    IncompatibleFrame,
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -51,6 +53,10 @@ impl std::fmt::Display for Error {
             Error::ReconstructionDataIncomplete => write!(f, "reconstruction data is incomplete"),
             Error::FrameDataIncomplete => write!(f, "JPEG XL frame data is incomplete"),
             Error::FrameParse(e) => write!(f, "error parsing JPEG XL frame: {e}"),
+            Error::IncompatibleFrame => write!(
+                f,
+                "JPEG XL frame data is incompatible with reconstruction data"
+            ),
         }
     }
 }
@@ -499,11 +505,14 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
 
         let frame_header = frame.header();
+        if frame_header.encoding != Encoding::VarDct {
+            return Err(Error::IncompatibleFrame);
+        }
         if !frame_header.frame_type.is_normal_frame() {
-            return Err(Error::InvalidData);
+            return Err(Error::IncompatibleFrame);
         }
         if frame_header.flags.use_lf_frame() || !frame_header.flags.skip_adaptive_lf_smoothing() {
-            return Err(Error::InvalidData);
+            return Err(Error::IncompatibleFrame);
         }
 
         let lf_global = frame
@@ -515,11 +524,11 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
 
         for c in 0..3 {
             if hf_global.dequant_matrices.jpeg_quant_values(c).is_none() {
-                return Err(Error::InvalidData);
+                return Err(Error::IncompatibleFrame);
             }
         }
 
-        let lf_global_vardct = lf_global.vardct.as_ref().ok_or(Error::InvalidData)?;
+        let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
         let global_ma_config = lf_global.gmodular.ma_config();
 
         let mut jpeg_upsampling_ycbcr = frame_header.jpeg_upsampling;
@@ -535,7 +544,7 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 || lf_chan_corr.base_correlation_x != 0.0
                 || lf_chan_corr.base_correlation_b != 0.0
             {
-                return Err(Error::InvalidData);
+                return Err(Error::IncompatibleFrame);
             }
         }
 
@@ -1035,7 +1044,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // APPn
             0xe0..=0xef => {
-                let am = self.app_marker_ptr.next().ok_or(Error::InvalidData)?;
+                let am = self.app_marker_ptr.next().unwrap();
                 let encoded_len = ((am.length - 1) as u16).to_be_bytes();
                 match am.ty {
                     0 => {
@@ -1095,7 +1104,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // COM
             0xfe => {
-                let length = *self.com_length.next().ok_or(Error::InvalidData)?;
+                let length = *self.com_length.next().unwrap();
                 let (com_data, next) = self.com_data.split_at(length as usize);
                 self.com_data = next;
                 writer
@@ -1109,7 +1118,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
             // Unrecognized
             0xff => {
-                let length = *self.intermarker_length.next().ok_or(Error::InvalidData)?;
+                let length = *self.intermarker_length.next().unwrap();
                 let (data, next) = self.intermarker_data.split_at(length as usize);
                 self.intermarker_data = next;
                 writer.write_all(data).map_err(Error::ReconstructionWrite)?;
