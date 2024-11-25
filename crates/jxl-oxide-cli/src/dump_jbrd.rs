@@ -1,6 +1,4 @@
-use std::io::Write;
-
-use jxl_oxide::{AuxBoxData, JxlImage};
+use jxl_oxide::JxlImage;
 
 use crate::commands::dump_jbrd::*;
 use crate::{Error, Result};
@@ -23,45 +21,41 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
         return Ok(());
     };
 
-    let icc = image.original_icc();
     let aux_boxes = image.aux_boxes();
-    let exif = aux_boxes.first_exif().map_err(Error::ReadJxl)?;
-    let xmp = aux_boxes.first_xml();
+    let jbrd_header = jbrd.header();
+    let expected_icc_len = jbrd_header.expected_icc_len();
+    let expected_exif_len = jbrd_header.expected_exif_len();
+    let expected_xmp_len = jbrd_header.expected_xmp_len();
+
+    let icc = if expected_icc_len > 0 {
+        image.original_icc().unwrap_or(&[])
+    } else {
+        &[]
+    };
+
+    let exif = if expected_exif_len > 0 {
+        let b = aux_boxes.first_exif().map_err(Error::ReadJxl)?;
+        b.map(|x| x.payload()).unwrap_or(&[])
+    } else {
+        &[]
+    };
+
+    let xmp = if expected_xmp_len > 0 {
+        aux_boxes.first_xml().unwrap_or(&[])
+    } else {
+        &[]
+    };
 
     let frame = image.frame_by_keyframe(0).unwrap();
     let mut reconstructor = jbrd
-        .reconstruct(frame)
+        .reconstruct(frame, icc, exif, xmp)
         .map_err(|e| Error::Reconstruct(e.into()))?;
 
     let output = std::fs::File::create(output_path).map_err(Error::WriteImage)?;
     let mut output = std::io::BufWriter::new(output);
-    loop {
-        let status = reconstructor
-            .write(&mut output)
-            .map_err(|e| Error::Reconstruct(e.into()))?;
-        match status {
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::Done => break,
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteIcc { from, len } => {
-                let icc = icc.unwrap();
-                let chunk = &icc[from..][..len];
-                output.write_all(chunk).map_err(Error::WriteImage)?;
-            }
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteExif => {
-                let AuxBoxData::Data(exif) = &exif else {
-                    todo!();
-                };
-                output
-                    .write_all(exif.payload())
-                    .map_err(Error::WriteImage)?;
-            }
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteXml => {
-                let AuxBoxData::Data(xmp) = &xmp else {
-                    todo!();
-                };
-                output.write_all(xmp).map_err(Error::WriteImage)?;
-            }
-        }
-    }
+    reconstructor
+        .write(&mut output)
+        .map_err(|e| Error::Reconstruct(e.into()))?;
 
     Ok(())
 }

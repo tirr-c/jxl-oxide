@@ -18,6 +18,10 @@ mod huffman;
 use bit_writer::BitWriter;
 use huffman::{BuiltHuffmanTable, HuffmanCode};
 
+const HEADER_ICC: &[u8] = b"ICC_PROFILE\0";
+const HEADER_EXIF: &[u8] = b"Exif\0\0";
+const HEADER_XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+
 const CFL_FIXED_POINT_BITS: usize = 11;
 const CFL_DEFAULT_COLOR_FACTOR: i32 = 84;
 
@@ -135,15 +139,25 @@ impl JpegBitstreamData {
         Ok(decompressed_len >= self.header.expected_data_len())
     }
 
-    pub fn reconstruct<'jbrd, 'frame>(
+    pub fn reconstruct<'jbrd, 'frame, 'meta>(
         &'jbrd self,
         frame: &'frame Frame,
-    ) -> Result<JpegBitstreamReconstructor<'jbrd, 'frame>> {
+        icc_profile: &'meta [u8],
+        exif: &'meta [u8],
+        xmp: &'meta [u8],
+    ) -> Result<JpegBitstreamReconstructor<'jbrd, 'frame, 'meta>> {
         let Self {
             ref header,
             ref data_stream,
         } = *self;
-        JpegBitstreamReconstructor::new(header, data_stream.get_ref(), frame)
+        JpegBitstreamReconstructor::new(
+            header,
+            data_stream.get_ref(),
+            frame,
+            icc_profile,
+            exif,
+            xmp,
+        )
     }
 
     pub fn header(&self) -> &JpegBitstreamHeader {
@@ -292,6 +306,30 @@ impl JpegBitstreamHeader {
             + self.com_data_len()
             + self.intermarker_data_len()
             + self.tail_data_length as usize
+    }
+
+    pub fn expected_icc_len(&self) -> usize {
+        self.app_markers
+            .iter()
+            .filter(|am| am.ty == 1)
+            .map(|am| am.length as usize - 5 - HEADER_ICC.len())
+            .sum::<usize>()
+    }
+
+    pub fn expected_exif_len(&self) -> usize {
+        self.app_markers
+            .iter()
+            .find(|am| am.ty == 2)
+            .map(|am| am.length as usize - 3 - HEADER_EXIF.len())
+            .unwrap_or(0)
+    }
+
+    pub fn expected_xmp_len(&self) -> usize {
+        self.app_markers
+            .iter()
+            .find(|am| am.ty == 3)
+            .map(|am| am.length as usize - 3 - HEADER_XMP.len())
+            .unwrap_or(0)
     }
 }
 
@@ -498,7 +536,7 @@ impl Bundle for Padding {
     }
 }
 
-pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
+pub struct JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
     state: ReconstructionState,
     parsed: ParsedFrameData,
     is_progressive: bool,
@@ -524,14 +562,33 @@ pub struct JpegBitstreamReconstructor<'jbrd, 'frame> {
     padding_bitstream: Option<Bitstream<'jbrd>>,
     scan_info_ptr: usize,
     tail_data: &'jbrd [u8],
+
+    icc_profile: &'meta [u8],
+    exif: &'meta [u8],
+    xmp: &'meta [u8],
 }
 
-impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
+impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
     fn new(
         header: &'jbrd JpegBitstreamHeader,
         data: &'jbrd [u8],
         frame: &'frame Frame,
+        icc_profile: &'meta [u8],
+        exif: &'meta [u8],
+        xmp: &'meta [u8],
     ) -> Result<Self> {
+        let expected_icc_len = header.expected_icc_len();
+        let expected_exif_len = header.expected_exif_len();
+        let expected_xmp_len = header.expected_xmp_len();
+        if expected_icc_len > 0 && expected_icc_len != icc_profile.len() {
+            return Err(Error::InvalidData);
+        }
+        if expected_exif_len > 0 && expected_exif_len != exif.len() {
+            return Err(Error::InvalidData);
+        }
+        if expected_xmp_len > 0 && expected_xmp_len != xmp.len() {
+            return Err(Error::InvalidData);
+        }
         let com_data_start = header.app_data_len();
         let intermarker_data_start = com_data_start + header.com_data_len();
         let tail_data_start = intermarker_data_start + header.intermarker_data_len();
@@ -696,6 +753,10 @@ impl<'jbrd, 'frame> JpegBitstreamReconstructor<'jbrd, 'frame> {
                 .map(|padding| Bitstream::new(&padding.bits)),
             scan_info_ptr: 0,
             tail_data: &data[tail_data_start..],
+
+            icc_profile,
+            exif,
+            xmp,
         })
     }
 
@@ -797,8 +858,8 @@ impl ParsedFrameData {
     }
 }
 
-impl JpegBitstreamReconstructor<'_, '_> {
-    pub fn write(&mut self, mut writer: impl Write) -> Result<ReconstructionStatus> {
+impl JpegBitstreamReconstructor<'_, '_, '_> {
+    pub fn write(&mut self, mut writer: impl Write) -> Result<()> {
         if self.state == ReconstructionState::Init {
             self.state = ReconstructionState::Writing;
             writer
@@ -807,24 +868,21 @@ impl JpegBitstreamReconstructor<'_, '_> {
         }
 
         if self.state == ReconstructionState::Done {
-            return Ok(ReconstructionStatus::Done);
+            return Ok(());
         }
 
         while self.marker_ptr < self.header.markers.len() {
-            let status = self.process_next(&mut writer)?;
+            self.process_next(&mut writer)?;
             self.marker_ptr += 1;
-            if status != ReconstructionStatus::Done {
-                return Ok(status);
-            }
         }
 
         self.state = ReconstructionState::Done;
-        Ok(ReconstructionStatus::Done)
+        Ok(())
     }
 
-    fn process_next(&mut self, mut writer: impl Write) -> Result<ReconstructionStatus> {
+    fn process_next(&mut self, mut writer: impl Write) -> Result<()> {
         let marker = self.header.markers[self.marker_ptr];
-        Ok(match marker {
+        match marker {
             // SOF
             0xc0 | 0xc1 | 0xc2 | 0xc9 | 0xca => {
                 self.is_progressive = marker == 0xc2 || marker == 0xca;
@@ -863,8 +921,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         .write_all(&component_bytes)
                         .map_err(Error::ReconstructionWrite)?;
                 }
-
-                ReconstructionStatus::Done
             }
 
             // DHT
@@ -903,8 +959,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         self.dc_tables[hc.id as usize] = Some(table);
                     }
                 }
-
-                ReconstructionStatus::Done
             }
 
             // RSTn
@@ -912,7 +966,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 writer
                     .write_all(&[0xff, marker])
                     .map_err(Error::ReconstructionWrite)?;
-                ReconstructionStatus::Done
             }
 
             // EOI
@@ -923,7 +976,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 writer
                     .write_all(self.tail_data)
                     .map_err(Error::ReconstructionWrite)?;
-                ReconstructionStatus::Done
             }
 
             // SOS
@@ -1022,8 +1074,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 } else {
                     self.process_scan::<2>(params, writer)?;
                 }
-
-                ReconstructionStatus::Done
             }
 
             // DQT
@@ -1092,8 +1142,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
 
                     writer.write_all(&buf).map_err(Error::ReconstructionWrite)?;
                 }
-
-                ReconstructionStatus::Done
             }
 
             // DRI
@@ -1106,7 +1154,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 if self.header.restart_interval != 0 {
                     self.restart_interval = Some(self.header.restart_interval);
                 }
-                ReconstructionStatus::Done
             }
 
             // APPn
@@ -1123,7 +1170,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                         writer
                             .write_all(app_data)
                             .map_err(Error::ReconstructionWrite)?;
-                        ReconstructionStatus::Done
                     }
                     1 => {
                         let header = [0xff, 0xe2, encoded_len[0], encoded_len[1]];
@@ -1131,7 +1177,7 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             .write_all(&header)
                             .map_err(Error::ReconstructionWrite)?;
                         writer
-                            .write_all(b"ICC_PROFILE\0")
+                            .write_all(HEADER_ICC)
                             .map_err(Error::ReconstructionWrite)?;
                         let curr = self.next_icc_marker as u8 + 1;
                         let total = self.num_icc_markers as u8;
@@ -1140,10 +1186,13 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             .map_err(Error::ReconstructionWrite)?;
 
                         let from = self.icc_marker_offset;
-                        let len = am.length as usize - 17;
+                        let len = am.length as usize - 5 - HEADER_ICC.len();
                         self.next_icc_marker += 1;
                         self.icc_marker_offset += len;
-                        ReconstructionStatus::WriteIcc { from, len }
+
+                        writer
+                            .write_all(&self.icc_profile[from..][..len])
+                            .map_err(Error::ReconstructionWrite)?;
                     }
                     2 => {
                         let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
@@ -1151,9 +1200,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             .write_all(&header)
                             .map_err(Error::ReconstructionWrite)?;
                         writer
-                            .write_all(b"Exif\0\0")
+                            .write_all(HEADER_EXIF)
                             .map_err(Error::ReconstructionWrite)?;
-                        ReconstructionStatus::WriteExif
+                        writer
+                            .write_all(self.exif)
+                            .map_err(Error::ReconstructionWrite)?;
                     }
                     3 => {
                         let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
@@ -1161,9 +1212,11 @@ impl JpegBitstreamReconstructor<'_, '_> {
                             .write_all(&header)
                             .map_err(Error::ReconstructionWrite)?;
                         writer
-                            .write_all(b"http://ns.adobe.com/xap/1.0/")
+                            .write_all(HEADER_XMP)
                             .map_err(Error::ReconstructionWrite)?;
-                        ReconstructionStatus::WriteXml
+                        writer
+                            .write_all(self.xmp)
+                            .map_err(Error::ReconstructionWrite)?;
                     }
                     _ => unreachable!(),
                 }
@@ -1180,7 +1233,6 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 writer
                     .write_all(com_data)
                     .map_err(Error::ReconstructionWrite)?;
-                ReconstructionStatus::Done
             }
 
             // Unrecognized
@@ -1189,11 +1241,12 @@ impl JpegBitstreamReconstructor<'_, '_> {
                 let (data, next) = self.intermarker_data.split_at(length as usize);
                 self.intermarker_data = next;
                 writer.write_all(data).map_err(Error::ReconstructionWrite)?;
-                ReconstructionStatus::Done
             }
 
             _ => return Err(Error::InvalidData),
-        })
+        }
+
+        Ok(())
     }
 
     fn process_scan<const TYPE: usize>(
@@ -1483,14 +1536,6 @@ enum ReconstructionState {
     Init,
     Writing,
     Done,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconstructionStatus {
-    Done,
-    WriteIcc { from: usize, len: usize },
-    WriteExif,
-    WriteXml,
 }
 
 fn process_sequential(

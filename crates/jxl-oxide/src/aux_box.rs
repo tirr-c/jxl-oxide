@@ -189,6 +189,13 @@ impl<T> AuxBoxData<T> {
         x
     }
 
+    pub fn unwrap_or(self, or: T) -> T {
+        match self {
+            Self::Data(x) => x,
+            _ => or,
+        }
+    }
+
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> AuxBoxData<U> {
         match self {
             Self::Data(x) => AuxBoxData::Data(f(x)),
