@@ -251,10 +251,12 @@ impl AuxBoxList {
                 last_box,
             } => {
                 self.current_box_ty = Some(ty);
-                if brotli_compressed {
-                    self.current_box.ensure_brotli()?;
-                } else {
-                    self.current_box.ensure_raw();
+                if ty != ContainerBoxType::JPEG_RECONSTRUCTION {
+                    if brotli_compressed {
+                        self.current_box.ensure_brotli()?;
+                    } else {
+                        self.current_box.ensure_raw();
+                    }
                 }
                 self.last_box = last_box;
             }
