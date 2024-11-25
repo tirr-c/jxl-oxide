@@ -148,7 +148,6 @@
 
 use std::sync::Arc;
 
-use jxl_bitstream::container::box_header::ContainerBoxType;
 use jxl_bitstream::{Bitstream, ContainerDetectingReader, ParseEvent};
 use jxl_frame::FrameContext;
 use jxl_image::BitDepth;
@@ -176,11 +175,9 @@ pub mod integration;
 #[cfg(feature = "lcms2")]
 mod lcms2;
 
-use aux_box::{AuxBoxReader, Jbrd};
-
 #[cfg(feature = "lcms2")]
 pub use self::lcms2::Lcms2;
-pub use aux_box::RawExif;
+pub use aux_box::{AuxBoxData, AuxBoxList, RawExif};
 pub use fb::{FrameBuffer, FrameBufferSample, ImageStream};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
@@ -222,8 +219,7 @@ impl JxlImageBuilder {
             tracker: self.tracker,
             reader: ContainerDetectingReader::new(),
             buffer: Vec::new(),
-            jbrd: Jbrd::new(),
-            exif: AuxBoxReader::new(),
+            aux_boxes: AuxBoxList::new(),
         }
     }
 
@@ -307,8 +303,7 @@ pub struct UninitializedJxlImage {
     tracker: Option<AllocTracker>,
     reader: ContainerDetectingReader,
     buffer: Vec<u8>,
-    jbrd: Jbrd,
-    exif: AuxBoxReader,
+    aux_boxes: AuxBoxList,
 }
 
 impl UninitializedJxlImage {
@@ -322,34 +317,9 @@ impl UninitializedJxlImage {
                 ParseEvent::Codestream(buf) => {
                     self.buffer.extend_from_slice(buf);
                 }
-                ParseEvent::NoMoreAuxBox => {
-                    self.exif.finalize()?;
+                aux_box_event => {
+                    self.aux_boxes.handle_event(aux_box_event)?;
                 }
-                ParseEvent::AuxBoxStart {
-                    ty: ContainerBoxType::EXIF,
-                    brotli_compressed: true,
-                    ..
-                } => {
-                    self.exif.ensure_brotli()?;
-                }
-                ParseEvent::AuxBoxStart { last_box: true, .. } => {
-                    self.exif.finalize()?;
-                }
-                ParseEvent::AuxBoxStart { .. } => {}
-                ParseEvent::AuxBoxData(ContainerBoxType::JPEG_RECONSTRUCTION, buf) => {
-                    self.jbrd.feed_bytes(buf)?;
-                }
-                ParseEvent::AuxBoxData(ContainerBoxType::EXIF, buf) => {
-                    self.exif.feed_data(buf)?;
-                }
-                ParseEvent::AuxBoxData(..) => {}
-                ParseEvent::AuxBoxEnd(ContainerBoxType::JPEG_RECONSTRUCTION) => {
-                    self.jbrd.finalize()?;
-                }
-                ParseEvent::AuxBoxEnd(ContainerBoxType::EXIF) => {
-                    self.exif.finalize()?;
-                }
-                ParseEvent::AuxBoxEnd(..) => {}
             }
         }
         Ok(self.reader.previous_consumed_bytes())
@@ -456,8 +426,7 @@ impl UninitializedJxlImage {
                 buffer: Vec::new(),
                 buffer_offset: bytes_read,
                 frame_offsets: Vec::new(),
-                jbrd: self.jbrd,
-                exif: self.exif,
+                aux_boxes: self.aux_boxes,
             },
         };
         image.inner.feed_bytes_inner(&mut image.ctx, &self.buffer)?;
@@ -502,42 +471,16 @@ impl JxlImage {
                 ParseEvent::Codestream(buf) => {
                     self.inner.feed_bytes_inner(&mut self.ctx, buf)?;
                 }
-                ParseEvent::NoMoreAuxBox => {
-                    self.inner.exif.finalize()?;
+                aux_box_event => {
+                    self.inner.aux_boxes.handle_event(aux_box_event)?;
                 }
-                ParseEvent::AuxBoxStart {
-                    ty: ContainerBoxType::EXIF,
-                    brotli_compressed: true,
-                    ..
-                } => {
-                    self.inner.exif.ensure_brotli()?;
-                }
-                ParseEvent::AuxBoxStart { last_box: true, .. } => {
-                    self.inner.exif.finalize()?;
-                }
-                ParseEvent::AuxBoxStart { .. } => {}
-                ParseEvent::AuxBoxData(ContainerBoxType::JPEG_RECONSTRUCTION, buf) => {
-                    self.inner.jbrd.feed_bytes(buf)?;
-                }
-                ParseEvent::AuxBoxData(ContainerBoxType::EXIF, buf) => {
-                    self.inner.exif.feed_data(buf)?;
-                }
-                ParseEvent::AuxBoxData(..) => {}
-                ParseEvent::AuxBoxEnd(ContainerBoxType::JPEG_RECONSTRUCTION) => {
-                    self.inner.jbrd.finalize()?;
-                }
-                ParseEvent::AuxBoxEnd(ContainerBoxType::EXIF) => {
-                    self.inner.exif.finalize()?;
-                }
-                ParseEvent::AuxBoxEnd(..) => {}
             }
         }
         Ok(self.reader.previous_consumed_bytes())
     }
 
     pub fn finalize(&mut self) -> Result<()> {
-        self.inner.jbrd.finalize()?;
-        self.inner.exif.finalize()?;
+        self.inner.aux_boxes.finalize()?;
         Ok(())
     }
 }
@@ -548,8 +491,7 @@ struct JxlImageInner {
     buffer: Vec<u8>,
     buffer_offset: usize,
     frame_offsets: Vec<usize>,
-    jbrd: Jbrd,
-    exif: AuxBoxReader,
+    aux_boxes: AuxBoxList,
 }
 
 impl JxlImageInner {
@@ -750,21 +692,11 @@ impl JxlImage {
 
 impl JxlImage {
     pub fn jbrd(&self) -> Option<&jxl_jbr::JpegBitstreamData> {
-        self.inner.jbrd.data()
+        self.inner.aux_boxes.jbrd().data()
     }
 
-    /// Returns the raw Exif metadata, if any.
-    ///
-    /// Returns `Ok(None)` if more data is needed.
-    pub fn raw_exif_data(&self) -> Result<Option<RawExif>> {
-        match self.inner.exif.data() {
-            aux_box::AuxBoxData::Data(data) => {
-                let exif = RawExif::new(data)?;
-                Ok(Some(exif))
-            }
-            aux_box::AuxBoxData::Decoding => Ok(None),
-            aux_box::AuxBoxData::NotFound => Ok(Some(RawExif::empty())),
-        }
+    pub fn aux_boxes(&self) -> &AuxBoxList {
+        &self.inner.aux_boxes
     }
 }
 

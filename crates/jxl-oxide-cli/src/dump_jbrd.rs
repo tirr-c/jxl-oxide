@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use jxl_oxide::JxlImage;
+use jxl_oxide::{AuxBoxData, JxlImage};
 
 use crate::commands::dump_jbrd::*;
 use crate::{Error, Result};
@@ -24,6 +24,10 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
     };
 
     let icc = image.original_icc();
+    let aux_boxes = image.aux_boxes();
+    let exif = aux_boxes.first_exif().map_err(Error::ReadJxl)?;
+    let xmp = aux_boxes.first_xml();
+
     let frame = image.frame_by_keyframe(0).unwrap();
     let mut reconstructor = jbrd
         .reconstruct(frame)
@@ -42,8 +46,20 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
                 let chunk = &icc[from..][..len];
                 output.write_all(chunk).map_err(Error::WriteImage)?;
             }
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteExif => todo!(),
-            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteXml => todo!(),
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteExif => {
+                let AuxBoxData::Data(exif) = &exif else {
+                    todo!();
+                };
+                output
+                    .write_all(exif.payload())
+                    .map_err(Error::WriteImage)?;
+            }
+            jxl_oxide::jpeg_bitstream::ReconstructionStatus::WriteXml => {
+                let AuxBoxData::Data(xmp) = &xmp else {
+                    todo!();
+                };
+                output.write_all(xmp).map_err(Error::WriteImage)?;
+            }
         }
     }
 

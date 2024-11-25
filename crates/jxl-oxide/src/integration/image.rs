@@ -4,7 +4,7 @@ use image::error::{DecodingError, ImageFormatHint};
 use image::{ColorType, ImageError, ImageResult};
 use jxl_grid::AllocTracker;
 
-use crate::{CropInfo, InitializeResult, JxlImage};
+use crate::{AuxBoxData, CropInfo, InitializeResult, JxlImage};
 
 /// JPEG XL decoder which implements [`ImageDecoder`][image::ImageDecoder].
 ///
@@ -188,7 +188,7 @@ impl<R: Read> JxlDecoder<R> {
     }
 
     fn load_until_exif(&mut self) -> crate::Result<()> {
-        self.load_until_condition(|image| Ok(image.raw_exif_data()?.is_some()))
+        self.load_until_condition(|image| Ok(!image.aux_boxes().first_exif()?.is_decoding()))
     }
 
     #[inline]
@@ -327,10 +327,11 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
             ))
         })?;
 
-        let Some(exif) = self.image.raw_exif_data().unwrap() else {
+        let aux_boxes = self.image.aux_boxes();
+        let AuxBoxData::Data(exif) = aux_boxes.first_exif().unwrap() else {
             return Ok(None);
         };
-        Ok(exif.payload().map(|v| v.to_vec()))
+        Ok(Some(exif.payload().to_vec()))
     }
 
     fn set_limits(&mut self, limits: image::Limits) -> ImageResult<()> {
