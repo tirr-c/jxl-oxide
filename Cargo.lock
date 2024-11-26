@@ -932,6 +932,7 @@ dependencies = [
  "mimalloc",
  "rand",
  "reqwest",
+ "ring",
  "tracing",
  "zstd",
 ]
