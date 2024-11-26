@@ -237,16 +237,10 @@ fn read_and_validate_local_modular_header(
         let params = MaConfigParams {
             tracker,
             node_limit: (1024 + local_samples).min(1 << 20) as usize,
+            depth_limit: 2048,
         };
         MaConfig::parse(bitstream, params)?
     };
-    if ma_ctx.tree_depth() > 2048 {
-        tracing::error!(
-            tree_depth = ma_ctx.tree_depth(),
-            "Decoded MA tree is too deep"
-        );
-        return Err(jxl_bitstream::Error::ProfileConformance("decoded MA tree is too deep").into());
-    }
 
     Ok((header, ma_ctx))
 }
