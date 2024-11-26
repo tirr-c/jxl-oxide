@@ -65,6 +65,10 @@ macro_rules! test {
 
 #[cfg(feature = "conformance")]
 test! {
+    bench_oriented_brg(
+        util::conformance_path("bench_oriented_brg"),
+        "cad665c67d74e3e5cf775ef618c73b0e70dfece33db7dbe0130bc889f2214e1b",
+    ),
     cafe(
         util::conformance_path("cafe"),
         "b6f6e4f820ac69234184434e5b77156401fb782bb46b96e26255ff51be1ec290",

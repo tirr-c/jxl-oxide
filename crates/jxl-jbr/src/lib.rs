@@ -1195,7 +1195,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                             .map_err(Error::ReconstructionWrite)?;
                     }
                     2 => {
-                        let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
+                        let header = [0xff, 0xe1, encoded_len[0], encoded_len[1]];
                         writer
                             .write_all(&header)
                             .map_err(Error::ReconstructionWrite)?;
@@ -1207,7 +1207,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                             .map_err(Error::ReconstructionWrite)?;
                     }
                     3 => {
-                        let header = [0xff, 0xe0, encoded_len[0], encoded_len[1]];
+                        let header = [0xff, 0xe1, encoded_len[0], encoded_len[1]];
                         writer
                             .write_all(&header)
                             .map_err(Error::ReconstructionWrite)?;
