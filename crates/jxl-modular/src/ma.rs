@@ -62,6 +62,7 @@ pub struct MaConfigParams<'a> {
     pub tracker: Option<&'a AllocTracker>,
     /// Maximum number of meta-adaptive tree nodes.
     pub node_limit: usize,
+    pub depth_limit: usize,
 }
 
 impl Bundle<MaConfigParams<'_>> for MaConfig {
@@ -83,6 +84,7 @@ impl Bundle<MaConfigParams<'_>> for MaConfig {
         let MaConfigParams {
             tracker,
             node_limit,
+            depth_limit,
         } = params;
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
@@ -181,7 +183,16 @@ impl Bundle<MaConfigParams<'_>> for MaConfig {
                         left,
                         right,
                     });
-                    tmp.push_back((node, dr.max(dl) + 1));
+                    let depth = dr.max(dl) + 1;
+                    if depth > depth_limit {
+                        tracing::error!(depth_limit, "Decoded MA tree is too deep");
+                        return Err(jxl_bitstream::Error::ProfileConformance(
+                            "decoded MA tree is too deep",
+                        )
+                        .into());
+                    }
+
+                    tmp.push_back((node, depth));
                 }
                 FoldingTree::Leaf(FoldingTreeLeaf {
                     ctx,
