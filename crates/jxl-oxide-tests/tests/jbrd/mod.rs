@@ -78,3 +78,15 @@ test! {
         "a170600cc02b2b029dc79c5ee72dbf9107e8de5a64f1d8b1732c759e09a3d41d",
     ),
 }
+
+#[cfg(feature = "decode")]
+test! {
+    genshin_ycbcr_420(
+        util::decode_testcases_dir().join("genshin_ycbcr_420/input.jxl"),
+        "24e05ce200df019710eb56cad43e4349bd6edee05865b1eb0eee1581406535b5",
+    ),
+    starrail_jpegli_xyb(
+        util::decode_testcases_dir().join("starrail_jpegli_xyb/input.jxl"),
+        "21ddc2688c89ec279a2e9415bc2e82c4d4b56362316d1332131b6fb97b0d1ea0",
+    ),
+}
