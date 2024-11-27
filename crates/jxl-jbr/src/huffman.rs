@@ -128,9 +128,18 @@ impl std::fmt::Debug for BuiltHuffmanTable {
 }
 
 impl BuiltHuffmanTable {
-    pub fn lookup(&self, symbol: u8) -> (u8, u64) {
+    pub fn lookup(&self, symbol: u8) -> crate::Result<(u8, u64)> {
         let idx = symbol as usize;
-        debug_assert_ne!(self.lengths[idx], 0);
-        (self.lengths[idx], self.bits[idx])
+        let length = self.lengths.get(idx).copied().unwrap_or(0);
+        if length == 0 {
+            Err(crate::Error::HuffmanLookup)
+        } else {
+            Ok((length, self.bits[idx]))
+        }
     }
 }
+
+pub(crate) static EMPTY_TABLE: BuiltHuffmanTable = BuiltHuffmanTable {
+    lengths: Vec::new(),
+    bits: Vec::new(),
+};

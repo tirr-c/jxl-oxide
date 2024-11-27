@@ -31,6 +31,7 @@ pub enum Error {
     Bitstream(jxl_bitstream::Error),
     Brotli(std::io::Error),
     InvalidData,
+    HuffmanLookup,
     ReconstructionWrite(std::io::Error),
     ReconstructionDataIncomplete,
     FrameDataIncomplete,
@@ -56,6 +57,9 @@ impl std::fmt::Display for Error {
             Error::Bitstream(e) => write!(f, "failed to read reconstruction data: {e}"),
             Error::Brotli(e) => write!(f, "failed to decompress Brotli stream: {e}"),
             Error::InvalidData => write!(f, "invalid reconstruction data"),
+            Error::HuffmanLookup => {
+                write!(f, "invalid reconstruction data: Huffman code lookup failed")
+            }
             Error::ReconstructionWrite(e) => write!(f, "failed to write data: {e}"),
             Error::ReconstructionDataIncomplete => write!(f, "reconstruction data is incomplete"),
             Error::FrameDataIncomplete => write!(f, "JPEG XL frame data is incomplete"),
@@ -127,6 +131,11 @@ impl JpegBitstreamData {
 
         let decompressed_len = self.data_stream.get_ref().len();
         if decompressed_len != self.header.expected_data_len() {
+            tracing::error!(
+                decompressed_len,
+                expected = self.header.expected_data_len(),
+                "Data section length of jbrd box doesn't match expected length"
+            );
             return Err(Error::InvalidData);
         }
 
@@ -581,12 +590,27 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
         let expected_exif_len = header.expected_exif_len();
         let expected_xmp_len = header.expected_xmp_len();
         if expected_icc_len > 0 && expected_icc_len != icc_profile.len() {
+            tracing::error!(
+                icc_profile_len = icc_profile.len(),
+                expected = expected_icc_len,
+                "ICC profile length doesn't match expected length"
+            );
             return Err(Error::InvalidData);
         }
         if expected_exif_len > 0 && expected_exif_len != exif.len() {
+            tracing::error!(
+                icc_profile_len = exif.len(),
+                expected = expected_exif_len,
+                "Exif metadata length doesn't match expected length"
+            );
             return Err(Error::InvalidData);
         }
         if expected_xmp_len > 0 && expected_xmp_len != xmp.len() {
+            tracing::error!(
+                icc_profile_len = xmp.len(),
+                expected = expected_xmp_len,
+                "XMP metadata length doesn't match expected length"
+            );
             return Err(Error::InvalidData);
         }
         let com_data_start = header.app_data_len();
@@ -987,6 +1011,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                 let smi = &self.header.scan_more_info[idx];
                 self.scan_info_ptr += 1;
                 if si.component_info.is_empty() {
+                    tracing::error!("No component in SOS marker");
                     return Err(Error::InvalidData);
                 }
 
@@ -1066,6 +1091,13 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
 
                 if !self.is_progressive {
                     if si.ss != 0 || si.se != 0x3f || si.al != 0 || si.ah != 0 {
+                        tracing::error!(
+                            si.ss,
+                            si.se,
+                            si.al,
+                            si.ah,
+                            "Progressive parameter set for sequential JPEG"
+                        );
                         return Err(Error::InvalidData);
                     }
                     self.process_scan::<0>(params, writer)?;
@@ -1243,7 +1275,10 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                 writer.write_all(data).map_err(Error::ReconstructionWrite)?;
             }
 
-            _ => return Err(Error::InvalidData),
+            _ => {
+                tracing::error!(marker, "Unknown marker");
+                return Err(Error::InvalidData);
+            }
         }
 
         Ok(())
@@ -1303,10 +1338,11 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                 for ((cidx, c), (&hs, &vs)) in it {
                     let dc_table = self.dc_tables[c.dc_tbl_idx as usize]
                         .as_ref()
-                        .ok_or(Error::InvalidData)?;
+                        .unwrap_or(&huffman::EMPTY_TABLE);
                     let ac_table = self.ac_tables[c.ac_tbl_idx as usize]
                         .as_ref()
-                        .ok_or(Error::InvalidData)?;
+                        .unwrap_or(&huffman::EMPTY_TABLE);
+
                     state.try_init_ac_table(ac_table);
 
                     let idx = if frame_header.do_ycbcr {
@@ -1364,7 +1400,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                             let extra_zero_runs = smi.extra_zero_runs.get(&block_idx).copied();
 
                             if smi.reset_points.contains(&block_idx) {
-                                state.emit_eobrun();
+                                state.emit_eobrun()?;
                             }
 
                             match TYPE {
@@ -1465,15 +1501,15 @@ impl<'recon> ScanState<'recon> {
         self.refinement_bitlen.push(bitlen);
     }
 
-    fn emit_eobrun(&mut self) {
+    fn emit_eobrun(&mut self) -> Result<()> {
         if self.eobrun == 0 {
-            return;
+            return Ok(());
         }
 
         let ac_table = self.last_ac_table.expect("last_ac_table not initialized");
 
         let eobn = 31 - self.eobrun.leading_zeros();
-        let (len, bits) = ac_table.lookup((eobn as u8) << 4);
+        let (len, bits) = ac_table.lookup((eobn as u8) << 4)?;
         self.bit_writer.write_huffman(bits, len);
         let mask = (1u32 << eobn) - 1;
         self.bit_writer
@@ -1485,6 +1521,8 @@ impl<'recon> ScanState<'recon> {
         for (bits, bitlen) in std::iter::zip(refinement_bits, refinement_bitlen) {
             self.bit_writer.write_raw(bits, bitlen);
         }
+
+        Ok(())
     }
 
     fn flush_bit_writer(
@@ -1492,7 +1530,7 @@ impl<'recon> ScanState<'recon> {
         padding_bitstream: Option<&mut Bitstream>,
         mut writer: impl Write,
     ) -> Result<()> {
-        self.emit_eobrun();
+        self.emit_eobrun()?;
 
         let mut bit_writer = std::mem::replace(&mut self.bit_writer, BitWriter::new());
         let padding_needed = bit_writer.padding_bits();
@@ -1554,7 +1592,7 @@ fn process_sequential(
     let bitlen = 16 - bits.leading_zeros();
     let raw_bits = if is_neg { -bits - 1 } else { bits };
 
-    let (len, bits) = dc_table.lookup(bitlen as u8);
+    let (len, bits) = dc_table.lookup(bitlen as u8)?;
     state.bit_writer.write_huffman(bits, len);
     state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
 
@@ -1564,7 +1602,7 @@ fn process_sequential(
         remaining = &remaining[nonzero_idx + 1..];
 
         while nonzero_idx >= 16 {
-            let (len, bits) = ac_table.lookup(0xf0);
+            let (len, bits) = ac_table.lookup(0xf0)?;
             state.bit_writer.write_huffman(bits, len);
             nonzero_idx -= 16;
         }
@@ -1578,14 +1616,14 @@ fn process_sequential(
 
         let nonzero_idx = nonzero_idx as u8;
         let sym = (nonzero_idx << 4) | bitlen as u8;
-        let (len, bits) = ac_table.lookup(sym);
+        let (len, bits) = ac_table.lookup(sym)?;
         state.bit_writer.write_huffman(bits, len);
         state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
     }
 
     let mut num_zeros = remaining.len() as i32;
     if let Some(ezr) = extra_zero_runs {
-        let (len, bits) = ac_table.lookup(0xf0);
+        let (len, bits) = ac_table.lookup(0xf0)?;
         for _ in 0..ezr {
             state.bit_writer.write_huffman(bits, len);
         }
@@ -1594,7 +1632,7 @@ fn process_sequential(
     }
 
     if num_zeros > 0 {
-        let (len, bits) = ac_table.lookup(0);
+        let (len, bits) = ac_table.lookup(0)?;
         state.bit_writer.write_huffman(bits, len);
     }
 
@@ -1618,21 +1656,21 @@ fn process_progressive_first<'recon>(
         let bitlen = 16 - bits.leading_zeros();
         let raw_bits = if is_neg { -bits - 1 } else { bits };
 
-        state.emit_eobrun();
-        let (len, bits) = dc_table.lookup(bitlen as u8);
+        state.emit_eobrun()?;
+        let (len, bits) = dc_table.lookup(bitlen as u8)?;
         state.bit_writer.write_huffman(bits, len);
         state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
     }
 
     let mut remaining = ac;
     while let Some(mut nonzero_idx) = remaining.iter().position(|x| *x != 0) {
-        state.emit_eobrun();
+        state.emit_eobrun()?;
 
         let coeff = remaining[nonzero_idx];
         remaining = &remaining[nonzero_idx + 1..];
 
         while nonzero_idx >= 16 {
-            let (len, bits) = ac_table.lookup(0xf0);
+            let (len, bits) = ac_table.lookup(0xf0)?;
             state.bit_writer.write_huffman(bits, len);
             nonzero_idx -= 16;
         }
@@ -1646,15 +1684,15 @@ fn process_progressive_first<'recon>(
 
         let nonzero_idx = nonzero_idx as u8;
         let sym = (nonzero_idx << 4) | bitlen as u8;
-        let (len, bits) = ac_table.lookup(sym);
+        let (len, bits) = ac_table.lookup(sym)?;
         state.bit_writer.write_huffman(bits, len);
         state.bit_writer.write_raw(raw_bits as u64, bitlen as u8);
     }
 
     let mut num_zeros = remaining.len() as i32;
     if let Some(ezr) = extra_zero_runs {
-        state.emit_eobrun();
-        let (len, bits) = ac_table.lookup(0xf0);
+        state.emit_eobrun()?;
+        let (len, bits) = ac_table.lookup(0xf0)?;
         for _ in 0..ezr {
             state.bit_writer.write_huffman(bits, len);
         }
@@ -1669,7 +1707,7 @@ fn process_progressive_first<'recon>(
     if num_zeros > 0 {
         state.eobrun += 1;
         if state.eobrun >= 32767 {
-            state.emit_eobrun();
+            state.emit_eobrun()?;
         }
     }
 
@@ -1684,13 +1722,13 @@ fn process_progressive_refinement<'recon>(
     extra_zero_runs: Option<u32>,
 ) -> Result<()> {
     if let Some(dc) = dc {
-        state.emit_eobrun();
+        state.emit_eobrun()?;
         state.bit_writer.write_raw(dc as u64, 1);
     }
 
     let mut remaining = ac;
     while let Some(nonzero_idx) = remaining.iter().position(|x| *x == 1 || *x == -1) {
-        state.emit_eobrun();
+        state.emit_eobrun()?;
 
         let mut zero_runs = 0u8;
         let mut refinement_bitlen = 0u8;
@@ -1699,7 +1737,7 @@ fn process_progressive_refinement<'recon>(
             if coeff == 0 {
                 zero_runs += 1;
                 if zero_runs == 16 {
-                    let (len, bits) = ac_table.lookup(0xf0);
+                    let (len, bits) = ac_table.lookup(0xf0)?;
                     state.bit_writer.write_huffman(bits, len);
                     state
                         .bit_writer
@@ -1718,7 +1756,7 @@ fn process_progressive_refinement<'recon>(
 
         let bit = (coeff == 1) as u64;
         let sym = (zero_runs << 4) | 1;
-        let (len, bits) = ac_table.lookup(sym);
+        let (len, bits) = ac_table.lookup(sym)?;
         state.bit_writer.write_huffman(bits, len);
         state.bit_writer.write_raw(bit, 1);
         state
@@ -1728,10 +1766,15 @@ fn process_progressive_refinement<'recon>(
 
     let mut remaining_zrl = extra_zero_runs.unwrap_or(0);
     if remaining_zrl > 0 {
-        state.emit_eobrun();
+        state.emit_eobrun()?;
     }
 
-    let (zrl_len, zrl_bits) = ac_table.lookup(0xf0);
+    let (zrl_len, zrl_bits) = if remaining_zrl > 0 {
+        ac_table.lookup(0xf0)?
+    } else {
+        (0, 0)
+    };
+
     let mut zero_runs = 0u8;
     let mut refinement_bitlen = 0u8;
     let mut refinement_bits = 0u64;
@@ -1770,7 +1813,7 @@ fn process_progressive_refinement<'recon>(
         state.eobrun += 1;
         state.buffer_refinement_bits(refinement_bits, refinement_bitlen);
         if state.eobrun >= 32767 {
-            state.emit_eobrun();
+            state.emit_eobrun()?;
         }
     }
 
