@@ -366,8 +366,8 @@ impl<'g, V: Copy> MutableSubgrid<'g, V> {
             "expected group width and height to be nonzero, got width = {group_width}, height = {group_height}"
         );
 
-        let num_cols = (self.width + group_width - 1) / group_width;
-        let num_rows = (self.height + group_height - 1) / group_height;
+        let num_cols = self.width.div_ceil(group_width);
+        let num_rows = self.height.div_ceil(group_height);
         self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
     }
 
@@ -409,7 +409,7 @@ impl<'g, V: Copy> MutableSubgrid<'g, V> {
     }
 }
 
-impl<'g> MutableSubgrid<'g, f32> {
+impl MutableSubgrid<'_, f32> {
     pub fn as_vectored<V: SimdVector>(&mut self) -> Option<MutableSubgrid<'_, V>> {
         assert!(
             V::available(),
