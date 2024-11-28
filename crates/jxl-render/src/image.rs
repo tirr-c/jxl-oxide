@@ -650,7 +650,7 @@ impl ImageWithRegion {
         let base_group_y = self.regions[0].0.top as u32 / group_dim;
         let width = self.regions[0].0.width;
         let frame_groups_per_row = frame_header.groups_per_row();
-        let groups_per_row = (width + group_dim - 1) / group_dim;
+        let groups_per_row = width.div_ceil(group_dim);
 
         let [fb_x, fb_y, fb_b] = [(0usize, fb_x), (1, fb_y), (2, fb_b)].map(|(idx, fb)| {
             let fb = fb.as_float_mut().unwrap().as_subgrid_mut();
