@@ -8,6 +8,7 @@ pub enum Error {
     VarDct(jxl_vardct::Error),
     InvalidTocPermutation,
     IncompleteFrameData { field: &'static str },
+    OutOfMemory,
     HadError,
 }
 
@@ -41,6 +42,12 @@ impl From<jxl_vardct::Error> for Error {
     }
 }
 
+impl From<std::collections::TryReserveError> for Error {
+    fn from(_: std::collections::TryReserveError) -> Self {
+        Self::OutOfMemory
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -53,6 +60,7 @@ impl std::fmt::Display for Error {
             Self::IncompleteFrameData { field } => {
                 write!(f, "incomplete frame data: {} is missing", field)
             }
+            Self::OutOfMemory => write!(f, "out of memory"),
             Self::HadError => write!(f, "previous parsing errored"),
         }
     }
