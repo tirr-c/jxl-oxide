@@ -389,7 +389,7 @@ pub struct TransformedModularSubimage<'dest, S: Sample> {
     partial: bool,
 }
 
-impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
+impl<S: Sample> TransformedModularSubimage<'_, S> {
     fn empty(header: &ModularHeader, ma_ctx: &MaConfig, bit_depth: u32) -> Self {
         Self {
             header: header.clone(),
@@ -448,7 +448,7 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
     }
 }
 
-impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
+impl<S: Sample> TransformedModularSubimage<'_, S> {
     fn decode_inner(&mut self, bitstream: &mut Bitstream, stream_index: u32) -> Result<()> {
         let span = tracing::span!(tracing::Level::TRACE, "decode channels", stream_index);
         let _guard = span.enter();
@@ -617,7 +617,7 @@ pub struct RecursiveModularImage<'dest, S: Sample> {
     image_channels: Vec<TransformedGrid<'dest, S>>,
 }
 
-impl<'dest, S: Sample> RecursiveModularImage<'dest, S> {
+impl<S: Sample> RecursiveModularImage<'_, S> {
     pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<S>> {
         let mut channels = self.channels.clone();
         let mut meta_channel_grids = self

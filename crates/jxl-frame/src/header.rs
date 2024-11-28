@@ -232,11 +232,11 @@ impl FrameHeader {
         } = self;
 
         if upsampling > 1 {
-            width = (width + upsampling - 1) / upsampling;
+            width = width.div_ceil(upsampling);
         }
         if lf_level > 0 {
             let div = 1u32 << (3 * lf_level);
-            width = (width + div - 1) / div;
+            width = (width + div - 1) >> (3 * lf_level);
         }
 
         width
@@ -250,11 +250,11 @@ impl FrameHeader {
         } = self;
 
         if upsampling > 1 {
-            height = (height + upsampling - 1) / upsampling;
+            height = height.div_ceil(upsampling);
         }
         if lf_level > 0 {
             let div = 1u32 << (3 * lf_level);
-            height = (height + div - 1) / div;
+            height = (height + div - 1) >> (3 * lf_level);
         }
 
         height
@@ -279,8 +279,8 @@ impl FrameHeader {
         let height = self.color_sample_height();
         let group_dim = self.group_dim();
 
-        let hgroups = (width + group_dim - 1) / group_dim;
-        let vgroups = (height + group_dim - 1) / group_dim;
+        let hgroups = width.div_ceil(group_dim);
+        let vgroups = height.div_ceil(group_dim);
 
         hgroups * vgroups
     }
@@ -290,8 +290,8 @@ impl FrameHeader {
         let height = self.color_sample_height();
         let lf_group_dim = self.lf_group_dim();
 
-        let hgroups = (width + lf_group_dim - 1) / lf_group_dim;
-        let vgroups = (height + lf_group_dim - 1) / lf_group_dim;
+        let hgroups = width.div_ceil(lf_group_dim);
+        let vgroups = height.div_ceil(lf_group_dim);
 
         hgroups * vgroups
     }
@@ -302,7 +302,7 @@ impl FrameHeader {
 
     pub fn groups_per_row(&self) -> u32 {
         let group_dim = self.group_dim();
-        (self.color_sample_width() + group_dim - 1) / group_dim
+        self.color_sample_width().div_ceil(group_dim)
     }
 
     pub fn lf_group_dim(&self) -> u32 {
@@ -311,7 +311,7 @@ impl FrameHeader {
 
     pub fn lf_groups_per_row(&self) -> u32 {
         let lf_group_dim = self.lf_group_dim();
-        (self.color_sample_width() + lf_group_dim - 1) / lf_group_dim
+        self.color_sample_width().div_ceil(lf_group_dim)
     }
 
     pub fn group_size_for(&self, group_idx: u32) -> (u32, u32) {
