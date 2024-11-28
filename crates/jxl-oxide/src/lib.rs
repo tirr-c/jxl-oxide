@@ -548,7 +548,7 @@ impl JxlImageInner {
         if let Some(loading_frame) = ctx.current_loading_frame() {
             debug_assert!(self.buffer.is_empty());
             let len = buf.len();
-            buf = loading_frame.feed_bytes(buf);
+            buf = loading_frame.feed_bytes(buf)?;
             let count = len - buf.len();
             self.buffer_offset += count;
 
@@ -587,7 +587,7 @@ impl JxlImageInner {
             let read_bytes = bitstream.num_read_bits() / 8;
             buf = &buf[read_bytes..];
             let len = buf.len();
-            buf = frame.feed_bytes(buf);
+            buf = frame.feed_bytes(buf)?;
             let read_bytes = read_bytes + (len - buf.len());
             self.buffer_offset += read_bytes;
 

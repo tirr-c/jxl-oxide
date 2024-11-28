@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use jxl_bitstream::Bitstream;
-use jxl_grid::AllocTracker;
+use jxl_grid::{AllocHandle, AllocTracker};
 use jxl_image::ImageHeader;
 use jxl_oxide_common::Bundle;
 
@@ -66,15 +66,36 @@ struct AllGroupOffsets {
 struct GroupData {
     toc_group: TocGroup,
     bytes: Vec<u8>,
+    handle: Option<AllocHandle>,
 }
 
 impl From<TocGroup> for GroupData {
     fn from(value: TocGroup) -> Self {
-        let cap = value.size as usize;
         Self {
             toc_group: value,
-            bytes: Vec::with_capacity(cap),
+            bytes: Vec::new(),
+            handle: None,
         }
+    }
+}
+
+impl GroupData {
+    fn ensure_allocated(&mut self, tracker: Option<&AllocTracker>) -> Result<()> {
+        if let Some(tracker) = tracker {
+            if self.handle.is_some() {
+                return Ok(());
+            }
+
+            let size = self.toc_group.size as usize;
+            let handle = tracker.alloc::<u8>(size)?;
+            self.bytes.try_reserve(size)?;
+            self.handle = Some(handle);
+        } else {
+            let additional = (self.toc_group.size as usize).saturating_sub(self.bytes.capacity());
+            self.bytes.try_reserve(additional)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -254,19 +275,20 @@ impl Frame {
 }
 
 impl Frame {
-    pub fn feed_bytes<'buf>(&mut self, mut buf: &'buf [u8]) -> &'buf [u8] {
+    pub fn feed_bytes<'buf>(&mut self, mut buf: &'buf [u8]) -> Result<&'buf [u8]> {
         while let Some(group_data) = self.data.get_mut(self.reading_data_index) {
+            group_data.ensure_allocated(self.tracker.as_ref())?;
             let bytes_left = group_data.toc_group.size as usize - group_data.bytes.len();
             if buf.len() < bytes_left {
                 group_data.bytes.extend_from_slice(buf);
-                return &[];
+                return Ok(&[]);
             }
             let (l, r) = buf.split_at(bytes_left);
             group_data.bytes.extend_from_slice(l);
             buf = r;
             self.reading_data_index += 1;
         }
-        buf
+        Ok(buf)
     }
 
     #[inline]
