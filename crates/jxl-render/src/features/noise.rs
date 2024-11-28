@@ -98,8 +98,8 @@ fn init_noise(
     let height = header.height as usize;
 
     let group_dim = header.group_dim() as usize;
-    let groups_per_row = (width + group_dim - 1) / group_dim;
-    let groups_num = groups_per_row * ((height + group_dim - 1) / group_dim);
+    let groups_per_row = width.div_ceil(group_dim);
+    let groups_num = groups_per_row * height.div_ceil(group_dim);
 
     // Padding for 5x5 kernel convolution step
     const PADDING: usize = 2;

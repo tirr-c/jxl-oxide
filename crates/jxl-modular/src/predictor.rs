@@ -223,7 +223,7 @@ impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
     }
 }
 
-impl<'prev, 'a, S: Sample> PredictorState<'prev, 'a, S> {
+impl<S: Sample> PredictorState<'_, '_, S> {
     #[inline(always)]
     fn nn<const EDGE: bool>(&self) -> i32 {
         if EDGE {
