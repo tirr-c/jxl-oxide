@@ -47,7 +47,7 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
     };
 
     let frame = image.frame_by_keyframe(0).unwrap();
-    let mut reconstructor = jbrd
+    let reconstructor = jbrd
         .reconstruct(frame, icc, exif, xmp)
         .map_err(|e| Error::Reconstruct(e.into()))?;
 
