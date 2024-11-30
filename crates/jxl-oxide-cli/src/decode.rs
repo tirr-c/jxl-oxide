@@ -23,9 +23,62 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         tracing::warn!("Partial image");
     }
 
+    let explicit_jpeg = args.output_format == Some(OutputFormat::JpegReconstruct);
+    let mut output_format = args.output_format.unwrap_or_else(|| {
+        if let Some(output_path) = &args.output {
+            if output_path
+                .extension()
+                .map(|x| x == "jpg" || x == "jpeg")
+                .unwrap_or(false)
+            {
+                OutputFormat::JpegReconstruct
+            } else {
+                OutputFormat::Png
+            }
+        } else {
+            OutputFormat::Png
+        }
+    });
+
+    if output_format == OutputFormat::JpegReconstruct {
+        tracing::info!("Reconstructing to JPEG");
+
+        let mut buf = Vec::new();
+        let decode_start = std::time::Instant::now();
+        let result = image.reconstruct_jpeg(&mut buf);
+        let elapsed = decode_start.elapsed();
+
+        if let Err(e) = result {
+            tracing::error!(%e, "Failed to reconstruct");
+            if explicit_jpeg {
+                return Err(Error::Reconstruct(e));
+            }
+
+            tracing::warn!("Falling back to decode-to-pixels");
+            output_format = OutputFormat::Png
+        } else {
+            let total_pixels = image.width() * image.height();
+            let mps = total_pixels as f64 / 1e6;
+            let elapsed_seconds = elapsed.as_secs_f64();
+            tracing::info!(
+                "Took {:.2} ms ({:.2} MP/s)",
+                elapsed_seconds * 1000.0,
+                mps / elapsed_seconds
+            );
+
+            if let Some(output_path) = args.output {
+                std::fs::write(output_path, buf).map_err(Error::WriteImage)?;
+            } else {
+                tracing::info!("No output path specified, skipping output encoding");
+            }
+
+            return Ok(());
+        }
+    }
+
     let output_png = args.output.is_some()
         && matches!(
-            args.output_format,
+            output_format,
             OutputFormat::Png | OutputFormat::Png8 | OutputFormat::Png16
         );
     if let Some(icc_path) = &args.target_icc {
@@ -92,7 +145,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     let total_pixels = width * height;
     let mps = total_pixels as f64 / 1e6;
 
-    if args.output_format == OutputFormat::Npy {
+    if output_format == OutputFormat::Npy {
         image.set_render_spot_color(false);
     }
 
@@ -149,10 +202,10 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
             return Ok(());
         }
 
-        tracing::debug!(output_format = format_args!("{:?}", args.output_format));
+        tracing::debug!(?output_format);
         let pixel_format = image.pixel_format();
         let output = std::fs::File::create(output).map_err(Error::WriteImage)?;
-        match args.output_format {
+        match output_format {
             OutputFormat::Png => {
                 let force_bit_depth = if let Some(encoding) = &args.target_colorspace {
                     if encoding.is_srgb_gamut() {
@@ -206,6 +259,7 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
 
                 output::write_npy(output, &keyframes, width, height).map_err(Error::WriteImage)?;
             }
+            OutputFormat::JpegReconstruct => unreachable!("should have been processed before"),
         }
     } else {
         tracing::info!("No output path specified, skipping output encoding");

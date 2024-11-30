@@ -691,12 +691,101 @@ impl JxlImage {
 }
 
 impl JxlImage {
-    pub fn jbrd(&self) -> Option<&jxl_jbr::JpegBitstreamData> {
-        self.inner.aux_boxes.jbrd().data()
-    }
-
     pub fn aux_boxes(&self) -> &AuxBoxList {
         &self.inner.aux_boxes
+    }
+
+    pub fn jpeg_reconstruction_status(&self) -> JpegReconstructionStatus {
+        match self.inner.aux_boxes.jbrd() {
+            AuxBoxData::Data(jbrd) => {
+                let header = jbrd.header();
+                let Ok(exif) = self.inner.aux_boxes.first_exif() else {
+                    return JpegReconstructionStatus::Invalid;
+                };
+                let xml = self.inner.aux_boxes.first_xml();
+
+                if header.expected_icc_len() > 0 {
+                    if !self.image_header.metadata.colour_encoding.want_icc() {
+                        return JpegReconstructionStatus::Invalid;
+                    } else if self.original_icc().is_none() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    }
+                }
+                if header.expected_exif_len() > 0 {
+                    if exif.is_decoding() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    } else if exif.is_not_found() {
+                        return JpegReconstructionStatus::Invalid;
+                    }
+                }
+                if header.expected_xmp_len() > 0 {
+                    if xml.is_decoding() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    } else if xml.is_not_found() {
+                        return JpegReconstructionStatus::Invalid;
+                    }
+                }
+
+                JpegReconstructionStatus::Available
+            }
+            AuxBoxData::Decoding => {
+                if self.num_loaded_frames() >= 2 {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                let Some(frame) = self.frame(0) else {
+                    return JpegReconstructionStatus::NeedMoreData;
+                };
+                let frame_header = frame.header();
+                if frame_header.encoding != jxl_frame::header::Encoding::VarDct {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                if !frame_header.frame_type.is_normal_frame() {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                JpegReconstructionStatus::NeedMoreData
+            }
+            AuxBoxData::NotFound => JpegReconstructionStatus::Unavailable,
+        }
+    }
+
+    pub fn reconstruct_jpeg(&self, jpeg_output: impl std::io::Write) -> Result<()> {
+        let aux_boxes = &self.inner.aux_boxes;
+        let AuxBoxData::Data(jbrd) = aux_boxes.jbrd() else {
+            return Err(jxl_jbr::Error::ReconstructionDataIncomplete.into());
+        };
+        if self.num_loaded_frames() == 0 {
+            return Err(jxl_jbr::Error::FrameDataIncomplete.into());
+        }
+
+        let jbrd_header = jbrd.header();
+        let expected_icc_len = jbrd_header.expected_icc_len();
+        let expected_exif_len = jbrd_header.expected_exif_len();
+        let expected_xmp_len = jbrd_header.expected_xmp_len();
+
+        let icc = if expected_icc_len > 0 {
+            self.original_icc().unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let exif = if expected_exif_len > 0 {
+            let b = aux_boxes.first_exif()?;
+            b.map(|x| x.payload()).unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let xmp = if expected_xmp_len > 0 {
+            aux_boxes.first_xml().unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let frame = self.frame(0).unwrap();
+        jbrd.reconstruct(frame, icc, exif, xmp)?
+            .write(jpeg_output)?;
+
+        Ok(())
     }
 }
 
@@ -1116,4 +1205,17 @@ impl From<CropInfo> for jxl_render::Region {
             height: value.height,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum JpegReconstructionStatus {
+    /// JPEG reconstruction data is found. Actual reconstruction may or may not succeed.
+    Available,
+    /// Either JPEG reconstruction data or JPEG XL image data is invalid and cannot be used for
+    /// actual reconstruction.
+    Invalid,
+    /// JPEG reconstruction data is not found. Result will *not* change.
+    Unavailable,
+    /// JPEG reconstruction data is not found. Result may change with more data.
+    NeedMoreData,
 }

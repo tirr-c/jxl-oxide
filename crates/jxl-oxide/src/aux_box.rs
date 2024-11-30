@@ -304,8 +304,16 @@ impl AuxBoxList {
 }
 
 impl AuxBoxList {
-    pub(crate) fn jbrd(&self) -> &Jbrd {
-        &self.jbrd
+    pub(crate) fn jbrd(&self) -> AuxBoxData<&jxl_jbr::JpegBitstreamData> {
+        if let Some(data) = self.jbrd.data() {
+            AuxBoxData::Data(data)
+        } else if self.last_box
+            && self.current_box_ty != Some(ContainerBoxType::JPEG_RECONSTRUCTION)
+        {
+            AuxBoxData::NotFound
+        } else {
+            AuxBoxData::Decoding
+        }
     }
 
     fn first_of_type(&self, ty: ContainerBoxType) -> AuxBoxData<&[u8]> {
