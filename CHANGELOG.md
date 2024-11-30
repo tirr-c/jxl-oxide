@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `jxl-modular`: Check MA tree depth limit while decoding (#391).
+- `jxl-frame`: Track group buffer allocation (#393).
+
 ## [0.10.1] - 2024-11-10
 
 ### Changed
