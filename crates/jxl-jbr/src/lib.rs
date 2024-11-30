@@ -90,6 +90,7 @@ impl JpegBitstreamData {
         icc_profile: &'meta [u8],
         exif: &'meta [u8],
         xmp: &'meta [u8],
+        pool: &jxl_threadpool::JxlThreadPool,
     ) -> Result<JpegBitstreamReconstructor<'jbrd, 'frame, 'meta>> {
         let Self {
             ref header,
@@ -102,6 +103,7 @@ impl JpegBitstreamData {
             icc_profile,
             exif,
             xmp,
+            pool,
         )
     }
 

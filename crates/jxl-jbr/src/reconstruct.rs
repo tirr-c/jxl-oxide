@@ -58,6 +58,7 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
         icc_profile: &'meta [u8],
         exif: &'meta [u8],
         xmp: &'meta [u8],
+        pool: &jxl_threadpool::JxlThreadPool,
     ) -> Result<Self> {
         let expected_icc_len = header.expected_icc_len();
         let expected_exif_len = header.expected_exif_len();
@@ -108,16 +109,6 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
         let lf_global = frame
             .try_parse_lf_global::<i16>()
             .ok_or(Error::FrameDataIncomplete)??;
-        let hf_global = frame
-            .try_parse_hf_global(Some(&lf_global))
-            .ok_or(Error::FrameDataIncomplete)??;
-
-        for c in 0..3 {
-            if hf_global.dequant_matrices.jpeg_quant_values(c).is_none() {
-                return Err(Error::IncompatibleFrame);
-            }
-        }
-
         let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
         let global_ma_config = lf_global.gmodular.ma_config();
 
@@ -138,19 +129,68 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
             }
         }
 
-        let lf_groups = (0..frame.header().num_lf_groups())
-            .map(|lf_group_idx| {
-                frame
-                    .try_parse_lf_group(
-                        Some(lf_global_vardct),
-                        global_ma_config,
-                        None,
-                        lf_group_idx,
-                    )
-                    .ok_or(Error::FrameDataIncomplete)
-                    .and_then(|r| r.map_err(Error::FrameParse))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let num_lf_groups = frame.header().num_lf_groups();
+        let mut lf_groups = Vec::with_capacity(num_lf_groups as usize);
+        lf_groups.resize_with(num_lf_groups as usize, || None);
+
+        let hf_global_out = std::sync::Mutex::new(None);
+        let result = std::sync::RwLock::new(Result::Ok(()));
+        pool.scope(|scope| {
+            scope.spawn(|_| {
+                let hf_global = match frame.try_parse_hf_global(Some(&lf_global)).transpose() {
+                    Ok(Some(x)) => x,
+                    Ok(None) => {
+                        *result.write().unwrap() = Err(Error::FrameDataIncomplete);
+                        return;
+                    }
+                    Err(e) => {
+                        *result.write().unwrap() = Err(Error::FrameParse(e));
+                        return;
+                    }
+                };
+
+                for c in 0..3 {
+                    if hf_global.dequant_matrices.jpeg_quant_values(c).is_none() {
+                        *result.write().unwrap() = Err(Error::IncompatibleFrame);
+                        return;
+                    }
+                }
+
+                *hf_global_out.lock().unwrap() = Some(hf_global);
+            });
+
+            for (lf_group_idx, out) in lf_groups.iter_mut().enumerate() {
+                let result = &result;
+                let lf_group_idx = lf_group_idx as u32;
+                scope.spawn(move |_| {
+                    let r = frame
+                        .try_parse_lf_group(
+                            Some(lf_global_vardct),
+                            global_ma_config,
+                            None,
+                            lf_group_idx,
+                        )
+                        .transpose()
+                        .map_err(Error::FrameParse);
+
+                    match r {
+                        Ok(x) => {
+                            *out = x;
+                        }
+                        Err(e) => {
+                            *result.write().unwrap() = Err(e);
+                        }
+                    }
+                });
+            }
+        });
+
+        result.into_inner().unwrap()?;
+        let hf_global = hf_global_out.into_inner().unwrap().unwrap();
+        let lf_groups = lf_groups
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or(Error::FrameDataIncomplete)?;
 
         let num_groups = frame_header.num_groups();
         let mut pass_groups = Vec::with_capacity(num_groups as usize);
@@ -165,6 +205,15 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
             }));
         }
 
+        let hf_coeff_output = pass_groups
+            .iter()
+            .map(|pass_group| {
+                [1, 0, 2].map(|idx| unsafe { pass_group[idx].as_subgrid().as_atomic_i32() })
+            })
+            .collect::<Vec<_>>();
+
+        let mut pass_group_params =
+            Vec::with_capacity(frame_header.passes.num_passes as usize * num_groups as usize);
         for pass_idx in 0..frame_header.passes.num_passes {
             for group_idx in 0..num_groups {
                 let pass_group = frame
@@ -174,11 +223,9 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                 if pass_group.partial {
                     return Err(Error::FrameDataIncomplete);
                 }
-                let mut bitstream = pass_group.bitstream;
+                let bitstream = pass_group.bitstream;
 
-                let pass_group = &pass_groups[group_idx as usize];
-                let hf_coeff_output =
-                    [1, 0, 2].map(|idx| unsafe { pass_group[idx].as_subgrid().as_atomic_i32() });
+                let hf_coeff_output = &hf_coeff_output[group_idx as usize];
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let lf_group = &lf_groups[lf_group_idx as usize];
                 let params = PassGroupParams {
@@ -191,19 +238,26 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                     vardct: Some(PassGroupParamsVardct {
                         lf_vardct: lf_global_vardct,
                         hf_global: &hf_global,
-                        hf_coeff_output: &hf_coeff_output,
+                        hf_coeff_output,
                     }),
                     allow_partial: false,
                     tracker: None,
-                    pool: &jxl_threadpool::JxlThreadPool::none(),
+                    pool,
                 };
-
-                decode_pass_group(&mut bitstream, params).map_err(Error::FrameParse)?;
+                pass_group_params.push((bitstream, params));
             }
         }
 
+        let result = std::sync::RwLock::new(Result::Ok(()));
+        pool.for_each_vec(pass_group_params, |(mut bitstream, params)| {
+            if let Err(e) = decode_pass_group(&mut bitstream, params) {
+                *result.write().unwrap() = Err(Error::FrameParse(e));
+            }
+        });
+        result.into_inner().unwrap()?;
+
         if !header.is_gray && !is_subsampled {
-            Self::integer_cfl(frame_header, &hf_global, &lf_groups, &mut pass_groups);
+            Self::integer_cfl(frame_header, &hf_global, &lf_groups, &mut pass_groups, pool);
         }
 
         let dc_offset = if frame_header.do_ycbcr {
@@ -262,6 +316,7 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
         hf_global: &HfGlobal,
         lf_groups: &[LfGroup<i16>],
         pass_groups: &mut [[AlignedGrid<i32>; 3]],
+        pool: &jxl_threadpool::JxlThreadPool,
     ) {
         let dequant_x = hf_global.dequant_matrices.jpeg_quant_values(0).unwrap();
         let dequant_y = hf_global.dequant_matrices.jpeg_quant_values(1).unwrap();
@@ -275,59 +330,64 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
             .collect::<Vec<_>>();
         let quant_ratio = [dequant_yx, dequant_yb];
 
-        let num_groups = frame_header.num_groups();
         let groups_per_row = frame_header.groups_per_row();
-        for group_idx in 0..num_groups {
-            let [coeff_y, coeff_x, coeff_b] = &mut pass_groups[group_idx as usize];
+        pool.scope(|scope| {
+            for (group_idx, [coeff_y, coeff_x, coeff_b]) in pass_groups.iter_mut().enumerate() {
+                let group_idx = group_idx as u32;
 
-            let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
-            let lf_group = &lf_groups[lf_group_idx as usize];
+                let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
+                let lf_group = &lf_groups[lf_group_idx as usize];
 
-            let group_x_in_lf = (group_idx % groups_per_row) % 8;
-            let group_y_in_lf = (group_idx / groups_per_row) % 8;
-            let cfl_x = group_x_in_lf as usize * 4;
-            let cfl_y = group_y_in_lf as usize * 4;
-            let x_from_y = &lf_group.hf_meta.as_ref().unwrap().x_from_y;
-            let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
-            let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
-            let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
-            let x_from_y = x_from_y
-                .as_subgrid()
-                .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
-            let b_from_y = b_from_y
-                .as_subgrid()
-                .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let group_x_in_lf = (group_idx % groups_per_row) % 8;
+                let group_y_in_lf = (group_idx / groups_per_row) % 8;
+                let cfl_x = group_x_in_lf as usize * 4;
+                let cfl_y = group_y_in_lf as usize * 4;
+                let x_from_y = &lf_group.hf_meta.as_ref().unwrap().x_from_y;
+                let b_from_y = &lf_group.hf_meta.as_ref().unwrap().b_from_y;
+                let cfl_x_end = (cfl_x + 4).min(x_from_y.width());
+                let cfl_y_end = (cfl_y + 4).min(x_from_y.height());
+                let x_from_y = x_from_y
+                    .as_subgrid()
+                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
+                let b_from_y = b_from_y
+                    .as_subgrid()
+                    .subgrid(cfl_x..cfl_x_end, cfl_y..cfl_y_end);
 
-            let cfl_factor = [x_from_y, b_from_y];
-            let coeff = [coeff_x, coeff_b];
-            let it = std::iter::zip(cfl_factor, coeff).zip(&quant_ratio);
+                let cfl_factor = [x_from_y, b_from_y];
+                let coeff = [coeff_x, coeff_b];
+                let it = std::iter::zip(cfl_factor, coeff).zip(&quant_ratio);
 
-            let width = coeff_y.width();
-            let height = coeff_y.height();
-            let rounding_const = 1i32 << (CFL_FIXED_POINT_BITS - 1);
-            for ((cfl_factor, coeff), quant_ratio) in it {
-                for y in 0..height {
-                    let cfl_y = y / 64;
-                    let q_y = y % 8;
-                    for x in 0..width {
-                        let cfl_x = x / 64;
-                        let factor = *cfl_factor.get(cfl_x, cfl_y);
-                        let coeff_y = *coeff_y.get(x, y).unwrap();
+                let width = coeff_y.width();
+                let height = coeff_y.height();
+                let rounding_const = 1i32 << (CFL_FIXED_POINT_BITS - 1);
 
-                        // Dequant matrix is transposed.
-                        let q_x = x % 8;
-                        let q = quant_ratio[q_y + 8 * q_x];
+                scope.spawn(move |_| {
+                    for ((cfl_factor, coeff), quant_ratio) in it {
+                        for y in 0..height {
+                            let cfl_y = y / 64;
+                            let q_y = y % 8;
+                            for x in 0..width {
+                                let cfl_x = x / 64;
+                                let factor = *cfl_factor.get(cfl_x, cfl_y);
+                                let coeff_y = *coeff_y.get(x, y).unwrap();
 
-                        let scale_factor =
-                            factor * (1 << CFL_FIXED_POINT_BITS) / CFL_DEFAULT_COLOR_FACTOR;
-                        let q_scale = (q * scale_factor + rounding_const) >> CFL_FIXED_POINT_BITS;
-                        let cfl_factor =
-                            (coeff_y * q_scale + rounding_const) >> CFL_FIXED_POINT_BITS;
-                        *coeff.get_mut(x, y).unwrap() += cfl_factor;
+                                // Dequant matrix is transposed.
+                                let q_x = x % 8;
+                                let q = quant_ratio[q_y + 8 * q_x];
+
+                                let scale_factor =
+                                    factor * (1 << CFL_FIXED_POINT_BITS) / CFL_DEFAULT_COLOR_FACTOR;
+                                let q_scale =
+                                    (q * scale_factor + rounding_const) >> CFL_FIXED_POINT_BITS;
+                                let cfl_factor =
+                                    (coeff_y * q_scale + rounding_const) >> CFL_FIXED_POINT_BITS;
+                                *coeff.get_mut(x, y).unwrap() += cfl_factor;
+                            }
+                        }
                     }
-                }
+                });
             }
-        }
+        });
     }
 }
 

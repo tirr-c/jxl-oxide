@@ -782,7 +782,7 @@ impl JxlImage {
         };
 
         let frame = self.frame(0).unwrap();
-        jbrd.reconstruct(frame, icc, exif, xmp)?
+        jbrd.reconstruct(frame, icc, exif, xmp, &self.pool)?
             .write(jpeg_output)?;
 
         Ok(())
