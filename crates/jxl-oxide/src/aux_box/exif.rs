@@ -3,7 +3,7 @@ use crate::Result;
 /// Raw Exif metadata.
 pub struct RawExif<'image> {
     tiff_header_offset: u32,
-    payload: Option<&'image [u8]>,
+    payload: &'image [u8],
 }
 
 impl std::fmt::Debug for RawExif<'_> {
@@ -15,13 +15,6 @@ impl std::fmt::Debug for RawExif<'_> {
 }
 
 impl<'image> RawExif<'image> {
-    pub(crate) fn empty() -> Self {
-        Self {
-            tiff_header_offset: 0,
-            payload: None,
-        }
-    }
-
     pub(crate) fn new(box_data: &'image [u8]) -> Result<Self> {
         if box_data.len() < 4 {
             tracing::error!(len = box_data.len(), "Exif box is too short");
@@ -44,7 +37,7 @@ impl<'image> RawExif<'image> {
 
         Ok(Self {
             tiff_header_offset,
-            payload: Some(payload),
+            payload,
         })
     }
 }
@@ -55,10 +48,8 @@ impl<'image> RawExif<'image> {
         self.tiff_header_offset
     }
 
-    /// Returns the payload, if exists.
-    ///
-    /// Returns `None` if Exif metadata wasn't found in the image.
-    pub fn payload(&self) -> Option<&'image [u8]> {
+    /// Returns the payload.
+    pub fn payload(&self) -> &'image [u8] {
         self.payload
     }
 }

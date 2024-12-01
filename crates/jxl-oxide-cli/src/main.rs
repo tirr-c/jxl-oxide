@@ -40,6 +40,8 @@ fn main() -> std::process::ExitCode {
         Some(Subcommands::Progressive(args)) => {
             jxl_oxide_cli::progressive::handle_progressive(args)
         }
+        #[cfg(feature = "__devtools")]
+        Some(Subcommands::DumpJbrd(args)) => jxl_oxide_cli::dump_jbrd::handle_dump_jbrd(args),
     };
 
     if let Err(e) = result {

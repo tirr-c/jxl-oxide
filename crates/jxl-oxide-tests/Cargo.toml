@@ -9,6 +9,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
+ring = "0.17.8"
 tracing.workspace = true
 
 [dependencies.criterion]

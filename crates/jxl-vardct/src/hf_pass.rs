@@ -107,6 +107,7 @@ const BLOCK_SIZES: [(usize, usize); 13] = [
     (256, 256),
     (256, 128),
 ];
+
 const NATURAL_ORDER: [&[(u16, u16)]; 9] = [
     &const_compute_natural_order::<{ BLOCK_SIZES[0].0 * BLOCK_SIZES[0].1 }>(BLOCK_SIZES[0]),
     &const_compute_natural_order::<{ BLOCK_SIZES[1].0 * BLOCK_SIZES[1].1 }>(BLOCK_SIZES[1]),
@@ -118,6 +119,8 @@ const NATURAL_ORDER: [&[(u16, u16)]; 9] = [
     &const_compute_natural_order::<{ BLOCK_SIZES[7].0 * BLOCK_SIZES[7].1 }>(BLOCK_SIZES[7]),
     &const_compute_natural_order::<{ BLOCK_SIZES[8].0 * BLOCK_SIZES[8].1 }>(BLOCK_SIZES[8]),
 ];
+
+pub const DCT8_NATURAL_ORDER: &[(u16, u16)] = NATURAL_ORDER[0];
 
 fn natural_order_lazy(idx: usize) -> &'static [(u16, u16)] {
     if idx >= 13 {

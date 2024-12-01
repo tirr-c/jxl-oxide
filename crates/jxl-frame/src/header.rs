@@ -354,6 +354,18 @@ impl FrameHeader {
         lf_group_col + lf_group_row * self.lf_groups_per_row()
     }
 
+    pub fn group_idx_from_coord(&self, x: u32, y: u32) -> Option<u32> {
+        let shift = 7 + self.group_size_shift;
+        let group_x = x >> shift;
+        let group_y = y >> shift;
+        let group_idx = group_y * self.groups_per_row() + group_x;
+        if group_x >= self.groups_per_row() || group_idx >= self.num_groups() {
+            None
+        } else {
+            Some(group_idx)
+        }
+    }
+
     pub fn is_group_collides_region(&self, group_idx: u32, region: (u32, u32, u32, u32)) -> bool {
         let group_dim = self.group_dim();
         let group_per_row = self.groups_per_row();

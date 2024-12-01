@@ -1,4 +1,4 @@
-use jxl_oxide::{color::*, frame::*, ColorEncodingWithProfile, JxlImage};
+use jxl_oxide::{color::*, frame::*, AuxBoxData, ColorEncodingWithProfile, JxlImage};
 
 use crate::{commands::info::*, Error, Result};
 
@@ -63,17 +63,21 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         }
     }
 
-    match image.raw_exif_data() {
-        Ok(None) => {}
-        Ok(Some(exif)) => {
-            if let Some(data) = exif.payload() {
-                let size = data.len();
-                println!("Exif metadata: {size} byte(s)");
-            }
+    let aux_boxes = image.aux_boxes();
+    match aux_boxes.first_exif() {
+        Ok(AuxBoxData::Data(exif)) => {
+            let data = exif.payload();
+            let size = data.len();
+            println!("Exif metadata: {size} byte(s)");
         }
+        Ok(_) => {}
         Err(e) => {
             println!("Invalid Exif metadata: {e}");
         }
+    }
+    if let AuxBoxData::Data(data) = aux_boxes.first_xml() {
+        let size = data.len();
+        println!("XML metadata: {size} byte(s)");
     }
 
     if let Some(animation) = &image_meta.animation {

@@ -584,6 +584,7 @@ impl BundleDefault<TransformType> for DequantMatrixParams {
 pub struct DequantMatrixSet {
     matrices: Vec<[Vec<f32>; 3]>,
     matrices_tr: Vec<[Vec<f32>; 3]>,
+    jpeg_matrices: Vec<Vec<i32>>,
 }
 
 impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
@@ -616,6 +617,21 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
                 .collect::<Result<_>>()?
         };
 
+        let jpeg_matrices = match &param_list[0].encoding {
+            DequantMatrixParamsEncoding::Raw {
+                denominator,
+                params,
+            } if (1.0 / denominator).round() as i32 == 2040 => params.image().map(|image| {
+                image
+                    .image_channels()
+                    .iter()
+                    .map(|channel| channel.buf().to_vec())
+                    .collect::<Vec<_>>()
+            }),
+            _ => None,
+        };
+        let jpeg_matrices = jpeg_matrices.unwrap_or_default();
+
         let matrices: Vec<_> = param_list
             .into_iter()
             .map(|params| params.into_matrix())
@@ -637,9 +653,11 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixSet {
                 })
             })
             .collect();
+
         Ok(Self {
             matrices,
             matrices_tr,
+            jpeg_matrices,
         })
     }
 }
@@ -699,5 +717,9 @@ impl DequantMatrixSet {
             Dct128x256 | Dct256x128 => 16,
         };
         &self.matrices_tr[idx][channel]
+    }
+
+    pub fn jpeg_quant_values(&self, channel: usize) -> Option<&[i32]> {
+        self.jpeg_matrices.get(channel).map(|v| &**v)
     }
 }

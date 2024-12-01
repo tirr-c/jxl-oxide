@@ -1,12 +1,16 @@
 use std::io::Write;
 
 use brotli_decompressor::DecompressorWriter;
+use jxl_bitstream::container::box_header::ContainerBoxType;
+use jxl_bitstream::ParseEvent;
 
 use crate::Result;
 
 mod exif;
+mod jbrd;
 
 pub use exif::*;
+pub use jbrd::*;
 
 #[derive(Debug, Default)]
 pub struct AuxBoxReader {
@@ -40,6 +44,22 @@ impl std::fmt::Debug for DataKind {
 impl AuxBoxReader {
     pub(super) fn new() -> Self {
         Self::default()
+    }
+
+    pub(super) fn ensure_raw(&mut self) {
+        if self.done {
+            return;
+        }
+
+        match self.data {
+            DataKind::Init => {
+                self.data = DataKind::Raw(Vec::new());
+            }
+            DataKind::NoData | DataKind::Brotli(_) => {
+                panic!();
+            }
+            DataKind::Raw(_) => {}
+        }
     }
 
     pub(super) fn ensure_brotli(&mut self) -> Result<()> {
@@ -120,7 +140,7 @@ impl AuxBoxReader {
         self.done
     }
 
-    pub fn data(&self) -> AuxBoxData {
+    pub fn data(&self) -> AuxBoxData<&[u8]> {
         if !self.is_done() {
             return AuxBoxData::Decoding;
         }
@@ -133,21 +153,190 @@ impl AuxBoxReader {
     }
 }
 
-pub enum AuxBoxData<'data> {
-    Data(&'data [u8]),
+pub enum AuxBoxData<T> {
+    Data(T),
     Decoding,
     NotFound,
 }
 
-impl std::fmt::Debug for AuxBoxData<'_> {
+impl<T> std::fmt::Debug for AuxBoxData<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Data(buf) => f
-                .debug_tuple("Data")
-                .field(&format_args!("{} byte(s)", buf.len()))
-                .finish(),
+            Self::Data(_) => write!(f, "Data(_)"),
             Self::Decoding => write!(f, "Decoding"),
             Self::NotFound => write!(f, "NotFound"),
         }
+    }
+}
+
+impl<T> AuxBoxData<T> {
+    pub fn has_data(&self) -> bool {
+        matches!(self, Self::Data(_))
+    }
+
+    pub fn is_decoding(&self) -> bool {
+        matches!(self, Self::Decoding)
+    }
+
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::NotFound)
+    }
+
+    pub fn unwrap(self) -> T {
+        let Self::Data(x) = self else {
+            panic!("cannot unwrap `AuxBoxData` which doesn't have any data");
+        };
+        x
+    }
+
+    pub fn unwrap_or(self, or: T) -> T {
+        match self {
+            Self::Data(x) => x,
+            _ => or,
+        }
+    }
+
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> AuxBoxData<U> {
+        match self {
+            Self::Data(x) => AuxBoxData::Data(f(x)),
+            Self::Decoding => AuxBoxData::Decoding,
+            Self::NotFound => AuxBoxData::NotFound,
+        }
+    }
+
+    pub fn as_ref(&self) -> AuxBoxData<&T> {
+        match self {
+            Self::Data(x) => AuxBoxData::Data(x),
+            Self::Decoding => AuxBoxData::Decoding,
+            Self::NotFound => AuxBoxData::NotFound,
+        }
+    }
+}
+
+impl<T, E> AuxBoxData<std::result::Result<T, E>> {
+    pub fn transpose(self) -> std::result::Result<AuxBoxData<T>, E> {
+        match self {
+            Self::Data(Ok(x)) => Ok(AuxBoxData::Data(x)),
+            Self::Data(Err(e)) => Err(e),
+            Self::Decoding => Ok(AuxBoxData::Decoding),
+            Self::NotFound => Ok(AuxBoxData::NotFound),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AuxBoxList {
+    boxes: Vec<(ContainerBoxType, AuxBoxReader)>,
+    jbrd: Jbrd,
+    current_box_ty: Option<ContainerBoxType>,
+    current_box: AuxBoxReader,
+    last_box: bool,
+}
+
+impl AuxBoxList {
+    pub(super) fn new() -> Self {
+        Self {
+            boxes: Vec::new(),
+            jbrd: Jbrd::new(),
+            current_box_ty: None,
+            current_box: AuxBoxReader::new(),
+            last_box: false,
+        }
+    }
+
+    pub(super) fn handle_event(&mut self, event: ParseEvent) -> Result<()> {
+        match event {
+            ParseEvent::BitstreamKind(_) => {}
+            ParseEvent::Codestream(_) => {}
+            ParseEvent::NoMoreAuxBox => {
+                self.current_box_ty = None;
+                self.last_box = true;
+            }
+            ParseEvent::AuxBoxStart {
+                ty,
+                brotli_compressed,
+                last_box,
+            } => {
+                self.current_box_ty = Some(ty);
+                if ty != ContainerBoxType::JPEG_RECONSTRUCTION {
+                    if brotli_compressed {
+                        self.current_box.ensure_brotli()?;
+                    } else {
+                        self.current_box.ensure_raw();
+                    }
+                }
+                self.last_box = last_box;
+            }
+            ParseEvent::AuxBoxData(ty, buf) => {
+                self.current_box_ty = Some(ty);
+                if ty == ContainerBoxType::JPEG_RECONSTRUCTION {
+                    self.jbrd.feed_bytes(buf)?;
+                } else {
+                    self.current_box.feed_data(buf)?;
+                }
+            }
+            ParseEvent::AuxBoxEnd(ty) => {
+                self.current_box_ty = Some(ty);
+                self.finalize()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn finalize(&mut self) -> Result<()> {
+        match self.current_box_ty {
+            Some(ContainerBoxType::JPEG_RECONSTRUCTION) => {
+                self.jbrd.finalize()?;
+            }
+            Some(ty) => {
+                self.current_box.finalize()?;
+                let finished_box = std::mem::replace(&mut self.current_box, AuxBoxReader::new());
+                self.boxes.push((ty, finished_box));
+            }
+            None => {
+                return Ok(());
+            }
+        }
+
+        self.current_box_ty = None;
+        Ok(())
+    }
+}
+
+impl AuxBoxList {
+    pub(crate) fn jbrd(&self) -> AuxBoxData<&jxl_jbr::JpegBitstreamData> {
+        if let Some(data) = self.jbrd.data() {
+            AuxBoxData::Data(data)
+        } else if self.last_box
+            && self.current_box_ty != Some(ContainerBoxType::JPEG_RECONSTRUCTION)
+        {
+            AuxBoxData::NotFound
+        } else {
+            AuxBoxData::Decoding
+        }
+    }
+
+    fn first_of_type(&self, ty: ContainerBoxType) -> AuxBoxData<&[u8]> {
+        let maybe = self.boxes.iter().find(|&&(ty_to_test, _)| ty_to_test == ty);
+        let data = maybe.map(|(_, b)| b.data());
+
+        if let Some(data) = data {
+            data
+        } else if self.last_box && self.current_box_ty != Some(ty) {
+            AuxBoxData::NotFound
+        } else {
+            AuxBoxData::Decoding
+        }
+    }
+
+    /// Returns the first Exif metadata, if any.
+    pub fn first_exif(&self) -> Result<AuxBoxData<RawExif>> {
+        let exif = self.first_of_type(ContainerBoxType::EXIF);
+        exif.map(RawExif::new).transpose()
+    }
+
+    /// Returns the first XML metadata, if any.
+    pub fn first_xml(&self) -> AuxBoxData<&[u8]> {
+        self.first_of_type(ContainerBoxType::XML)
     }
 }

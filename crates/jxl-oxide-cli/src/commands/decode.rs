@@ -21,8 +21,8 @@ pub struct DecodeArgs {
     #[arg(long, default_value_t = 0)]
     pub approx_memory_limit: usize,
     /// Format to output
-    #[arg(value_enum, short = 'f', long, default_value_t = OutputFormat::Png)]
-    pub output_format: OutputFormat,
+    #[arg(value_enum, short = 'f', long)]
+    pub output_format: Option<OutputFormat>,
     /// (unstable) Target colorspace specification
     ///
     /// Specification string consists of (optional) preset and a sequence of parameters delimited by commas.
@@ -83,6 +83,9 @@ pub enum OutputFormat {
     Png8,
     /// PNG, always 16-bit.
     Png16,
+    /// JPEG bitstream reconstruction.
+    #[value(name = "jpeg", alias("jpg"))]
+    JpegReconstruct,
     /// Numpy, used for conformance test.
     Npy,
 }

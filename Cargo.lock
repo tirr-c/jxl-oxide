@@ -843,6 +843,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-jbr"
+version = "0.1.0"
+dependencies = [
+ "brotli-decompressor",
+ "jxl-bitstream",
+ "jxl-frame",
+ "jxl-grid",
+ "jxl-image",
+ "jxl-modular",
+ "jxl-oxide-common",
+ "jxl-threadpool",
+ "jxl-vardct",
+ "tracing",
+]
+
+[[package]]
 name = "jxl-modular"
 version = "0.9.0"
 dependencies = [
@@ -866,6 +882,7 @@ dependencies = [
  "jxl-frame",
  "jxl-grid",
  "jxl-image",
+ "jxl-jbr",
  "jxl-oxide-common",
  "jxl-render",
  "jxl-threadpool",
@@ -915,6 +932,7 @@ dependencies = [
  "mimalloc",
  "rand",
  "reqwest",
+ "ring",
  "tracing",
  "zstd",
 ]

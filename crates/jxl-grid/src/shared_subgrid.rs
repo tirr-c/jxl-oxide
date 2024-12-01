@@ -226,3 +226,22 @@ impl<'g> SharedSubgrid<'g, f32> {
         }
     }
 }
+
+impl<'g> SharedSubgrid<'g, i32> {
+    /// # Safety
+    /// Caller should make sure that atomic and non-atomic accesses are not mixed.
+    pub unsafe fn as_atomic_i32(&self) -> SharedSubgrid<'g, AtomicI32> {
+        assert_eq!(std::mem::size_of::<i32>(), std::mem::size_of::<AtomicI32>());
+        assert_eq!(
+            std::mem::align_of::<i32>(),
+            std::mem::align_of::<AtomicI32>()
+        );
+        SharedSubgrid {
+            ptr: self.ptr.cast(),
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            _marker: Default::default(),
+        }
+    }
+}
