@@ -62,7 +62,6 @@ pub struct MaConfigParams<'a> {
     pub tracker: Option<&'a AllocTracker>,
     /// Maximum number of meta-adaptive tree nodes.
     pub node_limit: usize,
-    pub depth_limit: usize,
 }
 
 impl Bundle<MaConfigParams<'_>> for MaConfig {
@@ -84,8 +83,8 @@ impl Bundle<MaConfigParams<'_>> for MaConfig {
         let MaConfigParams {
             tracker,
             node_limit,
-            depth_limit,
         } = params;
+        let depth_limit = 2048;
 
         let mut tree_decoder = Decoder::parse(bitstream, 6)?;
         if is_infinite_tree_dist(&tree_decoder) {

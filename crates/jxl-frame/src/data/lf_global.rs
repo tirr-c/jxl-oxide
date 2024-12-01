@@ -222,7 +222,6 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
         let ma_config_params = MaConfigParams {
             tracker: params.tracker,
             node_limit: max_global_ma_nodes,
-            depth_limit: 2048,
         };
         let ma_config = bitstream
             .read_bool()?
