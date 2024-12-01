@@ -6,6 +6,8 @@ pub enum Error {
     InvalidData,
     HuffmanLookup,
     ReconstructionWrite(std::io::Error),
+    // TODO: Move to jxl-oxide crate
+    ReconstructionUnavailable,
     ReconstructionDataIncomplete,
     FrameDataIncomplete,
     FrameParse(jxl_frame::Error),
@@ -34,6 +36,7 @@ impl std::fmt::Display for Error {
                 write!(f, "invalid reconstruction data: Huffman code lookup failed")
             }
             Error::ReconstructionWrite(e) => write!(f, "failed to write data: {e}"),
+            Error::ReconstructionUnavailable => write!(f, "reconstruction data not found"),
             Error::ReconstructionDataIncomplete => write!(f, "reconstruction data is incomplete"),
             Error::FrameDataIncomplete => write!(f, "JPEG XL frame data is incomplete"),
             Error::FrameParse(e) => write!(f, "error parsing JPEG XL frame: {e}"),

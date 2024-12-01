@@ -750,8 +750,14 @@ impl JxlImage {
 
     pub fn reconstruct_jpeg(&self, jpeg_output: impl std::io::Write) -> Result<()> {
         let aux_boxes = &self.inner.aux_boxes;
-        let AuxBoxData::Data(jbrd) = aux_boxes.jbrd() else {
-            return Err(jxl_jbr::Error::ReconstructionDataIncomplete.into());
+        let jbrd = match aux_boxes.jbrd() {
+            AuxBoxData::Data(jbrd) => jbrd,
+            AuxBoxData::Decoding => {
+                return Err(jxl_jbr::Error::ReconstructionDataIncomplete.into());
+            }
+            AuxBoxData::NotFound => {
+                return Err(jxl_jbr::Error::ReconstructionUnavailable.into());
+            }
         };
         if self.num_loaded_frames() == 0 {
             return Err(jxl_jbr::Error::FrameDataIncomplete.into());
