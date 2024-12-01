@@ -19,6 +19,7 @@ use scan::*;
 const CFL_FIXED_POINT_BITS: usize = 11;
 const CFL_DEFAULT_COLOR_FACTOR: i32 = 84;
 
+/// JPEG bitstream reconstruction context.
 pub struct JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
     parsed: ParsedFrameData,
     is_progressive: bool,
@@ -392,6 +393,7 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
 }
 
 impl JpegBitstreamReconstructor<'_, '_, '_> {
+    /// Writes reconstructed JPEG bitstream to the writer.
     pub fn write(mut self, mut writer: impl Write) -> Result<()> {
         writer
             .write_all(&[0xff, 0xd8])

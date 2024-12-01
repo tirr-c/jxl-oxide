@@ -1,3 +1,5 @@
+//! This crate provides JPEG bitstream reconstruction feature from JPEG XL images.
+
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -22,6 +24,7 @@ const HEADER_ICC: &[u8] = b"ICC_PROFILE\0";
 const HEADER_EXIF: &[u8] = b"Exif\0\0";
 const HEADER_XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 
+/// JPEG bitstream reconstruction data.
 pub struct JpegBitstreamData {
     header: Box<JpegBitstreamHeader>,
     data_stream: Box<DecompressorWriter<Vec<u8>>>,
@@ -36,6 +39,12 @@ impl std::fmt::Debug for JpegBitstreamData {
 }
 
 impl JpegBitstreamData {
+    /// Decodes the JPEG bitstream reconstruction data from the buffer.
+    ///
+    /// Returns `Ok(Some(_))` if header is decoded successfully, and `Ok(None)` if the input is insufficient.
+    ///
+    /// # Errors
+    /// This function returns an error if the header is invalid, or data section could not be decompressed.
     pub fn try_parse(data: &[u8]) -> Result<Option<Self>> {
         let mut bitstream = Bitstream::new(data);
         let header = match JpegBitstreamHeader::parse(&mut bitstream, ()) {
@@ -58,10 +67,12 @@ impl JpegBitstreamData {
         }))
     }
 
+    /// Feeds more bytes to be decompressed.
     pub fn feed_bytes(&mut self, data: &[u8]) -> Result<()> {
         self.data_stream.write_all(data).map_err(Error::Brotli)
     }
 
+    /// Finalizes the stream and checks for potential errors.
     pub fn finalize(&mut self) -> Result<()> {
         self.data_stream.flush().map_err(Error::Brotli)?;
 
@@ -78,12 +89,9 @@ impl JpegBitstreamData {
         Ok(())
     }
 
-    pub fn is_complete(&mut self) -> Result<bool> {
-        self.data_stream.flush().map_err(Error::Brotli)?;
-        let decompressed_len = self.data_stream.get_ref().len();
-        Ok(decompressed_len >= self.header.expected_data_len())
-    }
-
+    /// Creates a reconstruction context with given JPEG XL frame and metadata.
+    ///
+    /// `icc_profile`, `exif` or `xmp` can be empty if no corresponding metadata was found.
     pub fn reconstruct<'jbrd, 'frame, 'meta>(
         &'jbrd self,
         frame: &'frame Frame,

@@ -695,6 +695,7 @@ impl JxlImage {
         &self.inner.aux_boxes
     }
 
+    /// Returns availability and validity of JPEG bitstream reconstruction data.
     pub fn jpeg_reconstruction_status(&self) -> JpegReconstructionStatus {
         match self.inner.aux_boxes.jbrd() {
             AuxBoxData::Data(jbrd) => {
@@ -748,6 +749,9 @@ impl JxlImage {
         }
     }
 
+    /// Tries to reconstruct JPEG bitstream from the image.
+    ///
+    /// Note that reconstruction may fail even if `jpeg_reconstruction_status` returned `Available`.
     pub fn reconstruct_jpeg(&self, jpeg_output: impl std::io::Write) -> Result<()> {
         let aux_boxes = &self.inner.aux_boxes;
         let jbrd = match aux_boxes.jbrd() {
