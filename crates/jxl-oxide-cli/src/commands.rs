@@ -7,6 +7,8 @@ pub mod generate_fixture;
 pub mod info;
 #[cfg(feature = "__devtools")]
 pub mod progressive;
+#[cfg(feature = "__ffmpeg")]
+pub mod slow_motion;
 #[cfg(test)]
 pub mod tests;
 
@@ -19,6 +21,8 @@ pub use generate_fixture::GenerateFixtureArgs;
 pub use info::InfoArgs;
 #[cfg(feature = "__devtools")]
 pub use progressive::ProgressiveArgs;
+#[cfg(feature = "__ffmpeg")]
+pub use slow_motion::SlowMotionArgs;
 
 #[derive(Debug, clap::Parser)]
 #[command(version)]
@@ -60,4 +64,7 @@ pub enum Subcommands {
     /// (devtools) Dump JPEG bitstream reconstruction data.
     #[cfg(feature = "__devtools")]
     DumpJbrd(DumpJbrd),
+    /// (devtools, ffmpeg) Load an image byte-by-byte.
+    #[cfg(feature = "__ffmpeg")]
+    SlowMotion(SlowMotionArgs),
 }
