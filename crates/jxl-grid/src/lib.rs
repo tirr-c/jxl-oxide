@@ -164,6 +164,24 @@ impl<S> AlignedGrid<S> {
         Some(&mut self.buf[y * self.width + x + self.offset])
     }
 
+    #[inline]
+    pub fn get_row(&self, y: usize) -> Option<&[S]> {
+        if y >= self.height {
+            return None;
+        }
+
+        Some(&self.buf[y * self.width + self.offset..][..self.width])
+    }
+
+    #[inline]
+    pub fn get_row_mut(&mut self, y: usize) -> Option<&mut [S]> {
+        if y >= self.height {
+            return None;
+        }
+
+        Some(&mut self.buf[y * self.width + self.offset..][..self.width])
+    }
+
     /// Get the immutable slice to the underlying buffer.
     #[inline]
     pub fn buf(&self) -> &[S] {
