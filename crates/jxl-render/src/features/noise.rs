@@ -41,6 +41,9 @@ pub fn render_noise(
         pool,
     )?;
 
+    let mut lut = [0f32; 9];
+    lut[..8].copy_from_slice(&params.lut);
+    lut[8] = params.lut[7];
     for fy in 0..height {
         let y = fy + top;
         let row_x = grid_x.get_row_mut(fy).unwrap();
@@ -59,36 +62,23 @@ pub fn render_noise(
             let noise_y = row_noise_y[x];
             let noise_b = row_noise_b[x];
 
-            let in_g = grid_y - grid_x;
-            let in_r = grid_x + grid_y;
-            let in_scaled_r = f32::max(0.0, in_r * 3.0);
-            let in_scaled_g = f32::max(0.0, in_g * 3.0);
+            let in_x = grid_x + grid_y;
+            let in_y = grid_y - grid_x;
+            let in_scaled_x = f32::max(0.0, in_x * 3.0);
+            let in_scaled_y = f32::max(0.0, in_y * 3.0);
 
-            let (in_int_r, in_frac_r) = if in_scaled_r >= 7.0 {
-                (6, 1.0)
-            } else {
-                (
-                    in_scaled_r.floor() as usize,
-                    in_scaled_r - in_scaled_r.floor(),
-                )
-            };
-            let (in_int_g, in_frac_g) = if in_scaled_g >= 7.0 {
-                (6, 1.0)
-            } else {
-                (
-                    in_scaled_g.floor() as usize,
-                    in_scaled_g - in_scaled_g.floor(),
-                )
-            };
+            let in_x_int = (in_scaled_x as usize).min(7);
+            let in_x_frac = in_scaled_x - in_x_int as f32;
+            let in_y_int = (in_scaled_y as usize).min(7);
+            let in_y_frac = in_scaled_y - in_y_int as f32;
 
-            let lut = params.lut;
-            let sr = (lut[in_int_r + 1] - lut[in_int_r]) * in_frac_r + lut[in_int_r];
-            let sg = (lut[in_int_g + 1] - lut[in_int_g]) * in_frac_g + lut[in_int_g];
-            let nr = 0.22 * sr * (0.0078125 * noise_x + 0.9921875 * noise_b);
-            let ng = 0.22 * sg * (0.0078125 * noise_y + 0.9921875 * noise_b);
-            row_x[fx] += corr_x * (nr + ng) + nr - ng;
-            row_y[fx] += nr + ng;
-            row_b[fx] += corr_b * (nr + ng);
+            let sx = (lut[in_x_int + 1] - lut[in_x_int]) * in_x_frac + lut[in_x_int];
+            let sy = (lut[in_y_int + 1] - lut[in_y_int]) * in_y_frac + lut[in_y_int];
+            let nx = 0.22 * sx * (0.0078125 * noise_x + 0.9921875 * noise_b);
+            let ny = 0.22 * sy * (0.0078125 * noise_y + 0.9921875 * noise_b);
+            row_x[fx] += corr_x * (nx + ny) + nx - ny;
+            row_y[fx] += nx + ny;
+            row_b[fx] += corr_b * (nx + ny);
         }
     }
 
