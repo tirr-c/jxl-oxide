@@ -1,7 +1,7 @@
 use std::num::Wrapping;
 
 use jxl_frame::{data::NoiseParameters, FrameHeader};
-use jxl_grid::{AlignedGrid, AllocTracker};
+use jxl_grid::{AlignedGrid, AllocTracker, SharedSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{ImageWithRegion, Region, Result};
@@ -114,14 +114,8 @@ fn init_noise(
 
         let group_width = group_dim.min(width - x0);
         let group_height = group_dim.min(height - y0);
-        let mut noise_buffer = [
-            AlignedGrid::with_alloc_tracker(group_width, group_height, tracker)?,
-            AlignedGrid::with_alloc_tracker(group_width, group_height, tracker)?,
-            AlignedGrid::with_alloc_tracker(group_width, group_height, tracker)?,
-        ];
-
-        init_noise_group(seed0, seed1, &mut noise_buffer);
-        noise_groups.push(noise_buffer);
+        let noise_group = NoiseGroup::new(group_width, group_height, seed0, seed1, tracker)?;
+        noise_groups.push(noise_group);
     }
 
     let mut convolved: [AlignedGrid<f32>; 3] = [
@@ -152,7 +146,9 @@ fn init_noise(
                 ) {
                     let group_idx = y * groups_per_row + x;
                     if x < groups_per_row {
-                        noise_groups.get(group_idx).map(|group| &group[channel_idx])
+                        noise_groups
+                            .get(group_idx)
+                            .map(|group| group.as_subgrid(channel_idx))
                     } else {
                         None
                     }
@@ -192,32 +188,60 @@ fn rng_seed1(x0: usize, y0: usize) -> u64 {
     ((x0 as u64) << 32) + y0 as u64
 }
 
-/// Initializes `noise_buffer` for group
-fn init_noise_group(seed0: u64, seed1: u64, noise_buffer: &mut [AlignedGrid<f32>; 3]) {
-    let mut rng = XorShift128Plus::new(seed0, seed1);
+struct NoiseGroup {
+    buf: [Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    _alloc_handle: Option<jxl_grid::AllocHandle>,
+}
 
-    for channel in noise_buffer {
-        let width = channel.width();
-        let height = channel.height();
-        let buf = channel.buf_mut();
-        for y in 0..height {
-            for x in (0..width).step_by(N * 2) {
-                let idx_base = y * width + x;
+impl NoiseGroup {
+    fn new(
+        width: usize,
+        height: usize,
+        seed0: u64,
+        seed1: u64,
+        tracker: Option<&AllocTracker>,
+    ) -> Result<Self> {
+        let width_n2 = width.div_ceil(N * 2);
+        let stride = width_n2 * N * 2;
+        let elems = stride * height * 3;
+        let alloc_handle = tracker
+            .map(|tracker| tracker.alloc::<f32>(elems))
+            .transpose()?;
+
+        let mut rng = XorShift128Plus::new(seed0, seed1);
+
+        let buf: [_; 3] = std::array::from_fn(|_| {
+            let num_iters = width_n2 * height;
+            let mut buf = Vec::with_capacity(num_iters * N * 2);
+            for _ in 0..num_iters {
                 let bits = rng.get_u32_bits();
-                let iters = (width - x).min(N * 2);
-                let buf_section = &mut buf[idx_base..][..iters];
-                for (out, bits) in std::iter::zip(buf_section, bits) {
-                    *out = f32::from_bits(bits >> 9 | 0x3f800000);
-                }
+                let bits = bits.map(|x| f32::from_bits(x >> 9 | 0x3f800000));
+                buf.extend_from_slice(&bits);
             }
-        }
+            buf
+        });
+
+        Ok(Self {
+            buf,
+            width,
+            height,
+            stride,
+            _alloc_handle: alloc_handle,
+        })
+    }
+
+    #[inline]
+    fn as_subgrid(&self, channel_idx: usize) -> SharedSubgrid<f32> {
+        SharedSubgrid::from_buf(&self.buf[channel_idx], self.width, self.height, self.stride)
     }
 }
 
-#[inline(never)]
 fn convolve_fill(
     mut out: jxl_grid::MutableSubgrid<'_, f32>,
-    adjacent_groups: [Option<&AlignedGrid<f32>>; 9],
+    adjacent_groups: [Option<SharedSubgrid<f32>>; 9],
     tracker: Option<&AllocTracker>,
 ) -> Result<()> {
     let this = adjacent_groups[4].unwrap();
@@ -234,9 +258,13 @@ fn convolve_fill(
             let out = rows
                 .get_row_mut(2usize.wrapping_add_signed(offset_y))
                 .unwrap();
-            let c = c.get_row(c.height().wrapping_add_signed(offset_y)).unwrap();
-            let l = l.map(|l| l.get_row(l.height().wrapping_add_signed(offset_y)).unwrap());
-            let r = r.map(|r| r.get_row(r.height().wrapping_add_signed(offset_y)).unwrap());
+            let c = c.get_row(c.height().wrapping_add_signed(offset_y));
+            let l = l
+                .as_ref()
+                .map(|l| l.get_row(l.height().wrapping_add_signed(offset_y)));
+            let r = r
+                .as_ref()
+                .map(|r| r.get_row(r.height().wrapping_add_signed(offset_y)));
             fill_padded_row(out, c, l, r);
         }
     } else if height >= 2 {
@@ -248,9 +276,9 @@ fn convolve_fill(
             let out = rows
                 .get_row_mut(2usize.wrapping_add_signed(offset_y))
                 .unwrap();
-            let c = c.get_row(y).unwrap();
-            let l = l.map(|l| l.get_row(y).unwrap());
-            let r = r.map(|r| r.get_row(y).unwrap());
+            let c = c.get_row(y);
+            let l = l.as_ref().map(|l| l.get_row(y));
+            let r = r.as_ref().map(|r| r.get_row(y));
             fill_padded_row(out, c, l, r);
         }
     } else {
@@ -258,9 +286,9 @@ fn convolve_fill(
         let l = adjacent_groups[3];
         let r = adjacent_groups[5];
 
-        let c = c.get_row(0).unwrap();
-        let l = l.map(|l| l.get_row(0).unwrap());
-        let r = r.map(|r| r.get_row(0).unwrap());
+        let c = c.get_row(0);
+        let l = l.as_ref().map(|l| l.get_row(0));
+        let r = r.as_ref().map(|r| r.get_row(0));
         for y in 0..2 {
             let out = rows.get_row_mut(y).unwrap();
             fill_padded_row(out, c, l, r);
@@ -296,8 +324,7 @@ fn convolve_fill(
     Ok(())
 }
 
-#[inline(never)]
-fn fill_once(out: &mut [f32], fill_y: usize, adjacent_groups: [Option<&AlignedGrid<f32>>; 9]) {
+fn fill_once(out: &mut [f32], fill_y: usize, adjacent_groups: [Option<SharedSubgrid<f32>>; 9]) {
     let this = adjacent_groups[4].unwrap();
     let height = this.height();
 
@@ -337,9 +364,9 @@ fn fill_once(out: &mut [f32], fill_y: usize, adjacent_groups: [Option<&AlignedGr
             (0, c, l, r)
         }
     };
-    let c = c.get_row(source_y).unwrap();
-    let l = l.map(|l| l.get_row(source_y).unwrap());
-    let r = r.map(|r| r.get_row(source_y).unwrap());
+    let c = c.get_row(source_y);
+    let l = l.as_ref().map(|l| l.get_row(source_y));
+    let r = r.as_ref().map(|r| r.get_row(source_y));
 
     fill_padded_row(out, c, l, r);
 }
@@ -399,6 +426,7 @@ impl XorShift128Plus {
     }
 
     /// Returns N * 2 [`u32`] pseudorandom numbers
+    #[inline]
     pub fn get_u32_bits(&mut self) -> [u32; N * 2] {
         let batch = self.fill_batch();
         if 1u64.to_le() == 1u64 {
@@ -408,6 +436,7 @@ impl XorShift128Plus {
         }
     }
 
+    #[inline]
     fn fill_batch(&mut self) -> [u64; N] {
         std::array::from_fn(|i| {
             let mut s1 = self.s0[i];
