@@ -2,6 +2,7 @@ use std::num::Wrapping;
 
 use jxl_frame::{data::NoiseParameters, FrameHeader};
 use jxl_grid::{AlignedGrid, AllocTracker};
+use jxl_threadpool::JxlThreadPool;
 
 use crate::{ImageWithRegion, Region, Result};
 
@@ -15,6 +16,7 @@ pub fn render_noise(
     base_correlations_xb: Option<(f32, f32)>,
     grid: &mut ImageWithRegion,
     params: &NoiseParameters,
+    pool: &JxlThreadPool,
 ) -> Result<()> {
     let (region, shift) = grid.regions_and_shifts()[0];
     let tracker = grid.alloc_tracker().cloned();
@@ -37,6 +39,7 @@ pub fn render_noise(
         invisible_frames_num,
         header,
         tracker.as_ref(),
+        pool,
     )?;
 
     for fy in 0..height {
@@ -91,6 +94,7 @@ fn init_noise(
     invisible_frames: usize,
     header: &FrameHeader,
     tracker: Option<&AllocTracker>,
+    pool: &JxlThreadPool,
 ) -> Result<[AlignedGrid<f32>; 3]> {
     let seed0 = rng_seed0(visible_frames, invisible_frames);
 
@@ -131,14 +135,16 @@ fn init_noise(
     ];
 
     // Each channel is convolved by the 5×5 kernel
+    let mut jobs = Vec::with_capacity(num_groups * 3);
     for (channel_idx, out) in convolved.iter_mut().enumerate() {
-        for group_idx in 0..num_groups {
+        for (group_idx, out_subgrid) in out
+            .as_subgrid_mut()
+            .into_groups(group_dim, group_dim)
+            .into_iter()
+            .enumerate()
+        {
             let group_x = group_idx % groups_per_row;
             let group_y = group_idx / groups_per_row;
-            let x0 = group_x * group_dim;
-            let y0 = group_y * group_dim;
-            let x1 = x0 + group_dim.min(width - x0);
-            let y1 = y0 + group_dim.min(height - y0);
 
             // `adjacent_groups[4] == this`
             let adjacent_groups: [_; 9] = std::array::from_fn(|idx| {
@@ -158,10 +164,20 @@ fn init_noise(
                     None
                 }
             });
-            let out_subgrid = out.as_subgrid_mut().subgrid(x0..x1, y0..y1);
-            convolve_fill(out_subgrid, adjacent_groups, tracker)?;
+
+            jobs.push((out_subgrid, adjacent_groups));
         }
     }
+
+    let result = std::sync::Mutex::new(Ok(()));
+    pool.for_each_vec(jobs, |job| {
+        let (out_subgrid, adjacent_groups) = job;
+        let r = convolve_fill(out_subgrid, adjacent_groups, tracker);
+        if r.is_err() {
+            *result.lock().unwrap() = r;
+        }
+    });
+    result.into_inner().unwrap()?;
 
     Ok(convolved)
 }
