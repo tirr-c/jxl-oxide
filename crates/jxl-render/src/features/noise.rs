@@ -20,7 +20,7 @@ pub fn render_noise(
 ) -> Result<()> {
     let (region, shift) = grid.regions_and_shifts()[0];
     let tracker = grid.alloc_tracker().cloned();
-    let [grid_r, grid_g, grid_b] = grid.as_color_floats_mut();
+    let [grid_x, grid_y, grid_b] = grid.as_color_floats_mut();
 
     let full_frame_region = Region::with_size(header.width, header.height);
     let actual_region = region
@@ -33,7 +33,6 @@ pub fn render_noise(
     let height = actual_region.height as usize;
     let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
 
-    // TODO: Initialize smaller noise grid.
     let noise_buffer = init_noise(
         visible_frames_num,
         invisible_frames_num,
@@ -44,14 +43,21 @@ pub fn render_noise(
 
     for fy in 0..height {
         let y = fy + top;
+        let row_x = grid_x.get_row_mut(fy).unwrap();
+        let row_y = grid_y.get_row_mut(fy).unwrap();
+        let row_b = grid_b.get_row_mut(fy).unwrap();
+        let row_noise_x = noise_buffer[0].get_row(y).unwrap();
+        let row_noise_y = noise_buffer[1].get_row(y).unwrap();
+        let row_noise_b = noise_buffer[2].get_row(y).unwrap();
+
         for fx in 0..width {
             let x = fx + left;
 
-            let grid_x = grid_r.get(fx, fy).unwrap();
-            let grid_y = grid_g.get(fx, fy).unwrap();
-            let noise_r = noise_buffer[0].get(x, y).unwrap();
-            let noise_g = noise_buffer[1].get(x, y).unwrap();
-            let noise_b = noise_buffer[2].get(x, y).unwrap();
+            let grid_x = row_x[fx];
+            let grid_y = row_y[fx];
+            let noise_x = row_noise_x[x];
+            let noise_y = row_noise_y[x];
+            let noise_b = row_noise_b[x];
 
             let in_g = grid_y - grid_x;
             let in_r = grid_x + grid_y;
@@ -78,11 +84,11 @@ pub fn render_noise(
             let lut = params.lut;
             let sr = (lut[in_int_r + 1] - lut[in_int_r]) * in_frac_r + lut[in_int_r];
             let sg = (lut[in_int_g + 1] - lut[in_int_g]) * in_frac_g + lut[in_int_g];
-            let nr = 0.22 * sr * (0.0078125 * noise_r + 0.9921875 * noise_b);
-            let ng = 0.22 * sg * (0.0078125 * noise_g + 0.9921875 * noise_b);
-            *grid_r.get_mut(fx, fy).unwrap() += corr_x * (nr + ng) + nr - ng;
-            *grid_g.get_mut(fx, fy).unwrap() += nr + ng;
-            *grid_b.get_mut(fx, fy).unwrap() += corr_b * (nr + ng);
+            let nr = 0.22 * sr * (0.0078125 * noise_x + 0.9921875 * noise_b);
+            let ng = 0.22 * sg * (0.0078125 * noise_y + 0.9921875 * noise_b);
+            row_x[fx] += corr_x * (nr + ng) + nr - ng;
+            row_y[fx] += nr + ng;
+            row_b[fx] += corr_b * (nr + ng);
         }
     }
 
