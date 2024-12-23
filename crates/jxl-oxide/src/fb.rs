@@ -183,7 +183,7 @@ pub struct ImageStream<'r> {
 }
 
 impl<'r> ImageStream<'r> {
-    pub(crate) fn from_render(render: &'r crate::Render) -> Self {
+    pub(crate) fn from_render(render: &'r crate::Render, skip_alpha: bool) -> Self {
         use jxl_image::ExtraChannelType;
 
         let orientation = render.orientation;
@@ -228,17 +228,19 @@ impl<'r> ImageStream<'r> {
         }
 
         // Find alpha
-        for (ec_idx, (ec, (region, _))) in render
-            .extra_channels
-            .iter()
-            .zip(&regions_and_shifts[color_channels..])
-            .enumerate()
-        {
-            if ec.is_alpha() {
-                grids.push(&fb[color_channels + ec_idx]);
-                bit_depth.push(ec.bit_depth);
-                start_offset_xy.push((left - region.left, top - region.top));
-                break;
+        if !skip_alpha {
+            for (ec_idx, (ec, (region, _))) in render
+                .extra_channels
+                .iter()
+                .zip(&regions_and_shifts[color_channels..])
+                .enumerate()
+            {
+                if ec.is_alpha() {
+                    grids.push(&fb[color_channels + ec_idx]);
+                    bit_depth.push(ec.bit_depth);
+                    start_offset_xy.push((left - region.left, top - region.top));
+                    break;
+                }
             }
         }
 
