@@ -181,9 +181,9 @@ fn rng_seed0(visible_frames: usize, invisible_frames: usize) -> u64 {
     ((visible_frames as u64) << 32) + invisible_frames as u64
 }
 
-#[inline]
 /// Seed for [`XorShift128Plus`] from the coordinates of the top-left pixel of the
 /// group within the frame.
+#[inline]
 fn rng_seed1(x0: usize, y0: usize) -> u64 {
     ((x0 as u64) << 32) + y0 as u64
 }
@@ -295,15 +295,14 @@ fn convolve_fill(
         }
     }
 
-    for y in 0..2 {
+    for y in 0..3 {
         let out = rows.get_row_mut(2 + y).unwrap();
         fill_once(out, y, adjacent_groups);
     }
 
     let input_width = rows.width();
     for y in 0..height {
-        let fill_y = y + 2;
-        fill_once(rows.get_row_mut(4).unwrap(), fill_y, adjacent_groups);
+        let center_y = (y + 2) % 5;
 
         let input_buf = rows.buf();
         let out_buf = out.get_row_mut(y);
@@ -315,10 +314,14 @@ fn convolve_fill(
                     sum += input_row[x + dx] * 0.16;
                 }
             }
-            *out = sum - input_buf[2 * input_width + x + 2] * 4.0;
+            *out = sum - input_buf[center_y * input_width + x + 2] * 4.0;
         }
 
-        rows.buf_mut().copy_within(input_width.., 0);
+        if y != height - 1 {
+            let next_y = y + 3;
+            let fill_y = (next_y + 2) % 5;
+            fill_once(rows.get_row_mut(fill_y).unwrap(), next_y, adjacent_groups);
+        }
     }
 
     Ok(())
