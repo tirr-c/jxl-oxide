@@ -12,6 +12,7 @@ version = "0.10.1"
 edition = "2021"
 
 [dependencies]
+bytemuck.workspace = true
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
