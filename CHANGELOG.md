@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement JPEG bitstream reconstruction (#390).
 - `jxl-oxide`: Extract (potentially Brotli-compressed) Exif metadata (#389).
 
+### Fixed
+- `jxl-render`: Fix panic in alpha blending without alpha channel (#403).
+
 ## [0.10.2] - 2024-12-07
 
 ### Fixed
