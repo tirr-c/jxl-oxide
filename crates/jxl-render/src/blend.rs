@@ -34,7 +34,7 @@ struct BlendParams<'a> {
 
 struct BlendAlpha<'a> {
     base: Option<SharedSubgrid<'a, f32>>,
-    new: SharedSubgrid<'a, f32>,
+    new: Option<SharedSubgrid<'a, f32>>,
     clamp: bool,
     swapped: bool,
     premultiplied: bool,
@@ -72,10 +72,10 @@ impl<'a> BlendParams<'a> {
             }
             FrameBlendMode::Blend => BlendMode::Blend(BlendAlpha {
                 base: base_alpha,
-                new: new_alpha.unwrap(),
+                new: new_alpha,
                 clamp: blending_info.clamp,
                 swapped: false,
-                premultiplied: premultiplied.unwrap(),
+                premultiplied: premultiplied.unwrap_or(false),
             }),
             FrameBlendMode::MulAdd
                 if channel_idx == blending_info.alpha_channel as usize + color_channels =>
@@ -84,10 +84,10 @@ impl<'a> BlendParams<'a> {
             }
             FrameBlendMode::MulAdd => BlendMode::MulAdd(BlendAlpha {
                 base: base_alpha,
-                new: new_alpha.unwrap(),
+                new: new_alpha,
                 clamp: blending_info.clamp,
                 swapped: false,
-                premultiplied: premultiplied.unwrap(),
+                premultiplied: premultiplied.unwrap_or(false),
             }),
             FrameBlendMode::Mul => BlendMode::Mul(blending_info.clamp),
         };
@@ -126,10 +126,10 @@ impl<'a> BlendParams<'a> {
                 } else {
                     BlendMode::Blend(BlendAlpha {
                         base: base_alpha,
-                        new: new_alpha.unwrap(),
+                        new: new_alpha,
                         clamp: blending_info.clamp,
                         swapped,
-                        premultiplied: premultiplied.unwrap(),
+                        premultiplied: premultiplied.unwrap_or(false),
                     })
                 }
             }
@@ -144,10 +144,10 @@ impl<'a> BlendParams<'a> {
                 } else {
                     BlendMode::MulAdd(BlendAlpha {
                         base: base_alpha,
-                        new: new_alpha.unwrap(),
+                        new: new_alpha,
                         clamp: blending_info.clamp,
                         swapped,
-                        premultiplied: premultiplied.unwrap(),
+                        premultiplied: premultiplied.unwrap_or(false),
                     })
                 }
             }
@@ -163,11 +163,14 @@ impl<'a> BlendParams<'a> {
     }
 }
 
-fn source_and_alpha_from_blending_info(blending_info: &BlendingInfo) -> (usize, Option<usize>) {
+fn source_and_alpha_from_blending_info(
+    blending_info: &BlendingInfo,
+    has_extra: bool,
+) -> (usize, Option<usize>) {
     use jxl_frame::header::BlendMode;
 
     let source = blending_info.source as usize;
-    let alpha = matches!(blending_info.mode, BlendMode::Blend | BlendMode::MulAdd)
+    let alpha = (matches!(blending_info.mode, BlendMode::Blend | BlendMode::MulAdd) && has_extra)
         .then_some(blending_info.alpha_channel as usize);
 
     (source, alpha)
@@ -215,6 +218,7 @@ pub(crate) fn blend<S: Sample>(
     let mut output_grid = ImageWithRegion::new(color_channels, tracker);
     output_grid.set_ct_done(new_grid.ct_done());
 
+    let has_extra = !header.ec_blending_info.is_empty();
     for (idx, blending_info) in std::iter::repeat(&header.blending_info)
         .take(color_channels)
         .chain(&header.ec_blending_info)
@@ -226,7 +230,7 @@ pub(crate) fn blend<S: Sample>(
             image_header.metadata.bit_depth
         };
 
-        let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info);
+        let (ref_idx, alpha_idx) = source_and_alpha_from_blending_info(blending_info, has_extra);
         let ref_grid = &reference_grids[ref_idx];
         let mut can_overwrite = idx < color_channels
             && (header.is_last
@@ -561,7 +565,7 @@ fn blend_single(
     } = blend_params;
 
     match mode {
-        BlendMode::Replace => {
+        BlendMode::Replace | BlendMode::Blend(BlendAlpha { new: None, .. }) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -574,7 +578,7 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::Add => {
+        BlendMode::Add | BlendMode::MulAdd(BlendAlpha { new: None, .. }) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -604,9 +608,14 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::Blend(alpha) => {
-            let base_alpha = alpha.base.as_ref();
-            let new_alpha = &alpha.new;
+        BlendMode::Blend(BlendAlpha {
+            base: base_alpha,
+            new: Some(new_alpha),
+            clamp,
+            swapped,
+            premultiplied,
+        }) => {
+            let base_alpha = base_alpha.as_ref();
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -622,7 +631,7 @@ fn blend_single(
                     let new_sample;
                     let base_alpha;
                     let mut new_alpha;
-                    if alpha.swapped {
+                    if *swapped {
                         base_sample = new_row[new_buf_x];
                         new_sample = base_row[base_buf_x];
                         base_alpha = new_alpha_row[new_buf_x];
@@ -634,11 +643,11 @@ fn blend_single(
                         new_alpha = new_alpha_row[new_buf_x];
                     }
 
-                    if alpha.clamp {
+                    if *clamp {
                         new_alpha = new_alpha.clamp(0.0, 1.0);
                     }
 
-                    base_row[base_buf_x] = if alpha.premultiplied {
+                    base_row[base_buf_x] = if *premultiplied {
                         new_sample + base_sample * (1.0 - new_alpha)
                     } else {
                         let base_alpha_rev = 1.0 - base_alpha;
@@ -655,9 +664,14 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::MulAdd(alpha) => {
-            let base_alpha = alpha.base.as_ref();
-            let new_alpha = &alpha.new;
+        BlendMode::MulAdd(BlendAlpha {
+            base: base_alpha,
+            new: Some(new_alpha),
+            clamp,
+            swapped,
+            ..
+        }) => {
+            let base_alpha = base_alpha.as_ref();
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -672,7 +686,7 @@ fn blend_single(
                     let base_sample;
                     let new_sample;
                     let mut new_alpha;
-                    if alpha.swapped {
+                    if *swapped {
                         base_sample = new_row[new_buf_x];
                         new_sample = base_row[base_buf_x];
                         new_alpha = base_alpha_row.map(|b| b[base_buf_x]).unwrap_or(0.0);
@@ -682,7 +696,7 @@ fn blend_single(
                         new_alpha = new_alpha_row[new_buf_x];
                     }
 
-                    if alpha.clamp {
+                    if *clamp {
                         new_alpha = new_alpha.clamp(0.0, 1.0);
                     }
 
