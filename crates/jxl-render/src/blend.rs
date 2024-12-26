@@ -565,7 +565,7 @@ fn blend_single(
     } = blend_params;
 
     match mode {
-        BlendMode::Replace => {
+        BlendMode::Replace | BlendMode::Blend(BlendAlpha { new: None, .. }) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -578,7 +578,7 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::Add => {
+        BlendMode::Add | BlendMode::MulAdd(BlendAlpha { new: None, .. }) => {
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
@@ -608,16 +608,21 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::Blend(alpha) => {
-            let base_alpha = alpha.base.as_ref();
-            let new_alpha = alpha.new.as_ref();
+        BlendMode::Blend(BlendAlpha {
+            base: base_alpha,
+            new: Some(new_alpha),
+            clamp,
+            swapped,
+            premultiplied,
+        }) => {
+            let base_alpha = base_alpha.as_ref();
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
                 let base_row = base.get_row_mut(base_buf_y);
                 let new_row = new_grid.get_row(new_buf_y);
                 let base_alpha_row = base_alpha.map(|alpha| alpha.get_row(base_buf_y));
-                let new_alpha_row = new_alpha.map(|alpha| alpha.get_row(new_buf_y));
+                let new_alpha_row = new_alpha.get_row(new_buf_y);
                 for dx in 0..width {
                     let base_buf_x = base_x + dx;
                     let new_buf_x = new_x + dx;
@@ -626,23 +631,23 @@ fn blend_single(
                     let new_sample;
                     let base_alpha;
                     let mut new_alpha;
-                    if alpha.swapped {
+                    if *swapped {
                         base_sample = new_row[new_buf_x];
                         new_sample = base_row[base_buf_x];
-                        base_alpha = new_alpha_row.map(|b| b[new_buf_x]).unwrap_or(1.0);
+                        base_alpha = new_alpha_row[new_buf_x];
                         new_alpha = base_alpha_row.map(|b| b[base_buf_x]).unwrap_or(0.0);
                     } else {
                         base_sample = base_row[base_buf_x];
                         new_sample = new_row[new_buf_x];
                         base_alpha = base_alpha_row.map(|b| b[base_buf_x]).unwrap_or(0.0);
-                        new_alpha = new_alpha_row.map(|b| b[new_buf_x]).unwrap_or(1.0);
+                        new_alpha = new_alpha_row[new_buf_x];
                     }
 
-                    if alpha.clamp {
+                    if *clamp {
                         new_alpha = new_alpha.clamp(0.0, 1.0);
                     }
 
-                    base_row[base_buf_x] = if alpha.premultiplied {
+                    base_row[base_buf_x] = if *premultiplied {
                         new_sample + base_sample * (1.0 - new_alpha)
                     } else {
                         let base_alpha_rev = 1.0 - base_alpha;
@@ -659,16 +664,21 @@ fn blend_single(
                 }
             }
         }
-        BlendMode::MulAdd(alpha) => {
-            let base_alpha = alpha.base.as_ref();
-            let new_alpha = alpha.new.as_ref();
+        BlendMode::MulAdd(BlendAlpha {
+            base: base_alpha,
+            new: Some(new_alpha),
+            clamp,
+            swapped,
+            ..
+        }) => {
+            let base_alpha = base_alpha.as_ref();
             for dy in 0..height {
                 let base_buf_y = base_y + dy;
                 let new_buf_y = new_y + dy;
                 let base_row = base.get_row_mut(base_buf_y);
                 let new_row = new_grid.get_row(new_buf_y);
                 let base_alpha_row = base_alpha.map(|alpha| alpha.get_row(base_buf_y));
-                let new_alpha_row = new_alpha.map(|alpha| alpha.get_row(new_buf_y));
+                let new_alpha_row = new_alpha.get_row(new_buf_y);
                 for dx in 0..width {
                     let base_buf_x = base_x + dx;
                     let new_buf_x = new_x + dx;
@@ -676,17 +686,17 @@ fn blend_single(
                     let base_sample;
                     let new_sample;
                     let mut new_alpha;
-                    if alpha.swapped {
+                    if *swapped {
                         base_sample = new_row[new_buf_x];
                         new_sample = base_row[base_buf_x];
                         new_alpha = base_alpha_row.map(|b| b[base_buf_x]).unwrap_or(0.0);
                     } else {
                         base_sample = base_row[base_buf_x];
                         new_sample = new_row[new_buf_x];
-                        new_alpha = new_alpha_row.map(|b| b[new_buf_x]).unwrap_or(1.0);
+                        new_alpha = new_alpha_row[new_buf_x];
                     }
 
-                    if alpha.clamp {
+                    if *clamp {
                         new_alpha = new_alpha.clamp(0.0, 1.0);
                     }
 
