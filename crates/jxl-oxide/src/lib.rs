@@ -454,11 +454,21 @@ pub struct JxlImage {
     inner: JxlImageInner,
 }
 
+/// # Constructors and data-feeding methods
 impl JxlImage {
     /// Creates a decoder builder with default options.
-    #[inline]
     pub fn builder() -> JxlImageBuilder {
         JxlImageBuilder::default()
+    }
+
+    /// Reads an image from the reader with default options.
+    pub fn read_with_defaults(reader: impl std::io::Read) -> Result<JxlImage> {
+        Self::builder().read(reader)
+    }
+
+    /// Opens an image in the filesystem with default options.
+    pub fn open_with_defaults(path: impl AsRef<std::path::Path>) -> Result<JxlImage> {
+        Self::builder().open(path)
     }
 
     /// Feeds more data into the decoder.
@@ -479,9 +489,411 @@ impl JxlImage {
         Ok(self.reader.previous_consumed_bytes())
     }
 
+    /// Signals the end of bitstream.
     pub fn finalize(&mut self) -> Result<()> {
         self.inner.aux_boxes.finalize()?;
         Ok(())
+    }
+}
+
+/// # Image and decoder metadata accessors
+impl JxlImage {
+    /// Returns the image header.
+    #[inline]
+    pub fn image_header(&self) -> &ImageHeader {
+        &self.image_header
+    }
+
+    /// Returns the image width with orientation applied.
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.image_header.width_with_orientation()
+    }
+
+    /// Returns the image height with orientation applied.
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.image_header.height_with_orientation()
+    }
+
+    /// Returns the *original* ICC profile embedded in the image.
+    #[inline]
+    pub fn original_icc(&self) -> Option<&[u8]> {
+        self.ctx.embedded_icc()
+    }
+
+    /// Returns the ICC profile that describes rendered images.
+    ///
+    /// The returned profile will change if different color encoding is specified using
+    /// [`request_icc`][Self::request_icc] or
+    /// [`request_color_encoding`][Self::request_color_encoding].
+    pub fn rendered_icc(&self) -> Vec<u8> {
+        let encoding = self.ctx.requested_color_encoding();
+        match encoding.encoding() {
+            jxl_color::ColourEncoding::Enum(encoding) => {
+                jxl_color::icc::colour_encoding_to_icc(encoding)
+            }
+            jxl_color::ColourEncoding::IccProfile(_) => encoding.icc_profile().to_vec(),
+        }
+    }
+
+    /// Returns the CICP tag of the color encoding of rendered images, if there's any.
+    #[inline]
+    pub fn rendered_cicp(&self) -> Option<[u8; 4]> {
+        let encoding = self.ctx.requested_color_encoding();
+        encoding.encoding().cicp()
+    }
+
+    /// Returns the pixel format of the rendered image.
+    pub fn pixel_format(&self) -> PixelFormat {
+        let encoding = self.ctx.requested_color_encoding();
+        let is_grayscale = encoding.is_grayscale();
+        let has_black = encoding.is_cmyk();
+        let mut has_alpha = false;
+        for ec_info in &self.image_header.metadata.ec_info {
+            if ec_info.is_alpha() {
+                has_alpha = true;
+            }
+        }
+
+        match (is_grayscale, has_black, has_alpha) {
+            (false, false, false) => PixelFormat::Rgb,
+            (false, false, true) => PixelFormat::Rgba,
+            (false, true, false) => PixelFormat::Cmyk,
+            (false, true, true) => PixelFormat::Cmyka,
+            (true, _, false) => PixelFormat::Gray,
+            (true, _, true) => PixelFormat::Graya,
+        }
+    }
+
+    /// Returns what HDR transfer function the image uses, if there's any.
+    ///
+    /// Returns `None` if the image is not HDR one.
+    pub fn hdr_type(&self) -> Option<HdrType> {
+        self.ctx.suggested_hdr_tf().and_then(|tf| match tf {
+            jxl_color::TransferFunction::Pq => Some(HdrType::Pq),
+            jxl_color::TransferFunction::Hlg => Some(HdrType::Hlg),
+            _ => None,
+        })
+    }
+
+    /// Returns whether the spot color channels will be rendered.
+    #[inline]
+    pub fn render_spot_color(&self) -> bool {
+        self.render_spot_color
+    }
+
+    /// Sets whether the spot colour channels will be rendered.
+    #[inline]
+    pub fn set_render_spot_color(&mut self, render_spot_color: bool) -> &mut Self {
+        if render_spot_color && self.image_header.metadata.grayscale() {
+            tracing::warn!("Spot colour channels are not rendered on grayscale images");
+            return self;
+        }
+        self.render_spot_color = render_spot_color;
+        self
+    }
+
+    /// Returns the list of auxiliary boxes in the JPEG XL container.
+    ///
+    /// The list may contain Exif and XMP metadata.
+    pub fn aux_boxes(&self) -> &AuxBoxList {
+        &self.inner.aux_boxes
+    }
+
+    /// Returns the number of currently loaded keyframes.
+    #[inline]
+    pub fn num_loaded_keyframes(&self) -> usize {
+        self.ctx.loaded_keyframes()
+    }
+
+    /// Returns the number of currently loaded frames, including frames that are not displayed
+    /// directly.
+    #[inline]
+    pub fn num_loaded_frames(&self) -> usize {
+        self.ctx.loaded_frames()
+    }
+
+    /// Returns whether the image is loaded completely, without missing animation keyframes or
+    /// partially loaded frames.
+    #[inline]
+    pub fn is_loading_done(&self) -> bool {
+        self.inner.end_of_image
+    }
+
+    /// Returns frame data by keyframe index.
+    pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
+        self.ctx.keyframe(keyframe_index)
+    }
+
+    /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
+    /// exist.
+    pub fn frame_header(&self, keyframe_index: usize) -> Option<&FrameHeader> {
+        let frame = self.ctx.keyframe(keyframe_index)?;
+        Some(frame.header())
+    }
+
+    /// Returns frame data by frame index, including frames that are not displayed directly.
+    ///
+    /// There are some situations where a frame is not displayed directly:
+    /// - It may be marked as reference only, and meant to be only used by other frames.
+    /// - It may contain LF image (which is 8x downsampled version) of another VarDCT frame.
+    /// - Zero duration frame that is not the last frame of image is blended with following frames
+    ///   and displayed together.
+    pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
+        self.ctx.frame(frame_idx)
+    }
+
+    /// Returns the offset of frame within codestream, in bytes.
+    pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
+        self.inner.frame_offsets.get(frame_index).copied()
+    }
+
+    /// Returns the thread pool used by the renderer.
+    #[inline]
+    pub fn pool(&self) -> &JxlThreadPool {
+        &self.pool
+    }
+
+    /// Returns the internal reader.
+    pub fn reader(&self) -> &ContainerDetectingReader {
+        &self.reader
+    }
+}
+
+/// # Color management methods
+impl JxlImage {
+    /// Sets color management system implementation to be used by the renderer.
+    #[inline]
+    pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
+        self.ctx.set_cms(cms);
+    }
+
+    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
+    ///
+    /// # Errors
+    /// This function will return an error if it cannot parse the ICC profile.
+    pub fn request_icc(&mut self, icc_profile: &[u8]) -> Result<()> {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::with_icc(icc_profile)?);
+        Ok(())
+    }
+
+    /// Requests the decoder to render in specific color encoding, described by
+    /// `EnumColourEncoding`.
+    pub fn request_color_encoding(&mut self, color_encoding: EnumColourEncoding) {
+        self.ctx
+            .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
+    }
+}
+
+/// # Rendering to image buffers
+impl JxlImage {
+    /// Renders the given keyframe.
+    pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
+        self.render_frame_cropped(keyframe_index)
+    }
+
+    /// Renders the given keyframe with optional cropping region.
+    pub fn render_frame_cropped(&self, keyframe_index: usize) -> Result<Render> {
+        let image = self.ctx.render_keyframe(keyframe_index)?;
+
+        let image_region = self
+            .ctx
+            .image_region()
+            .apply_orientation(&self.image_header);
+        let frame = self.ctx.keyframe(keyframe_index).unwrap();
+        let frame_header = frame.header();
+        let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
+
+        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
+        let result = Render {
+            keyframe_index,
+            name: frame_header.name.clone(),
+            duration: frame_header.duration,
+            orientation: self.image_header.metadata.orientation,
+            image,
+            extra_channels: self.convert_ec_info(),
+            target_frame_region,
+            color_bit_depth: self.image_header.metadata.bit_depth,
+            is_cmyk,
+            render_spot_color: self.render_spot_color,
+        };
+        Ok(result)
+    }
+
+    /// Renders the currently loading keyframe.
+    pub fn render_loading_frame(&mut self) -> Result<Render> {
+        self.render_loading_frame_cropped()
+    }
+
+    /// Renders the currently loading keyframe with optional cropping region.
+    pub fn render_loading_frame_cropped(&mut self) -> Result<Render> {
+        let (frame, image) = self.ctx.render_loading_keyframe()?;
+        let frame_header = frame.header();
+        let name = frame_header.name.clone();
+        let duration = frame_header.duration;
+
+        let image_region = self
+            .ctx
+            .image_region()
+            .apply_orientation(&self.image_header);
+        let frame = self
+            .ctx
+            .frame(self.ctx.loaded_frames())
+            .or_else(|| self.ctx.frame(self.ctx.loaded_frames() - 1))
+            .unwrap();
+        let frame_header = frame.header();
+        let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
+
+        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
+        let result = Render {
+            keyframe_index: self.ctx.loaded_keyframes(),
+            name,
+            duration,
+            orientation: self.image_header.metadata.orientation,
+            image,
+            extra_channels: self.convert_ec_info(),
+            target_frame_region,
+            color_bit_depth: self.image_header.metadata.bit_depth,
+            is_cmyk,
+            render_spot_color: self.render_spot_color,
+        };
+        Ok(result)
+    }
+
+    /// Sets the cropping region (region of interest).
+    ///
+    /// Subsequent rendering methods will crop the image buffer according to the region.
+    pub fn set_image_region(&mut self, region: CropInfo) -> &mut Self {
+        self.ctx.request_image_region(region.into());
+        self
+    }
+}
+
+/// # JPEG bitstream reconstruction
+impl JxlImage {
+    /// Returns availability and validity of JPEG bitstream reconstruction data.
+    pub fn jpeg_reconstruction_status(&self) -> JpegReconstructionStatus {
+        match self.inner.aux_boxes.jbrd() {
+            AuxBoxData::Data(jbrd) => {
+                let header = jbrd.header();
+                let Ok(exif) = self.inner.aux_boxes.first_exif() else {
+                    return JpegReconstructionStatus::Invalid;
+                };
+                let xml = self.inner.aux_boxes.first_xml();
+
+                if header.expected_icc_len() > 0 {
+                    if !self.image_header.metadata.colour_encoding.want_icc() {
+                        return JpegReconstructionStatus::Invalid;
+                    } else if self.original_icc().is_none() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    }
+                }
+                if header.expected_exif_len() > 0 {
+                    if exif.is_decoding() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    } else if exif.is_not_found() {
+                        return JpegReconstructionStatus::Invalid;
+                    }
+                }
+                if header.expected_xmp_len() > 0 {
+                    if xml.is_decoding() {
+                        return JpegReconstructionStatus::NeedMoreData;
+                    } else if xml.is_not_found() {
+                        return JpegReconstructionStatus::Invalid;
+                    }
+                }
+
+                JpegReconstructionStatus::Available
+            }
+            AuxBoxData::Decoding => {
+                if self.num_loaded_frames() >= 2 {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                let Some(frame) = self.frame(0) else {
+                    return JpegReconstructionStatus::NeedMoreData;
+                };
+                let frame_header = frame.header();
+                if frame_header.encoding != jxl_frame::header::Encoding::VarDct {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                if !frame_header.frame_type.is_normal_frame() {
+                    return JpegReconstructionStatus::Invalid;
+                }
+                JpegReconstructionStatus::NeedMoreData
+            }
+            AuxBoxData::NotFound => JpegReconstructionStatus::Unavailable,
+        }
+    }
+
+    /// Reconstructs JPEG bitstream and writes the image to writer.
+    ///
+    /// # Errors
+    /// Returns an error if the reconstruction data is not available, incomplete or invalid, or
+    /// if there was an error writing the image.
+    ///
+    /// Note that reconstruction may fail even if `jpeg_reconstruction_status` returned `Available`.
+    pub fn reconstruct_jpeg(&self, jpeg_output: impl std::io::Write) -> Result<()> {
+        let aux_boxes = &self.inner.aux_boxes;
+        let jbrd = match aux_boxes.jbrd() {
+            AuxBoxData::Data(jbrd) => jbrd,
+            AuxBoxData::Decoding => {
+                return Err(jxl_jbr::Error::ReconstructionDataIncomplete.into());
+            }
+            AuxBoxData::NotFound => {
+                return Err(jxl_jbr::Error::ReconstructionUnavailable.into());
+            }
+        };
+        if self.num_loaded_frames() == 0 {
+            return Err(jxl_jbr::Error::FrameDataIncomplete.into());
+        }
+
+        let jbrd_header = jbrd.header();
+        let expected_icc_len = jbrd_header.expected_icc_len();
+        let expected_exif_len = jbrd_header.expected_exif_len();
+        let expected_xmp_len = jbrd_header.expected_xmp_len();
+
+        let icc = if expected_icc_len > 0 {
+            self.original_icc().unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let exif = if expected_exif_len > 0 {
+            let b = aux_boxes.first_exif()?;
+            b.map(|x| x.payload()).unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let xmp = if expected_xmp_len > 0 {
+            aux_boxes.first_xml().unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let frame = self.frame(0).unwrap();
+        jbrd.reconstruct(frame, icc, exif, xmp, &self.pool)?
+            .write(jpeg_output)?;
+
+        Ok(())
+    }
+}
+
+/// # Private methods
+impl JxlImage {
+    fn convert_ec_info(&self) -> Vec<ExtraChannel> {
+        self.image_header
+            .metadata
+            .ec_info
+            .iter()
+            .map(|ec_info| ExtraChannel {
+                ty: ec_info.ty,
+                name: ec_info.name.clone(),
+                bit_depth: ec_info.bit_depth,
+            })
+            .collect()
     }
 }
 
@@ -564,389 +976,6 @@ impl JxlImageInner {
 
         self.buffer.clear();
         Ok(())
-    }
-}
-
-impl JxlImage {
-    /// Returns the image header.
-    #[inline]
-    pub fn image_header(&self) -> &ImageHeader {
-        &self.image_header
-    }
-
-    /// Returns the image width with orientation applied.
-    #[inline]
-    pub fn width(&self) -> u32 {
-        self.image_header.width_with_orientation()
-    }
-
-    /// Returns the image height with orientation applied.
-    #[inline]
-    pub fn height(&self) -> u32 {
-        self.image_header.height_with_orientation()
-    }
-
-    /// Sets color management system implementation to be used by the renderer.
-    #[inline]
-    pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
-        self.ctx.set_cms(cms);
-    }
-
-    /// Returns the *original* ICC profile embedded in the image.
-    #[inline]
-    pub fn original_icc(&self) -> Option<&[u8]> {
-        self.ctx.embedded_icc()
-    }
-
-    /// Returns the ICC profile that describes rendered images.
-    ///
-    /// The returned profile will change if different color encoding is specified using
-    /// [`request_icc`][Self::request_icc] or
-    /// [`request_color_encoding`][Self::request_color_encoding].
-    pub fn rendered_icc(&self) -> Vec<u8> {
-        let encoding = self.ctx.requested_color_encoding();
-        match encoding.encoding() {
-            jxl_color::ColourEncoding::Enum(encoding) => {
-                jxl_color::icc::colour_encoding_to_icc(encoding)
-            }
-            jxl_color::ColourEncoding::IccProfile(_) => encoding.icc_profile().to_vec(),
-        }
-    }
-
-    /// Returns the CICP tag of the color encoding of rendered images, if there's any.
-    #[inline]
-    pub fn rendered_cicp(&self) -> Option<[u8; 4]> {
-        let encoding = self.ctx.requested_color_encoding();
-        encoding.encoding().cicp()
-    }
-
-    /// Returns the pixel format of the rendered image.
-    pub fn pixel_format(&self) -> PixelFormat {
-        let encoding = self.ctx.requested_color_encoding();
-        let is_grayscale = encoding.is_grayscale();
-        let has_black = encoding.is_cmyk();
-        let mut has_alpha = false;
-        for ec_info in &self.image_header.metadata.ec_info {
-            if ec_info.is_alpha() {
-                has_alpha = true;
-            }
-        }
-
-        match (is_grayscale, has_black, has_alpha) {
-            (false, false, false) => PixelFormat::Rgb,
-            (false, false, true) => PixelFormat::Rgba,
-            (false, true, false) => PixelFormat::Cmyk,
-            (false, true, true) => PixelFormat::Cmyka,
-            (true, _, false) => PixelFormat::Gray,
-            (true, _, true) => PixelFormat::Graya,
-        }
-    }
-
-    pub fn hdr_type(&self) -> Option<HdrType> {
-        self.ctx.suggested_hdr_tf().and_then(|tf| match tf {
-            jxl_color::TransferFunction::Pq => Some(HdrType::Pq),
-            jxl_color::TransferFunction::Hlg => Some(HdrType::Hlg),
-            _ => None,
-        })
-    }
-
-    /// Requests the decoder to render in specific color encoding, described by an ICC profile.
-    ///
-    /// # Errors
-    /// This function will return an error if it cannot parse the ICC profile.
-    pub fn request_icc(&mut self, icc_profile: &[u8]) -> Result<()> {
-        self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::with_icc(icc_profile)?);
-        Ok(())
-    }
-
-    /// Requests the decoder to render in specific color encoding, described by
-    /// `EnumColourEncoding`.
-    pub fn request_color_encoding(&mut self, color_encoding: EnumColourEncoding) {
-        self.ctx
-            .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
-    }
-
-    /// Returns whether the spot color channels will be rendered.
-    #[inline]
-    pub fn render_spot_color(&self) -> bool {
-        self.render_spot_color
-    }
-
-    /// Sets whether the spot colour channels will be rendered.
-    #[inline]
-    pub fn set_render_spot_color(&mut self, render_spot_color: bool) -> &mut Self {
-        if render_spot_color && self.image_header.metadata.grayscale() {
-            tracing::warn!("Spot colour channels are not rendered on grayscale images");
-            return self;
-        }
-        self.render_spot_color = render_spot_color;
-        self
-    }
-
-    pub fn set_image_region(&mut self, region: CropInfo) -> &mut Self {
-        self.ctx.request_image_region(region.into());
-        self
-    }
-}
-
-impl JxlImage {
-    pub fn aux_boxes(&self) -> &AuxBoxList {
-        &self.inner.aux_boxes
-    }
-
-    /// Returns availability and validity of JPEG bitstream reconstruction data.
-    pub fn jpeg_reconstruction_status(&self) -> JpegReconstructionStatus {
-        match self.inner.aux_boxes.jbrd() {
-            AuxBoxData::Data(jbrd) => {
-                let header = jbrd.header();
-                let Ok(exif) = self.inner.aux_boxes.first_exif() else {
-                    return JpegReconstructionStatus::Invalid;
-                };
-                let xml = self.inner.aux_boxes.first_xml();
-
-                if header.expected_icc_len() > 0 {
-                    if !self.image_header.metadata.colour_encoding.want_icc() {
-                        return JpegReconstructionStatus::Invalid;
-                    } else if self.original_icc().is_none() {
-                        return JpegReconstructionStatus::NeedMoreData;
-                    }
-                }
-                if header.expected_exif_len() > 0 {
-                    if exif.is_decoding() {
-                        return JpegReconstructionStatus::NeedMoreData;
-                    } else if exif.is_not_found() {
-                        return JpegReconstructionStatus::Invalid;
-                    }
-                }
-                if header.expected_xmp_len() > 0 {
-                    if xml.is_decoding() {
-                        return JpegReconstructionStatus::NeedMoreData;
-                    } else if xml.is_not_found() {
-                        return JpegReconstructionStatus::Invalid;
-                    }
-                }
-
-                JpegReconstructionStatus::Available
-            }
-            AuxBoxData::Decoding => {
-                if self.num_loaded_frames() >= 2 {
-                    return JpegReconstructionStatus::Invalid;
-                }
-                let Some(frame) = self.frame(0) else {
-                    return JpegReconstructionStatus::NeedMoreData;
-                };
-                let frame_header = frame.header();
-                if frame_header.encoding != jxl_frame::header::Encoding::VarDct {
-                    return JpegReconstructionStatus::Invalid;
-                }
-                if !frame_header.frame_type.is_normal_frame() {
-                    return JpegReconstructionStatus::Invalid;
-                }
-                JpegReconstructionStatus::NeedMoreData
-            }
-            AuxBoxData::NotFound => JpegReconstructionStatus::Unavailable,
-        }
-    }
-
-    /// Tries to reconstruct JPEG bitstream from the image.
-    ///
-    /// Note that reconstruction may fail even if `jpeg_reconstruction_status` returned `Available`.
-    pub fn reconstruct_jpeg(&self, jpeg_output: impl std::io::Write) -> Result<()> {
-        let aux_boxes = &self.inner.aux_boxes;
-        let jbrd = match aux_boxes.jbrd() {
-            AuxBoxData::Data(jbrd) => jbrd,
-            AuxBoxData::Decoding => {
-                return Err(jxl_jbr::Error::ReconstructionDataIncomplete.into());
-            }
-            AuxBoxData::NotFound => {
-                return Err(jxl_jbr::Error::ReconstructionUnavailable.into());
-            }
-        };
-        if self.num_loaded_frames() == 0 {
-            return Err(jxl_jbr::Error::FrameDataIncomplete.into());
-        }
-
-        let jbrd_header = jbrd.header();
-        let expected_icc_len = jbrd_header.expected_icc_len();
-        let expected_exif_len = jbrd_header.expected_exif_len();
-        let expected_xmp_len = jbrd_header.expected_xmp_len();
-
-        let icc = if expected_icc_len > 0 {
-            self.original_icc().unwrap_or(&[])
-        } else {
-            &[]
-        };
-
-        let exif = if expected_exif_len > 0 {
-            let b = aux_boxes.first_exif()?;
-            b.map(|x| x.payload()).unwrap_or(&[])
-        } else {
-            &[]
-        };
-
-        let xmp = if expected_xmp_len > 0 {
-            aux_boxes.first_xml().unwrap_or(&[])
-        } else {
-            &[]
-        };
-
-        let frame = self.frame(0).unwrap();
-        jbrd.reconstruct(frame, icc, exif, xmp, &self.pool)?
-            .write(jpeg_output)?;
-
-        Ok(())
-    }
-}
-
-impl JxlImage {
-    /// Returns the number of currently loaded keyframes.
-    #[inline]
-    pub fn num_loaded_keyframes(&self) -> usize {
-        self.ctx.loaded_keyframes()
-    }
-
-    /// Returns the number of currently loaded frames, including frames that are not displayed
-    /// directly.
-    #[inline]
-    pub fn num_loaded_frames(&self) -> usize {
-        self.ctx.loaded_frames()
-    }
-
-    /// Returns whether the image is loaded completely, without missing animation keyframes or
-    /// partially loaded frames.
-    #[inline]
-    pub fn is_loading_done(&self) -> bool {
-        self.inner.end_of_image
-    }
-
-    /// Returns frame data by keyframe index.
-    pub fn frame_by_keyframe(&self, keyframe_index: usize) -> Option<&IndexedFrame> {
-        self.ctx.keyframe(keyframe_index)
-    }
-
-    /// Returns the frame header for the given keyframe index, or `None` if the keyframe does not
-    /// exist.
-    pub fn frame_header(&self, keyframe_index: usize) -> Option<&FrameHeader> {
-        let frame = self.ctx.keyframe(keyframe_index)?;
-        Some(frame.header())
-    }
-
-    /// Returns frame data by frame index, including frames that are not displayed directly.
-    ///
-    /// There are some situations where a frame is not displayed directly:
-    /// - It may be marked as reference only, and meant to be only used by other frames.
-    /// - It may contain LF image (which is 8x downsampled version) of another VarDCT frame.
-    /// - Zero duration frame that is not the last frame of image is blended with following frames
-    ///   and displayed together.
-    pub fn frame(&self, frame_idx: usize) -> Option<&IndexedFrame> {
-        self.ctx.frame(frame_idx)
-    }
-
-    /// Returns the offset of frame within codestream, in bytes.
-    pub fn frame_offset(&self, frame_index: usize) -> Option<usize> {
-        self.inner.frame_offsets.get(frame_index).copied()
-    }
-}
-
-impl JxlImage {
-    /// Renders the given keyframe.
-    pub fn render_frame(&self, keyframe_index: usize) -> Result<Render> {
-        self.render_frame_cropped(keyframe_index)
-    }
-
-    /// Renders the given keyframe with optional cropping region.
-    pub fn render_frame_cropped(&self, keyframe_index: usize) -> Result<Render> {
-        let image = self.ctx.render_keyframe(keyframe_index)?;
-
-        let image_region = self
-            .ctx
-            .image_region()
-            .apply_orientation(&self.image_header);
-        let frame = self.ctx.keyframe(keyframe_index).unwrap();
-        let frame_header = frame.header();
-        let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
-
-        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
-        let result = Render {
-            keyframe_index,
-            name: frame_header.name.clone(),
-            duration: frame_header.duration,
-            orientation: self.image_header.metadata.orientation,
-            image,
-            extra_channels: self.convert_ec_info(),
-            target_frame_region,
-            color_bit_depth: self.image_header.metadata.bit_depth,
-            is_cmyk,
-            render_spot_color: self.render_spot_color,
-        };
-        Ok(result)
-    }
-
-    /// Renders the currently loading keyframe.
-    pub fn render_loading_frame(&mut self) -> Result<Render> {
-        self.render_loading_frame_cropped()
-    }
-
-    /// Renders the currently loading keyframe with optional cropping region.
-    pub fn render_loading_frame_cropped(&mut self) -> Result<Render> {
-        let (frame, image) = self.ctx.render_loading_keyframe()?;
-        let frame_header = frame.header();
-        let name = frame_header.name.clone();
-        let duration = frame_header.duration;
-
-        let image_region = self
-            .ctx
-            .image_region()
-            .apply_orientation(&self.image_header);
-        let frame = self
-            .ctx
-            .frame(self.ctx.loaded_frames())
-            .or_else(|| self.ctx.frame(self.ctx.loaded_frames() - 1))
-            .unwrap();
-        let frame_header = frame.header();
-        let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
-
-        let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
-        let result = Render {
-            keyframe_index: self.ctx.loaded_keyframes(),
-            name,
-            duration,
-            orientation: self.image_header.metadata.orientation,
-            image,
-            extra_channels: self.convert_ec_info(),
-            target_frame_region,
-            color_bit_depth: self.image_header.metadata.bit_depth,
-            is_cmyk,
-            render_spot_color: self.render_spot_color,
-        };
-        Ok(result)
-    }
-
-    fn convert_ec_info(&self) -> Vec<ExtraChannel> {
-        self.image_header
-            .metadata
-            .ec_info
-            .iter()
-            .map(|ec_info| ExtraChannel {
-                ty: ec_info.ty,
-                name: ec_info.name.clone(),
-                bit_depth: ec_info.bit_depth,
-            })
-            .collect()
-    }
-}
-
-impl JxlImage {
-    /// Returns the thread pool used by the renderer.
-    #[inline]
-    pub fn pool(&self) -> &JxlThreadPool {
-        &self.pool
-    }
-
-    /// Returns the internal reader.
-    pub fn reader(&self) -> &ContainerDetectingReader {
-        &self.reader
     }
 }
 
@@ -1217,15 +1246,16 @@ impl From<CropInfo> for jxl_render::Region {
     }
 }
 
+/// Availability and validity of JPEG bitstream reconstruction data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum JpegReconstructionStatus {
-    /// JPEG reconstruction data is found. Actual reconstruction may or may not succeed.
+    /// JPEG bitstream reconstruction data is found. Actual reconstruction may or may not succeed.
     Available,
-    /// Either JPEG reconstruction data or JPEG XL image data is invalid and cannot be used for
-    /// actual reconstruction.
+    /// Either JPEG bitstream reconstruction data or JPEG XL image data is invalid and cannot be
+    /// used for actual reconstruction.
     Invalid,
-    /// JPEG reconstruction data is not found. Result will *not* change.
+    /// JPEG bitstream reconstruction data is not found. Result will *not* change.
     Unavailable,
-    /// JPEG reconstruction data is not found. Result may change with more data.
+    /// JPEG bitstream reconstruction data is not found. Result may change with more data.
     NeedMoreData,
 }

@@ -153,9 +153,13 @@ impl AuxBoxReader {
     }
 }
 
+/// Auxiliary box data.
 pub enum AuxBoxData<T> {
+    /// The box has data.
     Data(T),
+    /// The box has not been decoded yet.
     Decoding,
+    /// The box was not found.
     NotFound,
 }
 
@@ -224,6 +228,7 @@ impl<T, E> AuxBoxData<std::result::Result<T, E>> {
     }
 }
 
+/// Auxiliary box list of a JPEG XL container, which may contain Exif and/or XMP metadata.
 #[derive(Debug)]
 pub struct AuxBoxList {
     boxes: Vec<(ContainerBoxType, AuxBoxReader)>,
