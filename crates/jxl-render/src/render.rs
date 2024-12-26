@@ -212,6 +212,7 @@ fn render_features<S: Sample>(
                 base_correlations_xb,
                 grid,
                 noise,
+                pool,
             )?;
         } else {
             tracing::warn!("Cannot render noise on grayscale buffer; skipping");
