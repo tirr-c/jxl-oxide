@@ -139,9 +139,10 @@ impl Bundle<FrameContext<'_>> for Frame {
             return Err(jxl_bitstream::Error::ProfileConformance("frame area too large").into());
         }
 
+        let has_extra = !header.ec_blending_info.is_empty();
         for blending_info in std::iter::once(&header.blending_info).chain(&header.ec_blending_info)
         {
-            if blending_info.mode.use_alpha() {
+            if blending_info.mode.use_alpha() && has_extra {
                 let alpha_idx = blending_info.alpha_channel as usize;
                 let Some(alpha_ec_info) = image_header.metadata.ec_info.get(alpha_idx) else {
                     tracing::error!(?blending_info, "blending_info.alpha_channel out of range");
