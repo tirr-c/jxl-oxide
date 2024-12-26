@@ -530,7 +530,7 @@ impl<W> VideoContext<W> {
         };
         let video_width = unsafe { (*frame_ptr).width } as usize;
 
-        let mut stream = render.stream();
+        let mut stream = render.stream_no_alpha();
         let width = stream.width() as usize;
         let height = stream.height() as usize;
 
@@ -609,11 +609,13 @@ impl<W> VideoContext<W> {
         Ok(())
     }
 
-    pub fn finalize(&mut self) -> Result<()> {
-        tracing::info!("Adding 2 seconds of the last image");
-        for _ in 0..60 {
-            self.repeat_frame()?;
-            self.pts += 1;
+    pub fn finalize(&mut self, skip_still: bool) -> Result<()> {
+        if !skip_still {
+            tracing::info!("Adding 2 seconds of the last image");
+            for _ in 0..60 {
+                self.repeat_frame()?;
+                self.pts += 1;
+            }
         }
 
         tracing::info!("Flushing video");

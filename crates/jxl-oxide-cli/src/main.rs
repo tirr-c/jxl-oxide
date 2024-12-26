@@ -42,6 +42,8 @@ fn main() -> std::process::ExitCode {
         }
         #[cfg(feature = "__devtools")]
         Some(Subcommands::DumpJbrd(args)) => jxl_oxide_cli::dump_jbrd::handle_dump_jbrd(args),
+        #[cfg(feature = "__ffmpeg")]
+        Some(Subcommands::SlowMotion(args)) => jxl_oxide_cli::slow_motion::handle_slow_motion(args),
     };
 
     if let Err(e) = result {
