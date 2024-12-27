@@ -15,8 +15,8 @@ default-run = "jxl-oxide"
 
 [dependencies]
 lcms2 = "6.0.4"
-miniz_oxide = "0.7.2"
-png = "0.17.13"
+miniz_oxide = "0.8.2"
+png = "0.17.16"
 tracing.workspace = true
 
 [dependencies.clap]
@@ -24,7 +24,7 @@ version = "4.5.1"
 features = ["derive"]
 
 [dependencies.jxl-color]
-version = "0.9.0"
+version = "0.10.0"
 path = "../jxl-color"
 optional = true
 
