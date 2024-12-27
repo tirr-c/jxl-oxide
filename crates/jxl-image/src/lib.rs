@@ -421,7 +421,7 @@ impl TryFrom<u32> for ExtraChannelTypeRaw {
 }
 
 /// Bit depth information.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BitDepth {
     /// Modular image samples represent integer values, where the range
     /// `0..=(1 << bits_per_sample) - 1` corresponds to \[0.0, 1.0\], scaled linearly.
