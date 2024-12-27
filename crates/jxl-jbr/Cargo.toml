@@ -16,27 +16,27 @@ brotli-decompressor.workspace = true
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "0.5.0"
+version = "0.6.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-frame]
-version = "0.11.0"
+version = "0.12.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
-version = "0.5.1"
+version = "0.5.3"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
-version = "0.11.0"
+version = "0.12.0"
 path = "../jxl-image"
 
 [dependencies.jxl-modular]
-version = "0.9.0"
+version = "0.10.0"
 path = "../jxl-modular"
 
 [dependencies.jxl-oxide-common]
-version = "0.1.0"
+version = "0.2.0"
 path = "../jxl-oxide-common"
 
 [dependencies.jxl-threadpool]
@@ -44,5 +44,5 @@ version = "0.1.1"
 path = "../jxl-threadpool"
 
 [dependencies.jxl-vardct]
-version = "0.9.0"
+version = "0.10.0"
 path = "../jxl-vardct"
