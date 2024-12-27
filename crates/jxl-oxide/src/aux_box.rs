@@ -288,7 +288,7 @@ impl AuxBoxList {
         Ok(())
     }
 
-    pub(super) fn finalize(&mut self) -> Result<()> {
+    fn finalize(&mut self) -> Result<()> {
         match self.current_box_ty {
             Some(ContainerBoxType::JPEG_RECONSTRUCTION) => {
                 self.jbrd.finalize()?;
@@ -304,6 +304,12 @@ impl AuxBoxList {
         }
 
         self.current_box_ty = None;
+        Ok(())
+    }
+
+    pub(super) fn eof(&mut self) -> Result<()> {
+        self.finalize()?;
+        self.last_box = true;
         Ok(())
     }
 }

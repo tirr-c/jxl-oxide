@@ -1,4 +1,9 @@
-use jxl_oxide::{color::*, frame::*, AuxBoxData, ColorEncodingWithProfile, JxlImage};
+use jxl_oxide::color::*;
+use jxl_oxide::frame::*;
+use jxl_oxide::image::BitDepth;
+use jxl_oxide::{
+    AuxBoxData, ColorEncodingWithProfile, ExtraChannelType, JpegReconstructionStatus, JxlImage,
+};
 
 use crate::{commands::info::*, Error, Result};
 
@@ -33,10 +38,8 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         }
     }
 
-    println!(
-        "  Bit depth: {} bits",
-        image_meta.bit_depth.bits_per_sample()
-    );
+    print_bit_depth(image_meta.bit_depth, "  ");
+
     if image_meta.xyb_encoded {
         println!("  XYB encoded, suggested display color encoding:");
     } else {
@@ -63,6 +66,71 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         }
     }
 
+    if let Some(animation) = &image_meta.animation {
+        println!(
+            "  Animated ({}/{} ticks per second)",
+            animation.tps_numerator, animation.tps_denominator
+        );
+    }
+
+    if !image_meta.ec_info.is_empty() {
+        println!("Extra channel info:");
+        for (ec_idx, ec) in image_meta.ec_info.iter().enumerate() {
+            print!("  #{ec_idx} ");
+            if !ec.name.is_empty() {
+                print!("{} ", &*ec.name);
+            }
+
+            match &ec.ty {
+                ExtraChannelType::Alpha { alpha_associated } => {
+                    print!("Alpha");
+                    if *alpha_associated {
+                        println!(" (premultiplied)");
+                    } else {
+                        println!();
+                    }
+                }
+                ExtraChannelType::Depth => println!("Depth"),
+                ExtraChannelType::SpotColour {
+                    red,
+                    green,
+                    blue,
+                    solidity,
+                } => {
+                    println!("Spot Color ({red}, {green}, {blue})/{solidity}");
+                }
+                ExtraChannelType::SelectionMask => println!("Selection Mask"),
+                ExtraChannelType::Black => println!("Black"),
+                ExtraChannelType::Cfa { cfa_channel } => {
+                    println!("Color Filter Array of channel {cfa_channel}");
+                }
+                ExtraChannelType::Thermal => println!("Thermal"),
+                ExtraChannelType::NonOptional => {
+                    println!("Unknown non-optional channel");
+                }
+                ExtraChannelType::Optional => println!("Unknown optional channel"),
+            }
+
+            if ec.bit_depth != image_meta.bit_depth {
+                print_bit_depth(ec.bit_depth, "    ");
+            }
+
+            if ec.dim_shift > 0 {
+                println!("    {}x downsampled", 1 << ec.dim_shift);
+            }
+        }
+    }
+
+    let jbrd_status = match image.jpeg_reconstruction_status() {
+        JpegReconstructionStatus::Available => Some("available"),
+        JpegReconstructionStatus::Invalid => Some("invalid"),
+        JpegReconstructionStatus::Unavailable => None,
+        JpegReconstructionStatus::NeedMoreData => Some("partial"),
+    };
+    if let Some(status) = jbrd_status {
+        println!("JPEG bitstream reconstruction data: {status}");
+    }
+
     let aux_boxes = image.aux_boxes();
     match aux_boxes.first_exif() {
         Ok(AuxBoxData::Data(exif)) => {
@@ -78,13 +146,6 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
     if let AuxBoxData::Data(data) = aux_boxes.first_xml() {
         let size = data.len();
         println!("XML metadata: {size} byte(s)");
-    }
-
-    if let Some(animation) = &image_meta.animation {
-        println!(
-            "  Animated ({}/{} ticks per second)",
-            animation.tps_numerator, animation.tps_denominator
-        );
     }
 
     let animated = image_meta.animation.is_some();
@@ -243,5 +304,21 @@ fn print_colour_encoding(encoding: &EnumColourEncoding, indent: &str) {
         TransferFunction::Pq => println!("PQ (HDR)"),
         TransferFunction::Dci => println!("DCI"),
         TransferFunction::Hlg => println!("Hybrid log-gamma (HDR)"),
+    }
+}
+
+fn print_bit_depth(bit_depth: BitDepth, indent: &str) {
+    print!("{indent}Bit depth: {} bits", bit_depth.bits_per_sample());
+    if let BitDepth::FloatSample {
+        bits_per_sample,
+        exp_bits,
+    } = bit_depth
+    {
+        println!(
+            " (floating-point, {} mantissa bits)",
+            bits_per_sample - exp_bits - 1
+        );
+    } else {
+        println!();
     }
 }
