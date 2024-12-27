@@ -264,6 +264,7 @@ impl JxlImageBuilder {
         }
 
         buf.truncate(buf_valid);
+        image.finalize()?;
         Ok(image)
     }
 
@@ -490,8 +491,10 @@ impl JxlImage {
     }
 
     /// Signals the end of bitstream.
+    ///
+    /// This is automatically done if `open()` or `read()` is used to decode the image.
     pub fn finalize(&mut self) -> Result<()> {
-        self.inner.aux_boxes.finalize()?;
+        self.inner.aux_boxes.eof()?;
         Ok(())
     }
 }
