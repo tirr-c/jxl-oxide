@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2024-12-28
+
 ### Added
 - Implement JPEG bitstream reconstruction (#390).
 - `jxl-oxide`: Extract (potentially Brotli-compressed) Exif metadata (#389).
@@ -168,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
-[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.10.2...HEAD
+[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.0
 [0.10.2]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.10.2
 [0.10.1]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.10.1
 [0.10.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.10.0
