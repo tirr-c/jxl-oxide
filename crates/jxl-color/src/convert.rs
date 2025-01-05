@@ -1027,8 +1027,10 @@ fn apply_transfer_function(
             }
         }
         TransferFunction::Bt709 => {
+            // BT.1886 EOTF
+            let gamma = 1.0 / 2.4;
             for ch in channels {
-                tf::linear_to_bt709(ch);
+                tf::apply_gamma(ch, gamma);
             }
         }
         TransferFunction::Unknown => {}
@@ -1091,8 +1093,10 @@ fn apply_inverse_transfer_function(
             }
         }
         TransferFunction::Bt709 => {
+            // BT.1886 EOTF
+            let gamma = 2.4;
             for ch in channels {
-                tf::bt709_to_linear(ch);
+                tf::apply_gamma(ch, gamma);
             }
         }
         TransferFunction::Unknown => {}

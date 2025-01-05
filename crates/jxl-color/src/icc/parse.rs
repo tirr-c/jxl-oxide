@@ -357,16 +357,6 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
 
                                 if params
                                     == [
-                                        (65536 * 20 + 4) / 9,
-                                        (65536 * 1000 + 549) / 1099,
-                                        (65536 * 99 + 549) / 1099,
-                                        (65536 * 10 + 22) / 45,
-                                        (65536 * 81 + 500) / 1000,
-                                    ]
-                                {
-                                    KnownIccTrc::Bt709
-                                } else if params
-                                    == [
                                         (65536 * 24 + 5) / 10,
                                         (65536 * 1000 + 527) / 1055,
                                         (65536 * 55 + 527) / 1055,
@@ -472,6 +462,8 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
         Some(KnownIccTrc::Pq)
     } else if let Some([_, 18, _, _]) = cicp {
         Some(KnownIccTrc::Hlg)
+    } else if let Some([_, 1, _, _]) = cicp {
+        Some(KnownIccTrc::Bt709)
     } else {
         None
     };

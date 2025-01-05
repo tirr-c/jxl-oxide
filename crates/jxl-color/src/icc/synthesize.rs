@@ -200,16 +200,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &EnumColourEncoding) -> Vec<u8> {
             let gamma = ((65536u64 * 10000000u64 + adj) / g) as u32;
             create_para(0, &[gamma])
         }
-        TransferFunction::Bt709 => create_para(
-            3,
-            &[
-                (65536 * 20 + 4) / 9,
-                (65536 * 1000 + 549) / 1099,
-                (65536 * 99 + 549) / 1099,
-                (65536 * 10 + 22) / 45,
-                (65536 * 81 + 500) / 1000,
-            ],
-        ),
+        TransferFunction::Bt709 => create_para(0, &[(65536 * 24 + 5) / 10]),
         TransferFunction::Unknown => panic!(),
         TransferFunction::Linear => vec![b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0],
         TransferFunction::Srgb => create_para(
