@@ -58,7 +58,7 @@ pub(crate) fn render_frame<S: Sample>(
                 (Err(e), Some(lf)) if e.unexpected_eof() => {
                     let render = lf.image.run_with_image()?;
                     let render = render.blend(None, &pool)?;
-                    render.upsample_lf(lf.frame.header().lf_level)?
+                    render.upsample_lf(1)?
                 }
                 (Err(e), _) => return Err(e),
             }
