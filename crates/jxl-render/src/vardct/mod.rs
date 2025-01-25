@@ -609,6 +609,7 @@ pub fn transform_with_lf_grouped<S: Sample>(
 
     let group_dim = frame_header.group_dim();
     let groups_per_row = frame_header.groups_per_row();
+    let (group_width, group_height) = frame_header.group_size_for(group_idx);
 
     let group_x = group_idx % groups_per_row;
     let group_y = group_idx / groups_per_row;
@@ -622,8 +623,8 @@ pub fn transform_with_lf_grouped<S: Sample>(
     .map(|((lf_region, shift), lf)| {
         let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
         let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
-        let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
-        let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
+        let lf_width = (lf_region.width - lf_base_left).min(group_width.div_ceil(8));
+        let lf_height = (lf_region.height - lf_base_top).min(group_height.div_ceil(8));
         let lf_base_left = lf_base_left as usize;
         let lf_base_top = lf_base_top as usize;
 
@@ -660,8 +661,8 @@ pub fn transform_with_lf_grouped<S: Sample>(
         let lf_region = lf_regions[0].0;
         let lf_base_left = lf_base_left.checked_add_signed(-lf_region.left).unwrap();
         let lf_base_top = lf_base_top.checked_add_signed(-lf_region.top).unwrap();
-        let lf_width = (lf_region.width - lf_base_left).min(group_dim / 8);
-        let lf_height = (lf_region.height - lf_base_top).min(group_dim / 8);
+        let lf_width = (lf_region.width - lf_base_left).min(group_width.div_ceil(8));
+        let lf_height = (lf_region.height - lf_base_top).min(group_height.div_ceil(8));
 
         hf_meta.block_info.as_subgrid().subgrid(
             left_in_lf..(left_in_lf + lf_width as usize),
