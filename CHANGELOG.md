@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `jxl-threadpool`: Add `rayon_global` (#420).
+
+### Changed
+- `jxl-oxide`: Default thread pool now uses global Rayon pool, instead of creating new pool (#420).
+
 ## [0.11.1] - 2025-01-25
 
 ### Fixed
