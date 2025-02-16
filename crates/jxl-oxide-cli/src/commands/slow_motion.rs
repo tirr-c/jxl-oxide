@@ -14,8 +14,8 @@ pub struct SlowMotionArgs {
     #[arg(short = 'b', long, value_parser = value_parser!(u32).range(1..=1024), default_value_t = 1)]
     pub bytes_per_frame: u32,
     /// Number of parallelism to use
-    #[cfg(feature = "rayon")]
-    #[arg(short = 'j', long)]
+    #[cfg_attr(feature = "rayon", arg(short = 'j', long))]
+    #[cfg_attr(not(feature = "rayon"), arg(skip))]
     pub num_threads: Option<usize>,
     /// Font to use when displaying frame info
     #[arg(long, default_value_t = String::from("monospace"))]

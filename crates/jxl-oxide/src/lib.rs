@@ -184,7 +184,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 
 #[cfg(feature = "rayon")]
 fn default_pool() -> JxlThreadPool {
-    JxlThreadPool::rayon(None)
+    JxlThreadPool::rayon_global()
 }
 
 #[cfg(not(feature = "rayon"))]

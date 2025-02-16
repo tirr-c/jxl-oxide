@@ -5,9 +5,9 @@
 /// Thread pool wrapper.
 ///
 /// This struct wraps internal thread pool implementation and provides interfaces to access it. If
-/// `rayon` feature is enabled, users can create an actual thread pool backed by Rayon; if not,
-/// this struct won't have any multithreading capability, and every spawn operation will just run
-/// the given closure in place.
+/// `rayon` feature is enabled, users can create an actual thread pool backed by Rayon, or use
+/// global Rayon thread pool; if not, this struct won't have any multithreading capability, and
+/// every spawn operation will just run the given closure in place.
 #[derive(Debug, Clone)]
 pub struct JxlThreadPool(JxlThreadPoolImpl);
 
@@ -15,6 +15,8 @@ pub struct JxlThreadPool(JxlThreadPoolImpl);
 enum JxlThreadPoolImpl {
     #[cfg(feature = "rayon")]
     Rayon(std::sync::Arc<rayon_core::ThreadPool>),
+    #[cfg(feature = "rayon")]
+    RayonGlobal,
     None,
 }
 
@@ -81,12 +83,23 @@ impl JxlThreadPool {
         }
     }
 
+    /// Creates a `JxlThreadPool` backed by global Rayon thread pool.
+    #[cfg(feature = "rayon")]
+    pub const fn rayon_global() -> Self {
+        Self(JxlThreadPoolImpl::RayonGlobal)
+    }
+
     /// Returns the reference to Rayon thread pool, if exists.
+    ///
+    /// Returns `None` for thread pools created using [`rayon_global`], as they don't have Rayon
+    /// thread pool references.
+    ///
+    /// [`rayon_global`]: JxlThreadPool::rayon_global
     #[cfg(feature = "rayon")]
     pub fn as_rayon_pool(&self) -> Option<&rayon_core::ThreadPool> {
         match &self.0 {
             JxlThreadPoolImpl::Rayon(pool) => Some(&**pool),
-            JxlThreadPoolImpl::None => None,
+            JxlThreadPoolImpl::RayonGlobal | JxlThreadPoolImpl::None => None,
         }
     }
 
@@ -94,7 +107,7 @@ impl JxlThreadPool {
     pub fn is_multithreaded(&self) -> bool {
         match self.0 {
             #[cfg(feature = "rayon")]
-            JxlThreadPoolImpl::Rayon(_) => true,
+            JxlThreadPoolImpl::Rayon(_) | JxlThreadPoolImpl::RayonGlobal => true,
             JxlThreadPoolImpl::None => false,
         }
     }
@@ -106,6 +119,8 @@ impl JxlThreadPool {
         match &self.0 {
             #[cfg(feature = "rayon")]
             JxlThreadPoolImpl::Rayon(pool) => pool.spawn(op),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => rayon_core::spawn(op),
             JxlThreadPoolImpl::None => op(),
         }
     }
@@ -121,6 +136,11 @@ impl JxlThreadPool {
                 let scope = JxlScope(JxlScopeInner::Rayon(scope));
                 op(scope)
             }),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => rayon_core::scope(|scope| {
+                let scope = JxlScope(JxlScopeInner::Rayon(scope));
+                op(scope)
+            }),
             JxlThreadPoolImpl::None => op(JxlScope(JxlScopeInner::None(Default::default()))),
         }
     }
@@ -130,6 +150,8 @@ impl JxlThreadPool {
         match &self.0 {
             #[cfg(feature = "rayon")]
             JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each(v, op)),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => par_for_each(v, op),
             JxlThreadPoolImpl::None => v.into_iter().for_each(op),
         }
     }
@@ -144,6 +166,8 @@ impl JxlThreadPool {
         match &self.0 {
             #[cfg(feature = "rayon")]
             JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each_with(v, init, op)),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => par_for_each_with(v, init, op),
             JxlThreadPoolImpl::None => {
                 let mut init = init;
                 v.into_iter().for_each(|item| op(&mut init, item))
@@ -160,6 +184,8 @@ impl JxlThreadPool {
         match &self.0 {
             #[cfg(feature = "rayon")]
             JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each(v, op)),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => par_for_each(v, op),
             JxlThreadPoolImpl::None => v.iter_mut().for_each(op),
         }
     }
@@ -174,6 +200,8 @@ impl JxlThreadPool {
         match &self.0 {
             #[cfg(feature = "rayon")]
             JxlThreadPoolImpl::Rayon(pool) => pool.install(|| par_for_each_with(v, init, op)),
+            #[cfg(feature = "rayon")]
+            JxlThreadPoolImpl::RayonGlobal => par_for_each_with(v, init, op),
             JxlThreadPoolImpl::None => {
                 let mut init = init;
                 v.iter_mut().for_each(|item| op(&mut init, item))

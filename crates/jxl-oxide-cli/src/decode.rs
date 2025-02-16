@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use jxl_oxide::{AllocTracker, CropInfo, EnumColourEncoding, JxlImage, JxlThreadPool, Render};
+use jxl_oxide::{AllocTracker, CropInfo, EnumColourEncoding, JxlImage, Render};
 
 use crate::commands::decode::*;
 use crate::{output, Error, Result};
@@ -8,10 +8,7 @@ use crate::{output, Error, Result};
 pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle decode subcommand").entered();
 
-    #[cfg(feature = "rayon")]
-    let pool = JxlThreadPool::rayon(args.num_threads);
-    #[cfg(not(feature = "rayon"))]
-    let pool = JxlThreadPool::none();
+    let pool = crate::create_thread_pool(args.num_threads);
 
     let mut image_builder = JxlImage::builder().pool(pool.clone());
     if args.approx_memory_limit != 0 {

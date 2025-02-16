@@ -12,7 +12,7 @@ fn decode(c: &mut Criterion) {
     bench_path.push("decode/benchmark-data");
 
     #[cfg(feature = "rayon")]
-    let pool = JxlThreadPool::rayon(None);
+    let pool = JxlThreadPool::rayon_global();
     #[cfg(not(feature = "rayon"))]
     let pool = JxlThreadPool::none();
 
