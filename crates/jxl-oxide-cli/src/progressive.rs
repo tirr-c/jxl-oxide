@@ -1,7 +1,7 @@
 use std::io::prelude::*;
 use std::path::Path;
 
-use jxl_oxide::{JxlImage, JxlThreadPool, Render};
+use jxl_oxide::{JxlImage, Render};
 
 use crate::commands::progressive::*;
 use crate::{Error, Result};
@@ -182,10 +182,7 @@ pub fn handle_progressive(args: ProgressiveArgs) -> Result<()> {
 
     let _guard = tracing::trace_span!("Handle progressive subcommand").entered();
 
-    #[cfg(feature = "rayon")]
-    let pool = JxlThreadPool::rayon(args.num_threads);
-    #[cfg(not(feature = "rayon"))]
-    let pool = JxlThreadPool::none();
+    let pool = crate::create_thread_pool(args.num_threads);
 
     let mut uninit_image = JxlImage::builder().pool(pool.clone()).build_uninit();
 

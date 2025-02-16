@@ -1,6 +1,6 @@
 use std::io::prelude::*;
 
-use jxl_oxide::{EnumColourEncoding, JxlImage, JxlThreadPool, Render, RenderingIntent};
+use jxl_oxide::{EnumColourEncoding, JxlImage, Render, RenderingIntent};
 
 use crate::commands::slow_motion::*;
 use crate::output::Mp4FileEncoder;
@@ -61,10 +61,7 @@ impl std::fmt::Display for LoadProgress {
 pub fn handle_slow_motion(args: SlowMotionArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle slow-motion subcommand").entered();
 
-    #[cfg(feature = "rayon")]
-    let pool = JxlThreadPool::rayon(args.num_threads);
-    #[cfg(not(feature = "rayon"))]
-    let pool = JxlThreadPool::none();
+    let pool = crate::create_thread_pool(args.num_threads);
 
     let bytes_per_frame = args.bytes_per_frame as usize;
 

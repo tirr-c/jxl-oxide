@@ -67,8 +67,8 @@ pub struct DecodeArgs {
     #[arg(long)]
     pub target_icc: Option<PathBuf>,
     /// Number of parallelism to use
-    #[cfg(feature = "rayon")]
-    #[arg(short = 'j', long)]
+    #[cfg_attr(feature = "rayon", arg(short = 'j', long))]
+    #[cfg_attr(not(feature = "rayon"), arg(skip))]
     pub num_threads: Option<usize>,
     /// Number of repeated decoding, used for benchmarking
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
