@@ -17,8 +17,8 @@ pub struct ProgressiveArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     /// Number of parallelism to use
-    #[cfg(feature = "rayon")]
-    #[arg(short = 'j', long)]
+    #[cfg_attr(feature = "rayon", arg(short = 'j', long))]
+    #[cfg_attr(not(feature = "rayon"), arg(skip))]
     pub num_threads: Option<usize>,
     /// Font to use when displaying frame info
     #[cfg(feature = "__ffmpeg")]
