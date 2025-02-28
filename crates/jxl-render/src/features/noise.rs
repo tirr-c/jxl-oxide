@@ -218,7 +218,7 @@ impl NoiseGroup {
             let mut buf = Vec::with_capacity(num_iters * N * 2);
             for _ in 0..num_iters {
                 let bits = rng.get_u32_bits();
-                let bits = bits.map(|x| f32::from_bits(x >> 9 | 0x3f800000));
+                let bits = bits.map(|x| f32::from_bits((x >> 9) | 0x3f800000));
                 buf.extend_from_slice(&bits);
             }
             buf
