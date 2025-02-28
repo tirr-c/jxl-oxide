@@ -613,9 +613,7 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
                 inverted: true,
             })
         } else {
-            bitstream
-                .read_enum::<TransferFunction>()
-                .map_err(From::from)
+            bitstream.read_enum::<TransferFunction>()
         }
     }
 }
