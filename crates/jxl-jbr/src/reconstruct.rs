@@ -199,9 +199,9 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
             let (w, h) = frame_header.group_size_for(group_idx);
 
             pass_groups.push(upsampling_shifts_ycbcr.map(|shift| {
-                let (w, h) = shift.shift_size((w, h));
-                let w = (w + 7) & !7;
-                let h = (h + 7) & !7;
+                let (w8, h8) = shift.shift_size((w.div_ceil(8), h.div_ceil(8)));
+                let w = w8 * 8;
+                let h = h8 * 8;
                 AlignedGrid::<i32>::with_alloc_tracker(w as usize, h as usize, None).unwrap()
             }));
         }
