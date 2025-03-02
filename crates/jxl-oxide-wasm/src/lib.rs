@@ -148,6 +148,22 @@ impl WasmJxlImage {
         }
     }
 
+    #[wasm_bindgen(getter = width)]
+    pub fn width(&self) -> Option<u32> {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => None,
+            WasmJxlImageInner::Init(image) => Some(image.width()),
+        }
+    }
+
+    #[wasm_bindgen(getter = height)]
+    pub fn height(&self) -> Option<u32> {
+        match &self.inner {
+            WasmJxlImageInner::Uninit(_) => None,
+            WasmJxlImageInner::Init(image) => Some(image.height()),
+        }
+    }
+
     #[wasm_bindgen(getter = numLoops)]
     pub fn num_loops(&self) -> Option<u32> {
         match &self.inner {
