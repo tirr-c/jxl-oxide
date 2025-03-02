@@ -47,6 +47,10 @@ test! {
         util::decode_testcases_dir().join("genshin_ycbcr_420/input.jxl"),
         "24e05ce200df019710eb56cad43e4349bd6edee05865b1eb0eee1581406535b5",
     ),
+    issue_425(
+        util::decode_testcases_dir().join("issue_425/input.jxl"),
+        "c00df4d5b151556cfe92ac4b13d81e2a1ee20fa066cd5fddd3cdd1ae52f0fe00",
+    ),
     starrail_jpegli_xyb(
         util::decode_testcases_dir().join("starrail_jpegli_xyb/input.jxl"),
         "21ddc2688c89ec279a2e9415bc2e82c4d4b56362316d1332131b6fb97b0d1ea0",

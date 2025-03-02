@@ -204,7 +204,9 @@ pub(crate) fn render_vardct<S: Sample>(
 
             let mut fb = ImageWithRegion::new(3, tracker);
             for shift in shifts_cbycr {
-                let (width, height) = shift.shift_size((width, height));
+                let (w8, h8) = shift.shift_size((width.div_ceil(8), height.div_ceil(8)));
+                let width = w8 * 8;
+                let height = h8 * 8;
                 let buffer =
                     AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
                 fb.append_channel_shifted(ImageBuffer::F32(buffer), modular_region, shift);
