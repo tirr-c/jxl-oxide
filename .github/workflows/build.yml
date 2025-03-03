@@ -12,8 +12,8 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-latest
-          - windows-latest
+          - ubuntu-24.04
+          - windows-2022
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -43,13 +43,16 @@ jobs:
             target/release/jxl-oxide.exe
   cross:
     name: Cross-compile
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         target:
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
     steps:
+      - if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        name: Install cross build tools
+        run: 'sudo apt update && sudo apt upgrade -y crossbuild-essential-armhf'
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
@@ -80,7 +83,7 @@ jobs:
 
   wasm:
     name: WebAssembly
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
