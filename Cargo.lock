@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-color"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-jbr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "brotli-decompressor",
  "jxl-bitstream",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "brotli-decompressor",
  "bytemuck",
@@ -1029,7 +1029,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "clap",
  "jxl-color",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bytemuck",
  "jxl-bitstream",
