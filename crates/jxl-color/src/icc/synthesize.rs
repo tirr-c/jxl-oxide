@@ -240,7 +240,10 @@ pub fn colour_encoding_to_icc(colour_encoding: &EnumColourEncoding) -> Vec<u8> {
 
     if matches!(tf, TransferFunction::Pq | TransferFunction::Hlg) {
         if let Some(cicp) = colour_encoding.cicp() {
-            append_tag_with_data(&mut tags, &mut data, *b"cicp", &cicp);
+            let mut cicp_tag = [0u8; 12];
+            cicp_tag[..4].copy_from_slice(b"cicp");
+            cicp_tag[8..].copy_from_slice(&cicp);
+            append_tag_with_data(&mut tags, &mut data, *b"cicp", &cicp_tag);
         }
     }
 
