@@ -862,16 +862,17 @@ impl RenderContext {
                 channels.push(grid.as_float_mut().unwrap().buf_mut());
             }
 
-            let mut has_black = false;
-            for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
+            let mut black_ec_idx = None;
+            let it = extra_channels.iter_mut().zip(&metadata.ec_info).enumerate();
+            for (idx, (grid, ec_info)) in it {
                 if ec_info.is_black() {
                     channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
-                    has_black = true;
+                    black_ec_idx = Some(idx);
                     break;
                 }
             }
 
-            if has_black {
+            if black_ec_idx.is_some() {
                 // 0 means full ink; invert samples
                 for grid in channels.iter_mut() {
                     for v in &mut **grid {
