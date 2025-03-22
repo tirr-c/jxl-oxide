@@ -58,11 +58,25 @@ pub(crate) fn write_png<W: Write>(
 
     let mut writer = encoder.write_header()?;
 
-    tracing::debug!("Embedding ICC profile");
-    let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&source_icc, 7);
-    let mut iccp_chunk_data = vec![b'0', 0, 0];
-    iccp_chunk_data.extend(compressed_icc);
-    writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data)?;
+    let skip_icc = matches!(
+        metadata.colour_encoding,
+        jxl_oxide::color::ColourEncoding::Enum(jxl_oxide::color::EnumColourEncoding {
+            tf: jxl_oxide::color::TransferFunction::Bt709,
+            ..
+        })
+    );
+
+    if skip_icc {
+        // XXX: This is necessary because libjxl encodes BT.709 images with BT.709 inverse
+        // OETF, but some image viewers use BT.1886 EOTF when it encounters BT.709 CICP tag.
+        tracing::debug!("Skipping ICC profile, because the transfer function is BT.709");
+    } else {
+        tracing::debug!("Embedding ICC profile");
+        let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&source_icc, 7);
+        let mut iccp_chunk_data = vec![b'0', 0, 0];
+        iccp_chunk_data.extend(compressed_icc);
+        writer.write_chunk(png::chunk::iCCP, &iccp_chunk_data)?;
+    }
 
     if let Some(cicp) = cicp {
         tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");

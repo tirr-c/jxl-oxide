@@ -825,9 +825,18 @@ impl RenderContext {
             tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
             tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
+            let is_bt709 = matches!(
+                header_color_encoding,
+                ColourEncoding::Enum(EnumColourEncoding {
+                    tf: jxl_color::TransferFunction::Bt709,
+                    ..
+                })
+            );
+
             let mut transform = jxl_color::ColorTransform::builder();
             transform.set_srgb_icc(!self.cms.supports_linear_tf());
             transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
+            transform.xyb_from_bt709(metadata.xyb_encoded && is_bt709);
             let transform = transform.build(
                 &frame_color_encoding,
                 &self.requested_color_encoding,

@@ -124,6 +124,7 @@ pub struct ColorTransformBuilder {
     detect_peak: bool,
     srgb_icc: bool,
     from_pq: bool,
+    xyb_from_bt709: bool,
 }
 
 impl Default for ColorTransformBuilder {
@@ -139,6 +140,7 @@ impl ColorTransformBuilder {
             detect_peak: false,
             srgb_icc: false,
             from_pq: false,
+            xyb_from_bt709: false,
         }
     }
 
@@ -154,6 +156,11 @@ impl ColorTransformBuilder {
 
     pub fn from_pq(&mut self, from_pq: bool) -> &mut Self {
         self.from_pq = from_pq;
+        self
+    }
+
+    pub fn xyb_from_bt709(&mut self, xyb_from_bt709: bool) -> &mut Self {
+        self.xyb_from_bt709 = xyb_from_bt709;
         self
     }
 
@@ -211,6 +218,7 @@ impl ColorTransform {
             detect_peak,
             srgb_icc,
             from_pq,
+            xyb_from_bt709,
         } = builder;
         let connecting_tf = if srgb_icc {
             TransferFunction::Srgb
@@ -249,6 +257,7 @@ impl ColorTransform {
         }
 
         let mut ops = Vec::new();
+        let mut need_bt709_fix = false;
 
         let mut current_encoding = match from.encoding {
             ColourEncoding::IccProfile(_) => {
@@ -287,6 +296,15 @@ impl ColorTransform {
                 rendering_intent,
                 ..
             }) => {
+                let to_bt709 = matches!(
+                    to.encoding,
+                    ColourEncoding::Enum(EnumColourEncoding {
+                        tf: TransferFunction::Bt709,
+                        ..
+                    })
+                );
+                need_bt709_fix = xyb_from_bt709 && !to_bt709;
+
                 let inv_mat = oim.inv_mat;
                 #[rustfmt::skip]
                 let matrix = [
@@ -360,6 +378,28 @@ impl ColorTransform {
                 return Err(Error::UnsupportedColorEncoding);
             }
         };
+
+        if need_bt709_fix {
+            // Correct using BT.1886 EOTF.
+            ops.push(ColorTransformOp::TransferFunction {
+                tf: TransferFunction::Bt709,
+                hdr_params: HdrParams {
+                    luminances: [0f32; 3],
+                    intensity_target,
+                    min_nits,
+                },
+                inverse: false,
+            });
+            ops.push(ColorTransformOp::TransferFunction {
+                tf: TransferFunction::Bt709,
+                hdr_params: HdrParams {
+                    luminances: [0f32; 3],
+                    intensity_target,
+                    min_nits,
+                },
+                inverse: true,
+            });
+        }
 
         let target_encoding = match &to.encoding {
             ColourEncoding::Enum(encoding) => encoding,
@@ -1091,8 +1131,9 @@ fn apply_inverse_transfer_function(
             }
         }
         TransferFunction::Bt709 => {
+            // Matches Chromium and Firefox behavior.
             for ch in channels {
-                tf::bt709_to_linear(ch);
+                tf::srgb_to_linear(ch);
             }
         }
         TransferFunction::Unknown => {}

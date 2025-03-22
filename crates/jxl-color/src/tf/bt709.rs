@@ -100,14 +100,3 @@ unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
 
     remainder
 }
-
-pub fn bt709_to_linear(samples: &mut [f32]) {
-    for x in samples {
-        let a = *x;
-        *x = if a <= 0.081 {
-            a / 4.5
-        } else {
-            crate::fastmath::fast_powf_generic(a.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
-        };
-    }
-}
