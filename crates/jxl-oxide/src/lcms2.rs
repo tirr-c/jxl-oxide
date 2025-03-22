@@ -2,7 +2,7 @@ use lcms2::{Profile, Transform};
 
 use crate::RenderingIntent;
 
-/// Little CMS 2 integration.
+/// Little CMS 2 integration for ICC profile handling.
 pub struct Lcms2;
 
 impl crate::ColorManagementSystem for Lcms2 {

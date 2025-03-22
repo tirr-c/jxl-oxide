@@ -1,3 +1,5 @@
+mod cms;
+
 #[cfg(feature = "conformance")]
 mod conformance;
 
