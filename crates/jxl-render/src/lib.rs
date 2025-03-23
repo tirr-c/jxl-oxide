@@ -1,9 +1,9 @@
 //! This crate is the core of jxl-oxide that provides JPEG XL renderer.
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use jxl_bitstream::Bitstream;
 use jxl_color::{
-    ColorEncodingWithProfile, ColorManagementSystem, ColourEncoding, ColourSpace,
+    ColorEncodingWithProfile, ColorManagementSystem, ColorTransform, ColourEncoding, ColourSpace,
     EnumColourEncoding,
 };
 use jxl_frame::{header::FrameType, Frame, FrameContext};
@@ -53,6 +53,7 @@ pub struct RenderContext {
     embedded_icc: Vec<u8>,
     requested_color_encoding: ColorEncodingWithProfile,
     cms: Box<dyn ColorManagementSystem + Send + Sync>,
+    cached_transform: Mutex<Option<ColorTransform>>,
 }
 
 impl std::fmt::Debug for RenderContext {
@@ -174,6 +175,7 @@ impl RenderContextBuilder {
             embedded_icc: self.embedded_icc,
             requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
+            cached_transform: Mutex::new(None),
         })
     }
 }
@@ -188,6 +190,7 @@ impl RenderContext {
 impl RenderContext {
     #[inline]
     pub fn set_cms(&mut self, cms: impl ColorManagementSystem + Send + Sync + 'static) {
+        *self.cached_transform.get_mut().unwrap() = None;
         self.cms = Box::new(cms);
     }
 
@@ -208,6 +211,7 @@ impl RenderContext {
 
     #[inline]
     pub fn request_color_encoding(&mut self, encoding: ColorEncodingWithProfile) {
+        *self.cached_transform.get_mut().unwrap() = None;
         self.requested_color_encoding = encoding;
     }
 
@@ -802,6 +806,42 @@ impl RenderContext {
         }
     }
 
+    fn cache_color_transform(&self) -> Result<()> {
+        let mut cached_transform = self.cached_transform.lock().unwrap();
+        if cached_transform.is_some() {
+            return Ok(());
+        }
+
+        let metadata = self.metadata();
+        let header_color_encoding = &metadata.colour_encoding;
+
+        let frame_color_encoding = if metadata.xyb_encoded {
+            ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
+                jxl_color::RenderingIntent::Perceptual,
+            ))
+        } else if let ColourEncoding::Enum(encoding) = header_color_encoding {
+            ColorEncodingWithProfile::new(encoding.clone())
+        } else {
+            ColorEncodingWithProfile::with_icc(&self.embedded_icc)?
+        };
+        tracing::trace!(?frame_color_encoding);
+        tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
+
+        let mut transform = jxl_color::ColorTransform::builder();
+        transform.set_srgb_icc(!self.cms.supports_linear_tf());
+        transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
+        let transform = transform.build(
+            &frame_color_encoding,
+            &self.requested_color_encoding,
+            &metadata.opsin_inverse_matrix,
+            &metadata.tone_mapping,
+            &*self.cms,
+        )?;
+
+        *cached_transform = Some(transform);
+        Ok(())
+    }
+
     fn postprocess_keyframe(
         &self,
         frame: &IndexedFrame,
@@ -811,36 +851,23 @@ impl RenderContext {
         let metadata = self.metadata();
 
         tracing::trace_span!("Transform to requested color encoding").in_scope(|| -> Result<_> {
-            let header_color_encoding = &metadata.colour_encoding;
-            let frame_color_encoding = if !grid.ct_done() && metadata.xyb_encoded {
-                ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
-                    jxl_color::RenderingIntent::Perceptual,
-                ))
-            } else if let ColourEncoding::Enum(encoding) = header_color_encoding {
-                ColorEncodingWithProfile::new(encoding.clone())
-            } else {
-                ColorEncodingWithProfile::with_icc(&self.embedded_icc)?
-            };
-            tracing::trace!(?frame_color_encoding);
-            tracing::trace!(requested_color_encoding = ?self.requested_color_encoding);
+            if grid.ct_done() {
+                return Ok(grid);
+            }
+
+            self.cache_color_transform()?;
+
             tracing::trace!(do_ycbcr = frame_header.do_ycbcr);
 
-            let mut transform = jxl_color::ColorTransform::builder();
-            transform.set_srgb_icc(!self.cms.supports_linear_tf());
-            transform.from_pq(self.suggested_hdr_tf() == Some(jxl_color::TransferFunction::Pq));
-            let transform = transform.build(
-                &frame_color_encoding,
-                &self.requested_color_encoding,
-                &metadata.opsin_inverse_matrix,
-                &metadata.tone_mapping,
-            )?;
-            if grid.ct_done() || (transform.is_noop() && !frame_header.do_ycbcr) {
+            let transform = self.cached_transform.lock().unwrap();
+            let transform = transform.as_ref().unwrap();
+            if transform.is_noop() && !frame_header.do_ycbcr {
                 return Ok(grid);
             }
 
             let mut grid = grid.try_clone()?;
 
-            if !grid.ct_done() && frame_header.do_ycbcr {
+            if frame_header.do_ycbcr {
                 grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
                 jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
             }
@@ -880,8 +907,7 @@ impl RenderContext {
                 }
             }
 
-            let output_channels =
-                transform.run_with_threads(&mut channels, &*self.cms, &self.pool)?;
+            let output_channels = transform.run_with_threads(&mut channels, &self.pool)?;
             if output_channels < 3 {
                 grid.remove_color_channels(output_channels);
             }

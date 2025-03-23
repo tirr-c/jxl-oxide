@@ -1,31 +1,17 @@
 use crate::RenderingIntent;
 
 /// Color management system that handles ICCv4 profiles.
-///
-/// Implementors can implement `transform_impl` to integrate into external color management system.
 pub trait ColorManagementSystem {
-    fn transform_impl(
-        &self,
-        from: &[u8],
-        to: &[u8],
-        intent: RenderingIntent,
-        channels: &mut [&mut [f32]],
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync + 'static>>;
-
-    /// Performs color transformation between two ICC profiles.
+    /// Prepares color transformation between two ICC profiles.
     ///
     /// # Errors
     /// This function will return an error if the internal CMS implementation returned an error.
-    fn transform(
+    fn prepare_transform(
         &self,
-        from: &[u8],
-        to: &[u8],
+        from_icc: &[u8],
+        to_icc: &[u8],
         intent: RenderingIntent,
-        channels: &mut [&mut [f32]],
-    ) -> Result<usize, crate::Error> {
-        self.transform_impl(from, to, intent, channels)
-            .map_err(crate::Error::CmsFailure)
-    }
+    ) -> Result<Box<dyn PreparedTransform>, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
     /// Returns whether the CMS supports linear transfer function.
     ///
@@ -36,27 +22,37 @@ pub trait ColorManagementSystem {
     }
 }
 
+/// Prepared transformation created by [`ColorManagementSystem`].
+///
+/// Prepared transformations may be cached by jxl-oxide internally.
+pub trait PreparedTransform: Send + Sync {
+    /// The number of expected input channels.
+    fn num_input_channels(&self) -> usize;
+
+    /// The number of expected output channels.
+    fn num_output_channels(&self) -> usize;
+
+    /// Performs prepared color transformation.
+    ///
+    /// # Errors
+    /// This function will return an error if the internal CMS implementation returned an error.
+    fn transform(
+        &self,
+        channels: &mut [&mut [f32]],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
+}
+
 /// "Null" color management system that fails on every operation.
 #[derive(Debug, Copy, Clone)]
 pub struct NullCms;
 impl ColorManagementSystem for NullCms {
-    fn transform_impl(
+    fn prepare_transform(
         &self,
         _: &[u8],
         _: &[u8],
         _: RenderingIntent,
-        _: &mut [&mut [f32]],
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    ) -> Result<Box<dyn PreparedTransform>, Box<dyn std::error::Error + Send + Sync + 'static>>
+    {
         Err(Box::new(crate::Error::CmsNotAvailable))
-    }
-
-    fn transform(
-        &self,
-        _: &[u8],
-        _: &[u8],
-        _: RenderingIntent,
-        _: &mut [&mut [f32]],
-    ) -> Result<usize, crate::Error> {
-        Err(crate::Error::CmsNotAvailable)
     }
 }

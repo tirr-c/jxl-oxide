@@ -5,6 +5,12 @@ use crate::RenderingIntent;
 /// `moxcms` crate integration for ICC profile handling.
 pub struct Moxcms;
 
+struct PreparedTransform {
+    transform: Box<moxcms::TransformF32BitExecutor>,
+    from_channels: usize,
+    to_channels: usize,
+}
+
 fn color_space_to_layout(color_space: DataColorSpace) -> Result<(Layout, usize), moxcms::CmsError> {
     match color_space {
         DataColorSpace::Xyz
@@ -23,15 +29,17 @@ fn color_space_to_layout(color_space: DataColorSpace) -> Result<(Layout, usize),
 }
 
 impl crate::ColorManagementSystem for Moxcms {
-    fn transform_impl(
+    fn prepare_transform(
         &self,
-        from: &[u8],
-        to: &[u8],
+        from_icc: &[u8],
+        to_icc: &[u8],
         intent: RenderingIntent,
-        channels: &mut [&mut [f32]],
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let profile_from = moxcms::ColorProfile::new_from_slice(from)?;
-        let profile_to = moxcms::ColorProfile::new_from_slice(to)?;
+    ) -> Result<
+        Box<dyn jxl_color::PreparedTransform>,
+        Box<dyn std::error::Error + Send + Sync + 'static>,
+    > {
+        let profile_from = moxcms::ColorProfile::new_from_slice(from_icc)?;
+        let profile_to = moxcms::ColorProfile::new_from_slice(to_icc)?;
 
         let (layout_from, from_channels) = color_space_to_layout(profile_from.color_space)?;
         let (layout_to, to_channels) = color_space_to_layout(profile_to.color_space)?;
@@ -49,6 +57,35 @@ impl crate::ColorManagementSystem for Moxcms {
 
         let transform =
             profile_from.create_transform_f32(layout_from, &profile_to, layout_to, options)?;
+
+        let prepared = PreparedTransform {
+            transform,
+            from_channels,
+            to_channels,
+        };
+
+        Ok(Box::new(prepared) as Box<_>)
+    }
+}
+
+impl crate::PreparedTransform for PreparedTransform {
+    fn num_input_channels(&self) -> usize {
+        self.from_channels
+    }
+
+    fn num_output_channels(&self) -> usize {
+        self.to_channels
+    }
+
+    fn transform(
+        &self,
+        channels: &mut [&mut [f32]],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let Self {
+            ref transform,
+            from_channels,
+            to_channels,
+        } = *self;
 
         let mut buf_in = vec![0f32; 1024 * from_channels];
         let mut buf_out = vec![0f32; 1024 * to_channels];
@@ -73,6 +110,6 @@ impl crate::ColorManagementSystem for Moxcms {
             }
         }
 
-        Ok(to_channels)
+        Ok(())
     }
 }

@@ -160,7 +160,8 @@ use jxl_render::{IndexedFrame, RenderContext};
 
 pub use jxl_color::header as color;
 pub use jxl_color::{
-    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms, RenderingIntent,
+    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms,
+    PreparedTransform, RenderingIntent,
 };
 pub use jxl_frame::header as frame;
 pub use jxl_frame::{Frame, FrameHeader};
