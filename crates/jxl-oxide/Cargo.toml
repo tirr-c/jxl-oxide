@@ -71,7 +71,7 @@ optional = true
 [features]
 default = ["rayon"]
 image = ["dep:bytemuck", "dep:image"]
-lcms2 = ["dep:lcms2"]
+lcms2 = ["dep:bytemuck", "dep:lcms2"]
 moxcms = ["dep:moxcms"]
 rayon = ["jxl-threadpool/rayon"]
 __examples = ["image?/png"]
