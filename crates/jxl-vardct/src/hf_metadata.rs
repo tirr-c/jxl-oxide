@@ -139,7 +139,23 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                             jxl_bitstream::Error::ValidationFailed("non-positive HfMul").into()
                         );
                     }
+
                     let (dw, dh) = dct_select.dct_select_size();
+                    let x_in_group = (x % 32) as u32;
+                    let y_in_group = (y % 32) as u32;
+                    if x_in_group + dw > 32 || y_in_group + dh > 32 {
+                        tracing::error!(
+                            lf_group_idx,
+                            base_x = x,
+                            base_y = y,
+                            dct_select = format_args!("{dct_select:?}"),
+                            "varblock is placed across pass group border",
+                        );
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "varblock is placed across pass group border",
+                        )
+                        .into());
+                    }
 
                     let epf =
                         epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));

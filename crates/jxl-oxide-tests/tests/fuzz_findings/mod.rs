@@ -85,4 +85,5 @@ test_by_include!(
     rct_zero_sized,
     ma_lookup_overflow,
     hf_preset_out_of_range,
+    hf_varblock_across_group,
 );
