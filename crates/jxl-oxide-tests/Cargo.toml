@@ -25,7 +25,7 @@ optional = true
 version = "0.11.0"
 path = "../jxl-oxide"
 default-features = false
-features = ["lcms2"]
+features = ["lcms2", "moxcms"]
 
 [dependencies.mimalloc]
 version = "0.1.39"
@@ -43,16 +43,22 @@ default-features = false
 features = ["blocking", "rustls-tls"]
 optional = true
 
+[dependencies.ssimulacra2]
+version = "0.5.1"
+default-features = false
+optional = true
+
 [dependencies.zstd]
 version = "0.13.0"
 optional = true
 
 [features]
-default = ["net", "mimalloc", "rayon", "image", "conformance", "crop", "decode", "bench"]
+default = ["net", "mimalloc", "rayon", "image", "cms", "conformance", "crop", "decode", "bench"]
 net = ["dep:reqwest"]
 mimalloc = ["dep:mimalloc"]
-rayon = ["jxl-oxide/rayon"]
+rayon = ["jxl-oxide/rayon", "ssimulacra2?/rayon"]
 image = ["dep:image", "jxl-oxide/image"]
+cms = ["dep:ssimulacra2"]
 conformance = []
 crop = ["dep:rand"]
 decode = ["dep:zstd"]

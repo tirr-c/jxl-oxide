@@ -357,14 +357,11 @@ pub(crate) fn convert_color_for_record(
                 &ColorEncodingWithProfile::new(encoding.clone()),
                 &metadata.opsin_inverse_matrix,
                 &metadata.tone_mapping,
+                &jxl_color::NullCms,
             )
             .unwrap();
             let output_channels = transform
-                .run_with_threads(
-                    &mut [x.buf_mut(), y.buf_mut(), b.buf_mut()],
-                    &jxl_color::NullCms,
-                    pool,
-                )
+                .run_with_threads(&mut [x.buf_mut(), y.buf_mut(), b.buf_mut()], pool)
                 .unwrap();
             fb.remove_color_channels(output_channels);
             Ok(())

@@ -32,7 +32,7 @@ optional = true
 version = "0.11.3"
 path = "../jxl-oxide"
 default-features = false
-features = ["lcms2"]
+features = ["lcms2", "moxcms"]
 
 [dependencies.mimalloc]
 version = "0.1.39"

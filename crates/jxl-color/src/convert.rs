@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crate::{
     ciexyz::*, consts::*, icc::colour_encoding_to_icc, tf, ColorManagementSystem, ColourEncoding,
-    ColourSpace, EnumColourEncoding, Error, OpsinInverseMatrix, RenderingIntent, Result,
-    ToneMapping, TransferFunction,
+    ColourSpace, EnumColourEncoding, Error, OpsinInverseMatrix, PreparedTransform, RenderingIntent,
+    Result, ToneMapping, TransferFunction,
 };
 
 mod gamut_map;
@@ -157,14 +159,15 @@ impl ColorTransformBuilder {
         self
     }
 
-    pub fn build(
+    pub fn build<Cms: ColorManagementSystem + ?Sized>(
         self,
         from: &ColorEncodingWithProfile,
         to: &ColorEncodingWithProfile,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
+        cms: &Cms,
     ) -> Result<ColorTransform> {
-        ColorTransform::with_builder(self, from, to, oim, tone_mapping)
+        ColorTransform::with_builder(self, from, to, oim, tone_mapping, cms)
     }
 }
 
@@ -185,11 +188,12 @@ impl ColorTransform {
     ///
     /// # Errors
     /// This function will return an error if it cannot prepare such color transformation.
-    pub fn new(
+    pub fn new<Cms: ColorManagementSystem + ?Sized>(
         from: &ColorEncodingWithProfile,
         to: &ColorEncodingWithProfile,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
+        cms: &Cms,
     ) -> Result<Self> {
         Self::with_builder(
             ColorTransformBuilder::default(),
@@ -197,15 +201,17 @@ impl ColorTransform {
             to,
             oim,
             tone_mapping,
+            cms,
         )
     }
 
-    fn with_builder(
+    fn with_builder<Cms: ColorManagementSystem + ?Sized>(
         builder: ColorTransformBuilder,
         from: &ColorEncodingWithProfile,
         to: &ColorEncodingWithProfile,
         oim: &OpsinInverseMatrix,
         tone_mapping: &ToneMapping,
+        cms: &Cms,
     ) -> Result<Self> {
         let ColorTransformBuilder {
             detect_peak,
@@ -257,27 +263,26 @@ impl ColorTransform {
                     .rendering_intent;
                 match &to.encoding {
                     ColourEncoding::IccProfile(_) => {
+                        let from = &from.icc_profile;
+                        let to = &to.icc_profile;
+                        let transform = cms
+                            .prepare_transform(from, to, rendering_intent)
+                            .map_err(crate::Error::CmsFailure)?;
                         return Ok(Self {
                             begin_channels,
-                            ops: vec![ColorTransformOp::IccToIcc {
-                                inputs: 0,
-                                outputs: 0,
-                                from: from.icc_profile.clone(),
-                                to: to.icc_profile.clone(),
-                                rendering_intent,
-                            }],
+                            ops: vec![ColorTransformOp::IccToIcc(transform.into())],
                         });
                     }
                     ColourEncoding::Enum(encoding) => {
                         let mut target_encoding = encoding.clone();
                         target_encoding.tf = connecting_tf;
-                        ops.push(ColorTransformOp::IccToIcc {
-                            inputs: 0,
-                            outputs: 0,
-                            from: from.icc_profile.clone(),
-                            to: colour_encoding_to_icc(&target_encoding),
-                            rendering_intent,
-                        });
+
+                        let from = &from.icc_profile;
+                        let to = colour_encoding_to_icc(&target_encoding);
+                        let transform = cms
+                            .prepare_transform(from, &to, rendering_intent)
+                            .map_err(crate::Error::CmsFailure)?;
+                        ops.push(ColorTransformOp::IccToIcc(transform.into()));
                         target_encoding
                     }
                 }
@@ -364,13 +369,12 @@ impl ColorTransform {
         let target_encoding = match &to.encoding {
             ColourEncoding::Enum(encoding) => encoding,
             ColourEncoding::IccProfile(_) => {
-                ops.push(ColorTransformOp::IccToIcc {
-                    inputs: 0,
-                    outputs: 0,
-                    from: colour_encoding_to_icc(&current_encoding),
-                    to: to.icc_profile.clone(),
-                    rendering_intent: current_encoding.rendering_intent,
-                });
+                let from = colour_encoding_to_icc(&current_encoding);
+                let to = &to.icc_profile;
+                let transform = cms
+                    .prepare_transform(&from, to, current_encoding.rendering_intent)
+                    .map_err(crate::Error::CmsFailure)?;
+                ops.push(ColorTransformOp::IccToIcc(transform.into()));
                 return Ok(Self {
                     begin_channels,
                     ops,
@@ -568,6 +572,7 @@ impl ColorTransform {
             &ColorEncodingWithProfile::new(encoding.clone()),
             oim,
             tone_mapping,
+            &crate::NullCms, // XYB to enum colorspace shouldn't generate ICC op
         )
     }
 
@@ -601,16 +606,12 @@ impl ColorTransform {
     /// # Errors
     /// This function will return an error if it encountered ICC to ICC operation and the provided
     /// CMS cannot handle it.
-    pub fn run<Cms: ColorManagementSystem + ?Sized>(
-        &self,
-        channels: &mut [&mut [f32]],
-        cms: &Cms,
-    ) -> Result<usize> {
+    pub fn run(&self, channels: &mut [&mut [f32]]) -> Result<usize> {
         let _gurad = tracing::trace_span!("Run color transform ops").entered();
 
         let mut num_channels = self.begin_channels;
         for op in &self.ops {
-            num_channels = op.run(channels, num_channels, cms)?;
+            num_channels = op.run(channels, num_channels)?;
         }
         Ok(num_channels)
     }
@@ -624,10 +625,9 @@ impl ColorTransform {
     /// # Errors
     /// This function will return an error if it encountered ICC to ICC operation and the provided
     /// CMS cannot handle it.
-    pub fn run_with_threads<Cms: ColorManagementSystem + Sync + ?Sized>(
+    pub fn run_with_threads(
         &self,
         channels: &mut [&mut [f32]],
-        cms: &Cms,
         pool: &jxl_threadpool::JxlThreadPool,
     ) -> Result<usize> {
         let _gurad = tracing::trace_span!("Run color transform ops").entered();
@@ -652,7 +652,7 @@ impl ColorTransform {
         pool.for_each_vec(chunks, |mut channels| {
             let mut num_channels = self.begin_channels;
             for op in &self.ops {
-                match op.run(&mut channels, num_channels, cms) {
+                match op.run(&mut channels, num_channels) {
                     Ok(x) => {
                         num_channels = x;
                     }
@@ -731,13 +731,7 @@ enum ColorTransformOp {
         saturation_factor: f32,
     },
     Clip,
-    IccToIcc {
-        inputs: usize,
-        outputs: usize,
-        from: Vec<u8>,
-        to: Vec<u8>,
-        rendering_intent: RenderingIntent,
-    },
+    IccToIcc(Arc<dyn PreparedTransform>),
 }
 
 impl std::fmt::Debug for ColorTransformOp {
@@ -799,20 +793,7 @@ impl std::fmt::Debug for ColorTransformOp {
                 .field("saturation_factor", saturation_factor)
                 .finish(),
             Self::Clip => f.write_str("Clip"),
-            Self::IccToIcc {
-                inputs,
-                outputs,
-                from,
-                to,
-                rendering_intent,
-            } => f
-                .debug_struct("IccToIcc")
-                .field("inputs", inputs)
-                .field("outputs", outputs)
-                .field("from", &format_args!("({} byte(s))", from.len()))
-                .field("to", &format_args!("({} byte(s))", to.len()))
-                .field("rendering_intent", rendering_intent)
-                .finish(),
+            Self::IccToIcc(..) => f.debug_tuple("IccToIcc").finish_non_exhaustive(),
         }
     }
 }
@@ -834,8 +815,7 @@ impl ColorTransformOp {
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::Clip => None,
-            ColorTransformOp::IccToIcc { inputs: 0, .. } => None,
-            ColorTransformOp::IccToIcc { inputs, .. } => Some(inputs),
+            ColorTransformOp::IccToIcc(ref transform) => Some(transform.num_input_channels()),
         }
     }
 
@@ -855,17 +835,11 @@ impl ColorTransformOp {
             ColorTransformOp::ToneMapLumaRec2408 { .. } => Some(1),
             ColorTransformOp::GamutMap { .. } => Some(3),
             ColorTransformOp::Clip => None,
-            ColorTransformOp::IccToIcc { outputs: 0, .. } => None,
-            ColorTransformOp::IccToIcc { outputs, .. } => Some(outputs),
+            ColorTransformOp::IccToIcc(ref transform) => Some(transform.num_output_channels()),
         }
     }
 
-    fn run<Cms: ColorManagementSystem + ?Sized>(
-        &self,
-        channels: &mut [&mut [f32]],
-        num_input_channels: usize,
-        cms: &Cms,
-    ) -> Result<usize> {
+    fn run(&self, channels: &mut [&mut [f32]], num_input_channels: usize) -> Result<usize> {
         let channel_count = channels.len();
         if let Some(inputs) = self.inputs() {
             assert!(channel_count >= inputs);
@@ -988,8 +962,11 @@ impl ColorTransformOp {
                 }
                 num_input_channels
             }
-            Self::IccToIcc { from, to, .. } => {
-                cms.transform(from, to, RenderingIntent::Relative, channels)?
+            Self::IccToIcc(transform) => {
+                transform
+                    .transform(channels)
+                    .map_err(crate::Error::CmsFailure)?;
+                transform.num_output_channels()
             }
         })
     }

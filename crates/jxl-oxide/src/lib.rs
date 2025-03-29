@@ -143,6 +143,7 @@
 //! - `rayon`: Enable multithreading with Rayon. (*default*)
 //! - `image`: Enable integration with `image` crate.
 //! - `lcms2`: Enable integration with Little CMS 2.
+//! - `moxcms`: Enable integration with `moxcms` crate.
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
@@ -159,7 +160,8 @@ use jxl_render::{IndexedFrame, RenderContext};
 
 pub use jxl_color::header as color;
 pub use jxl_color::{
-    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms, RenderingIntent,
+    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms,
+    PreparedTransform, RenderingIntent,
 };
 pub use jxl_frame::header as frame;
 pub use jxl_frame::{Frame, FrameHeader};
@@ -174,9 +176,13 @@ mod fb;
 pub mod integration;
 #[cfg(feature = "lcms2")]
 mod lcms2;
+#[cfg(feature = "moxcms")]
+mod moxcms;
 
 #[cfg(feature = "lcms2")]
 pub use self::lcms2::Lcms2;
+#[cfg(feature = "moxcms")]
+pub use self::moxcms::Moxcms;
 pub use aux_box::{AuxBoxData, AuxBoxList, RawExif};
 pub use fb::{FrameBuffer, FrameBufferSample, ImageStream};
 
@@ -411,10 +417,12 @@ impl UninitializedJxlImage {
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
-        #[cfg_attr(not(feature = "lcms2"), allow(unused_mut))]
+        #[cfg_attr(not(any(feature = "lcms2", feature = "moxcms")), allow(unused_mut))]
         let mut ctx = builder.build(image_header.clone())?;
         #[cfg(feature = "lcms2")]
         ctx.set_cms(Lcms2);
+        #[cfg(all(not(feature = "lcms2"), feature = "moxcms"))]
+        ctx.set_cms(Moxcms);
 
         let mut image = JxlImage {
             pool: self.pool.clone(),

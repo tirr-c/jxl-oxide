@@ -104,36 +104,38 @@ fn run_test(
 }
 
 macro_rules! conformance_test {
-    (@single $(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:literal, $max_rmse:literal $(,)? )) => {
-        conformance_test!(@single $(#[$attr])* $name ($npy_hash, $icc_hash, $frames, $channels, [($peak_error, $max_rmse); $channels]));
+    (@single $(#[$attr:meta])* $name:ident ($cms:expr, $npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, $peak_error:literal, $max_rmse:literal $(,)? )) => {
+        conformance_test!(@single $(#[$attr])* $name ($cms, $npy_hash, $icc_hash, $frames, $channels, [($peak_error, $max_rmse); $channels]));
     };
 
-    (@single $(#[$attr:meta])* $name:ident ($npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, [$($error_list:tt)*] $(,)? )) => {
+    (@single $(#[$attr:meta])* $name:ident ($cms:expr, $npy_hash:literal, $icc_hash:literal, $frames:literal, $channels:literal, [$($error_list:tt)*] $(,)? )) => {
         #[test]
         $(#[$attr])*
         fn $name() {
             let perform_ct = $icc_hash != "skip";
 
-            let buf = util::download_object_with_cache($npy_hash, "npy");
-            let target_icc = perform_ct.then(|| util::download_object_with_cache($icc_hash, "icc"));
+            let buf = ::jxl_oxide_tests::download_object_with_cache($npy_hash, "npy");
+            let target_icc = perform_ct.then(|| ::jxl_oxide_tests::download_object_with_cache($icc_hash, "icc"));
 
-            let expected = read_numpy(std::io::Cursor::new(buf), $frames, $channels);
+            let expected = $crate::conformance::read_numpy(::std::io::Cursor::new(buf), $frames, $channels);
 
-            let path = util::conformance_path(stringify!($name));
-            let image = JxlImage::builder().open(path).expect("Failed to open file");
+            let path = ::jxl_oxide_tests::conformance_path(stringify!($name));
+            let mut image = ::jxl_oxide::JxlImage::builder().open(path).expect("Failed to open file");
+            image.set_cms($cms);
 
-            run_test(image, target_icc, expected, &[$($error_list)*]);
+            $crate::conformance::run_test(image, target_icc, expected, &[$($error_list)*]);
         }
     };
 
-    ($($(#[$attr:meta])* $name:ident ($($params:tt)*)),* $(,)?) => {
+    ($cms:expr; $($(#[$attr:meta])* $name:ident ($($params:tt)*)),* $(,)?) => {
         $(
-            conformance_test!(@single $(#[$attr])* $name ($($params)*));
+            conformance_test!(@single $(#[$attr])* $name ($cms, $($params)*));
         )*
     };
 }
 
 conformance_test! {
+    jxl_oxide::Lcms2;
     alpha_nonpremultiplied(
         "cad070b944d8aff6b7865c211e44bc469b08addf5b4a19d11fdc4ef2f7494d1b",
         "80a1d9ea2892c89ab10a05fcbd1d752069557768fac3159ecd91c33be0d74a19",
@@ -361,4 +363,50 @@ conformance_test! {
         0.004,
         0.0001,
     ),
+}
+
+mod moxcms {
+    conformance_test! {
+        jxl_oxide::Moxcms;
+        bench_oriented_brg(
+            "eac8c30907e41e53a73a0c002bc39e998e0ceb021bd523f5bff4580b455579e6",
+            "6603ae12a4ac1ac742cacd887e9b35552a12c354ff25a00cae069ad4b932e6cc",
+            1,
+            3,
+            0.004,
+            1e-5,
+        ),
+        bike(
+            "815c89d1fe0bf67b6a1c8139d0af86b6e3f11d55c5a0ed9396256fb05744469e",
+            "809e189d1bf1fadb66f130ed0463d0de374b46497d299997e7c84619cbd35ed3",
+            1,
+            3,
+            0.007,
+            0.0001,
+        ),
+        cafe(
+            "4aaea4e1bda3771e62643fcdf2003ffe6048ee2870c93f67d34d6cc16cb7da4b",
+            "bef95ce5cdb139325f2a299b943158e00e39a7ca3cf597ab3dfa3098e42fc707",
+            1,
+            3,
+            0.004,
+            1e-5,
+        ),
+        cmyk_layers(
+            "a01913d4e4b1a89bd96e5de82a5dfb9925c7827ee6380ad60c0b1c4becb53880",
+            "4855b8fabb96bdc6495d45d089bb8c8efb1ae18389e0dc9e75a5f701a9c0b662",
+            1,
+            5,
+            0.000976562,
+            0.000976562,
+        ),
+        grayscale_public_university(
+            "851abd36b93948cfaeabeb65c8bb8727ebca4bb1d2697bce73461e05ccf24c1e",
+            "48d006762d583f6e354a3223c0a5aeaff7f45a324e229d237d69630bcc170241",
+            1,
+            1,
+            0.000976562,
+            0.000976562,
+        ),
+    }
 }

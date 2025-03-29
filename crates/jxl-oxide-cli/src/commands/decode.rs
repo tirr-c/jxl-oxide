@@ -73,6 +73,11 @@ pub struct DecodeArgs {
     /// Number of repeated decoding, used for benchmarking
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub num_reps: Option<u32>,
+    /// External color management system to use for ICC profiles.
+    ///
+    /// External CMS will handle ICC profiles jxl-oxide cannot handle.
+    #[arg(long)]
+    pub cms: Option<Cms>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -88,6 +93,15 @@ pub enum OutputFormat {
     JpegReconstruct,
     /// Numpy, used for conformance test.
     Npy,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Cms {
+    /// Little CMS 2.
+    #[default]
+    Lcms2,
+    /// moxcms crate.
+    Moxcms,
 }
 
 fn parse_crop_info(s: &str) -> Result<CropInfo, std::num::ParseIntError> {

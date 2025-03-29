@@ -110,6 +110,19 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         }
     }
 
+    if let Some(cms) = args.cms {
+        match cms {
+            Cms::Lcms2 => {
+                tracing::debug!("Using Little CMS 2");
+                image.set_cms(jxl_oxide::Lcms2);
+            }
+            Cms::Moxcms => {
+                tracing::debug!("Using moxcms");
+                image.set_cms(jxl_oxide::Moxcms);
+            }
+        }
+    }
+
     let crop = args.crop.and_then(|crop| {
         if crop.width == 0 && crop.height == 0 {
             None
