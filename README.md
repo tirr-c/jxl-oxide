@@ -3,7 +3,7 @@
 [![docs.rs](https://docs.rs/jxl-oxide/badge.svg)](https://docs.rs/crate/jxl-oxide/)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/tirr-c/jxl-oxide/build.yml?branch=main)](https://github.com/tirr-c/jxl-oxide/actions/workflows/build.yml?query=branch%3Amain)
 
-A spec-conforming JPEG XL decoder written in pure Rust[^1].
+A spec-conforming JPEG XL decoder written in pure Rust.
 
 If you want to use it as a library, add `jxl-oxide` in `Cargo.toml`. `jxl-oxide` is a blanket crate
 which covers various components of jxl-oxide.
@@ -28,7 +28,9 @@ cargo install jxl-oxide-cli
 **For `jxl-oxide`:**
 - `rayon` (default): Enable multithreading using `rayon`.
 - `lcms2`: Integrate into Little CMS 2 which supports arbitrary ICC profiles and enables CMYK to RGB
-  conversion. (Note that this will add dependencies written in C.)
+  conversion. Note that this will add dependencies written in C.
+- `moxcms`: Integrate into `moxcms` crate which supports arbitrary ICC profiles like `lcms2`.
+  `moxcms` is written in pure Rust, so it won't add any additional C dependency.
 - `image`: Integrate into the `image` crate. `jxl_oxide::integration::JxlDecoder` will be made
   available.
 
@@ -41,7 +43,5 @@ cargo install jxl-oxide-cli
 ---
 
 Dual-licensed under MIT and Apache 2.0.
-
-[^1]: Integration with Little CMS 2, which is written in C, can be enabled with `lcms2` feature.
 
 [conformance]: https://github.com/libjxl/conformance
