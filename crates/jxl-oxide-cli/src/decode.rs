@@ -288,9 +288,7 @@ fn run_once(image: &mut JxlImage) -> Result<(Vec<Render>, Duration)> {
 
     if !rendered {
         for idx in 0..image.num_loaded_keyframes() {
-            let frame = image
-                .render_frame_cropped(idx)
-                .expect("rendering frames failed");
+            let frame = image.render_frame_cropped(idx).map_err(Error::Render)?;
             keyframes.push(frame);
         }
     }

@@ -139,7 +139,23 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                             jxl_bitstream::Error::ValidationFailed("non-positive HfMul").into()
                         );
                     }
+
                     let (dw, dh) = dct_select.dct_select_size();
+                    let x_in_group = (x % 32) as u32;
+                    let y_in_group = (y % 32) as u32;
+                    if x_in_group + dw > 32 || y_in_group + dh > 32 {
+                        tracing::error!(
+                            lf_group_idx,
+                            base_x = x,
+                            base_y = y,
+                            ?dct_select,
+                            "varblock is placed across pass group border",
+                        );
+                        return Err(jxl_bitstream::Error::ValidationFailed(
+                            "varblock is placed across pass group border",
+                        )
+                        .into());
+                    }
 
                     let epf =
                         epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
@@ -151,13 +167,13 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                         lf_group_idx,
                                         base_x = x,
                                         base_y = y,
-                                        dct_select = format_args!("{:?}", dct_select),
+                                        ?dct_select,
                                         x = x + dx,
                                         y = y + dy,
-                                        "Varblocks overlap",
+                                        "varblocks overlap",
                                     );
                                     return Err(jxl_bitstream::Error::ValidationFailed(
-                                        "Varblocks overlap",
+                                        "varblocks overlap",
                                     )
                                     .into());
                                 }
@@ -166,11 +182,11 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                     lf_group_idx,
                                     base_x = x,
                                     base_y = y,
-                                    dct_select = format_args!("{:?}", dct_select),
-                                    "Varblock doesn't fit in an LF group",
+                                    ?dct_select,
+                                    "varblock doesn't fit in an LF group",
                                 );
                                 return Err(jxl_bitstream::Error::ValidationFailed(
-                                    "Varblock doesn't fit in an LF group",
+                                    "varblock doesn't fit in an LF group",
                                 )
                                 .into());
                             };
@@ -185,7 +201,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                 let sharpness = sharpness[(y + dy) * bw + (x + dx)];
                                 if !(0..8).contains(&sharpness) {
                                     return Err(jxl_bitstream::Error::ValidationFailed(
-                                        "Invalid EPF sharpness value",
+                                        "invalid EPF sharpness value",
                                     )
                                     .into());
                                 }
