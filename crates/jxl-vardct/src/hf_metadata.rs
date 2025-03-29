@@ -148,7 +148,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                             lf_group_idx,
                             base_x = x,
                             base_y = y,
-                            dct_select = format_args!("{dct_select:?}"),
+                            ?dct_select,
                             "varblock is placed across pass group border",
                         );
                         return Err(jxl_bitstream::Error::ValidationFailed(
@@ -167,13 +167,13 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                         lf_group_idx,
                                         base_x = x,
                                         base_y = y,
-                                        dct_select = format_args!("{:?}", dct_select),
+                                        ?dct_select,
                                         x = x + dx,
                                         y = y + dy,
-                                        "Varblocks overlap",
+                                        "varblocks overlap",
                                     );
                                     return Err(jxl_bitstream::Error::ValidationFailed(
-                                        "Varblocks overlap",
+                                        "varblocks overlap",
                                     )
                                     .into());
                                 }
@@ -182,11 +182,11 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                     lf_group_idx,
                                     base_x = x,
                                     base_y = y,
-                                    dct_select = format_args!("{:?}", dct_select),
-                                    "Varblock doesn't fit in an LF group",
+                                    ?dct_select,
+                                    "varblock doesn't fit in an LF group",
                                 );
                                 return Err(jxl_bitstream::Error::ValidationFailed(
-                                    "Varblock doesn't fit in an LF group",
+                                    "varblock doesn't fit in an LF group",
                                 )
                                 .into());
                             };
@@ -201,7 +201,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                 let sharpness = sharpness[(y + dy) * bw + (x + dx)];
                                 if !(0..8).contains(&sharpness) {
                                     return Err(jxl_bitstream::Error::ValidationFailed(
-                                        "Invalid EPF sharpness value",
+                                        "invalid EPF sharpness value",
                                     )
                                     .into());
                                 }
