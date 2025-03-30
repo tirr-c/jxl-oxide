@@ -8,7 +8,7 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 
 [dependencies]
@@ -27,7 +27,7 @@ version = "0.5.3"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
-version = "0.12.0"
+version = "0.13.0"
 path = "../jxl-image"
 
 [dependencies.jxl-modular]
@@ -43,5 +43,5 @@ version = "0.1.1"
 path = "../jxl-threadpool"
 
 [dependencies.jxl-vardct]
-version = "0.10.0"
+version = "0.10.1"
 path = "../jxl-vardct"
