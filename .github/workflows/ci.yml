@@ -12,14 +12,29 @@ name: Continuous integration
 jobs:
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
         target:
           - x86_64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
+        exclude:
+          - os: ubuntu-24.04
+            target: armv7-unknown-linux-gnueabihf
+          - os: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
     steps:
+      - if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        name: Install cross build tools
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt update && sudo apt install -y crossbuild-essential-armhf libc6:armhf
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
@@ -44,14 +59,10 @@ jobs:
           key: jxl-oxide-fixtures-0-${{ hashFiles('crates/jxl-oxide-tests/tests/*.rs') }}
           restore-keys: |
             jxl-oxide-fixtures-0-
-      - name: Install cross
-        uses: taiki-e/cache-cargo-install-action@v2
-        with:
-          tool: cross
-          git: https://github.com/cross-rs/cross
-          rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - name: Run tests
-        run: cross test --release --target ${{ matrix.target }} -- --test-threads 1
+        run: cargo test --release --target ${{ matrix.target }} -- --test-threads 1
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: 'arm-linux-gnueabihf-gcc'
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -60,7 +71,7 @@ jobs:
 
   clippy:
     name: Rustfmt and Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

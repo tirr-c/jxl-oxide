@@ -9,14 +9,29 @@ name: Code coverage
 jobs:
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
         target:
           - x86_64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
           - aarch64-unknown-linux-gnu
+        exclude:
+          - os: ubuntu-24.04
+            target: armv7-unknown-linux-gnueabihf
+          - os: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
     steps:
+      - if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        name: Install cross build tools
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt update && sudo apt install -y crossbuild-essential-armhf libc6:armhf
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
@@ -31,10 +46,8 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-19be83481fd3e50ea103d800d72e0f8eddb1c90c-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-cross-19be83481fd3e50ea103d800d72e0f8eddb1c90c-
-            ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - uses: actions/cache@v4
@@ -44,38 +57,33 @@ jobs:
           key: jxl-oxide-fixtures-0-${{ hashFiles('crates/jxl-oxide-tests/tests/*.rs') }}
           restore-keys: |
             jxl-oxide-fixtures-0-
-      - name: Install cross
-        uses: taiki-e/cache-cargo-install-action@v2
-        with:
-          tool: cross
-          git: https://github.com/cross-rs/cross
-          rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
       - name: Set environment variables
         run: |
           target_uppercase="$(tr '[:lower:]-' '[:upper:]_' <<< '${{ matrix.target }}')"
           echo "RUSTFLAGS=-C instrument-coverage -Z coverage-options=branch" >>"$GITHUB_ENV"
           echo "CARGO_TARGET_${target_uppercase}_RUSTFLAGS=-C instrument-coverage -Z coverage-options=branch" >>"$GITHUB_ENV"
           echo "RUSTC_SYSROOT=$(rustc --print sysroot)" >>"$GITHUB_ENV"
+      - if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        name: Set environment variables
+        run: |
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >>"$GITHUB_ENV"
       - name: Run tests
-        run: cross test --tests --no-fail-fast --target ${{ matrix.target }}
+        run: cargo test --tests --no-fail-fast --target ${{ matrix.target }} -- --test-threads 1
       - name: Collect coverage data
         run: |
+          cargo test --tests --no-run --message-format=json --target ${{ matrix.target }} >list.json
           llvm_profdata="$(find $RUSTC_SYSROOT -name llvm-profdata)"
           llvm_cov="$(find $RUSTC_SYSROOT -name llvm-cov)"
           profiles="$(find . -name '*.profraw')"
           $llvm_profdata merge -sparse $profiles -o coverage.profdata
-          testbins=$( \
-            cross test --no-run --message-format=json --target ${{ matrix.target }} \
-            | jq -r "select(.profile.test == true) | .filenames[]" \
-            | grep -v dSYM \
-          )
-          covargs=$(for bin in $testbins; do echo "-object ${PWD}${bin}"; done)
+          testbins=$(jq -r "select(.profile.test == true) | .filenames[]" <list.json | grep -v dSYM)
+          covargs=$(for bin in $testbins; do echo "-object ${bin}"; done)
           $llvm_cov export -format=lcov -instr-profile=coverage.profdata $covargs \
             -ignore-filename-regex='/\.cargo/' \
             -ignore-filename-regex='/rustc/' \
             >coverage.lcov
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage.lcov
           flags: rust-${{ matrix.target }}
