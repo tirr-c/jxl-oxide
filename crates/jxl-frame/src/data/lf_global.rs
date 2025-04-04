@@ -257,7 +257,7 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
             } else {
                 let channel_param = ModularChannelParams::new(color_width, color_height);
                 let channels = header.encoded_color_channels();
-                shifts.extend(std::iter::repeat(channel_param).take(channels));
+                shifts.extend(std::iter::repeat_n(channel_param, channels));
             }
         }
 

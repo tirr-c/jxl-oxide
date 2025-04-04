@@ -23,6 +23,7 @@ pub struct DecodeArgs {
     /// Format to output
     #[arg(value_enum, short = 'f', long)]
     pub output_format: Option<OutputFormat>,
+    #[allow(clippy::doc_overindented_list_items, reason = "verbatim doc comment")]
     /// (unstable) Target colorspace specification
     ///
     /// Specification string consists of (optional) preset and a sequence of parameters delimited by commas.

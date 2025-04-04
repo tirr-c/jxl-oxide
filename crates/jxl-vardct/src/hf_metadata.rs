@@ -67,24 +67,24 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
             pool,
         } = params;
 
-        let mut bw = ((lf_width + 7) / 8) as usize;
-        let mut bh = ((lf_height + 7) / 8) as usize;
+        let mut bw = lf_width.div_ceil(8) as usize;
+        let mut bh = lf_height.div_ceil(8) as usize;
 
         let h_upsample = jpeg_upsampling.into_iter().any(|j| j == 1 || j == 2);
         let v_upsample = jpeg_upsampling.into_iter().any(|j| j == 1 || j == 3);
         if h_upsample {
-            bw = (bw + 1) / 2 * 2;
+            bw = bw.div_ceil(2) * 2;
         }
         if v_upsample {
-            bh = (bh + 1) / 2 * 2;
+            bh = bh.div_ceil(2) * 2;
         }
 
         let nb_blocks =
             1 + bitstream.read_bits((bw * bh).next_power_of_two().trailing_zeros() as usize)?;
 
         let channels = vec![
-            ModularChannelParams::new((lf_width + 63) / 64, (lf_height + 63) / 64),
-            ModularChannelParams::new((lf_width + 63) / 64, (lf_height + 63) / 64),
+            ModularChannelParams::new(lf_width.div_ceil(64), lf_height.div_ceil(64)),
+            ModularChannelParams::new(lf_width.div_ceil(64), lf_height.div_ceil(64)),
             ModularChannelParams::new(nb_blocks, 2),
             ModularChannelParams::new(bw as u32, bh as u32),
         ];

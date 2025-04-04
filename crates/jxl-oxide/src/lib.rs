@@ -1162,8 +1162,7 @@ impl Render {
     /// All extra channels are included.
     pub fn image_planar(&self) -> Vec<FrameBuffer> {
         let grids = self.image.buffer();
-        let bit_depth_it = std::iter::repeat(self.color_bit_depth)
-            .take(self.image.color_channels())
+        let bit_depth_it = std::iter::repeat_n(self.color_bit_depth, self.image.color_channels())
             .chain(self.extra_channels.iter().map(|ec| ec.bit_depth));
         let region_it = self
             .image

@@ -174,7 +174,7 @@ pub(super) unsafe fn run_epf_rows(
     let sigma_group_dim_shift = frame_header.group_dim().trailing_zeros();
     let sigma_group_dim_mask = (frame_header.group_dim() - 1) as usize;
     let groups_per_row = frame_header.lf_groups_per_row() as usize;
-    let sigma_len = (width + 7) / 8;
+    let sigma_len = width.div_ceil(8);
     pool.for_each_vec_with(
         jobs,
         vec![epf_params.sigma_for_modular; sigma_len],

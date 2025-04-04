@@ -196,7 +196,7 @@ impl Bitstream<'_> {
 
     /// Performs `ZeroPadToByte` as defined in the JPEG XL specification.
     pub fn zero_pad_to_byte(&mut self) -> Result<()> {
-        let byte_boundary = (self.num_read_bits + 7) / 8 * 8;
+        let byte_boundary = self.num_read_bits.div_ceil(8) * 8;
         let n = byte_boundary - self.num_read_bits;
         if self.read_bits(n)? != 0 {
             Err(Error::NonZeroPadding)

@@ -157,8 +157,8 @@ pub fn compute_modular_region<S: Sample>(
         let mut width = frame_header.color_sample_width();
         let mut height = frame_header.color_sample_height();
         if is_lf {
-            width = (width + 7) / 8;
-            height = (height + 7) / 8;
+            width = width.div_ceil(8);
+            height = height.div_ceil(8);
         }
         let width = width.max(region.width.checked_add_signed(region.left).unwrap());
         let height = height.max(region.height.checked_add_signed(region.top).unwrap());

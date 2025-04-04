@@ -722,9 +722,9 @@ impl<S: Sample> RenderedImage<S> {
         };
 
         if frame_header.can_reference() {
-            let bit_depth_it = std::iter::repeat(image_header.metadata.bit_depth)
-                .take(grid.color_channels)
-                .chain(image_header.metadata.ec_info.iter().map(|ec| ec.bit_depth));
+            let bit_depth_it =
+                std::iter::repeat_n(image_header.metadata.bit_depth, grid.color_channels)
+                    .chain(image_header.metadata.ec_info.iter().map(|ec| ec.bit_depth));
             for (buffer, bit_depth) in grid.buffer.iter_mut().zip(bit_depth_it) {
                 buffer.convert_to_float_modular(bit_depth)?;
             }

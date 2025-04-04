@@ -27,8 +27,8 @@ impl<S: Sample> RenderCache<S> {
         let shifts_cbycr: [_; 3] =
             std::array::from_fn(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx));
 
-        let lf_width = (frame_header.color_sample_width() + 7) / 8;
-        let lf_height = (frame_header.color_sample_height() + 7) / 8;
+        let lf_width = frame_header.color_sample_width().div_ceil(8);
+        let lf_height = frame_header.color_sample_height().div_ceil(8);
         let mut whd = [(lf_width, lf_height); 3];
         for ((w, h), shift) in whd.iter_mut().zip(shifts_cbycr) {
             let (shift_w, shift_h) = shift.shift_size((lf_width, lf_height));
