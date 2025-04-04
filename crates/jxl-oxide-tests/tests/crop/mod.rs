@@ -5,7 +5,7 @@ use jxl_oxide_tests as util;
 use rand::prelude::*;
 
 fn run_test(buf: &[u8], name: &str) {
-    let mut rng = rand::rngs::SmallRng::from_entropy();
+    let mut rng = rand::rngs::SmallRng::from_os_rng();
 
     let image = JxlImage::builder()
         .read(Cursor::new(buf))
@@ -13,8 +13,8 @@ fn run_test(buf: &[u8], name: &str) {
 
     let width = image.width();
     let height = image.height();
-    let width_dist = rand::distributions::Uniform::new_inclusive(128, (width / 2).max(128));
-    let height_dist = rand::distributions::Uniform::new_inclusive(128, (height / 2).max(128));
+    let width_dist = rand::distr::Uniform::new_inclusive(128, (width / 2).max(128)).unwrap();
+    let height_dist = rand::distr::Uniform::new_inclusive(128, (height / 2).max(128)).unwrap();
 
     let mut tester_image = JxlImage::builder()
         .read(Cursor::new(buf))
@@ -23,8 +23,8 @@ fn run_test(buf: &[u8], name: &str) {
     for _ in 0..4 {
         let crop_width = width_dist.sample(&mut rng);
         let crop_height = height_dist.sample(&mut rng);
-        let crop_left = rng.gen_range(0..=(width - crop_width));
-        let crop_top = rng.gen_range(0..=(height - crop_height));
+        let crop_left = rng.random_range(0..=(width - crop_width));
+        let crop_top = rng.random_range(0..=(height - crop_height));
         let crop = CropInfo {
             left: crop_left,
             top: crop_top,

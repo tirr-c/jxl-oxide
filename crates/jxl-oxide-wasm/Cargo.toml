@@ -16,7 +16,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-miniz_oxide = "0.7.2"
+miniz_oxide = "0.8.7"
 png = "0.17.13"
 wasm-bindgen = "0.2.93"
 
