@@ -148,7 +148,7 @@ impl ChannelShift {
                 v_subsample,
             } => {
                 let width = if has_h_subsample {
-                    let size = (width + 1) / 2;
+                    let size = width.div_ceil(2);
                     if h_subsample {
                         size
                     } else {
@@ -158,7 +158,7 @@ impl ChannelShift {
                     width
                 };
                 let height = if has_v_subsample {
-                    let size = (height + 1) / 2;
+                    let size = height.div_ceil(2);
                     if v_subsample {
                         size
                     } else {

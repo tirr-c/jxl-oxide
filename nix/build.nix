@@ -53,7 +53,8 @@ let
     let
       featureList =
         [ "conformance" ] # conformance tests only
-        ++ lib.optional enableMimalloc "mimalloc" ++ lib.optional enableRayon "rayon";
+        ++ lib.optional enableMimalloc "mimalloc"
+        ++ lib.optional enableRayon "rayon";
       featureListStr = concatStringsSep "," featureList;
     in
     [

@@ -219,8 +219,7 @@ pub(crate) fn blend<S: Sample>(
     output_grid.set_ct_done(new_grid.ct_done());
 
     let has_extra = !header.ec_blending_info.is_empty();
-    for (idx, blending_info) in std::iter::repeat(&header.blending_info)
-        .take(color_channels)
+    for (idx, blending_info) in std::iter::repeat_n(&header.blending_info, color_channels)
         .chain(&header.ec_blending_info)
         .enumerate()
     {
@@ -429,8 +428,7 @@ pub fn patch(
     let color_channels = base_grid.color_channels();
     assert_eq!(patch_ref_grid.color_channels(), color_channels);
     for target in &patch_ref.patch_targets {
-        for (idx, blending_info) in std::iter::repeat(&target.blending[0])
-            .take(color_channels)
+        for (idx, blending_info) in std::iter::repeat_n(&target.blending[0], color_channels)
             .chain(&target.blending[1..])
             .enumerate()
         {

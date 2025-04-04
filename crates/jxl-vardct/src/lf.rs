@@ -153,8 +153,8 @@ impl<S: Sample> Bundle<LfCoeffParams<'_, '_, '_>> for LfCoeff<S> {
 
         let extra_precision = bitstream.read_bits(2)? as u8;
 
-        let width = (lf_width + 7) / 8;
-        let height = (lf_height + 7) / 8;
+        let width = lf_width.div_ceil(8);
+        let height = lf_height.div_ceil(8);
         let channel_shifts = [1, 0, 2]
             .into_iter()
             .map(|idx| ChannelShift::from_jpeg_upsampling(jpeg_upsampling, idx))

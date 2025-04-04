@@ -116,7 +116,7 @@ fn div_ceil_qa(dividend: u32, quant_adjust: i32) -> u64 {
         (8 * dividend + 7 + quant_adjust) / (8 + quant_adjust)
     } else {
         let abs_quant_adjust = (-quant_adjust) as u64;
-        dividend + (dividend * abs_quant_adjust + 7) / 8
+        dividend + (dividend * abs_quant_adjust).div_ceil(8)
     }
 }
 

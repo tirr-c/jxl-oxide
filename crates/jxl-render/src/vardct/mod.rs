@@ -75,15 +75,15 @@ pub(crate) fn render_vardct<S: Sample>(
     let width = frame_header.color_sample_width() as usize;
     let height = frame_header.color_sample_height() as usize;
     let (width_rounded, height_rounded) = {
-        let mut bw = (width + 7) / 8;
-        let mut bh = (height + 7) / 8;
+        let mut bw = width.div_ceil(8);
+        let mut bh = height.div_ceil(8);
         let h_upsample = jpeg_upsampling.into_iter().any(|j| j == 1 || j == 2);
         let v_upsample = jpeg_upsampling.into_iter().any(|j| j == 1 || j == 3);
         if h_upsample {
-            bw = (bw + 1) / 2 * 2;
+            bw = bw.div_ceil(2) * 2;
         }
         if v_upsample {
-            bh = (bh + 1) / 2 * 2;
+            bh = bh.div_ceil(2) * 2;
         }
         (bw * 8, bh * 8)
     };
@@ -351,8 +351,8 @@ pub(crate) fn render_vardct<S: Sample>(
                 let lf_chan_corr = &lf_global_vardct.lf_chan_corr;
                 let cfl_base_x = ((group_x % 8) * group_dim / 64) as usize;
                 let cfl_base_y = ((group_y % 8) * group_dim / 64) as usize;
-                let gw = (grid_xyb[0].width() + 63) / 64;
-                let gh = (grid_xyb[0].height() + 63) / 64;
+                let gw = grid_xyb[0].width().div_ceil(64);
+                let gh = grid_xyb[0].height().div_ceil(64);
                 let x_from_y = hf_meta
                     .x_from_y
                     .as_subgrid()

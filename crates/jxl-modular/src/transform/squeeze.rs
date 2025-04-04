@@ -60,7 +60,7 @@ fn inverse_h_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
     let height = merged.height();
     let width = merged.width();
     let mut scratch = vec![0i32; width];
-    let avg_width = (width + 1) / 2;
+    let avg_width = width.div_ceil(2);
     for y in 0..height {
         let row_out = merged.get_row_mut(y);
         scratch.copy_from_slice(row_out);
@@ -92,7 +92,7 @@ fn inverse_h_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
     let height = merged.height();
     let width = merged.width();
     let mut scratch = vec![0i16; width];
-    let avg_width = (width + 1) / 2;
+    let avg_width = width.div_ceil(2);
     for y in 0..height {
         let row_out = merged.get_row_mut(y);
         scratch.copy_from_slice(row_out);
@@ -218,7 +218,7 @@ unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: __m128i doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); width];
-    let avg_width = (width + 1) / 2;
+    let avg_width = width.div_ceil(2);
 
     let h8 = height / 8;
     for y8 in 0..h8 {
@@ -367,7 +367,7 @@ unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: __m128i doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); width];
-    let avg_width = (width + 1) / 2;
+    let avg_width = width.div_ceil(2);
 
     let h8 = height / 8;
     for y8 in 0..h8 {
@@ -804,7 +804,7 @@ fn inverse_v_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
     let width = merged.width();
     let height = merged.height();
     let mut scratch = vec![0i32; height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
     for x in 0..width {
         for (y, v) in scratch.iter_mut().enumerate() {
             *v = merged.get(x, y);
@@ -835,7 +835,7 @@ fn inverse_v_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
     let width = merged.width();
     let height = merged.height();
     let mut scratch = vec![0i16; height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
     for x in 0..width {
         for (y, v) in scratch.iter_mut().enumerate() {
             *v = merged.get(x, y);
@@ -878,7 +878,7 @@ unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: __m256i doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<__m256i>::uninit(); height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
 
     let w16 = width / 16;
     for x16 in 0..w16 {
@@ -940,7 +940,7 @@ unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: __m128i doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<__m128i>::uninit(); height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
 
     let w8 = width / 8;
     for x8 in 0..w8 {

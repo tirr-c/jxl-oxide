@@ -318,7 +318,7 @@ impl Squeeze {
                 horizontal: false,
                 ..param_base
             });
-            h = (h + 1) / 2;
+            h = h.div_ceil(2);
         }
         while w > 8 || h > 8 {
             if w > 8 {
@@ -326,14 +326,14 @@ impl Squeeze {
                     horizontal: true,
                     ..param_base
                 });
-                w = (w + 1) / 2;
+                w = w.div_ceil(2);
             }
             if h > 8 {
                 self.sp.push(SqueezeParams {
                     horizontal: false,
                     ..param_base
                 });
-                h = (h + 1) / 2;
+                h = h.div_ceil(2);
             }
         }
     }
@@ -396,7 +396,7 @@ impl Squeeze {
                     (h, vshift, &mut residu.height, &mut residu.vshift)
                 };
                 let len = *target_len;
-                *target_len = (len + 1) / 2;
+                *target_len = len.div_ceil(2);
                 *residu_len = len / 2;
                 if *target_shift >= 0 {
                     *target_shift += 1;
@@ -410,9 +410,9 @@ impl Squeeze {
                     let g = &mut grids[begin as usize + idx];
                     let g = g.grid_mut();
                     let residu_grid = if horizontal {
-                        g.split_horizontal_in_place((g.width() + 1) / 2)
+                        g.split_horizontal_in_place(g.width().div_ceil(2))
                     } else {
-                        g.split_vertical_in_place((g.height() + 1) / 2)
+                        g.split_vertical_in_place(g.height().div_ceil(2))
                     };
                     residu_grids.push(TransformedGrid::from(residu_grid));
                 }

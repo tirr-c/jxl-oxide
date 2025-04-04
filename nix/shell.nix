@@ -18,7 +18,7 @@ in
     };
   },
   fenix ? (import (getFlake "fenix") { }).packages.${system},
-  rustVersion ? "stable",
+  toolchainSpec,
   ...
 }:
 
@@ -43,7 +43,7 @@ let
   ];
 
   rustToolchain = fenix.combine (
-    with fenix.${rustVersion};
+    with fenix.toolchainOf toolchainSpec;
     [
       cargo
       clippy
@@ -53,7 +53,7 @@ let
       rustfmt
     ]
     ++ [
-      fenix.targets.wasm32-unknown-unknown.${rustVersion}.rust-std
+      (fenix.targets.wasm32-unknown-unknown.toolchainOf toolchainSpec).rust-std
     ]
   );
 in
