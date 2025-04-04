@@ -71,22 +71,27 @@
         inherit (builtins)
           map
           listToAttrs
-          isNull
           ;
 
         mapListToAttrs = f: l: listToAttrs (map f l);
 
-        rustVersion = "stable";
-        toolchainBase = fenix.packages.${system};
+        rustToolchainSpec = {
+          channel = "1.86.0";
+          sha256 = "sha256-X/4ZBHO3iW0fOenQ3foEvscgAPJYl2abspaBThDOukI=";
+        };
+
         toolchainFor =
           target:
-          with toolchainBase;
+          with fenix.packages.${system};
+          let
+            toolchain = toolchainOf rustToolchainSpec;
+          in
           combine (
             [
-              toolchainBase.${rustVersion}.rustc
-              toolchainBase.${rustVersion}.cargo
+              toolchain.rustc
+              toolchain.cargo
             ]
-            ++ (lib.optional (!isNull target) targets.${target}.${rustVersion}.rust-std)
+            ++ (lib.optional (target != null) (targets.${target}.toolchainOf rustToolchainSpec).rust-std)
           );
         naerskFor =
           target:
@@ -166,7 +171,8 @@
         defaultPackage = packages.native;
 
         devShell = pkgs.callPackage ./nix/shell.nix {
-          fenix = toolchainBase;
+          fenix = fenix.packages.${system};
+          toolchainSpec = rustToolchainSpec;
         };
 
         formatter = pkgs.nixfmt-rfc-style;
