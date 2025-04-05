@@ -1,24 +1,37 @@
+/// The error type for JPEG XL entropy decoders.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
+    /// Bitstream-level error.
     Bitstream(jxl_bitstream::Error),
+    /// LZ77 decoder is being used where it's not allowed.
     Lz77NotAllowed,
+    /// Decoded ANS distribution is invalid.
     InvalidAnsHistogram,
+    /// ANS stream checksum verification has failed.
     InvalidAnsStream,
+    /// Hybrid integer configuration is invalid.
     InvalidIntegerConfig {
         split_exponent: u32,
         msb_in_token: u32,
         lsb_in_token: Option<u32>,
     },
+    /// Decoded permutation is invalid.
     InvalidPermutation,
+    /// Decoded Brotli histogram is invalid.
     InvalidPrefixHistogram,
+    /// Prefix code symbol is too large.
     PrefixSymbolTooLarge(usize),
+    /// Decoded cluster ID is invalid.
     InvalidCluster(u32),
+    /// Distribution cluster has a hole.
     ClusterHole {
         num_expected_clusters: u32,
         num_actual_clusters: u32,
     },
+    /// LZ77 repeat symbol encountered without decoding any symbols.
     UnexpectedLz77Repeat,
+    /// Decoded LZ77 symbol is invalid.
     InvalidLz77Symbol,
 }
 

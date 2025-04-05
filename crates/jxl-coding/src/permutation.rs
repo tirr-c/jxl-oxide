@@ -6,7 +6,7 @@ pub fn read_permutation(
     decoder: &mut crate::Decoder,
     size: u32,
     skip: u32,
-) -> crate::Result<Vec<usize>> {
+) -> crate::CodingResult<Vec<usize>> {
     let end = decoder.read_varint(bitstream, get_context(size))?;
     if end > size - skip {
         tracing::error!(size, skip, end, "Invalid permutation");

@@ -384,3 +384,72 @@ pub(crate) fn mirror(mut offset: isize, len: usize) -> usize {
         }
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct PaddedGrid<S: Clone> {
+    grid: AlignedGrid<S>,
+    padding: usize,
+}
+
+impl<S: Default + Clone> PaddedGrid<S> {
+    pub fn with_alloc_tracker(
+        width: usize,
+        height: usize,
+        padding: usize,
+        tracker: Option<&jxl_grid::AllocTracker>,
+    ) -> Result<Self> {
+        Ok(Self {
+            grid: AlignedGrid::with_alloc_tracker(
+                width + padding * 2,
+                height + padding * 2,
+                tracker,
+            )?,
+            padding,
+        })
+    }
+}
+
+impl<S: Clone> PaddedGrid<S> {
+    #[inline]
+    pub fn buf_padded(&self) -> &[S] {
+        self.grid.buf()
+    }
+
+    #[inline]
+    pub fn buf_padded_mut(&mut self) -> &mut [S] {
+        self.grid.buf_mut()
+    }
+
+    pub fn mirror_edges_padding(&mut self) {
+        let padding = self.padding;
+        let stride = self.grid.width();
+        let height = self.grid.height() - padding * 2;
+
+        // Mirror horizontally.
+        let buf = self.grid.buf_mut();
+        for y in padding..height + padding {
+            for x in 0..padding {
+                buf[y * stride + x] = buf[y * stride + padding * 2 - x - 1].clone();
+                buf[(y + 1) * stride - x - 1] = buf[(y + 1) * stride - padding * 2 + x].clone();
+            }
+        }
+
+        // Mirror vertically.
+        let (out_chunk, in_chunk) = buf.split_at_mut(stride * padding);
+        let in_chunk = &in_chunk[..stride * padding];
+        for (out_row, in_row) in out_chunk
+            .chunks_exact_mut(stride)
+            .zip(in_chunk.chunks_exact(stride).rev())
+        {
+            out_row.clone_from_slice(in_row);
+        }
+
+        let (in_chunk, out_chunk) = buf.split_at_mut(stride * (height + padding));
+        for (out_row, in_row) in out_chunk
+            .chunks_exact_mut(stride)
+            .zip(in_chunk.chunks_exact(stride).rev())
+        {
+            out_row.clone_from_slice(in_row);
+        }
+    }
+}

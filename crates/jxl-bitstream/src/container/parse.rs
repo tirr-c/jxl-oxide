@@ -1,6 +1,6 @@
 use super::box_header::*;
 use super::{BitstreamKind, ContainerDetectingReader, DetectState, JxlpIndexState};
-use crate::error::{Error, Result};
+use crate::error::{BitstreamResult, Error};
 
 /// Iterator that reads over a buffer and emits parser events.
 pub struct ParseEvents<'inner, 'buf> {
@@ -22,7 +22,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
         }
     }
 
-    fn emit_single(&mut self) -> Result<Option<ParseEvent<'buf>>> {
+    fn emit_single(&mut self) -> BitstreamResult<Option<ParseEvent<'buf>>> {
         let state = &mut self.inner.state;
         let jxlp_index_state = &mut self.inner.jxlp_index_state;
         let buf = &mut self.remaining_input;
@@ -313,7 +313,7 @@ impl std::fmt::Debug for ParseEvents<'_, '_> {
 }
 
 impl<'buf> Iterator for ParseEvents<'_, 'buf> {
-    type Item = Result<ParseEvent<'buf>>;
+    type Item = BitstreamResult<ParseEvent<'buf>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.finished {

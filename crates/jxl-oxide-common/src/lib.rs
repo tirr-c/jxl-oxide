@@ -1,3 +1,7 @@
+//! Common helpers used in various places of jxl-oxide.
+//!
+//! This crate is mainly for internal use.
+
 use jxl_bitstream::Bitstream;
 
 #[macro_export]
@@ -24,7 +28,7 @@ macro_rules! expand_u32 {
 #[doc(hidden)]
 macro_rules! read_bits {
     ($bistream:ident, $c:literal $(, $ctx:expr)?) => {
-        ::jxl_bitstream::Result::Ok($c)
+        ::jxl_bitstream::BitstreamResult::Ok($c)
     };
     ($bitstream:ident, u($n:literal) $(, $ctx:expr)?) => {
         $bitstream.read_bits($n)

@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{BitstreamResult, Error};
 
 /// Bitstream reader with borrowed in-memory buffer.
 ///
@@ -130,7 +130,7 @@ impl Bitstream<'_> {
     /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
     /// bits in the bit buffer.
     #[inline]
-    pub fn consume_bits(&mut self, n: usize) -> Result<()> {
+    pub fn consume_bits(&mut self, n: usize) -> BitstreamResult<()> {
         self.remaining_buf_bits = self
             .remaining_buf_bits
             .checked_sub(n)
@@ -146,7 +146,7 @@ impl Bitstream<'_> {
     /// This method returns `Err(Io(std::io::ErrorKind::UnexpectedEof))` when there are not enough
     /// bits in the bit buffer.
     #[inline]
-    pub fn consume_bits_const<const N: usize>(&mut self) -> Result<()> {
+    pub fn consume_bits_const<const N: usize>(&mut self) -> BitstreamResult<()> {
         self.remaining_buf_bits = self
             .remaining_buf_bits
             .checked_sub(N)
@@ -158,14 +158,14 @@ impl Bitstream<'_> {
 
     /// Read and consume bits from bitstream.
     #[inline]
-    pub fn read_bits(&mut self, n: usize) -> Result<u32> {
+    pub fn read_bits(&mut self, n: usize) -> BitstreamResult<u32> {
         let ret = self.peek_bits(n);
         self.consume_bits(n)?;
         Ok(ret)
     }
 
     #[inline(never)]
-    pub fn skip_bits(&mut self, mut n: usize) -> Result<()> {
+    pub fn skip_bits(&mut self, mut n: usize) -> BitstreamResult<()> {
         if let Some(next_remaining_bits) = self.remaining_buf_bits.checked_sub(n) {
             self.num_read_bits += n;
             self.remaining_buf_bits = next_remaining_bits;
@@ -195,7 +195,7 @@ impl Bitstream<'_> {
     }
 
     /// Performs `ZeroPadToByte` as defined in the JPEG XL specification.
-    pub fn zero_pad_to_byte(&mut self) -> Result<()> {
+    pub fn zero_pad_to_byte(&mut self) -> BitstreamResult<()> {
         let byte_boundary = self.num_read_bits.div_ceil(8) * 8;
         let n = byte_boundary - self.num_read_bits;
         if self.read_bits(n)? != 0 {
@@ -226,7 +226,7 @@ impl Bitstream<'_> {
         d1: impl Into<U32Specifier>,
         d2: impl Into<U32Specifier>,
         d3: impl Into<U32Specifier>,
-    ) -> Result<u32> {
+    ) -> BitstreamResult<u32> {
         let d = match self.read_bits(2)? {
             0 => d0.into(),
             1 => d1.into(),
@@ -243,7 +243,7 @@ impl Bitstream<'_> {
     }
 
     /// Reads an `U64` as defined in the JPEG XL specification.
-    pub fn read_u64(&mut self) -> Result<u64> {
+    pub fn read_u64(&mut self) -> BitstreamResult<u64> {
         let selector = self.read_bits(2)?;
         Ok(match selector {
             0 => 0u64,
@@ -268,7 +268,7 @@ impl Bitstream<'_> {
 
     /// Reads a `Bool` as defined in the JPEG XL specification.
     #[inline]
-    pub fn read_bool(&mut self) -> Result<bool> {
+    pub fn read_bool(&mut self) -> BitstreamResult<bool> {
         self.read_bits(1).map(|x| x != 0)
     }
 
@@ -276,7 +276,7 @@ impl Bitstream<'_> {
     ///
     /// # Errors
     /// Returns `Error::InvalidFloat` if the value is `NaN` or `Infinity`.
-    pub fn read_f16_as_f32(&mut self) -> Result<f32> {
+    pub fn read_f16_as_f32(&mut self) -> BitstreamResult<f32> {
         let v = self.read_bits(16)?;
         let neg_bit = (v & 0x8000) << 16;
 
@@ -303,7 +303,7 @@ impl Bitstream<'_> {
     }
 
     /// Reads an enum as defined in the JPEG XL specification.
-    pub fn read_enum<E: TryFrom<u32>>(&mut self) -> Result<E> {
+    pub fn read_enum<E: TryFrom<u32>>(&mut self) -> BitstreamResult<E> {
         let v = self.read_u32(0, 1, 2 + U(4), 18 + U(6))?;
         E::try_from(v).map_err(|_| Error::InvalidEnum {
             name: std::any::type_name::<E>(),

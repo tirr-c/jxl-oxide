@@ -13,6 +13,7 @@ pub struct MutableSubgrid<'g, V = f32> {
     _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
+// SAFETY: All `MutableSubgrid`s are disjoint, so they're semantically identical as `&mut [V]`.
 unsafe impl<'g, V> Send for MutableSubgrid<'g, V> where &'g mut [V]: Send {}
 unsafe impl<'g, V> Sync for MutableSubgrid<'g, V> where &'g mut [V]: Sync {}
 
@@ -45,6 +46,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
+    /// Creates a empty, zero-sized subgrid that points to nowhere.
     pub fn empty() -> Self {
         Self {
             ptr: NonNull::dangling(),
@@ -56,7 +58,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
-    /// Create a `CutGrid` from buffer slice, width, height and stride.
+    /// Create a `MutableSubgrid` from buffer slice, width, height and stride.
     ///
     /// # Panic
     /// Panics if:
@@ -78,11 +80,6 @@ impl<'g, V> MutableSubgrid<'g, V> {
                 stride,
             )
         }
-    }
-
-    #[inline]
-    pub fn into_ptr(self) -> NonNull<V> {
-        self.ptr
     }
 
     #[inline]
@@ -161,6 +158,10 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
+    /// Swaps two samples at the given locations.
+    ///
+    /// # Panics
+    /// Panics if either one of the locations is out of bounds.
     #[inline]
     pub fn swap(&mut self, (ax, ay): (usize, usize), (bx, by): (usize, usize)) {
         let a = self.get_ptr(ax, ay);
