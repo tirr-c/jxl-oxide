@@ -1,3 +1,7 @@
+/// The error type for JPEG XL bitstream-level operations.
+///
+/// Other crates of jxl-oxide may return `ValidationFailed` or `ProfileConformance` errors while
+/// validating decoded data.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -80,4 +84,5 @@ impl Error {
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+/// Shorthand for result type of `jxl_bitstream`.
+pub type BitstreamResult<T> = std::result::Result<T, Error>;

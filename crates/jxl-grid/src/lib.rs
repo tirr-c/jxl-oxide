@@ -9,18 +9,23 @@ pub use mutable_subgrid::*;
 pub use shared_subgrid::*;
 pub use simd::SimdVector;
 
+/// The error type for failed grid allocation.
 #[derive(Debug)]
-pub enum Error {
-    OutOfMemory(usize),
+pub struct OutOfMemory {
+    bytes: usize,
 }
 
-impl std::error::Error for Error {}
+impl OutOfMemory {
+    fn new(bytes: usize) -> Self {
+        Self { bytes }
+    }
+}
 
-impl std::fmt::Display for Error {
+impl std::error::Error for OutOfMemory {}
+
+impl std::fmt::Display for OutOfMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OutOfMemory(bytes) => write!(f, "failed to allocate {bytes} byte(s)"),
-        }
+        write!(f, "failed to allocate {} byte(s)", self.bytes)
     }
 }
 
@@ -67,7 +72,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
         width: usize,
         height: usize,
         tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, OutOfMemory> {
         let len = width * height;
         let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
         let handle = tracker
@@ -93,7 +98,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
         width: usize,
         height: usize,
         tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, OutOfMemory> {
         let len = width * height;
         let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
         let handle = tracker
@@ -123,7 +128,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
 
     /// Tries to clone the buffer, and records the allocation in the same tracker as the original
     /// buffer.
-    pub fn try_clone(&self) -> Result<Self, Error> {
+    pub fn try_clone(&self) -> Result<Self, OutOfMemory> {
         let mut out = Self::empty_aligned(self.width, self.height, self.tracker().as_ref())?;
         out.buf.extend_from_slice(self.buf());
         Ok(out)
@@ -131,16 +136,19 @@ impl<S: Default + Clone> AlignedGrid<S> {
 }
 
 impl<S> AlignedGrid<S> {
+    /// Returns the width of the grid.
     #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the grid.
     #[inline]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Returns allocation tracker associated with the grid.
     #[inline]
     pub fn tracker(&self) -> Option<AllocTracker> {
         self.handle.as_ref().map(|handle| handle.tracker())
@@ -205,7 +213,7 @@ impl<S> AlignedGrid<S> {
     }
 }
 
-/// `[AlignedGrid]` with padding.
+/// [`AlignedGrid`] with padding.
 #[derive(Debug)]
 pub struct PaddedGrid<S: Clone> {
     pub grid: AlignedGrid<S>,
@@ -219,7 +227,7 @@ impl<S: Default + Clone> PaddedGrid<S> {
         height: usize,
         padding: usize,
         tracker: Option<&AllocTracker>,
-    ) -> Result<Self, crate::Error> {
+    ) -> Result<Self, crate::OutOfMemory> {
         Ok(Self {
             grid: AlignedGrid::with_alloc_tracker(
                 width + padding * 2,

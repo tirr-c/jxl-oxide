@@ -2,6 +2,7 @@ use std::{ops::RangeBounds, ptr::NonNull, sync::atomic::AtomicI32};
 
 use crate::SimdVector;
 
+/// An immutable shared subgrid of the underlying buffer.
 #[derive(Debug, Copy, Clone)]
 pub struct SharedSubgrid<'g, V = f32> {
     ptr: NonNull<V>,

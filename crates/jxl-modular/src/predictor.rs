@@ -44,7 +44,7 @@ pub enum Predictor {
 impl TryFrom<u32> for Predictor {
     type Error = jxl_bitstream::Error;
 
-    fn try_from(value: u32) -> jxl_bitstream::Result<Self> {
+    fn try_from(value: u32) -> jxl_bitstream::BitstreamResult<Self> {
         use Predictor::*;
         Ok(match value {
             0 => Zero,

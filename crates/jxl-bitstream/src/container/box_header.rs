@@ -8,11 +8,14 @@ pub struct ContainerBoxHeader {
     is_last: bool,
 }
 
+/// Result of parsing container box header.
 pub enum HeaderParseResult {
+    /// Box header is read successfully.
     Done {
         header: ContainerBoxHeader,
         header_size: usize,
     },
+    /// Parser needs more data to read a header.
     NeedMoreData,
 }
 
@@ -71,19 +74,46 @@ impl ContainerBoxHeader {
     }
 }
 
+/// Type of JPEG XL container box.
+///
+/// Known types are defined as associated consts.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ContainerBoxType(pub [u8; 4]);
 
 impl ContainerBoxType {
+    /// JPEG XL signature box.
     pub const JXL: Self = Self(*b"JXL ");
+
+    /// JPEG XL file type box.
     pub const FILE_TYPE: Self = Self(*b"ftyp");
+
+    /// JPEG XL level box.
     pub const JXL_LEVEL: Self = Self(*b"jxll");
+
+    /// JUMBF box.
     pub const JUMBF: Self = Self(*b"jumb");
+
+    /// Exif box.
     pub const EXIF: Self = Self(*b"Exif");
+
+    /// XML box, mainly for storing XMP metadata.
     pub const XML: Self = Self(*b"xml ");
+
+    /// Brotli-compressed box.
     pub const BROTLI_COMPRESSED: Self = Self(*b"brob");
+
+    /// Frame index box.
     pub const FRAME_INDEX: Self = Self(*b"jxli");
+
+    /// JPEG XL codestream box.
     pub const CODESTREAM: Self = Self(*b"jxlc");
+
+    /// JPEG XL partial codestream box.
     pub const PARTIAL_CODESTREAM: Self = Self(*b"jxlp");
+
+    /// JPEG bistream reconstruction data box.
     pub const JPEG_RECONSTRUCTION: Self = Self(*b"jbrd");
+
+    /// HDR gain map box.
+    pub const HDR_GAIN_MAP: Self = Self(*b"jhgm");
 }

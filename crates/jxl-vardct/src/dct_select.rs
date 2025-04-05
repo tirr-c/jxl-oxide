@@ -34,7 +34,7 @@ pub enum TransformType {
 impl TryFrom<u8> for TransformType {
     type Error = jxl_bitstream::Error;
 
-    fn try_from(value: u8) -> jxl_bitstream::Result<Self> {
+    fn try_from(value: u8) -> jxl_bitstream::BitstreamResult<Self> {
         if value <= TransformType::Dct128x256 as u8 {
             // SAFETY: TransformType is repr(u8) and all value <= Dct128x256 is valid
             Ok(unsafe { std::mem::transmute::<u8, Self>(value) })
