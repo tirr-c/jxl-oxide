@@ -158,16 +158,12 @@ use jxl_render::ImageWithRegion;
 use jxl_render::Region;
 use jxl_render::{IndexedFrame, RenderContext};
 
-pub use jxl_color::header as color;
-pub use jxl_color::{
-    ColorEncodingWithProfile, ColorManagementSystem, EnumColourEncoding, NullCms,
-    PreparedTransform, RenderingIntent,
-};
+pub use jxl_color::{ColorEncodingWithProfile, ColorManagementSystem, NullCms, PreparedTransform};
 pub use jxl_frame::header as frame;
 pub use jxl_frame::{Frame, FrameHeader};
 pub use jxl_grid::{AlignedGrid, AllocTracker};
-pub use jxl_image as image;
-pub use jxl_image::{ExtraChannelType, ImageHeader};
+pub use jxl_image::color::{self, EnumColourEncoding, RenderingIntent};
+pub use jxl_image::{self as image, ExtraChannelType, ImageHeader};
 pub use jxl_jbr as jpeg_bitstream;
 pub use jxl_threadpool::JxlThreadPool;
 
@@ -541,10 +537,10 @@ impl JxlImage {
     pub fn rendered_icc(&self) -> Vec<u8> {
         let encoding = self.ctx.requested_color_encoding();
         match encoding.encoding() {
-            jxl_color::ColourEncoding::Enum(encoding) => {
+            color::ColourEncoding::Enum(encoding) => {
                 jxl_color::icc::colour_encoding_to_icc(encoding)
             }
-            jxl_color::ColourEncoding::IccProfile(_) => encoding.icc_profile().to_vec(),
+            color::ColourEncoding::IccProfile(_) => encoding.icc_profile().to_vec(),
         }
     }
 
@@ -582,8 +578,8 @@ impl JxlImage {
     /// Returns `None` if the image is not HDR one.
     pub fn hdr_type(&self) -> Option<HdrType> {
         self.ctx.suggested_hdr_tf().and_then(|tf| match tf {
-            jxl_color::TransferFunction::Pq => Some(HdrType::Pq),
-            jxl_color::TransferFunction::Hlg => Some(HdrType::Hlg),
+            color::TransferFunction::Pq => Some(HdrType::Pq),
+            color::TransferFunction::Hlg => Some(HdrType::Hlg),
             _ => None,
         })
     }

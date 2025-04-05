@@ -18,14 +18,15 @@ mod convert;
 mod error;
 mod fastmath;
 mod gamut;
-pub mod header;
 pub mod icc;
 mod tf;
 mod xyb;
 mod ycbcr;
 
+pub use jxl_image::color::*;
+
+pub use ciexyz::{AsIlluminant, AsPrimaries};
 pub use cms::*;
 pub use convert::*;
 pub use error::*;
-pub use header::*;
 pub use ycbcr::ycbcr_to_rgb;

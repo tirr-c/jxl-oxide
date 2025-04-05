@@ -3,6 +3,7 @@ use std::{
     io::prelude::*,
 };
 
+use jxl_color::{AsIlluminant as _, AsPrimaries as _};
 use jxl_oxide::{HdrType, PixelFormat, Render};
 use rusty_ffmpeg::ffi as ffmpeg;
 
@@ -321,8 +322,8 @@ impl<W> VideoContext<W> {
                     let mut libsvtav1_opts =
                         format!("enable-hdr=1:content-light={max_cll},{max_fall}");
                     if let Some((lmin, lmax)) = mastering_luminances {
-                        let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100.as_chromaticity();
-                        let d65_wtpt = jxl_oxide::color::WhitePoint::D65.as_chromaticity();
+                        let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100.as_primaries();
+                        let d65_wtpt = jxl_oxide::color::WhitePoint::D65.as_illuminant();
 
                         write!(
                             &mut libsvtav1_opts,
@@ -351,10 +352,10 @@ impl<W> VideoContext<W> {
                         format!("hdr-opt=1:repeat-headers=1:max-cll={max_cll},{max_fall}");
                     if let Some((lmin, lmax)) = mastering_luminances {
                         let bt2100_chrm = jxl_oxide::color::Primaries::Bt2100
-                            .as_chromaticity()
+                            .as_primaries()
                             .map(|xy| xy.map(|v| (v * 50000.0 + 0.5) as i32));
                         let d65_wtpt = jxl_oxide::color::WhitePoint::D65
-                            .as_chromaticity()
+                            .as_illuminant()
                             .map(|v| (v * 50000.0 + 0.5) as i32);
                         let min_luminance = (lmin * 10000.0 + 0.5) as i32;
                         let max_luminance = (lmax * 10000.0 + 0.5) as i32;

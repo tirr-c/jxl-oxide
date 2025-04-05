@@ -18,10 +18,6 @@ tracing.workspace = true
 version = "1.0.0-alpha.0"
 path = "../jxl-bitstream"
 
-[dependencies.jxl-color]
-version = "0.11.0"
-path = "../jxl-color"
-
 [dependencies.jxl-grid]
 version = "1.0.0-alpha.0"
 path = "../jxl-grid"

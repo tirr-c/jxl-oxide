@@ -316,9 +316,7 @@ impl ColorTransform {
                     ..
                 },
             ) => {
-                let illuminant = white_point.as_chromaticity();
-                let mat =
-                    crate::ciexyz::primaries_to_xyz_mat(primaries.as_chromaticity(), illuminant);
+                let mat = crate::ciexyz::primaries_to_xyz_mat(primaries, white_point);
                 let luminances = [mat[3], mat[4], mat[5]];
                 ops.push(ColorTransformOp::TransferFunction {
                     tf,
@@ -342,9 +340,8 @@ impl ColorTransform {
                     ..
                 },
             ) => {
-                let illuminant = white_point.as_chromaticity();
                 // primaries don't matter for grayscale
-                let mat = crate::ciexyz::primaries_to_xyz_mat(PRIMARIES_SRGB, illuminant);
+                let mat = crate::ciexyz::primaries_to_xyz_mat(PRIMARIES_SRGB, white_point);
                 let luminances = [mat[3], mat[4], mat[5]];
 
                 ops.push(ColorTransformOp::TransferFunction {
@@ -403,10 +400,9 @@ impl ColorTransform {
                 && current_encoding.primaries != target_encoding.primaries)
         {
             if current_encoding.rendering_intent == RenderingIntent::Perceptual {
-                let illuminant = current_encoding.white_point.as_chromaticity();
                 let mat = crate::ciexyz::primaries_to_xyz_mat(
-                    current_encoding.primaries.as_chromaticity(),
-                    illuminant,
+                    current_encoding.primaries,
+                    current_encoding.white_point,
                 );
                 let luminances = [mat[3], mat[4], mat[5]];
 
@@ -421,16 +417,16 @@ impl ColorTransform {
             match current_encoding.colour_space {
                 ColourSpace::Rgb => {
                     // RGB to XYZ
-                    let illuminant = current_encoding.white_point.as_chromaticity();
                     let mat = crate::ciexyz::primaries_to_xyz_mat(
-                        current_encoding.primaries.as_chromaticity(),
-                        illuminant,
+                        current_encoding.primaries,
+                        current_encoding.white_point,
                     );
                     ops.push(ColorTransformOp::Matrix(mat));
                 }
                 ColourSpace::Grey => {
                     // Yxy to XYZ
-                    let illuminant = current_encoding.white_point.as_chromaticity();
+                    let illuminant =
+                        crate::ciexyz::AsIlluminant::as_illuminant(&current_encoding.white_point);
                     ops.push(ColorTransformOp::LumaToXyz { illuminant });
                 }
                 ColourSpace::Xyb | ColourSpace::Unknown => {
@@ -440,20 +436,16 @@ impl ColorTransform {
 
             if current_encoding.rendering_intent != RenderingIntent::Absolute {
                 // Chromatic adaptation: XYZ to XYZ
-                let adapt = adapt_mat(
-                    current_encoding.white_point.as_chromaticity(),
-                    target_encoding.white_point.as_chromaticity(),
-                );
+                let adapt = adapt_mat(current_encoding.white_point, target_encoding.white_point);
                 ops.push(ColorTransformOp::Matrix(adapt));
             }
 
             match target_encoding.colour_space {
                 ColourSpace::Rgb => {
                     // XYZ to RGB
-                    let illuminant = target_encoding.white_point.as_chromaticity();
                     let mat = crate::ciexyz::xyz_to_primaries_mat(
-                        target_encoding.primaries.as_chromaticity(),
-                        illuminant,
+                        target_encoding.primaries,
+                        target_encoding.white_point,
                     );
                     ops.push(ColorTransformOp::Matrix(mat));
                 }
@@ -471,10 +463,9 @@ impl ColorTransform {
             current_encoding.primaries = target_encoding.primaries;
         }
 
-        let illuminant = current_encoding.white_point.as_chromaticity();
         let mat = crate::ciexyz::primaries_to_xyz_mat(
-            current_encoding.primaries.as_chromaticity(),
-            illuminant,
+            current_encoding.primaries,
+            current_encoding.white_point,
         );
         let luminances = [mat[3], mat[4], mat[5]];
 
