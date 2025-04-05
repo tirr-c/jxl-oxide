@@ -5,10 +5,10 @@ use jxl_coding::{Decoder, DecoderRleMode, RleToken};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 
 use crate::{
+    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
     ma::{FlatMaTree, MaTreeLeafClustered, SimpleMaTable},
     predictor::{Predictor, PredictorState, Properties, WpHeader},
     sample::Sample,
-    MaConfig, ModularChannelInfo, ModularChannels, ModularHeader, Result,
 };
 
 #[derive(Debug)]

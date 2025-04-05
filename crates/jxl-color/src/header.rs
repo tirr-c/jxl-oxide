@@ -2,7 +2,7 @@
 
 #![allow(clippy::excessive_precision)]
 use jxl_bitstream::{Bitstream, Error, Result};
-use jxl_oxide_common::{define_bundle, Bundle};
+use jxl_oxide_common::{Bundle, define_bundle};
 
 use crate::consts::*;
 

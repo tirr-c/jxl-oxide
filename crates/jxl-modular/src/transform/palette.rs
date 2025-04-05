@@ -1,8 +1,8 @@
 use jxl_grid::{MutableSubgrid, SharedSubgrid};
 
 use crate::{
-    predictor::{Predictor, PredictorState},
     Sample,
+    predictor::{Predictor, PredictorState},
 };
 
 use super::Palette;

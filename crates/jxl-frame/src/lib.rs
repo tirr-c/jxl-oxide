@@ -17,8 +17,8 @@
 //! [`num_groups`]: FrameHeader::num_groups
 //! [`num_passes`]: header::Passes::num_passes
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use jxl_bitstream::Bitstream;
 use jxl_grid::{AllocHandle, AllocTracker};
@@ -33,7 +33,7 @@ pub mod header;
 pub use error::{Error, Result};
 pub use header::FrameHeader;
 use jxl_modular::Sample;
-use jxl_modular::{image::TransformedModularSubimage, MaConfig};
+use jxl_modular::{MaConfig, image::TransformedModularSubimage};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::data::*;

@@ -7,7 +7,7 @@ use jxl_frame::data::{HfGlobal, LfGlobal, LfGroup};
 use jxl_modular::{ChannelShift, Sample};
 
 use crate::{
-    image::RenderedImage, Error, ImageWithRegion, IndexedFrame, Reference, Region, Result,
+    Error, ImageWithRegion, IndexedFrame, Reference, Region, Result, image::RenderedImage,
 };
 
 pub type RenderOp<S> =
@@ -210,7 +210,7 @@ impl<S: Sample> FrameRenderHandle<S> {
                     return Ok(render_ref);
                 }
                 FrameRender::None | FrameRender::InProgress(_) => {
-                    return Err(Error::IncompleteFrame)
+                    return Err(Error::IncompleteFrame);
                 }
                 FrameRender::Err(e) => return Err(e),
                 FrameRender::ErrTaken => return Err(Error::FailedReference),

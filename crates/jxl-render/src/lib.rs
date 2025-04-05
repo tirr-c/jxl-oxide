@@ -6,7 +6,7 @@ use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, ColorTransform, ColourEncoding, ColourSpace,
     EnumColourEncoding,
 };
-use jxl_frame::{header::FrameType, Frame, FrameContext};
+use jxl_frame::{Frame, FrameContext, header::FrameType};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::Sample;

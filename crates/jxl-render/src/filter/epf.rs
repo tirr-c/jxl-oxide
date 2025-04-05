@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use jxl_frame::{data::LfGroup, filter::EpfParams, FrameHeader};
+use jxl_frame::{FrameHeader, data::LfGroup, filter::EpfParams};
 use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{util, ImageWithRegion, Region};
+use crate::{ImageWithRegion, Region, util};
 
 pub fn apply_epf<S: Sample>(
     fb_image: &mut ImageWithRegion,

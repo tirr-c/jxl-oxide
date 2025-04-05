@@ -19,6 +19,7 @@ pub enum HeaderParseResult {
 impl ContainerBoxHeader {
     pub(super) fn parse(buf: &[u8]) -> Result<HeaderParseResult, Error> {
         let (tbox, box_size, header_size) = match *buf {
+            #[rustfmt::skip]
             [0, 0, 0, 1, t0, t1, t2, t3, s0, s1, s2, s3, s4, s5, s6, s7, ..] => {
                 let xlbox = u64::from_be_bytes([s0, s1, s2, s3, s4, s5, s6, s7]);
                 let tbox = ContainerBoxType([t0, t1, t2, t3]);

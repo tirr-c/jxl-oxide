@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use jxl_frame::{
+    Frame,
     data::{BlendingModeInformation, PatchRef},
     header::{BlendMode as FrameBlendMode, BlendingInfo},
-    Frame,
 };
 use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};
 use jxl_image::ImageHeader;
 use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
-use crate::{image::ImageBuffer, ImageWithRegion, Reference, Region, Result};
+use crate::{ImageWithRegion, Reference, Region, Result, image::ImageBuffer};
 
 #[derive(Debug)]
 enum BlendMode<'a> {

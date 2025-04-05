@@ -1,6 +1,6 @@
 use std::num::Wrapping;
 
-use jxl_frame::{data::NoiseParameters, FrameHeader};
+use jxl_frame::{FrameHeader, data::NoiseParameters};
 use jxl_grid::{AlignedGrid, AllocTracker, SharedSubgrid};
 use jxl_threadpool::JxlThreadPool;
 

@@ -2,14 +2,14 @@
 
 use jxl_bitstream::{Bitstream, U};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
-use jxl_oxide_common::{define_bundle, Bundle};
+use jxl_oxide_common::{Bundle, define_bundle};
 use jxl_threadpool::JxlThreadPool;
 
 use super::{
-    predictor::{Predictor, WpHeader},
     ModularChannelInfo,
+    predictor::{Predictor, WpHeader},
 };
-use crate::{image::TransformedGrid, Error, Result, Sample};
+use crate::{Error, Result, Sample, image::TransformedGrid};
 
 mod palette;
 mod rct;

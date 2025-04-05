@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
-    ciexyz::*, consts::*, icc::colour_encoding_to_icc, tf, ColorManagementSystem, ColourEncoding,
-    ColourSpace, EnumColourEncoding, Error, OpsinInverseMatrix, PreparedTransform, RenderingIntent,
-    Result, ToneMapping, TransferFunction,
+    ColorManagementSystem, ColourEncoding, ColourSpace, EnumColourEncoding, Error,
+    OpsinInverseMatrix, PreparedTransform, RenderingIntent, Result, ToneMapping, TransferFunction,
+    ciexyz::*, consts::*, icc::colour_encoding_to_icc, tf,
 };
 
 mod gamut_map;

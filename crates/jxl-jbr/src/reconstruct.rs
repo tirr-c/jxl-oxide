@@ -2,7 +2,7 @@ use std::io::Write;
 
 use jxl_bitstream::Bitstream;
 use jxl_frame::data::{
-    decode_pass_group, HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct,
+    HfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct, decode_pass_group,
 };
 use jxl_frame::header::Encoding;
 use jxl_frame::{Frame, FrameHeader};

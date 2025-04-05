@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_int, c_void, CStr, CString},
+    ffi::{CStr, CString, c_int, c_void},
     io::prelude::*,
 };
 
@@ -205,7 +205,7 @@ impl<W> VideoContext<W> {
             PixelFormat::Gray | PixelFormat::Graya => ffmpeg::AV_PIX_FMT_GRAY16,
             PixelFormat::Rgb | PixelFormat::Rgba => ffmpeg::AV_PIX_FMT_RGB48,
             PixelFormat::Cmyk | PixelFormat::Cmyka => {
-                return Err(Error::from_ffmpeg_msg("CMYK not supported"))
+                return Err(Error::from_ffmpeg_msg("CMYK not supported"));
             }
         };
 
@@ -476,7 +476,8 @@ impl<W> VideoContext<W> {
             ffmpeg::avcodec_send_frame(self.video_ctx, frame_ptr).into_ffmpeg_result()?;
 
             loop {
-                let ret = ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr).into_ffmpeg_result();
+                let ret = ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr)
+                    .into_ffmpeg_result();
                 match ret {
                     Err(Error::Ffmpeg {
                         averror: Some(e), ..

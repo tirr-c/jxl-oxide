@@ -74,7 +74,9 @@ fn test_crop_region(image: &JxlImage, tester_image: &JxlImage, crop: CropInfo, n
                 let expected_row = &expected_row[crop_left as usize..][..crop_width as usize];
                 for (x, (expected, actual)) in expected_row.iter().zip(actual_row).enumerate() {
                     if (expected - actual).abs() > 1e-6 {
-                        eprintln!("Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})");
+                        eprintln!(
+                            "Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})"
+                        );
 
                         let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
                         path.push("tests/.artifact");
@@ -93,7 +95,9 @@ fn test_crop_region(image: &JxlImage, tester_image: &JxlImage, crop: CropInfo, n
                             cropped.to_string_lossy()
                         );
 
-                        panic!("Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})");
+                        panic!(
+                            "Test failed at c={c}, x={x}, y={y} (expected={expected}, actual={actual})"
+                        );
                     }
                 }
             }
@@ -200,7 +204,9 @@ fn write_npy(render: &Render, path: impl AsRef<std::path::Path>) {
     let num_channels = image.channels();
     let width = image.width();
     let height = image.height();
-    let header_string = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': (1, {height}, {width}, {num_channels}), }}\n");
+    let header_string = format!(
+        "{{'descr': '<f4', 'fortran_order': False, 'shape': (1, {height}, {width}, {num_channels}), }}\n"
+    );
     eprintln!("width={width}, height={height}, num_channels={num_channels}");
     let header_len = header_string.len() as u16;
     file.write_all(&header_len.to_le_bytes()).unwrap();

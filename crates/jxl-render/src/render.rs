@@ -7,8 +7,8 @@ use jxl_modular::Sample;
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    blend, features, filter, modular, state::RenderCache, util, vardct, Error, ImageWithRegion,
-    IndexedFrame, Reference, ReferenceFrames, Region, Result,
+    Error, ImageWithRegion, IndexedFrame, Reference, ReferenceFrames, Region, Result, blend,
+    features, filter, modular, state::RenderCache, util, vardct,
 };
 
 pub(crate) fn render_frame<S: Sample>(

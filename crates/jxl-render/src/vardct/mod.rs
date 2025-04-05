@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use jxl_frame::{
-    data::{HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
     FrameHeader,
+    data::{HfGlobal, LfGlobal, LfGroup, PassGroupParams, PassGroupParamsVardct},
 };
 use jxl_grid::{AlignedGrid, MutableSubgrid, SharedSubgrid};
 use jxl_image::ImageHeader;
@@ -15,8 +15,8 @@ use jxl_vardct::{
 };
 
 use crate::{
-    image::ImageBuffer, modular, util, Error, ImageWithRegion, IndexedFrame, Reference, Region,
-    RenderCache, Result,
+    Error, ImageWithRegion, IndexedFrame, Reference, Region, RenderCache, Result,
+    image::ImageBuffer, modular, util,
 };
 
 mod dct_common;

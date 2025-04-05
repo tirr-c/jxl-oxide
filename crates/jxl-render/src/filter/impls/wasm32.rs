@@ -1,9 +1,9 @@
-use jxl_frame::{filter::EpfParams, FrameHeader};
+use jxl_frame::{FrameHeader, filter::EpfParams};
 use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
-use crate::filter::epf::run_epf_rows;
 use crate::Region;
+use crate::filter::epf::run_epf_rows;
 
 mod epf;
 

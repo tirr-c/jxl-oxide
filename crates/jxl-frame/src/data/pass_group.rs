@@ -2,9 +2,9 @@ use std::sync::atomic::AtomicI32;
 
 use jxl_bitstream::Bitstream;
 use jxl_grid::{AllocTracker, SharedSubgrid};
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift, MaConfig, Sample};
+use jxl_modular::{ChannelShift, MaConfig, Sample, image::TransformedModularSubimage};
 use jxl_threadpool::JxlThreadPool;
-use jxl_vardct::{write_hf_coeff, HfCoeffParams};
+use jxl_vardct::{HfCoeffParams, write_hf_coeff};
 
 use super::{HfGlobal, LfGlobalVarDct, LfGroup};
 use crate::{FrameHeader, Result};

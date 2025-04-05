@@ -1,4 +1,4 @@
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 
 use jxl_oxide::HdrType;
 use rusty_ffmpeg::ffi as ffmpeg;

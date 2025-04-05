@@ -149,21 +149,13 @@ impl ChannelShift {
             } => {
                 let width = if has_h_subsample {
                     let size = width.div_ceil(2);
-                    if h_subsample {
-                        size
-                    } else {
-                        size * 2
-                    }
+                    if h_subsample { size } else { size * 2 }
                 } else {
                     width
                 };
                 let height = if has_v_subsample {
                     let size = height.div_ceil(2);
-                    if v_subsample {
-                        size
-                    } else {
-                        size * 2
-                    }
+                    if v_subsample { size } else { size * 2 }
                 } else {
                     height
                 };

@@ -3,8 +3,8 @@ use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
-    dct_common::{scale_f, DctDirection},
     VarblockInfo,
+    dct_common::{DctDirection, scale_f},
 };
 
 #[inline(always)]

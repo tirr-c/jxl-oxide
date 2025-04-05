@@ -7,7 +7,7 @@
 //! bitstream to retrieve information about the image.
 use jxl_bitstream::{Bitstream, Result, U};
 use jxl_color::header::*;
-use jxl_oxide_common::{define_bundle, Bundle, Name};
+use jxl_oxide_common::{Bundle, Name, define_bundle};
 
 /// JPEG XL image header.
 ///

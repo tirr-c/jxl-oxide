@@ -1,4 +1,4 @@
-use jxl_bitstream::{unpack_signed, Bitstream};
+use jxl_bitstream::{Bitstream, unpack_signed};
 use jxl_coding::Decoder;
 use jxl_oxide_common::Bundle;
 
