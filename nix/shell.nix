@@ -36,9 +36,9 @@ let
   # Copied from naersk
   pkgsDarwin = with pkgs.darwin; [
     Security
+    apple_sdk.frameworks.CoreFoundation
     apple_sdk.frameworks.CoreServices
     apple_sdk.frameworks.SystemConfiguration
-    cf-private
     libiconv
   ];
 
