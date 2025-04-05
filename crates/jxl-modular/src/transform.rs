@@ -1,3 +1,5 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use jxl_bitstream::{Bitstream, U};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 use jxl_oxide_common::{define_bundle, Bundle};

@@ -258,7 +258,7 @@ impl<S: Sample> ModularImageDestination<S> {
                 let shift = hshift.min(vshift); // shift < 3
                 let pass_idx = *pass_shifts
                     .iter()
-                    .find(|(_, &(minshift, maxshift))| (minshift..maxshift).contains(&shift))
+                    .find(|&(_, &(minshift, maxshift))| (minshift..maxshift).contains(&shift))
                     .unwrap()
                     .0;
                 let pass_idx = pass_idx as usize;

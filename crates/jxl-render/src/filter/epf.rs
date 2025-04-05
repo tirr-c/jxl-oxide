@@ -237,7 +237,9 @@ pub(super) unsafe fn run_epf_rows(
                             epf_params,
                             skip_inner,
                         };
-                        handle_row_simd(row);
+                        unsafe {
+                            handle_row_simd(row);
+                        }
                     }
                 }
 

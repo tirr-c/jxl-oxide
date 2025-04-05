@@ -134,7 +134,7 @@ impl<W: Write + Seek> VideoContext<W> {
         buf_size: c_int,
     ) -> c_int {
         let buf = buf.as_const();
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(|| unsafe {
             let buf = std::slice::from_raw_parts(buf, buf_size as usize);
             let writer = &mut *(opaque as *mut W);
             writer.write_all(buf)
@@ -156,7 +156,7 @@ impl<W: Write + Seek> VideoContext<W> {
     }
 
     unsafe extern "C" fn cb_seek(opaque: *mut c_void, offset: i64, whence: c_int) -> i64 {
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(|| unsafe {
             let writer = &mut *(opaque as *mut W);
             let pos = match whence as u32 {
                 ffmpeg::SEEK_CUR => std::io::SeekFrom::Current(offset),
@@ -472,31 +472,32 @@ impl<W> VideoContext<W> {
     unsafe fn send_frame(&mut self, frame_ptr: *mut ffmpeg::AVFrame) -> Result<()> {
         let start = std::time::Instant::now();
 
-        ffmpeg::avcodec_send_frame(self.video_ctx, frame_ptr).into_ffmpeg_result()?;
+        unsafe {
+            ffmpeg::avcodec_send_frame(self.video_ctx, frame_ptr).into_ffmpeg_result()?;
 
-        loop {
-            match ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr)
-                .into_ffmpeg_result()
-            {
-                Err(Error::Ffmpeg {
-                    averror: Some(e), ..
-                }) if e == ffmpeg::AVERROR(ffmpeg::EAGAIN) || e == ffmpeg::AVERROR_EOF => {
-                    break;
+            loop {
+                let ret = ffmpeg::avcodec_receive_packet(self.video_ctx, self.packet_ptr).into_ffmpeg_result();
+                match ret {
+                    Err(Error::Ffmpeg {
+                        averror: Some(e), ..
+                    }) if e == ffmpeg::AVERROR(ffmpeg::EAGAIN) || e == ffmpeg::AVERROR_EOF => {
+                        break;
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                    Ok(_) => {}
                 }
-                Err(e) => {
-                    return Err(e);
-                }
-                Ok(_) => {}
+
+                ffmpeg::av_packet_rescale_ts(
+                    self.packet_ptr,
+                    (*self.video_ctx).time_base,
+                    (*self.video_stream).time_base,
+                );
+                (*self.packet_ptr).stream_index = (*self.video_stream).index;
+
+                ffmpeg::av_write_frame(self.muxer_ctx, self.packet_ptr).into_ffmpeg_result()?;
             }
-
-            ffmpeg::av_packet_rescale_ts(
-                self.packet_ptr,
-                (*self.video_ctx).time_base,
-                (*self.video_stream).time_base,
-            );
-            (*self.packet_ptr).stream_index = (*self.video_stream).index;
-
-            ffmpeg::av_write_frame(self.muxer_ctx, self.packet_ptr).into_ffmpeg_result()?;
         }
 
         let elapsed = start.elapsed();

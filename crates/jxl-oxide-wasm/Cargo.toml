@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 version = "0.12.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

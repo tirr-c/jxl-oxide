@@ -9,6 +9,7 @@
 //! # Modules
 //! - [`consts`] defines constants used by the various colorspaces.
 //! - [`icc`] provides functions related to ICC profiles.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 mod ciexyz;
 mod cms;
