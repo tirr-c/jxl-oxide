@@ -350,11 +350,13 @@ impl Histogram {
 
     #[inline]
     pub fn single_symbol(&self) -> Option<u32> {
-        if let &[Entry {
-            nested: false,
-            bits_or_mask: 0,
-            symbol_or_offset: symbol,
-        }] = &*self.toplevel_entries
+        if let &[
+            Entry {
+                nested: false,
+                bits_or_mask: 0,
+                symbol_or_offset: symbol,
+            },
+        ] = &*self.toplevel_entries
         {
             Some(symbol as u32)
         } else {

@@ -179,11 +179,7 @@ impl DequantMatrixParams {
         }
 
         fn mult(x: f32) -> f32 {
-            if x > 0.0 {
-                1.0 + x
-            } else {
-                1.0 / (1.0 - x)
-            }
+            if x > 0.0 { 1.0 + x } else { 1.0 / (1.0 - x) }
         }
 
         fn dct_quant_weights(params: &[f32], width: u32, height: u32) -> Result<Vec<f32>> {

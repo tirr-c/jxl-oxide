@@ -5,7 +5,7 @@ mod bitstream;
 pub mod container;
 mod error;
 
-pub use bitstream::{Bitstream, U32Specifier, U};
+pub use bitstream::{Bitstream, U, U32Specifier};
 pub use container::{BitstreamKind, ContainerDetectingReader, ParseEvent};
 pub use error::{Error, Result};
 

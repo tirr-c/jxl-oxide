@@ -101,7 +101,9 @@ pub(super) unsafe fn run_gabor_rows_unsafe<'buf>(
                 output_row,
                 weights,
             };
-            handle_row(row);
+            unsafe {
+                handle_row(row);
+            }
         }
     });
 

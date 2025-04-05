@@ -1,7 +1,7 @@
 use jxl_bitstream::Bitstream;
 use jxl_oxide_common::Bundle;
 
-use crate::{header::Encoding, Result};
+use crate::{Result, header::Encoding};
 
 #[derive(Debug, Clone)]
 pub enum Gabor {

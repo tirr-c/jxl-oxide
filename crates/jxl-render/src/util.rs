@@ -2,18 +2,18 @@ use jxl_color::{
     ColorEncodingWithProfile, ColorTransform, ColourEncoding, ColourSpace, EnumColourEncoding,
 };
 use jxl_frame::{
+    Frame, FrameHeader,
     data::{LfGlobal, LfGroup},
     filter::{EdgePreservingFilter, EpfParams},
     header::FrameType,
-    Frame, FrameHeader,
 };
 use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_image::ImageHeader;
-use jxl_modular::{image::TransformedModularSubimage, ChannelShift, Sample};
+use jxl_modular::{ChannelShift, Sample, image::TransformedModularSubimage};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    image::ImageBuffer, vardct::copy_lf_dequant, ImageWithRegion, IndexedFrame, Region, Result,
+    ImageWithRegion, IndexedFrame, Region, Result, image::ImageBuffer, vardct::copy_lf_dequant,
 };
 
 pub(crate) fn image_region_to_frame(

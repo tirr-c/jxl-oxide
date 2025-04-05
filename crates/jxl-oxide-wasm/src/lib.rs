@@ -1,6 +1,6 @@
 use jxl_oxide::{
-    color::ColourEncoding, EnumColourEncoding, InitializeResult, JxlImage, PixelFormat, Render,
-    RenderingIntent, UninitializedJxlImage,
+    EnumColourEncoding, InitializeResult, JxlImage, PixelFormat, Render, RenderingIntent,
+    UninitializedJxlImage, color::ColourEncoding,
 };
 use wasm_bindgen::prelude::*;
 
@@ -285,7 +285,7 @@ impl RenderResult {
             PixelFormat::Rgb => png::ColorType::Rgb,
             PixelFormat::Rgba => png::ColorType::Rgba,
             PixelFormat::Cmyk | PixelFormat::Cmyka => {
-                return Err(String::from("unsupported colorspace"))
+                return Err(String::from("unsupported colorspace"));
             }
         };
         let depth = if self.need_high_precision {

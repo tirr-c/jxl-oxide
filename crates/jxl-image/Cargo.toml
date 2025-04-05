@@ -9,23 +9,19 @@ categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
 version = "0.13.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "0.6.0"
+version = "1.0.0-alpha.0"
 path = "../jxl-bitstream"
 
-[dependencies.jxl-color]
-version = "0.11.0"
-path = "../jxl-color"
-
 [dependencies.jxl-grid]
-version = "0.5.3"
+version = "1.0.0-alpha.0"
 path = "../jxl-grid"
 
 [dependencies.jxl-oxide-common]
-version = "0.2.0"
+version = "1.0.0-alpha.0"
 path = "../jxl-oxide-common"

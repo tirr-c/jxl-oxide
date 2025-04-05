@@ -1,6 +1,6 @@
 use crate::{
-    ciexyz::*, consts::*, tf, ColourSpace, EnumColourEncoding, Primaries, RenderingIntent,
-    TransferFunction, WhitePoint,
+    ColourSpace, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction, WhitePoint,
+    ciexyz::*, consts::*, tf,
 };
 
 use super::IccTag;

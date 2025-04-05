@@ -4,10 +4,10 @@ use jxl_image::ImageHeader;
 use jxl_modular::{
     ChannelShift, MaConfig, MaConfigParams, Modular, ModularChannelParams, ModularParams, Sample,
 };
-use jxl_oxide_common::{define_bundle, Bundle};
+use jxl_oxide_common::{Bundle, define_bundle};
 use jxl_vardct::{HfBlockContext, LfChannelCorrelation, LfChannelDequantization, Quantizer};
 
-use crate::{header::Encoding, FrameHeader, Result};
+use crate::{FrameHeader, Result, header::Encoding};
 
 use super::{NoiseParameters, Patches, Splines};
 

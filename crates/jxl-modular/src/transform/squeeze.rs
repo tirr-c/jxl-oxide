@@ -490,7 +490,7 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: int16x4_t doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<int16x4_t>::uninit(); width];
-    let avg_width = (width + 1) / 2;
+    let avg_width = width.div_ceil(2);
 
     let h4 = height / 4;
     for y4 in 0..h4 {
@@ -999,7 +999,7 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: int16x4_t doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<int16x4_t>::uninit(); height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
 
     let w4 = width / 4;
     for x4 in 0..w4 {
@@ -1057,7 +1057,7 @@ unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
 
     // SAFETY: v128 doesn't need to be dropped.
     let mut scratch = vec![MaybeUninit::<v128>::uninit(); height];
-    let avg_height = (height + 1) / 2;
+    let avg_height = height.div_ceil(2);
 
     let w8 = width / 8;
     for x8 in 0..w8 {

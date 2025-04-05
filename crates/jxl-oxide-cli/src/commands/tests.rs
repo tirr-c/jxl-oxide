@@ -98,8 +98,8 @@ mod clap {
 mod color_encoding {
     use super::super::*;
     use jxl_oxide::{
-        color::{ColourSpace, TransferFunction},
         EnumColourEncoding, RenderingIntent,
+        color::{ColourSpace, TransferFunction},
     };
 
     fn test_encoding_eq(a: &EnumColourEncoding, b: &EnumColourEncoding) -> bool {

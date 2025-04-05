@@ -61,14 +61,14 @@ dependencies = [
 
 [[package]]
 name = "jxl-bitstream"
-version = "0.6.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-coding"
-version = "0.6.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "jxl-bitstream",
  "tracing",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-grid"
-version = "0.5.3"
+version = "1.0.0-alpha.0"
 dependencies = [
  "tracing",
 ]
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-common"
-version = "0.2.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "jxl-bitstream",
 ]
@@ -206,14 +206,14 @@ dependencies = [
 
 [[package]]
 name = "jxl-threadpool"
-version = "0.1.2"
+version = "1.0.0-alpha.0"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "jxl-vardct"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",

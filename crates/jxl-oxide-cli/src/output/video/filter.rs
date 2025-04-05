@@ -1,4 +1,4 @@
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 
 use jxl_oxide::HdrType;
 use rusty_ffmpeg::ffi as ffmpeg;
@@ -26,17 +26,19 @@ impl VideoFilter {
         filter: &CStr,
         name: Option<&CStr>,
     ) -> Result<*mut ffmpeg::AVFilterContext> {
-        let filter = ffmpeg::avfilter_get_by_name(filter.as_ptr());
+        let filter = unsafe { ffmpeg::avfilter_get_by_name(filter.as_ptr()) };
         if filter.is_null() {
             tracing::error!(name = ?filter, "filter not found");
             return Err(Error::from_ffmpeg_msg("filter not found"));
         }
 
-        let filter_ctx = ffmpeg::avfilter_graph_alloc_filter(
-            self.graph_ptr,
-            filter,
-            name.map(|v| v.as_ptr()).unwrap_or(std::ptr::null()),
-        );
+        let filter_ctx = unsafe {
+            ffmpeg::avfilter_graph_alloc_filter(
+                self.graph_ptr,
+                filter,
+                name.map(|v| v.as_ptr()).unwrap_or(std::ptr::null()),
+            )
+        };
         if filter_ctx.is_null() {
             tracing::error!(filter_name = ?filter, ?name, "cannot allocate filter");
             return Err(Error::from_ffmpeg_msg("cannot allocate filter"));

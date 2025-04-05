@@ -4,7 +4,7 @@
 //! images are used mainly for lossless images, but lossy VarDCT images also use them to store
 //! various information, such as quantized LF images and varblock configurations.
 use jxl_bitstream::Bitstream;
-use jxl_oxide_common::{define_bundle, Bundle};
+use jxl_oxide_common::{Bundle, define_bundle};
 
 mod error;
 pub mod image;

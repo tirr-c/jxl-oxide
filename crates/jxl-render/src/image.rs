@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use jxl_frame::{data::GlobalModular, FrameHeader};
+use jxl_frame::{FrameHeader, data::GlobalModular};
 use jxl_grid::{AlignedGrid, AllocTracker, MutableSubgrid};
 use jxl_image::{BitDepth, ImageHeader};
 use jxl_modular::{ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::LfChannelDequantization;
 
-use crate::{util, FrameRender, FrameRenderHandle, Region, Result};
+use crate::{FrameRender, FrameRenderHandle, Region, Result, util};
 
 #[derive(Debug)]
 pub enum ImageBuffer {

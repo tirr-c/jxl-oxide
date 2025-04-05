@@ -1,7 +1,7 @@
-use jxl_frame::{data::GlobalModular, FrameHeader};
-use jxl_modular::{image::TransformedModularSubimage, Sample};
+use jxl_frame::{FrameHeader, data::GlobalModular};
+use jxl_modular::{Sample, image::TransformedModularSubimage};
 
-use crate::{util, Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result};
+use crate::{Error, ImageWithRegion, IndexedFrame, Region, RenderCache, Result, util};
 
 pub(crate) fn render_modular<S: Sample>(
     frame: &IndexedFrame,

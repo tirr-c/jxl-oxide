@@ -1,6 +1,6 @@
 use std::{io::Cursor, path::Path, time::Duration};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use jxl_oxide::{EnumColourEncoding, JxlThreadPool, RenderingIntent};
 
 #[cfg(feature = "mimalloc")]

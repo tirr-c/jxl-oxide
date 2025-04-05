@@ -1,8 +1,8 @@
 use std::io::Write;
 
 use brotli_decompressor::DecompressorWriter;
-use jxl_bitstream::container::box_header::ContainerBoxType;
 use jxl_bitstream::ParseEvent;
+use jxl_bitstream::container::box_header::ContainerBoxType;
 
 use crate::Result;
 

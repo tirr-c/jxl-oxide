@@ -65,7 +65,7 @@ impl TryFrom<u32> for Predictor {
                 return Err(jxl_bitstream::Error::InvalidEnum {
                     name: "MaProperty",
                     value,
-                })
+                });
             }
         })
     }

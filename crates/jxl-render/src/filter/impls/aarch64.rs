@@ -1,12 +1,12 @@
 use std::arch::is_aarch64_feature_detected;
 
-use jxl_frame::{filter::EpfParams, FrameHeader};
+use jxl_frame::{FrameHeader, filter::EpfParams};
 use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
+use crate::Region;
 use crate::filter::epf::run_epf_rows;
 use crate::filter::gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe};
-use crate::Region;
 
 mod epf;
 mod gabor;

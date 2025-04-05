@@ -3,8 +3,8 @@ use jxl_modular::ChannelShift;
 use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
-    dct_common::{scale_f, DctDirection},
     VarblockInfo,
+    dct_common::{DctDirection, scale_f},
 };
 
 #[inline(always)]
@@ -53,7 +53,9 @@ pub unsafe fn transform_varblocks_inner(
                             *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
                         }
                     }
-                    dct(&mut out, DctDirection::Forward);
+                    unsafe {
+                        dct(&mut out, DctDirection::Forward);
+                    }
                     for y in 0..bh {
                         for x in 0..bw {
                             *out.get_mut(x, y) /= scale_f(y, 5 - logbh) * scale_f(x, 5 - logbw);
@@ -64,7 +66,9 @@ pub unsafe fn transform_varblocks_inner(
                 let mut block = coeff
                     .borrow_mut()
                     .subgrid(left..(left + bw * 8), top..(top + bh * 8));
-                transform(&mut block, dct_select);
+                unsafe {
+                    transform(&mut block, dct_select);
+                }
             },
         );
     }

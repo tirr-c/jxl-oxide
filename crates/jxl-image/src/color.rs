@@ -2,9 +2,7 @@
 
 #![allow(clippy::excessive_precision)]
 use jxl_bitstream::{Bitstream, Error, Result};
-use jxl_oxide_common::{define_bundle, Bundle};
-
-use crate::consts::*;
+use jxl_oxide_common::{Bundle, define_bundle};
 
 /// Color encoding, either represented by enum values, or a signal of existence of ICC profile.
 #[derive(Debug, Clone)]
@@ -158,7 +156,8 @@ impl EnumColourEncoding {
         }
     }
 
-    pub(crate) fn srgb_linear(rendering_intent: RenderingIntent) -> Self {
+    /// Creates an sRGB color encoding with linear transfer (instead of sRGB transfer curve).
+    pub fn srgb_linear(rendering_intent: RenderingIntent) -> Self {
         Self {
             colour_space: ColourSpace::Rgb,
             white_point: WhitePoint::D65,
@@ -425,19 +424,6 @@ impl<Ctx> Bundle<Ctx> for WhitePoint {
     }
 }
 
-impl WhitePoint {
-    /// Returns the xy-chromaticity coordinate of the white point as floating point values.
-    #[inline]
-    pub fn as_chromaticity(self) -> [f32; 2] {
-        match self {
-            Self::D65 => ILLUMINANT_D65,
-            Self::Custom(xy) => xy.as_float(),
-            Self::E => ILLUMINANT_E,
-            Self::Dci => ILLUMINANT_DCI,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
 enum PrimariesDiscriminator {
@@ -501,19 +487,6 @@ impl<Ctx> Bundle<Ctx> for Primaries {
 }
 
 impl Primaries {
-    /// Returns the xy-chromaticity coordinates of the primaries as floating point values.
-    #[inline]
-    pub fn as_chromaticity(self) -> [[f32; 2]; 3] {
-        match self {
-            Self::Srgb => PRIMARIES_SRGB,
-            Self::Custom { red, green, blue } => {
-                [red.as_float(), green.as_float(), blue.as_float()]
-            }
-            Self::Bt2100 => PRIMARIES_BT2100,
-            Self::P3 => PRIMARIES_P3,
-        }
-    }
-
     /// Returns the CICP value of the primaries, if there is any.
     pub fn cicp(&self) -> Option<u8> {
         match self {

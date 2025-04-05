@@ -74,7 +74,9 @@ fn run_test(
 
                     let abs_error = (output - reference).abs();
                     if debug && abs_error >= expected_peak_error {
-                        eprintln!("abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}");
+                        eprintln!(
+                            "abs_error is larger than max peak_error, at (x={x}, y={y}, c={c}), reference={reference}, actual={output}"
+                        );
                     }
                     *peak_error = peak_error.max(abs_error);
                     *sum_se += abs_error * abs_error;

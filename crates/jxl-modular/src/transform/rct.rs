@@ -128,7 +128,9 @@ unsafe fn run_rows_unsafe<S: Sample>(
         let height = grids[0].height();
         for y in 0..height {
             let mut rows = grids.each_mut().map(|g| g.get_row_mut(y));
-            f(&mut rows);
+            unsafe {
+                f(&mut rows);
+            }
             inverse_permute(permutation, rows);
         }
     });

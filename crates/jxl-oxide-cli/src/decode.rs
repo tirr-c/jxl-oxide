@@ -3,7 +3,7 @@ use std::time::Duration;
 use jxl_oxide::{AllocTracker, CropInfo, EnumColourEncoding, JxlImage, Render};
 
 use crate::commands::decode::*;
-use crate::{output, Error, Result};
+use crate::{Error, Result, output};
 
 pub fn handle_decode(args: DecodeArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle decode subcommand").entered();
@@ -264,7 +264,9 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
             }
             OutputFormat::Npy => {
                 if args.icc_output.is_none() {
-                    tracing::warn!("--icc-output is not set. Numpy buffer alone cannot be used to display image as its colorspace is unknown.");
+                    tracing::warn!(
+                        "--icc-output is not set. Numpy buffer alone cannot be used to display image as its colorspace is unknown."
+                    );
                 }
 
                 output::write_npy(output, &keyframes, width, height).map_err(Error::WriteImage)?;

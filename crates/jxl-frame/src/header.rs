@@ -1,7 +1,7 @@
 use crate::Result;
 use jxl_bitstream::{Bitstream, U};
 use jxl_image::{BitDepth, Extensions, ImageHeader, SizeHeader};
-use jxl_oxide_common::{define_bundle, Bundle, Name};
+use jxl_oxide_common::{Bundle, Name, define_bundle};
 
 define_bundle! {
     /// Frame header.
@@ -506,7 +506,7 @@ impl<Ctx> Bundle<Ctx> for BlendMode {
                     name: "BlendMode",
                     value,
                 }
-                .into())
+                .into());
             }
         })
     }

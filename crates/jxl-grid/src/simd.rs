@@ -1,3 +1,5 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 /// Trait representing a SIMD vector.
 pub trait SimdVector: Copy {
     /// The number of `f32` lanes in a single SIMD vector.

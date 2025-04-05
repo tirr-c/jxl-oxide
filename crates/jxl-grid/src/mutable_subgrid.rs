@@ -116,7 +116,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
     #[inline]
     unsafe fn get_ptr_unchecked(&self, x: usize, y: usize) -> *mut V {
         let offset = y * self.stride + x;
-        self.ptr.as_ptr().add(offset)
+        unsafe { self.ptr.as_ptr().add(offset) }
     }
 
     #[inline]

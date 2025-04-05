@@ -536,7 +536,7 @@ pub(crate) fn parse_icc(profile: &[u8]) -> Result<EnumColourEncoding> {
         };
         let wp = info.white_point();
         Ok(EnumColourEncoding {
-            colour_space: crate::ColourSpace::Grey,
+            colour_space: ColourSpace::Grey,
             white_point: wp,
             primaries: Primaries::Srgb,
             tf,
@@ -548,7 +548,7 @@ pub(crate) fn parse_icc(profile: &[u8]) -> Result<EnumColourEncoding> {
         };
         let wp = info.white_point();
         Ok(EnumColourEncoding {
-            colour_space: crate::ColourSpace::Rgb,
+            colour_space: ColourSpace::Rgb,
             white_point: wp,
             primaries,
             tf,

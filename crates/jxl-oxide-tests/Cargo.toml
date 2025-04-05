@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 ring = "0.17.8"
@@ -32,9 +32,9 @@ version = "0.1.39"
 optional = true
 
 [dependencies.rand]
-version = "0.8.5"
+version = "0.9.0"
 default-features = false
-features = ["getrandom", "small_rng"]
+features = ["os_rng", "small_rng"]
 optional = true
 
 [dependencies.reqwest]

@@ -1,8 +1,8 @@
 use std::ops::{Add, Mul, Sub};
 
 use jxl_frame::{
-    data::{QuantSpline, Splines},
     FrameHeader,
+    data::{QuantSpline, Splines},
 };
 
 use crate::ImageWithRegion;
@@ -325,9 +325,5 @@ fn erf(x: f32) -> f32 {
     let result = -inv_denom5 * inv_denom5 + 1.0;
 
     // Change sign if needed.
-    if x < 0.0 {
-        -result
-    } else {
-        result
-    }
+    if x < 0.0 { -result } else { result }
 }

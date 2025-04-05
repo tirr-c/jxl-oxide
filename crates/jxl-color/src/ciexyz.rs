@@ -1,3 +1,6 @@
+use crate::consts::*;
+use crate::{Primaries, WhitePoint};
+
 const MAT_BRADFORD: [f32; 9] = [
     0.8951, 0.2664, -0.1614, -0.7502, 1.7135, 0.0367, 0.0389, -0.0685, 1.0296,
 ];
@@ -6,6 +9,54 @@ const MAT_BRADFORD_INV: [f32; 9] = [
     0.9869929, -0.1470543, 0.1599627, 0.4323053, 0.5183603, 0.0492912, -0.0085287, 0.0400428,
     0.9684867,
 ];
+
+pub trait AsIlluminant {
+    fn as_illuminant(&self) -> [f32; 2];
+}
+
+pub trait AsPrimaries {
+    fn as_primaries(&self) -> [[f32; 2]; 3];
+}
+
+impl AsIlluminant for [f32; 2] {
+    #[inline]
+    fn as_illuminant(&self) -> [f32; 2] {
+        *self
+    }
+}
+
+impl AsIlluminant for WhitePoint {
+    #[inline]
+    fn as_illuminant(&self) -> [f32; 2] {
+        match *self {
+            WhitePoint::D65 => ILLUMINANT_D65,
+            WhitePoint::Custom(xy) => xy.as_float(),
+            WhitePoint::E => ILLUMINANT_E,
+            WhitePoint::Dci => ILLUMINANT_DCI,
+        }
+    }
+}
+
+impl AsPrimaries for [[f32; 2]; 3] {
+    #[inline]
+    fn as_primaries(&self) -> [[f32; 2]; 3] {
+        *self
+    }
+}
+
+impl AsPrimaries for Primaries {
+    #[inline]
+    fn as_primaries(&self) -> [[f32; 2]; 3] {
+        match *self {
+            Primaries::Srgb => PRIMARIES_SRGB,
+            Primaries::Custom { red, green, blue } => {
+                [red.as_float(), green.as_float(), blue.as_float()]
+            }
+            Primaries::Bt2100 => PRIMARIES_BT2100,
+            Primaries::P3 => PRIMARIES_P3,
+        }
+    }
+}
 
 #[inline]
 pub fn matmul3(a: &[f32; 9], b: &[f32; 9]) -> [f32; 9] {
@@ -54,17 +105,18 @@ pub fn matinv(mat: &[f32; 9]) -> [f32; 9] {
 }
 
 #[inline]
-pub fn illuminant_to_xyz([x, y]: [f32; 2]) -> [f32; 3] {
+pub fn illuminant_to_xyz(illuminant: impl AsIlluminant) -> [f32; 3] {
+    let [x, y] = illuminant.as_illuminant();
     [x / y, 1.0, (1.0 - x) / y - 1.0]
 }
 
-pub fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9] {
-    if from_illuminant == to_illuminant {
-        return [1., 0., 0., 0., 1., 0., 0., 0., 1.];
-    }
-
+pub fn adapt_mat(from_illuminant: impl AsIlluminant, to_illuminant: impl AsIlluminant) -> [f32; 9] {
     let from_w = illuminant_to_xyz(from_illuminant);
     let to_w = illuminant_to_xyz(to_illuminant);
+
+    if from_w == to_w {
+        return [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    }
 
     let from_lms = matmul3vec(&MAT_BRADFORD, &from_w);
     let to_lms = matmul3vec(&MAT_BRADFORD, &to_w);
@@ -78,7 +130,8 @@ pub fn adapt_mat(from_illuminant: [f32; 2], to_illuminant: [f32; 2]) -> [f32; 9]
     matmul3(&MAT_BRADFORD_INV, &multiplied)
 }
 
-pub fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
+pub fn primaries_to_xyz_mat(primaries: impl AsPrimaries, wp: impl AsIlluminant) -> [f32; 9] {
+    let primaries = primaries.as_primaries();
     let mut primaries = [
         primaries[0][0],
         primaries[1][0],
@@ -101,7 +154,8 @@ pub fn primaries_to_xyz_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] 
     primaries
 }
 
-pub fn xyz_to_primaries_mat(primaries: [[f32; 2]; 3], wp: [f32; 2]) -> [f32; 9] {
+pub fn xyz_to_primaries_mat(primaries: impl AsPrimaries, wp: impl AsIlluminant) -> [f32; 9] {
+    let primaries = primaries.as_primaries();
     let primaries = [
         primaries[0][0],
         primaries[1][0],

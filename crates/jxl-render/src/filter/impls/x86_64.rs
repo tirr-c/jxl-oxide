@@ -1,13 +1,13 @@
-use jxl_frame::{filter::EpfParams, FrameHeader};
+use jxl_frame::{FrameHeader, filter::EpfParams};
 use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
+    Region,
     filter::{
         epf::run_epf_rows,
         gabor::{run_gabor_row_generic, run_gabor_rows, run_gabor_rows_unsafe},
     },
-    Region,
 };
 
 mod epf_sse41;

@@ -5,7 +5,7 @@ use jxl_oxide::{
     AuxBoxData, ColorEncodingWithProfile, ExtraChannelType, JpegReconstructionStatus, JxlImage,
 };
 
-use crate::{commands::info::*, Error, Result};
+use crate::{Error, Result, commands::info::*};
 
 pub fn handle_info(args: InfoArgs) -> Result<()> {
     let _guard = tracing::trace_span!("Handle info subcommand").entered();

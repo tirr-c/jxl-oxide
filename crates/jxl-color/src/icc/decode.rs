@@ -1,5 +1,5 @@
-use std::io::prelude::*;
 use std::io::Cursor;
+use std::io::prelude::*;
 
 use jxl_bitstream::Bitstream;
 

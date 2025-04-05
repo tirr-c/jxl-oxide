@@ -9,6 +9,7 @@
 //! # Modules
 //! - [`consts`] defines constants used by the various colorspaces.
 //! - [`icc`] provides functions related to ICC profiles.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 mod ciexyz;
 mod cms;
@@ -17,14 +18,15 @@ mod convert;
 mod error;
 mod fastmath;
 mod gamut;
-pub mod header;
 pub mod icc;
 mod tf;
 mod xyb;
 mod ycbcr;
 
+pub use jxl_image::color::*;
+
+pub use ciexyz::{AsIlluminant, AsPrimaries};
 pub use cms::*;
 pub use convert::*;
 pub use error::*;
-pub use header::*;
 pub use ycbcr::ycbcr_to_rgb;

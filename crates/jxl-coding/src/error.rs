@@ -42,7 +42,11 @@ impl std::fmt::Display for Error {
                 split_exponent,
                 msb_in_token,
                 lsb_in_token,
-            } => write!(f, "invalid hybrid integer configuration; {} + {msb_in_token} > {split_exponent}", lsb_in_token.unwrap_or(0)),
+            } => write!(
+                f,
+                "invalid hybrid integer configuration; {} + {msb_in_token} > {split_exponent}",
+                lsb_in_token.unwrap_or(0)
+            ),
             Self::InvalidPermutation => write!(f, "invalid permutation"),
             Self::InvalidPrefixHistogram => write!(f, "invalid Brotli prefix code"),
             Self::PrefixSymbolTooLarge(size) => write!(f, "prefix code symbol too large ({size})"),
@@ -50,7 +54,10 @@ impl std::fmt::Display for Error {
             Self::ClusterHole {
                 num_expected_clusters,
                 num_actual_clusters,
-            } => write!(f, "distribution cluster has a hole; expected {num_expected_clusters}, actual {num_actual_clusters}"),
+            } => write!(
+                f,
+                "distribution cluster has a hole; expected {num_expected_clusters}, actual {num_actual_clusters}"
+            ),
             Self::UnexpectedLz77Repeat => write!(
                 f,
                 "LZ77 repeat symbol encountered without decoding any symbols"

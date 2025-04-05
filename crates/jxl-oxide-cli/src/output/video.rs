@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::File;
 use std::path::Path;
 
@@ -118,11 +118,13 @@ unsafe extern "C" fn jxl_oxide_ffmpeg_log(
     vl: va_list::VaList<'static>,
 ) {
     let mut out = vec![0u8; 65536];
-    let vsnprintf = std::mem::transmute::<
-        unsafe extern "C" fn(*mut c_char, std::ffi::c_ulong, *const c_char, _) -> i32,
-        unsafe extern "C" fn(_, _, _, va_list::VaList<'static>) -> i32,
-    >(ffmpeg::vsnprintf);
-    vsnprintf(out.as_mut_ptr() as *mut c_char, 65536, fmt, vl);
+    unsafe {
+        let vsnprintf = std::mem::transmute::<
+            unsafe extern "C" fn(*mut c_char, std::ffi::c_ulong, *const c_char, _) -> i32,
+            unsafe extern "C" fn(_, _, _, va_list::VaList<'static>) -> i32,
+        >(ffmpeg::vsnprintf);
+        vsnprintf(out.as_mut_ptr() as *mut c_char, 65536, fmt, vl);
+    }
 
     let len = out.iter().position(|&v| v == 0).unwrap();
     let line = String::from_utf8_lossy(&out[..len]);

@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 
-use jxl_frame::{filter::EpfParams, FrameHeader};
+use jxl_frame::{FrameHeader, filter::EpfParams};
 use jxl_grid::{AlignedGrid, MutableSubgrid};
 use jxl_threadpool::JxlThreadPool;
 
 use crate::{
-    filter::{epf::run_epf_rows, gabor::run_gabor_rows},
     Region,
+    filter::{epf::run_epf_rows, gabor::run_gabor_rows},
 };
 
 pub(crate) mod epf;

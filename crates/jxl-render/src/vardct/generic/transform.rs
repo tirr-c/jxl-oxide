@@ -5,7 +5,7 @@ use jxl_vardct::{BlockInfo, TransformType};
 
 use crate::vardct::{
     dct_common::DctDirection,
-    transform_common::{transform_varblocks_inner, AFV_BASIS},
+    transform_common::{AFV_BASIS, transform_varblocks_inner},
 };
 
 use super::dct_2d;

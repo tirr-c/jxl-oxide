@@ -1,4 +1,4 @@
-use jxl_bitstream::{unpack_signed, Bitstream};
+use jxl_bitstream::{Bitstream, unpack_signed};
 use jxl_image::ImageHeader;
 use jxl_oxide_common::Bundle;
 
@@ -65,7 +65,7 @@ impl TryFrom<u32> for PatchBlendMode {
                 return Err(jxl_bitstream::Error::InvalidEnum {
                     name: "PatchBlendMode",
                     value,
-                })
+                });
             }
         })
     }
