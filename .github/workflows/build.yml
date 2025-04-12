@@ -70,7 +70,7 @@ jobs:
         with:
           tool: cross
           git: https://github.com/cross-rs/cross
-          rev: 7b79041c9278769eca57fae10c74741f5aa5c14b
+          rev: 4e64366af6095c84fa4f54a0fa5a2ba7d9a271aa
       - run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
