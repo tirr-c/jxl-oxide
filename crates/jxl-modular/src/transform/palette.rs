@@ -65,7 +65,7 @@ impl Palette {
 
                 if (0..nb_colors).contains(&index) {
                     for (c, sample) in channels_it.enumerate() {
-                        *sample = *palette.get(index as usize, c);
+                        *sample = palette.get(index as usize, c);
                     }
                 } else if index >= nb_colors {
                     let index = index - nb_colors;

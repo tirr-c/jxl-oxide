@@ -160,8 +160,23 @@ impl<S> AlignedGrid<S> {
     }
 
     /// Returns a reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+    pub fn get_ref(&self, x: usize, y: usize) -> &S {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_ref(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
+    }
+
+    /// Returns a reference to the sample at the given location, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_ref(&self, x: usize, y: usize) -> Option<&S> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -170,8 +185,24 @@ impl<S> AlignedGrid<S> {
     }
 
     /// Returns a mutable reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
+    pub fn get_mut(&mut self, x: usize, y: usize) -> &mut S {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_mut(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
+    }
+
+    /// Returns a mutable reference to the sample at the given location, or `None` if it is out of
+    /// bounds.
+    #[inline]
+    pub fn try_get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -180,8 +211,22 @@ impl<S> AlignedGrid<S> {
     }
 
     /// Returns a slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
-    pub fn get_row(&self, y: usize) -> Option<&[S]> {
+    pub fn get_row(&self, row: usize) -> &[S] {
+        let height = self.height;
+        let Some(slice) = self.try_get_row(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row(&self, y: usize) -> Option<&[S]> {
         if y >= self.height {
             return None;
         }
@@ -190,8 +235,22 @@ impl<S> AlignedGrid<S> {
     }
 
     /// Returns a mutable slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
-    pub fn get_row_mut(&mut self, y: usize) -> Option<&mut [S]> {
+    pub fn get_row_mut(&mut self, row: usize) -> &mut [S] {
+        let height = self.height;
+        let Some(slice) = self.try_get_row_mut(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a mutable slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row_mut(&mut self, y: usize) -> Option<&mut [S]> {
         if y >= self.height {
             return None;
         }
@@ -199,13 +258,13 @@ impl<S> AlignedGrid<S> {
         Some(&mut self.buf[y * self.width + self.offset..][..self.width])
     }
 
-    /// Get the immutable slice to the underlying buffer.
+    /// Returns the immutable slice to the underlying buffer.
     #[inline]
     pub fn buf(&self) -> &[S] {
         &self.buf[self.offset..]
     }
 
-    /// Get the mutable slice to the underlying buffer.
+    /// Returns the mutable slice to the underlying buffer.
     #[inline]
     pub fn buf_mut(&mut self) -> &mut [S] {
         &mut self.buf[self.offset..]
@@ -221,5 +280,16 @@ impl<S> AlignedGrid<S> {
     #[inline]
     pub fn as_subgrid_mut(&mut self) -> MutableSubgrid<S> {
         MutableSubgrid::from(self)
+    }
+}
+
+impl<V: Copy> AlignedGrid<V> {
+    /// Returns a copy of sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of range.
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> V {
+        *self.get_ref(x, y)
     }
 }

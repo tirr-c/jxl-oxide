@@ -113,12 +113,12 @@ pub(crate) unsafe fn epf_row_x86_64_sse41<const STEP: usize>(epf_row: EpfRow) {
                     let mut acc0 = tmp.add(v1.sub(v0).abs());
                     let mut acc1 = tmp.add(v3.sub(v4).abs());
 
-                    let v1_left = *input_rows.get(dx - 1, 2);
-                    let v2_left = *input_rows.get(dx - 1, 3);
-                    let v3_left = *input_rows.get(dx - 1, 4);
-                    let v1_right = *input_rows.get(dx + 4, 2);
-                    let v2_right = *input_rows.get(dx + 4, 3);
-                    let v3_right = *input_rows.get(dx + 4, 4);
+                    let v1_left = input_rows.get(dx - 1, 2);
+                    let v2_left = input_rows.get(dx - 1, 3);
+                    let v3_left = input_rows.get(dx - 1, 4);
+                    let v1_right = input_rows.get(dx + 4, 2);
+                    let v2_right = input_rows.get(dx + 4, 3);
+                    let v3_right = input_rows.get(dx + 4, 4);
 
                     let v1_left = _mm_castsi128_ps(_mm_insert_epi32::<0>(
                         _mm_slli_si128::<4>(_mm_castps_si128(v1)),

@@ -89,12 +89,11 @@ impl FrameBuffer {
                     }
 
                     buf[idx] = match g {
-                        ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
-                        ImageBuffer::I32(g) => {
-                            bit_depth[c].parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
-                        }
+                        ImageBuffer::F32(g) => g.try_get_ref(x, y).copied().unwrap_or(0.0),
+                        ImageBuffer::I32(g) => bit_depth[c]
+                            .parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0)),
                         ImageBuffer::I16(g) => bit_depth[c]
-                            .parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32),
+                            .parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0) as i32),
                     };
                 }
             }
@@ -438,12 +437,12 @@ mod private {
         #[inline]
         fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
             *self = match grid {
-                ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                ImageBuffer::F32(g) => g.try_get_ref(x, y).copied().unwrap_or(0.0),
                 ImageBuffer::I32(g) => {
-                    bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                    bit_depth.parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0))
                 }
                 ImageBuffer::I16(g) => {
-                    bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
+                    bit_depth.parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0) as i32)
                 }
             };
         }
@@ -464,20 +463,22 @@ mod private {
                 }
             ) {
                 *self = match grid {
-                    ImageBuffer::F32(g) => (g.get(x, y).copied().unwrap_or(0.0) * 65535.0 + 0.5)
+                    ImageBuffer::F32(g) => (g.try_get_ref(x, y).copied().unwrap_or(0.0) * 65535.0
+                        + 0.5)
                         .clamp(0.0, 65535.0) as u16,
-                    ImageBuffer::I32(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 65535) as u16,
-                    ImageBuffer::I16(g) => g.get(x, y).copied().unwrap_or(0).max(0) as u16,
+                    ImageBuffer::I32(g) => {
+                        g.try_get_ref(x, y).copied().unwrap_or(0).clamp(0, 65535) as u16
+                    }
+                    ImageBuffer::I16(g) => g.try_get_ref(x, y).copied().unwrap_or(0).max(0) as u16,
                 };
             } else {
                 let flt = match grid {
-                    ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                    ImageBuffer::F32(g) => g.try_get_ref(x, y).copied().unwrap_or(0.0),
                     ImageBuffer::I32(g) => {
-                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                        bit_depth.parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0))
                     }
-                    ImageBuffer::I16(g) => {
-                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
-                    }
+                    ImageBuffer::I16(g) => bit_depth
+                        .parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0) as i32),
                 };
                 self.copy_from_f32(flt);
             }
@@ -494,21 +495,24 @@ mod private {
         fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
             if matches!(bit_depth, BitDepth::IntegerSample { bits_per_sample: 8 }) {
                 *self = match grid {
-                    ImageBuffer::F32(g) => {
-                        (g.get(x, y).copied().unwrap_or(0.0) * 255.0 + 0.5).clamp(0.0, 255.0) as u8
+                    ImageBuffer::F32(g) => (g.try_get_ref(x, y).copied().unwrap_or(0.0) * 255.0
+                        + 0.5)
+                        .clamp(0.0, 255.0) as u8,
+                    ImageBuffer::I32(g) => {
+                        g.try_get_ref(x, y).copied().unwrap_or(0).clamp(0, 255) as u8
                     }
-                    ImageBuffer::I32(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 255) as u8,
-                    ImageBuffer::I16(g) => g.get(x, y).copied().unwrap_or(0).clamp(0, 255) as u8,
+                    ImageBuffer::I16(g) => {
+                        g.try_get_ref(x, y).copied().unwrap_or(0).clamp(0, 255) as u8
+                    }
                 };
             } else {
                 let flt = match grid {
-                    ImageBuffer::F32(g) => g.get(x, y).copied().unwrap_or(0.0),
+                    ImageBuffer::F32(g) => g.try_get_ref(x, y).copied().unwrap_or(0.0),
                     ImageBuffer::I32(g) => {
-                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0))
+                        bit_depth.parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0))
                     }
-                    ImageBuffer::I16(g) => {
-                        bit_depth.parse_integer_sample(g.get(x, y).copied().unwrap_or(0) as i32)
-                    }
+                    ImageBuffer::I16(g) => bit_depth
+                        .parse_integer_sample(g.try_get_ref(x, y).copied().unwrap_or(0) as i32),
                 };
                 self.copy_from_f32(flt);
             }

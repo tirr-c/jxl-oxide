@@ -369,8 +369,8 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                             let q_y = y % 8;
                             for x in 0..width {
                                 let cfl_x = x / 64;
-                                let factor = *cfl_factor.get(cfl_x, cfl_y);
-                                let coeff_y = *coeff_y.get(x, y).unwrap();
+                                let factor = cfl_factor.get(cfl_x, cfl_y);
+                                let coeff_y = coeff_y.get(x, y);
 
                                 // Dequant matrix is transposed.
                                 let q_x = x % 8;
@@ -382,7 +382,7 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                                     (q * scale_factor + rounding_const) >> CFL_FIXED_POINT_BITS;
                                 let cfl_factor =
                                     (coeff_y * q_scale + rounding_const) >> CFL_FIXED_POINT_BITS;
-                                *coeff.get_mut(x, y).unwrap() += cfl_factor;
+                                *coeff.get_mut(x, y) += cfl_factor;
                             }
                         }
                     }

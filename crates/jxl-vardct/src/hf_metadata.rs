@@ -122,8 +122,8 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
             x = 0usize;
 
             while x < bw {
-                if !block_info.get(x, y).unwrap().is_occupied() {
-                    let Some(&dct_select) = block_info_raw.get(data_idx, 0) else {
+                if !block_info.get(x, y).is_occupied() {
+                    let Some(&dct_select) = block_info_raw.try_get_ref(data_idx, 0) else {
                         tracing::error!(lf_group_idx, x, y, "BlockInfo doesn't fill LF group");
                         return Err(jxl_bitstream::Error::ValidationFailed(
                             "BlockInfo doesn't fill LF group",
@@ -131,7 +131,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                         .into());
                     };
                     let dct_select = TransformType::try_from(dct_select as u8)?;
-                    let mul = *block_info_raw.get(data_idx, 1).unwrap();
+                    let mul = block_info_raw.get(data_idx, 1);
                     let hf_mul = mul + 1;
                     if hf_mul <= 0 {
                         tracing::error!(lf_group_idx, x, y, hf_mul, "non-positive HfMul");
@@ -161,7 +161,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                         epf.map(|(quant_mul, sharp_lut)| (quant_mul / hf_mul as f32, sharp_lut));
                     for dy in 0..dh as usize {
                         for dx in 0..dw as usize {
-                            if let Some(info) = block_info.get(x + dx, y + dy) {
+                            if let Some(info) = block_info.try_get_ref(x + dx, y + dy) {
                                 if info.is_occupied() {
                                     tracing::error!(
                                         lf_group_idx,
@@ -191,7 +191,7 @@ impl Bundle<HfMetadataParams<'_, '_, '_>> for HfMetadata {
                                 .into());
                             };
 
-                            *block_info.get_mut(x + dx, y + dy).unwrap() = if dx == 0 && dy == 0 {
+                            *block_info.get_mut(x + dx, y + dy) = if dx == 0 && dy == 0 {
                                 BlockInfo::Data { dct_select, hf_mul }
                             } else {
                                 BlockInfo::Occupied

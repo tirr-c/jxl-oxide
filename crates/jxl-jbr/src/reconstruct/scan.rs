@@ -470,7 +470,6 @@ impl super::JpegBitstreamReconstructor<'_, '_, '_> {
                             let dc_coeff = (si.ss == 0).then(|| {
                                 let dc_coeff = lf_quant
                                     .get(x_dc, y_dc)
-                                    .unwrap()
                                     .saturating_sub(dc_offset)
                                     .clamp(-2047, 2047);
                                 dc_coeff >> al
@@ -479,7 +478,7 @@ impl super::JpegBitstreamReconstructor<'_, '_, '_> {
                             let mut ac_coeffs: Vec<i16> = Vec::with_capacity((se - ss) as usize);
                             for &(x, y) in &jxl_vardct::DCT8_NATURAL_ORDER[ss as usize..se as usize]
                             {
-                                let coeff = *hf_coeff.get(x as usize, y as usize) as i16;
+                                let coeff = hf_coeff.get(x as usize, y as usize) as i16;
                                 let coeff = if coeff < 0 {
                                     -((-coeff) >> al)
                                 } else {

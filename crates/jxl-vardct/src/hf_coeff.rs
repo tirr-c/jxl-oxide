@@ -100,7 +100,7 @@ pub fn write_hf_coeff<S: Sample>(
             let BlockInfo::Data {
                 dct_select,
                 hf_mul: qf,
-            } = *block_info.get(x, y)
+            } = block_info.get(x, y)
             else {
                 continue;
             };
@@ -117,7 +117,7 @@ pub fn write_hf_coeff<S: Sample>(
 
                     let x = x >> hshifts[c];
                     let y = y >> vshifts[c];
-                    let q = *lf_quant[c].get(x, y);
+                    let q = lf_quant[c].get(x, y);
                     for &threshold in lf_thresholds {
                         if q.to_i32() > threshold {
                             idx += 1;
@@ -237,7 +237,7 @@ pub fn write_hf_coeff<S: Sample>(
 
                     // We only need atomicity here.
                     coeff_grid
-                        .get(x, y)
+                        .get_ref(x, y)
                         .fetch_add(coeff, std::sync::atomic::Ordering::Relaxed);
 
                     is_prev_coeff_nonzero = 1;

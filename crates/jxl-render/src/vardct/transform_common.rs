@@ -46,11 +46,11 @@ pub unsafe fn transform_varblocks_inner(
                     Hornuss | Dct2 | Dct4 | Dct8x4 | Dct4x8 | Dct8 | Afv0 | Afv1 | Afv2 | Afv3
                 ) {
                     debug_assert_eq!(bw * bh, 1);
-                    *out.get_mut(0, 0) = *lf.get(shifted_bx, shifted_by);
+                    *out.get_mut(0, 0) = lf.get(shifted_bx, shifted_by);
                 } else {
                     for y in 0..bh {
                         for x in 0..bw {
-                            *out.get_mut(x, y) = *lf.get(shifted_bx + x, shifted_by + y);
+                            *out.get_mut(x, y) = lf.get(shifted_bx + x, shifted_by + y);
                         }
                     }
                     unsafe {

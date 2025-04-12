@@ -46,12 +46,12 @@ pub fn render_noise(
     lut[8] = params.lut[7];
     for fy in 0..height {
         let y = fy + top;
-        let row_x = grid_x.get_row_mut(fy).unwrap();
-        let row_y = grid_y.get_row_mut(fy).unwrap();
-        let row_b = grid_b.get_row_mut(fy).unwrap();
-        let row_noise_x = noise_buffer[0].get_row(y).unwrap();
-        let row_noise_y = noise_buffer[1].get_row(y).unwrap();
-        let row_noise_b = noise_buffer[2].get_row(y).unwrap();
+        let row_x = grid_x.get_row_mut(fy);
+        let row_y = grid_y.get_row_mut(fy);
+        let row_b = grid_b.get_row_mut(fy);
+        let row_noise_x = noise_buffer[0].get_row(y);
+        let row_noise_y = noise_buffer[1].get_row(y);
+        let row_noise_b = noise_buffer[2].get_row(y);
 
         for fx in 0..width {
             let x = fx + left;
@@ -255,9 +255,7 @@ fn convolve_fill(
         let l = adjacent_groups[0];
         let r = adjacent_groups[2];
         for offset_y in -2..0 {
-            let out = rows
-                .get_row_mut(2usize.wrapping_add_signed(offset_y))
-                .unwrap();
+            let out = rows.get_row_mut(2usize.wrapping_add_signed(offset_y));
             let c = c.get_row(c.height().wrapping_add_signed(offset_y));
             let l = l
                 .as_ref()
@@ -273,9 +271,7 @@ fn convolve_fill(
         let r = adjacent_groups[5];
         for offset_y in -2..0 {
             let y = (-(offset_y + 1)) as usize;
-            let out = rows
-                .get_row_mut(2usize.wrapping_add_signed(offset_y))
-                .unwrap();
+            let out = rows.get_row_mut(2usize.wrapping_add_signed(offset_y));
             let c = c.get_row(y);
             let l = l.as_ref().map(|l| l.get_row(y));
             let r = r.as_ref().map(|r| r.get_row(y));
@@ -290,13 +286,13 @@ fn convolve_fill(
         let l = l.as_ref().map(|l| l.get_row(0));
         let r = r.as_ref().map(|r| r.get_row(0));
         for y in 0..2 {
-            let out = rows.get_row_mut(y).unwrap();
+            let out = rows.get_row_mut(y);
             fill_padded_row(out, c, l, r);
         }
     }
 
     for y in 0..3 {
-        let out = rows.get_row_mut(2 + y).unwrap();
+        let out = rows.get_row_mut(2 + y);
         fill_once(out, y, adjacent_groups);
     }
 
@@ -320,7 +316,7 @@ fn convolve_fill(
         if y != height - 1 {
             let next_y = y + 3;
             let fill_y = (next_y + 2) % 5;
-            fill_once(rows.get_row_mut(fill_y).unwrap(), next_y, adjacent_groups);
+            fill_once(rows.get_row_mut(fill_y), next_y, adjacent_groups);
         }
     }
 
