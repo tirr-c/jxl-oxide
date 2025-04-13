@@ -1,10 +1,10 @@
 use super::box_header::*;
-use super::{BitstreamKind, ContainerDetectingReader, DetectState, JxlpIndexState};
+use super::{BitstreamKind, ContainerParser, DetectState, JxlpIndexState};
 use crate::error::{BitstreamResult, Error};
 
 /// Iterator that reads over a buffer and emits parser events.
 pub struct ParseEvents<'inner, 'buf> {
-    inner: &'inner mut ContainerDetectingReader,
+    inner: &'inner mut ContainerParser,
     remaining_input: &'buf [u8],
     finished: bool,
 }
@@ -13,7 +13,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
     const CODESTREAM_SIG: [u8; 2] = [0xff, 0x0a];
     const CONTAINER_SIG: [u8; 12] = [0, 0, 0, 0xc, b'J', b'X', b'L', b' ', 0xd, 0xa, 0x87, 0xa];
 
-    pub(super) fn new(parser: &'inner mut ContainerDetectingReader, input: &'buf [u8]) -> Self {
+    pub(super) fn new(parser: &'inner mut ContainerParser, input: &'buf [u8]) -> Self {
         parser.previous_consumed_bytes = 0;
         Self {
             inner: parser,
@@ -341,13 +341,23 @@ pub enum ParseEvent<'buf> {
     /// Returned data may be partial. Complete codestream can be obtained by concatenating all data
     /// of `Codestream` events.
     Codestream(&'buf [u8]),
+    /// No more auxiliary box will come after this event.
     NoMoreAuxBox,
+    /// New auxiliary box starts.
     AuxBoxStart {
+        /// Type of this box.
         ty: ContainerBoxType,
+        /// Indicates whether the payload is Brotli-compressed.
         brotli_compressed: bool,
+        /// Indicates whether this box is the last box of the bitstream.
         last_box: bool,
     },
+    /// Auxiliary box data is read.
+    ///
+    /// Returned data may be partial. Complete box payload can be obtained by concatenating all
+    /// data between corresponding `AuxBoxStart` and `AuxBoxEnd` events.
     AuxBoxData(ContainerBoxType, &'buf [u8]),
+    /// Current auxiliary box has ended.
     AuxBoxEnd(ContainerBoxType),
 }
 
