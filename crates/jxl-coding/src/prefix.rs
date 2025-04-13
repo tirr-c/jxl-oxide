@@ -21,6 +21,10 @@ struct Entry {
     symbol_or_offset: u16,
 }
 
+const _: () = {
+    ["size of `struct Entry`"][std::mem::size_of::<Entry>() - 4];
+};
+
 impl Histogram {
     fn with_code_lengths(code_lengths: Vec<u8>) -> CodingResult<Self> {
         let mut syms_for_length = Vec::with_capacity(MAX_PREFIX_BITS);
@@ -378,13 +382,5 @@ fn vec_reverse_bits(v: &[Entry], out: &mut Vec<Entry>) {
         let rev_idx = idx.reverse_bits() >> shift;
         let entry = v[rev_idx];
         out.push(entry);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn type_size() {
-        assert_eq!(std::mem::size_of::<super::Entry>(), 4);
     }
 }

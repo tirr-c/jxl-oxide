@@ -1,4 +1,4 @@
-//! Internal crate used in jxl-oxide, for abstraction of thread pool.
+//! Abstraction of thread pools, intended to be used in jxl-oxide.
 //!
 //! [`JxlThreadPool`] is re-exported by `jxl-oxide`.
 

@@ -1,4 +1,5 @@
 //! This crate provides [`AlignedGrid`], used in various places involving images.
+
 mod alloc_tracker;
 mod mutable_subgrid;
 mod shared_subgrid;

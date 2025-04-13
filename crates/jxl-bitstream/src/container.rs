@@ -6,7 +6,7 @@ mod parse;
 pub use box_header::*;
 pub use parse::*;
 
-/// Wrapper that detects container format from underlying reader.
+/// Parser that detects the kind of bitstream and emits parser events.
 #[derive(Debug, Default)]
 pub struct ContainerParser {
     state: DetectState,

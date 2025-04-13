@@ -22,6 +22,10 @@ struct Bucket {
     alias_dist_xor: u16,
 }
 
+const _: () = {
+    ["size of `struct Bucket`"][std::mem::size_of::<Bucket>() - 8];
+};
+
 impl Histogram {
     // log_alphabet_size: 5 + u(2)
     pub fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> CodingResult<Self> {
