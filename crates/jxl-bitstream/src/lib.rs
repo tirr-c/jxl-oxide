@@ -1,5 +1,14 @@
-//! This crate provides a JPEG XL bitstream reader. The bitstream reader supports both bare codestream
-//! and container format, and it can detect which format to read.
+//! This crate provides a JPEG XL bitstream reader and container format parser.
+//!
+//! # Bitstream reader
+//!
+//! [`Bitstream`] reads all the raw bits needed to decode JPEG XL codestream. It provides methods
+//! to read data types that appear on the JPEG XL specification.
+//!
+//! # Container parser
+//!
+//! [`ContainerParser`] tries to parse the bytes fed into it, and emits various parser events
+//! including codestream data and auxiliary box data.
 
 mod bitstream;
 pub mod container;
