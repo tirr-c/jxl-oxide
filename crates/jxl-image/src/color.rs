@@ -1,7 +1,7 @@
 //! Types related to color encoding.
 
 #![allow(clippy::excessive_precision)]
-use jxl_bitstream::{Bitstream, Error, Result};
+use jxl_bitstream::{Bitstream, BitstreamResult, Error};
 use jxl_oxide_common::{Bundle, define_bundle};
 
 /// Color encoding, either represented by enum values, or a signal of existence of ICC profile.
@@ -22,7 +22,7 @@ impl Default for ColourEncoding {
 impl<Ctx> Bundle<Ctx> for ColourEncoding {
     type Error = jxl_bitstream::Error;
 
-    fn parse(bitstream: &mut Bitstream, _: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _: Ctx) -> BitstreamResult<Self> {
         let all_default = bitstream.read_bool()?;
         Ok(if all_default {
             Self::default()
@@ -410,7 +410,7 @@ pub enum WhitePoint {
 impl<Ctx> Bundle<Ctx> for WhitePoint {
     type Error = Error;
 
-    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> BitstreamResult<Self> {
         let d = bitstream.read_enum::<WhitePointDiscriminator>()?;
         Ok(match d {
             WhitePointDiscriminator::D65 => Self::D65,
@@ -470,7 +470,7 @@ pub enum Primaries {
 impl<Ctx> Bundle<Ctx> for Primaries {
     type Error = Error;
 
-    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> BitstreamResult<Self> {
         let d = bitstream.read_enum::<PrimariesDiscriminator>()?;
         Ok(match d {
             PrimariesDiscriminator::Srgb => Self::Srgb,
@@ -577,7 +577,7 @@ impl TryFrom<u32> for TransferFunction {
 impl<Ctx> Bundle<Ctx> for TransferFunction {
     type Error = Error;
 
-    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> Result<Self> {
+    fn parse(bitstream: &mut Bitstream, _ctx: Ctx) -> BitstreamResult<Self> {
         let has_gamma = bitstream.read_bool()?;
         if has_gamma {
             let gamma = bitstream.read_bits(24)?;

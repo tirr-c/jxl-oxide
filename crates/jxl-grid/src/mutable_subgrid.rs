@@ -13,6 +13,7 @@ pub struct MutableSubgrid<'g, V = f32> {
     _marker: std::marker::PhantomData<&'g mut [V]>,
 }
 
+// SAFETY: All `MutableSubgrid`s are disjoint, so they're semantically identical as `&mut [V]`.
 unsafe impl<'g, V> Send for MutableSubgrid<'g, V> where &'g mut [V]: Send {}
 unsafe impl<'g, V> Sync for MutableSubgrid<'g, V> where &'g mut [V]: Sync {}
 
@@ -25,11 +26,11 @@ impl<'g, V> From<&'g mut crate::AlignedGrid<V>> for MutableSubgrid<'g, V> {
 }
 
 impl<'g, V> MutableSubgrid<'g, V> {
-    /// Create a `CutGrid` from raw pointer to the buffer, width, height and stride.
+    /// Create a mutable subgrid from raw pointer to the buffer, width, height and stride.
     ///
     /// # Safety
     /// The area specified by `width`, `height` and `stride` must not overlap with other instances
-    /// of `CutGrid`, and the memory region in the area must be valid.
+    /// of other subgrids, and the memory region in the area must be valid.
     ///
     /// # Panics
     /// Panics if `width > stride`.
@@ -45,6 +46,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
+    /// Creates a empty, zero-sized subgrid that points to nowhere.
     pub fn empty() -> Self {
         Self {
             ptr: NonNull::dangling(),
@@ -56,7 +58,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
-    /// Create a `CutGrid` from buffer slice, width, height and stride.
+    /// Create a `MutableSubgrid` from buffer slice, width, height and stride.
     ///
     /// # Panic
     /// Panics if:
@@ -80,37 +82,40 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
-    #[inline]
-    pub fn into_ptr(self) -> NonNull<V> {
-        self.ptr
-    }
-
+    /// Returns the width of the subgrid.
     #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the subgrid.
     #[inline]
     pub fn height(&self) -> usize {
         self.height
     }
 
     #[inline]
-    pub fn stride(&self) -> usize {
-        self.stride
+    fn get_ptr(&self, x: usize, y: usize) -> *mut V {
+        let width = self.width;
+        let height = self.height;
+        let Some(ptr) = self.try_get_ptr(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        ptr
     }
 
     #[inline]
-    fn get_ptr(&self, x: usize, y: usize) -> *mut V {
+    fn try_get_ptr(&self, x: usize, y: usize) -> Option<*mut V> {
         if x >= self.width || y >= self.height {
-            panic!(
-                "Coordinate out of range: ({}, {}) not in {}x{}",
-                x, y, self.width, self.height
-            );
+            return None;
         }
 
         // SAFETY: (x, y) is checked above and is in bounds.
-        unsafe { self.get_ptr_unchecked(x, y) }
+        Some(unsafe {
+            let offset = y * self.stride + x;
+            self.ptr.as_ptr().add(offset)
+        })
     }
 
     #[inline]
@@ -119,48 +124,114 @@ impl<'g, V> MutableSubgrid<'g, V> {
         unsafe { self.ptr.as_ptr().add(offset) }
     }
 
+    /// Returns a reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
+    #[inline]
+    pub fn get_ref(&self, x: usize, y: usize) -> &V {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_ref(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
+    }
+
+    /// Returns a reference to the sample at the given location, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_ref(&self, x: usize, y: usize) -> Option<&V> {
+        // SAFETY: try_get_ptr returns a valid pointer.
+        self.try_get_ptr(x, y).map(|ptr| unsafe { &*ptr })
+    }
+
+    /// Returns a slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
     pub fn get_row(&self, row: usize) -> &[V] {
-        assert!(
-            row < self.height,
-            "Row index out of range: height is {} but index is {}",
-            self.height,
-            row,
-        );
+        let height = self.height;
+        let Some(slice) = self.try_get_row(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row(&self, row: usize) -> Option<&[V]> {
+        if row >= self.height {
+            return None;
+        }
 
         // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
-        unsafe {
+        Some(unsafe {
             let offset = row * self.stride;
             let ptr = self.ptr.as_ptr().add(offset);
             std::slice::from_raw_parts(ptr as *const _, self.width)
-        }
+        })
     }
 
+    /// Returns a mutable reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
     pub fn get_mut(&mut self, x: usize, y: usize) -> &mut V {
-        let ptr = self.get_ptr(x, y);
-        // SAFETY: get_ptr returns a valid pointer, and mutable borrow of `self` makes sure that
-        // the access is exclusive.
-        unsafe { ptr.as_mut().unwrap() }
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_mut(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
     }
 
+    /// Returns a mutable reference to the sample at the given location, or `None` if it is out of
+    /// bounds.
+    #[inline]
+    pub fn try_get_mut(&mut self, x: usize, y: usize) -> Option<&mut V> {
+        // SAFETY: get_ptr returns a valid pointer, and mutable borrow of `self` makes sure that
+        // the access is exclusive.
+        self.try_get_ptr(x, y).map(|ptr| unsafe { &mut *ptr })
+    }
+
+    /// Returns a mutable slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
     pub fn get_row_mut(&mut self, row: usize) -> &mut [V] {
-        assert!(
-            row < self.height,
-            "Row index out of range: height is {} but index is {}",
-            self.height,
-            row,
-        );
+        let height = self.height;
+        let Some(slice) = self.try_get_row_mut(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a mutable slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row_mut(&mut self, row: usize) -> Option<&mut [V]> {
+        if row >= self.height {
+            return None;
+        }
 
         // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
-        unsafe {
+        Some(unsafe {
             let offset = row * self.stride;
             let ptr = self.ptr.as_ptr().add(offset);
             std::slice::from_raw_parts_mut(ptr, self.width)
-        }
+        })
     }
 
+    /// Swaps two samples at the given locations.
+    ///
+    /// # Panics
+    /// Panics if either one of the locations is out of bounds.
     #[inline]
     pub fn swap(&mut self, (ax, ay): (usize, usize), (bx, by): (usize, usize)) {
         let a = self.get_ptr(ax, ay);
@@ -174,28 +245,23 @@ impl<'g, V> MutableSubgrid<'g, V> {
             std::ptr::swap(a, b);
         }
     }
-}
 
-impl<V: Copy> MutableSubgrid<'_, V> {
-    #[inline]
-    pub fn get(&self, x: usize, y: usize) -> V {
-        let ptr = self.get_ptr(x, y);
-        // SAFETY: get_ptr returns a valid pointer.
-        unsafe { *ptr }
-    }
-}
-
-impl<'g, V> MutableSubgrid<'g, V> {
+    /// Reborrows the mutable subgrid, and returns a mutable subgrid with shorter lifetime.
     pub fn borrow_mut(&mut self) -> MutableSubgrid<V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
         unsafe { MutableSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
+    /// Reborrows the mutable subgrid, and returns a shared subgrid.
     pub fn as_shared(&self) -> SharedSubgrid<V> {
         // SAFETY: We have unique reference to the grid.
         unsafe { SharedSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
+    /// Creates a subgrid of this subgrid.
+    ///
+    /// # Panics
+    /// Panics if the range is out of bounds.
     pub fn subgrid(
         self,
         range_x: impl RangeBounds<usize>,
@@ -321,6 +387,16 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
     }
 
+    /// Merges the subgrid with another subgrid horizontally.
+    ///
+    /// Two subgrids must be previously split from a subgrid using [`split_horizontal`] or
+    /// [`split_horizontal_in_place`].
+    ///
+    /// # Panics
+    /// Panics if two subgrids have not been split from the same subgrid.
+    ///
+    /// [`split_horizontal`]: Self::split_horizontal
+    /// [`split_horizontal_in_place`]: Self::split_horizontal_in_place
     pub fn merge_horizontal_in_place(&mut self, right: Self) {
         assert!(self.split_base.is_some());
         assert_eq!(self.split_base, right.split_base);
@@ -338,6 +414,16 @@ impl<'g, V> MutableSubgrid<'g, V> {
         self.width += right_width;
     }
 
+    /// Merges the subgrid with another subgrid vertically.
+    ///
+    /// Two subgrids must be previously split from a subgrid using [`split_vertical`] or
+    /// [`split_vertical_in_place`].
+    ///
+    /// # Panics
+    /// Panics if two subgrids have not been split from the same subgrid.
+    ///
+    /// [`split_vertical`]: Self::split_vertical
+    /// [`split_vertical_in_place`]: Self::split_vertical_in_place
     pub fn merge_vertical_in_place(&mut self, bottom: Self) {
         assert!(self.split_base.is_some());
         assert_eq!(self.split_base, bottom.split_base);
@@ -355,7 +441,24 @@ impl<'g, V> MutableSubgrid<'g, V> {
     }
 }
 
-impl<'g, V: Copy> MutableSubgrid<'g, V> {
+impl<V: Copy> MutableSubgrid<'_, V> {
+    /// Returns a copy of sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of range.
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> V {
+        *self.get_ref(x, y)
+    }
+}
+
+impl<'g, V> MutableSubgrid<'g, V> {
+    /// Returns a list of subgrids split into groups of given size, in row-first order.
+    ///
+    /// Groups at the edge of the grid may have smaller sizes.
+    ///
+    /// # Panics
+    /// Panics if either `group_width` or `group_height` is zero.
     pub fn into_groups(
         self,
         group_width: usize,
@@ -371,6 +474,12 @@ impl<'g, V: Copy> MutableSubgrid<'g, V> {
         self.into_groups_with_fixed_count(group_width, group_height, num_cols, num_rows)
     }
 
+    /// Returns a list of subgrids split into groups of given size, with `num_rows` rows and
+    /// `num_cols` columns, in row-first order.
+    ///
+    /// Unlike `into_groups`, this method will always return vector of length
+    /// `num_cols * num_rows`. Remaining rows or columns will be truncated, and groups out of
+    /// bounds will be zero-sized.
     pub fn into_groups_with_fixed_count(
         self,
         group_width: usize,
@@ -410,6 +519,11 @@ impl<'g, V: Copy> MutableSubgrid<'g, V> {
 }
 
 impl MutableSubgrid<'_, f32> {
+    /// Converts the grid to a grid of SIMD vectors, or `None` if the grid is not aligned to the
+    /// SIMD vector type.
+    ///
+    /// # Panics
+    /// Panics if given SIMD vector type is not supported.
     pub fn as_vectored<V: SimdVector>(&mut self) -> Option<MutableSubgrid<'_, V>> {
         assert!(
             V::available(),

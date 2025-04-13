@@ -13,7 +13,7 @@ pub enum Error {
     InvalidSqueezeParams,
     Bitstream(jxl_bitstream::Error),
     Decoder(jxl_coding::Error),
-    Buffer(jxl_grid::Error),
+    Buffer(jxl_grid::OutOfMemory),
 }
 
 impl From<jxl_bitstream::Error> for Error {
@@ -28,8 +28,8 @@ impl From<jxl_coding::Error> for Error {
     }
 }
 
-impl From<jxl_grid::Error> for Error {
-    fn from(err: jxl_grid::Error) -> Self {
+impl From<jxl_grid::OutOfMemory> for Error {
+    fn from(err: jxl_grid::OutOfMemory) -> Self {
         Self::Buffer(err)
     }
 }

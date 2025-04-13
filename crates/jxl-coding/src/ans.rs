@@ -1,6 +1,6 @@
 use jxl_bitstream::Bitstream;
 
-use crate::{Error, Result};
+use crate::{CodingResult, Error};
 
 #[derive(Debug)]
 pub struct Histogram {
@@ -24,7 +24,7 @@ struct Bucket {
 
 impl Histogram {
     // log_alphabet_size: 5 + u(2)
-    pub fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> Result<Self> {
+    pub fn parse(bitstream: &mut Bitstream, log_alphabet_size: u32) -> CodingResult<Self> {
         #[derive(Debug)]
         struct WorkingBucket {
             dist: u16,
@@ -257,7 +257,7 @@ impl Histogram {
         })
     }
 
-    fn read_u8(bitstream: &mut Bitstream) -> Result<u8> {
+    fn read_u8(bitstream: &mut Bitstream) -> CodingResult<u8> {
         Ok(if bitstream.read_bool()? {
             let n = bitstream.read_bits(3)?;
             ((1 << n) + bitstream.read_bits(n as usize)?) as u8
@@ -269,7 +269,7 @@ impl Histogram {
 
 impl Histogram {
     #[inline(always)]
-    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> Result<u32> {
+    pub fn read_symbol(&self, bitstream: &mut Bitstream, state: &mut u32) -> CodingResult<u32> {
         assert_eq!(std::mem::size_of::<Bucket>(), 8);
         let is_le = usize::from_le(1) == 1;
 
@@ -331,7 +331,7 @@ impl Histogram {
     }
 }
 
-fn read_prefix(bitstream: &mut Bitstream) -> Result<u16> {
+fn read_prefix(bitstream: &mut Bitstream) -> CodingResult<u16> {
     Ok(match bitstream.read_bits(3)? {
         0 => 10,
         1 => {

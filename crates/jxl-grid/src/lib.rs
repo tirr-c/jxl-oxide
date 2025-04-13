@@ -1,5 +1,4 @@
-//! This crate provides [`AlignedGrid`] and [`PaddedGrid`], used in various places involving
-//! images.
+//! This crate provides [`AlignedGrid`], used in various places involving images.
 mod alloc_tracker;
 mod mutable_subgrid;
 mod shared_subgrid;
@@ -9,18 +8,28 @@ pub use mutable_subgrid::*;
 pub use shared_subgrid::*;
 pub use simd::SimdVector;
 
+/// The error type for failed grid allocation.
 #[derive(Debug)]
-pub enum Error {
-    OutOfMemory(usize),
+pub struct OutOfMemory {
+    bytes: usize,
 }
 
-impl std::error::Error for Error {}
+impl OutOfMemory {
+    fn new(bytes: usize) -> Self {
+        Self { bytes }
+    }
 
-impl std::fmt::Display for Error {
+    /// Returns the size of failed allocation in bytes.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
+impl std::error::Error for OutOfMemory {}
+
+impl std::fmt::Display for OutOfMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OutOfMemory(bytes) => write!(f, "failed to allocate {bytes} byte(s)"),
-        }
+        write!(f, "failed to allocate {} byte(s)", self.bytes)
     }
 }
 
@@ -46,6 +55,7 @@ impl<S> std::fmt::Debug for AlignedGrid<S> {
 }
 
 impl<S> AlignedGrid<S> {
+    /// Creates a zero-sized "empty" grid.
     #[inline]
     pub fn empty() -> Self {
         Self {
@@ -67,7 +77,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
         width: usize,
         height: usize,
         tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, OutOfMemory> {
         let len = width * height;
         let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
         let handle = tracker
@@ -93,7 +103,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
         width: usize,
         height: usize,
         tracker: Option<&AllocTracker>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, OutOfMemory> {
         let len = width * height;
         let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
         let handle = tracker
@@ -123,7 +133,7 @@ impl<S: Default + Clone> AlignedGrid<S> {
 
     /// Tries to clone the buffer, and records the allocation in the same tracker as the original
     /// buffer.
-    pub fn try_clone(&self) -> Result<Self, Error> {
+    pub fn try_clone(&self) -> Result<Self, OutOfMemory> {
         let mut out = Self::empty_aligned(self.width, self.height, self.tracker().as_ref())?;
         out.buf.extend_from_slice(self.buf());
         Ok(out)
@@ -131,23 +141,42 @@ impl<S: Default + Clone> AlignedGrid<S> {
 }
 
 impl<S> AlignedGrid<S> {
+    /// Returns the width of the grid.
     #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the grid.
     #[inline]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Returns allocation tracker associated with the grid.
     #[inline]
     pub fn tracker(&self) -> Option<AllocTracker> {
         self.handle.as_ref().map(|handle| handle.tracker())
     }
 
+    /// Returns a reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Option<&S> {
+    pub fn get_ref(&self, x: usize, y: usize) -> &S {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_ref(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
+    }
+
+    /// Returns a reference to the sample at the given location, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_ref(&self, x: usize, y: usize) -> Option<&S> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -155,8 +184,25 @@ impl<S> AlignedGrid<S> {
         Some(&self.buf[y * self.width + x + self.offset])
     }
 
+    /// Returns a mutable reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
+    pub fn get_mut(&mut self, x: usize, y: usize) -> &mut S {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_mut(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
+    }
+
+    /// Returns a mutable reference to the sample at the given location, or `None` if it is out of
+    /// bounds.
+    #[inline]
+    pub fn try_get_mut(&mut self, x: usize, y: usize) -> Option<&mut S> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -164,8 +210,23 @@ impl<S> AlignedGrid<S> {
         Some(&mut self.buf[y * self.width + x + self.offset])
     }
 
+    /// Returns a slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
-    pub fn get_row(&self, y: usize) -> Option<&[S]> {
+    pub fn get_row(&self, row: usize) -> &[S] {
+        let height = self.height;
+        let Some(slice) = self.try_get_row(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row(&self, y: usize) -> Option<&[S]> {
         if y >= self.height {
             return None;
         }
@@ -173,8 +234,23 @@ impl<S> AlignedGrid<S> {
         Some(&self.buf[y * self.width + self.offset..][..self.width])
     }
 
+    /// Returns a mutable slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
-    pub fn get_row_mut(&mut self, y: usize) -> Option<&mut [S]> {
+    pub fn get_row_mut(&mut self, row: usize) -> &mut [S] {
+        let height = self.height;
+        let Some(slice) = self.try_get_row_mut(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a mutable slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row_mut(&mut self, y: usize) -> Option<&mut [S]> {
         if y >= self.height {
             return None;
         }
@@ -182,112 +258,38 @@ impl<S> AlignedGrid<S> {
         Some(&mut self.buf[y * self.width + self.offset..][..self.width])
     }
 
-    /// Get the immutable slice to the underlying buffer.
+    /// Returns the immutable slice to the underlying buffer.
     #[inline]
     pub fn buf(&self) -> &[S] {
         &self.buf[self.offset..]
     }
 
-    /// Get the mutable slice to the underlying buffer.
+    /// Returns the mutable slice to the underlying buffer.
     #[inline]
     pub fn buf_mut(&mut self) -> &mut [S] {
         &mut self.buf[self.offset..]
     }
 
+    /// Borrows the grid into a `SharedSubgrid`.
     #[inline]
     pub fn as_subgrid(&self) -> SharedSubgrid<S> {
         SharedSubgrid::from(self)
     }
 
+    /// Borrows the grid into a `MutableSubgrid`.
     #[inline]
     pub fn as_subgrid_mut(&mut self) -> MutableSubgrid<S> {
         MutableSubgrid::from(self)
     }
 }
 
-/// `[AlignedGrid]` with padding.
-#[derive(Debug)]
-pub struct PaddedGrid<S: Clone> {
-    pub grid: AlignedGrid<S>,
-    padding: usize,
-}
-
-impl<S: Default + Clone> PaddedGrid<S> {
-    /// Create a new buffer.
-    pub fn with_alloc_tracker(
-        width: usize,
-        height: usize,
-        padding: usize,
-        tracker: Option<&AllocTracker>,
-    ) -> Result<Self, crate::Error> {
-        Ok(Self {
-            grid: AlignedGrid::with_alloc_tracker(
-                width + padding * 2,
-                height + padding * 2,
-                tracker,
-            )?,
-            padding,
-        })
-    }
-}
-
-impl<S: Clone> PaddedGrid<S> {
+impl<V: Copy> AlignedGrid<V> {
+    /// Returns a copy of sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of range.
     #[inline]
-    pub fn width(&self) -> usize {
-        self.grid.width - self.padding * 2
-    }
-
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.grid.height - self.padding * 2
-    }
-
-    #[inline]
-    pub fn padding(&self) -> usize {
-        self.padding
-    }
-
-    #[inline]
-    pub fn buf_padded(&self) -> &[S] {
-        self.grid.buf()
-    }
-
-    #[inline]
-    pub fn buf_padded_mut(&mut self) -> &mut [S] {
-        self.grid.buf_mut()
-    }
-
-    /// Use mirror operator on padding
-    pub fn mirror_edges_padding(&mut self) {
-        let padding = self.padding;
-        let stride = self.grid.width();
-        let height = self.grid.height() - padding * 2;
-
-        // Mirror horizontally.
-        let buf = self.grid.buf_mut();
-        for y in padding..height + padding {
-            for x in 0..padding {
-                buf[y * stride + x] = buf[y * stride + padding * 2 - x - 1].clone();
-                buf[(y + 1) * stride - x - 1] = buf[(y + 1) * stride - padding * 2 + x].clone();
-            }
-        }
-
-        // Mirror vertically.
-        let (out_chunk, in_chunk) = buf.split_at_mut(stride * padding);
-        let in_chunk = &in_chunk[..stride * padding];
-        for (out_row, in_row) in out_chunk
-            .chunks_exact_mut(stride)
-            .zip(in_chunk.chunks_exact(stride).rev())
-        {
-            out_row.clone_from_slice(in_row);
-        }
-
-        let (in_chunk, out_chunk) = buf.split_at_mut(stride * (height + padding));
-        for (out_row, in_row) in out_chunk
-            .chunks_exact_mut(stride)
-            .zip(in_chunk.chunks_exact(stride).rev())
-        {
-            out_row.clone_from_slice(in_row);
-        }
+    pub fn get(&self, x: usize, y: usize) -> V {
+        *self.get_ref(x, y)
     }
 }

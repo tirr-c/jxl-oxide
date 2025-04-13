@@ -1,6 +1,7 @@
-use jxl_grid::{AlignedGrid, AllocTracker, PaddedGrid, SharedSubgrid};
+use jxl_grid::{AlignedGrid, AllocTracker, SharedSubgrid};
 
 use crate::Region;
+use crate::util::PaddedGrid;
 
 pub fn upsample(
     grid: SharedSubgrid<f32>,

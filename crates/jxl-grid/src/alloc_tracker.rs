@@ -27,7 +27,7 @@ impl AllocTracker {
     /// Records an allocation of `count` number of `T`, and returns handle of the record.
     ///
     /// Returns an error if the allocation exceeds the current limit.
-    pub fn alloc<T>(&self, count: usize) -> Result<AllocHandle, crate::Error> {
+    pub fn alloc<T>(&self, count: usize) -> Result<AllocHandle, crate::OutOfMemory> {
         let bytes = count * std::mem::size_of::<T>();
         let result = self.inner.bytes_left.fetch_update(
             Ordering::Relaxed,
@@ -45,7 +45,7 @@ impl AllocTracker {
             }
             Err(left) => {
                 tracing::trace!(bytes, left, "Allocation failed");
-                Err(crate::Error::OutOfMemory(bytes))
+                Err(crate::OutOfMemory::new(bytes))
             }
         }
     }
@@ -59,7 +59,7 @@ impl AllocTracker {
     ///
     /// Returns an error if the total amount of current allocation doesn't allow shrinking the
     /// limit.
-    pub fn shrink_limit(&self, by_bytes: usize) -> Result<(), crate::Error> {
+    pub fn shrink_limit(&self, by_bytes: usize) -> Result<(), crate::OutOfMemory> {
         let result = self.inner.bytes_left.fetch_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
@@ -69,7 +69,7 @@ impl AllocTracker {
         if result.is_ok() {
             Ok(())
         } else {
-            Err(crate::Error::OutOfMemory(by_bytes))
+            Err(crate::OutOfMemory::new(by_bytes))
         }
     }
 }

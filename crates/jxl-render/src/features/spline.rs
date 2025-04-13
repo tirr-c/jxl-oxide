@@ -228,7 +228,7 @@ pub fn render_spline(
                             continue;
                         }
 
-                        let Some(sample) = buffer.get_mut(fx as usize, fy as usize) else {
+                        let Some(sample) = buffer.try_get_mut(fx as usize, fy as usize) else {
                             break;
                         };
                         let dx = (x as f32) - arc.point.x;

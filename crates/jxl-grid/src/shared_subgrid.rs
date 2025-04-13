@@ -2,6 +2,7 @@ use std::{ops::RangeBounds, ptr::NonNull, sync::atomic::AtomicI32};
 
 use crate::SimdVector;
 
+/// An immutable shared subgrid of the underlying buffer.
 #[derive(Debug, Copy, Clone)]
 pub struct SharedSubgrid<'g, V = f32> {
     ptr: NonNull<V>,
@@ -58,11 +59,13 @@ impl<'g, V> SharedSubgrid<'g, V> {
         }
     }
 
+    /// Returns the width of the subgrid.
     #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the subgrid.
     #[inline]
     pub fn height(&self) -> usize {
         self.height
@@ -70,46 +73,79 @@ impl<'g, V> SharedSubgrid<'g, V> {
 
     #[inline]
     fn get_ptr(&self, x: usize, y: usize) -> *mut V {
+        let width = self.width;
+        let height = self.height;
+        let Some(ptr) = self.try_get_ptr(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        ptr
+    }
+
+    #[inline]
+    fn try_get_ptr(&self, x: usize, y: usize) -> Option<*mut V> {
         if x >= self.width || y >= self.height {
-            panic!(
-                "Coordinate out of range: ({}, {}) not in {}x{}",
-                x, y, self.width, self.height
-            );
+            return None;
         }
 
         // SAFETY: (x, y) is checked above and is in bounds.
-        unsafe {
+        Some(unsafe {
             let offset = y * self.stride + x;
             self.ptr.as_ptr().add(offset)
-        }
+        })
     }
 
+    /// Returns a reference to the sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of bounds.
     #[inline]
-    pub fn get(&self, x: usize, y: usize) -> &V {
-        let ptr = self.get_ptr(x, y);
-        // SAFETY: get_ptr returns a valid pointer.
-        unsafe { ptr.as_ref().unwrap() }
+    pub fn get_ref(&self, x: usize, y: usize) -> &V {
+        let width = self.width;
+        let height = self.height;
+        let Some(r) = self.try_get_ref(x, y) else {
+            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
+        };
+
+        r
     }
 
+    /// Returns a reference to the sample at the given location, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_ref(&self, x: usize, y: usize) -> Option<&V> {
+        // SAFETY: try_get_ptr returns a valid pointer.
+        self.try_get_ptr(x, y).map(|ptr| unsafe { &*ptr })
+    }
+
+    /// Returns a slice of a row of samples.
+    ///
+    /// # Panics
+    /// Panics if the row index is out of bounds.
     #[inline]
     pub fn get_row(&self, row: usize) -> &[V] {
-        assert!(
-            row < self.height,
-            "Row index out of range: height is {} but index is {}",
-            self.height,
-            row,
-        );
+        let height = self.height;
+        let Some(slice) = self.try_get_row(row) else {
+            panic!("row index out of range: height is {height} but index is {row}");
+        };
+
+        slice
+    }
+
+    /// Returns a slice of a row of samples, or `None` if it is out of bounds.
+    #[inline]
+    pub fn try_get_row(&self, row: usize) -> Option<&[V]> {
+        if row >= self.height {
+            return None;
+        }
 
         // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
-        unsafe {
+        Some(unsafe {
             let offset = row * self.stride;
             let ptr = self.ptr.as_ptr().add(offset);
             std::slice::from_raw_parts(ptr as *const _, self.width)
-        }
+        })
     }
-}
 
-impl<'g, V> SharedSubgrid<'g, V> {
     /// Split the grid horizontally at an index.
     ///
     /// # Panics
@@ -146,6 +182,10 @@ impl<'g, V> SharedSubgrid<'g, V> {
         }
     }
 
+    /// Creates a subgrid of this subgrid.
+    ///
+    /// # Panics
+    /// Panics if the range is out of bounds.
     pub fn subgrid(
         &self,
         range_x: impl RangeBounds<usize>,
@@ -186,7 +226,23 @@ impl<'g, V> SharedSubgrid<'g, V> {
     }
 }
 
+impl<V: Copy> SharedSubgrid<'_, V> {
+    /// Returns a copy of sample at the given location.
+    ///
+    /// # Panics
+    /// Panics if the coordinate is out of range.
+    #[inline]
+    pub fn get(&self, x: usize, y: usize) -> V {
+        *self.get_ref(x, y)
+    }
+}
+
 impl<'g> SharedSubgrid<'g, f32> {
+    /// Converts the grid to a grid of SIMD vectors, or `None` if the grid is not aligned to the
+    /// SIMD vector type.
+    ///
+    /// # Panics
+    /// Panics if given SIMD vector type is not supported.
     pub fn as_vectored<V: SimdVector>(&self) -> Option<SharedSubgrid<'g, V>> {
         assert!(
             V::available(),

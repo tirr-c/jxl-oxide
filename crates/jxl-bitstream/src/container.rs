@@ -1,9 +1,10 @@
-pub mod box_header;
-pub mod parse;
+//! Types for JPEG XL container format.
 
-use box_header::*;
-pub use parse::ParseEvent;
-use parse::*;
+mod box_header;
+mod parse;
+
+pub use box_header::*;
+pub use parse::*;
 
 /// Wrapper that detects container format from underlying reader.
 #[derive(Debug, Default)]

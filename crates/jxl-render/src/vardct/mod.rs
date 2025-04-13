@@ -698,7 +698,7 @@ fn for_each_varblocks(
 
     for by in 0..h8 {
         for bx in 0..w8 {
-            let &BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else {
+            let BlockInfo::Data { dct_select, hf_mul } = block_info.get(bx, by) else {
                 continue;
             };
             let shifted_bx = bx >> hshift;
