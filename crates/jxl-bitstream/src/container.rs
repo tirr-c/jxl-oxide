@@ -8,7 +8,7 @@ pub use parse::*;
 
 /// Wrapper that detects container format from underlying reader.
 #[derive(Debug, Default)]
-pub struct ContainerDetectingReader {
+pub struct ContainerParser {
     state: DetectState,
     jxlp_index_state: JxlpIndexState,
     previous_consumed_bytes: usize,
@@ -54,11 +54,13 @@ enum JxlpIndexState {
     JxlpFinished,
 }
 
-impl ContainerDetectingReader {
+impl ContainerParser {
+    /// Creates a new parser.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the kind of this bitstream currently recognized.
     pub fn kind(&self) -> BitstreamKind {
         match self.state {
             DetectState::WaitingSignature => BitstreamKind::Unknown,
@@ -75,7 +77,7 @@ impl ContainerDetectingReader {
     /// many bytes are consumed. Bytes not consumed by the parser should be fed into the parser
     /// again.
     ///
-    /// [`previous_consumed_bytes`]: ContainerDetectingReader::previous_consumed_bytes
+    /// [`previous_consumed_bytes`]: Self::previous_consumed_bytes
     pub fn feed_bytes<'inner, 'buf>(
         &'inner mut self,
         input: &'buf [u8],
@@ -87,7 +89,7 @@ impl ContainerDetectingReader {
     ///
     /// Bytes not consumed by the parser should be fed into the parser again.
     ///
-    /// [`feed_bytes`]: ContainerDetectingReader::feed_bytes
+    /// [`feed_bytes`]: Self::feed_bytes
     pub fn previous_consumed_bytes(&self) -> usize {
         self.previous_consumed_bytes
     }

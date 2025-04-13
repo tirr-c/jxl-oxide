@@ -149,7 +149,7 @@
 
 use std::sync::Arc;
 
-use jxl_bitstream::{Bitstream, ContainerDetectingReader, ParseEvent};
+use jxl_bitstream::{Bitstream, ContainerParser, ParseEvent};
 use jxl_frame::FrameContext;
 use jxl_image::BitDepth;
 use jxl_oxide_common::{Bundle, Name};
@@ -219,7 +219,7 @@ impl JxlImageBuilder {
         UninitializedJxlImage {
             pool: self.pool.unwrap_or_else(default_pool),
             tracker: self.tracker,
-            reader: ContainerDetectingReader::new(),
+            reader: ContainerParser::new(),
             buffer: Vec::new(),
             aux_boxes: AuxBoxList::new(),
         }
@@ -304,7 +304,7 @@ impl JxlImageBuilder {
 pub struct UninitializedJxlImage {
     pool: JxlThreadPool,
     tracker: Option<AllocTracker>,
-    reader: ContainerDetectingReader,
+    reader: ContainerParser,
     buffer: Vec<u8>,
     aux_boxes: AuxBoxList,
 }
@@ -330,7 +330,7 @@ impl UninitializedJxlImage {
 
     /// Returns the internal reader.
     #[inline]
-    pub fn reader(&self) -> &ContainerDetectingReader {
+    pub fn reader(&self) -> &ContainerParser {
         &self.reader
     }
 
@@ -452,7 +452,7 @@ pub enum InitializeResult {
 #[derive(Debug)]
 pub struct JxlImage {
     pool: JxlThreadPool,
-    reader: ContainerDetectingReader,
+    reader: ContainerParser,
     image_header: Arc<ImageHeader>,
     ctx: RenderContext,
     render_spot_color: bool,
@@ -663,7 +663,7 @@ impl JxlImage {
     }
 
     /// Returns the internal reader.
-    pub fn reader(&self) -> &ContainerDetectingReader {
+    pub fn reader(&self) -> &ContainerParser {
         &self.reader
     }
 }
