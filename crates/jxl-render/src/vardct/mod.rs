@@ -223,7 +223,7 @@ pub(crate) fn render_vardct<S: Sample>(
     let hf_global = cache.hf_global.as_ref();
     let lf_groups = &mut cache.lf_groups;
 
-    let it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
+    let mut it = tracing::trace_span!("Prepare PassGroup").in_scope(|| {
         fb.color_groups_with_group_id(frame_header)
             .into_iter()
             .filter_map(|(group_idx, grid_xyb)| {
@@ -242,23 +242,22 @@ pub(crate) fn render_vardct<S: Sample>(
 
         let result = std::sync::RwLock::new(Result::Ok(()));
 
-        pool.scope(|scope| {
-            let global_ma_config = gmodular.ma_config.as_ref();
+        for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
+            let pass_idx = pass_idx as u32;
 
-            for (pass_idx, pass_image) in pass_group_image.into_iter().enumerate() {
-                let pass_idx = pass_idx as u32;
+            pool.scope(|scope| {
+                let global_ma_config = gmodular.ma_config.as_ref();
+
                 let mut image_it = pass_image.into_iter().enumerate();
-                for &(group_idx, ref grid_xyb, lf_group) in &it {
-                    // SAFETY: All accesses to `grid_xyb` are atomic in this Rayon scope. The scope
-                    // captures `fb_xyb` as a unique reference (via `it`), so `grid_xyb` is
-                    // accessed exclusively in this scope.
-                    let grid_xyb = grid_xyb
-                        .each_ref()
-                        .map(|grid| unsafe { grid.as_shared().as_atomic_i32() });
-
+                for &mut (group_idx, ref mut grid_xyb, lf_group) in &mut it {
                     if lf_group.hf_meta.is_none() {
                         continue;
                     }
+
+                    let mut grid_xyb = {
+                        let [x, y, b] = grid_xyb;
+                        [x, y, b].map(|grid| grid.borrow_mut().into_i32())
+                    };
 
                     let bitstream = match frame.pass_group_bitstream(pass_idx, group_idx) {
                         Some(Ok(bitstream)) => bitstream,
@@ -280,7 +279,7 @@ pub(crate) fn render_vardct<S: Sample>(
                         let vardct = Some(PassGroupParamsVardct {
                             lf_vardct: lf_global_vardct,
                             hf_global,
-                            hf_coeff_output: &grid_xyb,
+                            hf_coeff_output: &mut grid_xyb,
                         });
 
                         let r = jxl_frame::data::decode_pass_group(
@@ -303,8 +302,8 @@ pub(crate) fn render_vardct<S: Sample>(
                         }
                     });
                 }
-            }
-        });
+            });
+        }
 
         result.into_inner().unwrap()
     })?;
