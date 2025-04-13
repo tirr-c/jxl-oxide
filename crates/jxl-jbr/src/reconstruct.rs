@@ -206,17 +206,19 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
             }));
         }
 
-        let hf_coeff_output = pass_groups
-            .iter()
+        let mut hf_coeff_output = pass_groups
+            .iter_mut()
             .map(|pass_group| {
-                [1, 0, 2].map(|idx| unsafe { pass_group[idx].as_subgrid().as_atomic_i32() })
+                let [cb, y, cr] = pass_group.each_mut();
+                [y, cb, cr].map(|grid| grid.as_subgrid_mut())
             })
             .collect::<Vec<_>>();
 
-        let mut pass_group_params =
-            Vec::with_capacity(frame_header.passes.num_passes as usize * num_groups as usize);
         for pass_idx in 0..frame_header.passes.num_passes {
-            for group_idx in 0..num_groups {
+            let mut pass_group_params = Vec::with_capacity(num_groups as usize);
+
+            for (group_idx, hf_coeff_output) in hf_coeff_output.iter_mut().enumerate() {
+                let group_idx = group_idx as u32;
                 let pass_group = frame
                     .pass_group_bitstream(pass_idx, group_idx)
                     .ok_or(Error::FrameDataIncomplete)
@@ -226,7 +228,6 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                 }
                 let bitstream = pass_group.bitstream;
 
-                let hf_coeff_output = &hf_coeff_output[group_idx as usize];
                 let lf_group_idx = frame_header.lf_group_idx_from_group_idx(group_idx);
                 let lf_group = &lf_groups[lf_group_idx as usize];
                 let params = PassGroupParams {
@@ -247,15 +248,15 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
                 };
                 pass_group_params.push((bitstream, params));
             }
-        }
 
-        let result = std::sync::RwLock::new(Result::Ok(()));
-        pool.for_each_vec(pass_group_params, |(mut bitstream, params)| {
-            if let Err(e) = decode_pass_group(&mut bitstream, params) {
-                *result.write().unwrap() = Err(Error::FrameParse(e));
-            }
-        });
-        result.into_inner().unwrap()?;
+            let result = std::sync::RwLock::new(Result::Ok(()));
+            pool.for_each_vec(pass_group_params, |(mut bitstream, params)| {
+                if let Err(e) = decode_pass_group(&mut bitstream, params) {
+                    *result.write().unwrap() = Err(Error::FrameParse(e));
+                }
+            });
+            result.into_inner().unwrap()?;
+        }
 
         if !header.is_gray && !is_subsampled {
             Self::integer_cfl(frame_header, &hf_global, &lf_groups, &mut pass_groups, pool);

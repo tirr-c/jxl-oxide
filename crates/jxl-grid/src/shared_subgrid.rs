@@ -1,4 +1,4 @@
-use std::{ops::RangeBounds, ptr::NonNull, sync::atomic::AtomicI32};
+use std::{ops::RangeBounds, ptr::NonNull};
 
 use crate::SimdVector;
 
@@ -265,33 +265,9 @@ impl<'g> SharedSubgrid<'g, f32> {
             })
     }
 
-    /// # Safety
-    /// Caller should make sure that atomic and non-atomic accesses are not mixed.
-    pub unsafe fn as_atomic_i32(&self) -> SharedSubgrid<'g, AtomicI32> {
-        assert_eq!(std::mem::size_of::<f32>(), std::mem::size_of::<AtomicI32>());
-        assert_eq!(
-            std::mem::align_of::<f32>(),
-            std::mem::align_of::<AtomicI32>()
-        );
-        SharedSubgrid {
-            ptr: self.ptr.cast(),
-            width: self.width,
-            height: self.height,
-            stride: self.stride,
-            _marker: Default::default(),
-        }
-    }
-}
-
-impl<'g> SharedSubgrid<'g, i32> {
-    /// # Safety
-    /// Caller should make sure that atomic and non-atomic accesses are not mixed.
-    pub unsafe fn as_atomic_i32(&self) -> SharedSubgrid<'g, AtomicI32> {
-        assert_eq!(std::mem::size_of::<i32>(), std::mem::size_of::<AtomicI32>());
-        assert_eq!(
-            std::mem::align_of::<i32>(),
-            std::mem::align_of::<AtomicI32>()
-        );
+    /// Reinterprets this subgrid as `i32` subgrid.
+    pub fn as_i32(&self) -> SharedSubgrid<'g, i32> {
+        // Safe because `f32` and `i32` has same size and align, and all bit patterns are valid.
         SharedSubgrid {
             ptr: self.ptr.cast(),
             width: self.width,

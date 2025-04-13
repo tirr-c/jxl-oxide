@@ -547,3 +547,18 @@ impl MutableSubgrid<'_, f32> {
             })
     }
 }
+
+impl<'g> MutableSubgrid<'g, f32> {
+    /// Converts this subgrid into `i32` subgrid.
+    pub fn into_i32(self) -> MutableSubgrid<'g, i32> {
+        // Safe because `f32` and `i32` has same size and align, and all bit patterns are valid.
+        MutableSubgrid {
+            ptr: self.ptr.cast(),
+            split_base: self.split_base,
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            _marker: Default::default(),
+        }
+    }
+}
