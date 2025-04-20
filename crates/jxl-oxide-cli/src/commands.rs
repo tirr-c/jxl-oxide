@@ -45,6 +45,9 @@ pub struct GlobalArgs {
     /// Do not print logs to console.
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
+    /// Whether to use colors on output.
+    #[arg(long, global = true, value_enum, default_value_t)]
+    pub color: TermColorKind,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -67,4 +70,15 @@ pub enum Subcommands {
     /// (devtools, ffmpeg) Load an image byte-by-byte.
     #[cfg(feature = "__ffmpeg")]
     SlowMotion(SlowMotionArgs),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TermColorKind {
+    /// Use colors if the output is tty.
+    #[default]
+    Auto,
+    /// Never use colors.
+    Never,
+    /// Always use colors.
+    Always,
 }
