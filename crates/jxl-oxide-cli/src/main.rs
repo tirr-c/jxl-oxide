@@ -1,4 +1,8 @@
+use std::io::IsTerminal;
+
 use clap::Parser;
+use crossterm::ExecutableCommand;
+use jxl_oxide_cli::commands::TermColorKind;
 use jxl_oxide_cli::{Args, Subcommands};
 
 #[cfg(feature = "mimalloc")]
@@ -12,6 +16,18 @@ fn main() -> std::process::ExitCode {
         decode,
     } = Args::parse();
 
+    // Make sure the terminal handle ANSI escape sequences.
+    let mut stderr = std::io::stderr();
+    let is_tty = stderr.is_terminal();
+    let use_colors = match globals.color {
+        TermColorKind::Auto => is_tty,
+        TermColorKind::Never => false,
+        TermColorKind::Always => true,
+    };
+    if use_colors {
+        stderr.execute(crossterm::style::ResetColor).ok();
+    }
+
     if !globals.quiet {
         let filter = match globals.verbose {
             0 => tracing::level_filters::LevelFilter::INFO,
@@ -22,6 +38,8 @@ fn main() -> std::process::ExitCode {
             .with_default_directive(filter.into())
             .from_env_lossy();
         tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_ansi(use_colors)
             .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
             .with_env_filter(env_filter)
             .init();
