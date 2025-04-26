@@ -867,7 +867,8 @@ impl RenderContext {
 
             if frame_header.do_ycbcr {
                 grid.convert_modular_color(self.image_header.metadata.bit_depth)?;
-                jxl_color::ycbcr_to_rgb(grid.as_color_floats_mut());
+                let [cb, y, cr] = grid.as_color_floats_mut();
+                jxl_color::ycbcr_to_rgb([cb.buf_mut(), y.buf_mut(), cr.buf_mut()]);
             }
             if transform.is_noop() {
                 let output_channels = transform.output_channels();

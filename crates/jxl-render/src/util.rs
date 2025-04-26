@@ -321,7 +321,7 @@ pub(crate) fn convert_color_for_record(
         // xyb_encoded = false
         fb.convert_modular_color(metadata.bit_depth)?;
         let [cb, y, cr] = fb.as_color_floats_mut();
-        jxl_color::ycbcr_to_rgb([cb, y, cr]);
+        jxl_color::ycbcr_to_rgb([cb.buf_mut(), y.buf_mut(), cr.buf_mut()]);
         if metadata.colour_encoding.colour_space() == ColourSpace::Grey {
             fb.remove_color_channels(1);
         }

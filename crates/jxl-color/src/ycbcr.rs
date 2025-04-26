@@ -1,13 +1,8 @@
-use jxl_grid::AlignedGrid;
-
 /// Applies transform from YCbCr to RGB.
 ///
 /// Channels are expected to be in CbYCr order.
-pub fn ycbcr_to_rgb(fb_cbycr: [&mut AlignedGrid<f32>; 3]) {
+pub fn ycbcr_to_rgb(fb_cbycr: [&mut [f32]; 3]) {
     let [cb, y, cr] = fb_cbycr;
-    let cb = cb.buf_mut();
-    let y = y.buf_mut();
-    let cr = cr.buf_mut();
 
     #[cfg(target_arch = "x86_64")]
     {

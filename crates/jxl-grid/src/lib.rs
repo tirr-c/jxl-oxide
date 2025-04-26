@@ -36,7 +36,7 @@ impl std::fmt::Display for OutOfMemory {
 
 /// A continuous buffer in the "raster order".
 ///
-/// The buffer is aligned so that it can be used in SIMD instructions.
+/// The beginning of the buffer is aligned so that it can be used in SIMD instructions.
 pub struct AlignedGrid<S> {
     width: usize,
     height: usize,
