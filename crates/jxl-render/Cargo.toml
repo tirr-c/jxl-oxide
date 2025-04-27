@@ -16,11 +16,11 @@ bytemuck.workspace = true
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-coding]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-coding"
 
 [dependencies.jxl-color]
@@ -32,7 +32,7 @@ version = "0.13.0"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
-version = "1.0.0-alpha.0"
+version = "0.6.0"
 path = "../jxl-grid"
 
 [dependencies.jxl-image]
@@ -44,11 +44,11 @@ version = "0.11.0"
 path = "../jxl-modular"
 
 [dependencies.jxl-oxide-common]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-oxide-common"
 
 [dependencies.jxl-threadpool]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-threadpool"
 
 [dependencies.jxl-vardct]

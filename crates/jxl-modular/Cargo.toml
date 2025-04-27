@@ -15,21 +15,21 @@ edition = "2024"
 tracing.workspace = true
 
 [dependencies.jxl-bitstream]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-coding]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-coding"
 
 [dependencies.jxl-grid]
-version = "1.0.0-alpha.0"
+version = "0.6.0"
 path = "../jxl-grid"
 
 [dependencies.jxl-oxide-common]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-oxide-common"
 
 [dependencies.jxl-threadpool]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-threadpool"

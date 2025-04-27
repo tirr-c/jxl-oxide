@@ -6,11 +6,11 @@ repository = "https://github.com/tirr-c/jxl-oxide.git"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 
 [dependencies.jxl-bitstream]
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 path = "../jxl-bitstream"
