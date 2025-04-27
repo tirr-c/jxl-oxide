@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies.brotli-decompressor]
-version = "4.0.1"
+version = "5.0.0"
 
 [workspace.dependencies.bytemuck]
 version = "1.19.0"
