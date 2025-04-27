@@ -5,13 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] - 2025-04-27
 
 ### Added
 - `jxl-oxide`: Add `moxcms` integration for external CMS (#435).
+- `jxl-oxide-cli`: Add `--color` option to control whether it formats console output (#452).
 
 ### Changed
+- Update codebase to Rust 2024 (#446). Now jxl-oxide requires Rust 1.85.0 or newer to compile.
 - `ColorManagementSystem` trait has been updated so that color transforms can be cached (#435).
+- `jxl-oxide-cli`: Print log to stderr instead of stdout (#452).
+
+### Fixed
+- `jxl-oxide-cli`: Fix colors not being printed correctly in Windows conhost (#452).
 
 ## [0.11.4] - 2025-03-29
 
@@ -203,7 +209,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
-[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.11.4..HEAD
+[0.12.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.0
 [0.11.4]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.4
 [0.11.3]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.3
 [0.11.2]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.2
