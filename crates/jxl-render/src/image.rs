@@ -7,7 +7,7 @@ use jxl_modular::{ChannelShift, Sample};
 use jxl_threadpool::JxlThreadPool;
 use jxl_vardct::LfChannelDequantization;
 
-use crate::{FrameRender, FrameRenderHandle, Region, Result, util};
+use crate::{FrameRender, FrameRenderHandle, IndexedFrame, Region, Result, util};
 
 #[derive(Debug)]
 pub enum ImageBuffer {
@@ -692,24 +692,9 @@ impl<S: Sample> RenderedImage<S> {
         pool: &JxlThreadPool,
     ) -> Result<Arc<ImageWithRegion>> {
         let image_header = self.image.frame.image_header();
-        let frame_header = self.image.frame.header();
         let image_region = self.image.image_region;
         let oriented_image_region = oriented_image_region
             .unwrap_or_else(|| util::apply_orientation_to_image_region(image_header, image_region));
-        let frame_region = oriented_image_region
-            .translate(-frame_header.x0, -frame_header.y0)
-            .downsample(frame_header.lf_level * 3);
-        let frame_region = util::pad_lf_region(frame_header, frame_region);
-        let frame_region = util::pad_color_region(image_header, frame_header, frame_region);
-        let frame_region = frame_region.upsample(frame_header.upsampling.ilog2());
-        let frame_region = if frame_header.frame_type.is_normal_frame() {
-            let full_image_region_in_frame =
-                Region::with_size(image_header.size.width, image_header.size.height)
-                    .translate(-frame_header.x0, -frame_header.y0);
-            frame_region.intersection(full_image_region_in_frame)
-        } else {
-            frame_region
-        };
 
         let mut grid_lock = self.image.wait_until_render()?;
         if let FrameRender::Blended(image) = &*grid_lock {
@@ -721,25 +706,8 @@ impl<S: Sample> RenderedImage<S> {
             panic!();
         };
 
-        if frame_header.can_reference() {
-            let bit_depth_it =
-                std::iter::repeat_n(image_header.metadata.bit_depth, grid.color_channels)
-                    .chain(image_header.metadata.ec_info.iter().map(|ec| ec.bit_depth));
-            for (buffer, bit_depth) in grid.buffer.iter_mut().zip(bit_depth_it) {
-                buffer.convert_to_float_modular(bit_depth)?;
-            }
-        }
-
-        let skip_blending =
-            !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas;
-
-        if !(grid.ct_done() || frame_header.save_before_ct || skip_blending && frame_header.is_last)
-        {
-            util::convert_color_for_record(image_header, frame_header.do_ycbcr, &mut grid, pool)?;
-        }
-
-        if skip_blending {
-            grid.blend_done = true;
+        let skip_composition = composite_preprocess(&self.image.frame, &mut grid, pool)?;
+        if skip_composition {
             let image = Arc::new(grid);
             *grid_lock = FrameRender::Blended(Arc::clone(&image));
             return Ok(image);
@@ -748,16 +716,15 @@ impl<S: Sample> RenderedImage<S> {
         *grid_lock = FrameRender::Rendering;
         drop(grid_lock);
 
-        let image = crate::blend::blend(
-            image_header,
-            self.image.refs.clone(),
+        composite(
             &self.image.frame,
             &mut grid,
-            frame_region,
+            self.image.refs.clone(),
+            oriented_image_region,
             pool,
         )?;
 
-        let image = Arc::new(image);
+        let image = Arc::new(grid);
         drop(
             self.image
                 .done_render(FrameRender::Blended(Arc::clone(&image))),
@@ -782,4 +749,66 @@ impl<S: Sample> RenderedImage<S> {
             }
         }
     }
+}
+
+/// Prerocess image before composition.
+///
+/// Returns `Ok(true)` if no actual composition is needed.
+pub(crate) fn composite_preprocess(
+    frame: &IndexedFrame,
+    grid: &mut ImageWithRegion,
+    pool: &JxlThreadPool,
+) -> Result<bool> {
+    let image_header = frame.image_header();
+    let frame_header = frame.header();
+
+    if frame_header.can_reference() {
+        let bit_depth_it =
+            std::iter::repeat_n(image_header.metadata.bit_depth, grid.color_channels)
+                .chain(image_header.metadata.ec_info.iter().map(|ec| ec.bit_depth));
+        for (buffer, bit_depth) in grid.buffer.iter_mut().zip(bit_depth_it) {
+            buffer.convert_to_float_modular(bit_depth)?;
+        }
+    }
+
+    let skip_blending = !frame_header.frame_type.is_normal_frame() || frame_header.resets_canvas;
+
+    if !(grid.ct_done() || frame_header.save_before_ct || skip_blending && frame_header.is_last) {
+        util::convert_color_for_record(image_header, frame_header.do_ycbcr, grid, pool)?;
+    }
+
+    if skip_blending {
+        grid.blend_done = true;
+    }
+
+    Ok(skip_blending)
+}
+
+pub(crate) fn composite<S: Sample>(
+    frame: &IndexedFrame,
+    grid: &mut ImageWithRegion,
+    refs: [Option<crate::Reference<S>>; 4],
+    oriented_image_region: Region,
+    pool: &JxlThreadPool,
+) -> Result<()> {
+    let image_header = frame.image_header();
+    let frame_header = frame.header();
+    let frame_region = oriented_image_region
+        .translate(-frame_header.x0, -frame_header.y0)
+        .downsample(frame_header.lf_level * 3);
+    let frame_region = util::pad_lf_region(frame_header, frame_region);
+    let frame_region = util::pad_color_region(image_header, frame_header, frame_region);
+    let frame_region = frame_region.upsample(frame_header.upsampling.ilog2());
+    let frame_region = if frame_header.frame_type.is_normal_frame() {
+        let full_image_region_in_frame =
+            Region::with_size(image_header.size.width, image_header.size.height)
+                .translate(-frame_header.x0, -frame_header.y0);
+        frame_region.intersection(full_image_region_in_frame)
+    } else {
+        frame_region
+    };
+
+    let image = crate::blend::blend(image_header, refs, frame, grid, frame_region, pool)?;
+    *grid = image;
+    Ok(())
 }

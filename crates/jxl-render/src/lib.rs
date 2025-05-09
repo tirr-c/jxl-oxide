@@ -477,6 +477,61 @@ impl RenderContext {
 }
 
 impl RenderContext {
+    fn do_render<S: Sample>(
+        frame: &IndexedFrame,
+        reference_frames: &ReferenceFrames<S>,
+        mut state: FrameRender<S>,
+        image_region: Region,
+        prev_frame_visibility: (usize, usize),
+        pool: &JxlThreadPool,
+    ) -> FrameRender<S> {
+        if let Some(lf) = &reference_frames.lf {
+            tracing::trace!(idx = lf.frame.idx, "Spawn LF frame renderer");
+            let lf_handle = Arc::clone(&lf.image);
+            pool.spawn(move || {
+                lf_handle.run(image_region);
+            });
+        }
+        for grid in reference_frames.refs.iter().flatten() {
+            tracing::trace!(idx = grid.frame.idx, "Spawn reference frame renderer");
+            let ref_handle = Arc::clone(&grid.image);
+            pool.spawn(move || {
+                ref_handle.run(image_region);
+            });
+        }
+
+        let mut cache = match state {
+            FrameRender::InProgress(cache) => cache,
+            _ => {
+                state = FrameRender::InProgress(Box::new(RenderCache::new(frame)));
+                let FrameRender::InProgress(cache) = state else {
+                    unreachable!()
+                };
+                cache
+            }
+        };
+
+        let result = render::render_frame(
+            frame,
+            reference_frames.clone(),
+            &mut cache,
+            image_region,
+            pool.clone(),
+            prev_frame_visibility,
+        );
+        match result {
+            Ok(grid) => FrameRender::Done(grid),
+            Err(e) if e.unexpected_eof() || matches!(e, Error::IncompleteFrame) => {
+                if frame.is_loading_done() {
+                    FrameRender::Err(e)
+                } else {
+                    FrameRender::InProgress(cache)
+                }
+            }
+            Err(e) => FrameRender::Err(e),
+        }
+    }
+
     fn render_op<S: Sample>(
         &self,
         frame: Arc<IndexedFrame>,
@@ -485,52 +540,15 @@ impl RenderContext {
         let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
 
         let pool = self.pool.clone();
-        Arc::new(move |mut state, image_region| {
-            if let Some(lf) = &reference_frames.lf {
-                tracing::trace!(idx = lf.frame.idx, "Spawn LF frame renderer");
-                let lf_handle = Arc::clone(&lf.image);
-                pool.spawn(move || {
-                    lf_handle.run(image_region);
-                });
-            }
-            for grid in reference_frames.refs.iter().flatten() {
-                tracing::trace!(idx = grid.frame.idx, "Spawn reference frame renderer");
-                let ref_handle = Arc::clone(&grid.image);
-                pool.spawn(move || {
-                    ref_handle.run(image_region);
-                });
-            }
-
-            let mut cache = match state {
-                FrameRender::InProgress(cache) => cache,
-                _ => {
-                    state = FrameRender::InProgress(Box::new(RenderCache::new(&frame)));
-                    let FrameRender::InProgress(cache) = state else {
-                        unreachable!()
-                    };
-                    cache
-                }
-            };
-
-            let result = render::render_frame(
+        Arc::new(move |state, image_region| {
+            Self::do_render(
                 &frame,
-                reference_frames.clone(),
-                &mut cache,
+                &reference_frames,
+                state,
                 image_region,
-                pool.clone(),
                 prev_frame_visibility,
-            );
-            match result {
-                Ok(grid) => FrameRender::Done(grid),
-                Err(e) if e.unexpected_eof() || matches!(e, Error::IncompleteFrame) => {
-                    if frame.is_loading_done() {
-                        FrameRender::Err(e)
-                    } else {
-                        FrameRender::InProgress(cache)
-                    }
-                }
-                Err(e) => FrameRender::Err(e),
-            }
+                &pool,
+            )
         })
     }
 
@@ -727,10 +745,11 @@ impl RenderContext {
 
         tracing::debug!(?image_region, ?frame_region, "Rendering loading frame");
         let image = if self.narrow_modular() {
-            let mut cache = self.loading_render_cache_narrow.take().unwrap_or_else(|| {
-                let frame = self.loading_frame().unwrap();
-                RenderCache::new(frame)
-            });
+            let state = if let Some(cache) = self.loading_render_cache_narrow.take() {
+                FrameRender::InProgress(Box::new(cache))
+            } else {
+                FrameRender::None
+            };
 
             let reference_frames = ReferenceFrames {
                 lf: (lf_frame_idx != usize::MAX).then(|| Reference {
@@ -746,26 +765,53 @@ impl RenderContext {
             };
 
             let frame = self.loading_frame().unwrap();
-            let image_result = render::render_frame(
+            let prev_frame_visibility = self.get_previous_frames_visibility(frame);
+
+            let state = Self::do_render(
                 frame,
-                reference_frames,
-                &mut cache,
+                &reference_frames,
+                state,
                 image_region,
-                self.pool.clone(),
-                self.get_previous_frames_visibility(frame),
+                prev_frame_visibility,
+                &self.pool,
             );
-            match image_result {
-                Ok(image) => image,
-                Err(e) => {
-                    self.loading_render_cache_narrow = Some(cache);
+
+            match state {
+                FrameRender::InProgress(cache) => {
+                    self.loading_render_cache_narrow = Some(*cache);
+                    return Err(Error::IncompleteFrame);
+                }
+                FrameRender::Err(e) => {
                     return Err(e);
                 }
+                FrameRender::Done(mut image) => {
+                    let skip_composition =
+                        image::composite_preprocess(frame, &mut image, &self.pool)?;
+
+                    if !skip_composition {
+                        let oriented_image_region = util::apply_orientation_to_image_region(
+                            &self.image_header,
+                            image_region,
+                        );
+                        image::composite(
+                            frame,
+                            &mut image,
+                            reference_frames.refs,
+                            oriented_image_region,
+                            &self.pool,
+                        )?;
+                    }
+
+                    image
+                }
+                _ => todo!(),
             }
         } else {
-            let mut cache = self.loading_render_cache_wide.take().unwrap_or_else(|| {
-                let frame = self.loading_frame().unwrap();
-                RenderCache::new(frame)
-            });
+            let state = if let Some(cache) = self.loading_render_cache_wide.take() {
+                FrameRender::InProgress(Box::new(cache))
+            } else {
+                FrameRender::None
+            };
 
             let reference_frames = ReferenceFrames {
                 lf: (lf_frame_idx != usize::MAX).then(|| Reference {
@@ -781,20 +827,46 @@ impl RenderContext {
             };
 
             let frame = self.loading_frame().unwrap();
-            let image_result = render::render_frame(
+            let prev_frame_visibility = self.get_previous_frames_visibility(frame);
+
+            let state = Self::do_render(
                 frame,
-                reference_frames,
-                &mut cache,
+                &reference_frames,
+                state,
                 image_region,
-                self.pool.clone(),
-                self.get_previous_frames_visibility(frame),
+                prev_frame_visibility,
+                &self.pool,
             );
-            match image_result {
-                Ok(image) => image,
-                Err(e) => {
-                    self.loading_render_cache_wide = Some(cache);
+
+            match state {
+                FrameRender::InProgress(cache) => {
+                    self.loading_render_cache_wide = Some(*cache);
+                    return Err(Error::IncompleteFrame);
+                }
+                FrameRender::Err(e) => {
                     return Err(e);
                 }
+                FrameRender::Done(mut image) => {
+                    let skip_composition =
+                        image::composite_preprocess(frame, &mut image, &self.pool)?;
+
+                    if !skip_composition {
+                        let oriented_image_region = util::apply_orientation_to_image_region(
+                            &self.image_header,
+                            image_region,
+                        );
+                        image::composite(
+                            frame,
+                            &mut image,
+                            reference_frames.refs,
+                            oriented_image_region,
+                            &self.pool,
+                        )?;
+                    }
+
+                    image
+                }
+                _ => todo!(),
             }
         };
 
