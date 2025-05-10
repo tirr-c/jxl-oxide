@@ -319,7 +319,7 @@ impl Frame {
                     &self.image_header,
                     &self.header,
                     self.tracker.as_ref(),
-                    false,
+                    !loaded,
                 ),
             );
             match lf_global {
