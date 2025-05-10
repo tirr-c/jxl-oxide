@@ -8,7 +8,7 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.12.0"
+version = "0.12.1"
 edition = "2024"
 
 [dependencies]
@@ -28,7 +28,7 @@ version = "0.11.0"
 path = "../jxl-color"
 
 [dependencies.jxl-frame]
-version = "0.13.0"
+version = "0.13.1"
 path = "../jxl-frame"
 
 [dependencies.jxl-grid]
