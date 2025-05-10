@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-frame"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "brotli-decompressor",
  "jxl-bitstream",
@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bytemuck",
  "jxl-bitstream",

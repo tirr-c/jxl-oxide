@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.1] - 2025-05-10
 
 ### Fixed
 - `jxl-render`: Fix blending of partial frames (#457).
@@ -215,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
-[0.5.0]: https://github.com/tirr-c/jxl-oxide/compare/0.12.0..HEAD
+[0.12.1]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.1
 [0.12.0]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.0
 [0.11.4]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.4
 [0.11.3]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.11.3
