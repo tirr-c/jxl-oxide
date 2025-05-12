@@ -215,10 +215,9 @@ impl WasmJxlImage {
             image.rendered_icc()
         };
 
-        let has_embedded_icc = image.original_icc().is_some();
         let metadata = &image.image_header().metadata;
         let bit_depth = metadata.bit_depth.bits_per_sample();
-        let need_high_precision = !metadata.xyb_encoded && has_embedded_icc && bit_depth > 8;
+        let need_high_precision = !self.force_srgb && bit_depth > 8;
         Ok(RenderResult {
             image: frame,
             pixfmt,
