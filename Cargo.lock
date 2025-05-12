@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "brotli-decompressor",
  "bytemuck",
@@ -1161,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "clap",
  "crossterm",
@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
