@@ -22,6 +22,15 @@ enum WasmJxlImageInner {
     Init(JxlImage),
 }
 
+impl WasmJxlImageInner {
+    fn as_init(&self) -> Option<&JxlImage> {
+        match self {
+            WasmJxlImageInner::Uninit(_) => None,
+            WasmJxlImageInner::Init(image) => Some(image),
+        }
+    }
+}
+
 impl Default for WasmJxlImage {
     fn default() -> Self {
         Self::new()
@@ -78,6 +87,27 @@ impl WasmJxlImage {
         self.force_srgb = force_srgb;
     }
 
+    #[wasm_bindgen(getter = renderingRegion)]
+    pub fn rendering_region(&self) -> Option<RenderingRegion> {
+        let image = self.inner.as_init()?;
+        let region = image.current_image_region();
+        Some(region.into())
+    }
+
+    #[wasm_bindgen(setter = renderingRegion)]
+    pub fn set_rendering_region(&mut self, region: RenderingRegionLike) {
+        let WasmJxlImageInner::Init(image) = &mut self.inner else {
+            return;
+        };
+        let region = RenderingRegion {
+            left: region.left(),
+            top: region.top(),
+            width: region.width(),
+            height: region.height(),
+        };
+        image.set_image_region(region.into());
+    }
+
     #[wasm_bindgen(js_name = feedBytes)]
     pub fn feed_bytes(&mut self, bytes: &[u8]) -> Result<usize, String> {
         match &mut self.inner {
@@ -124,60 +154,50 @@ impl WasmJxlImage {
 
     #[wasm_bindgen(getter = loaded)]
     pub fn is_loading_done(&self) -> bool {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => false,
-            WasmJxlImageInner::Init(image) => image.is_loading_done(),
-        }
+        self.inner
+            .as_init()
+            .map(|image| image.is_loading_done())
+            .unwrap_or(false)
     }
 
     #[wasm_bindgen(getter = numLoadedKeyframes)]
     pub fn num_loaded_keyframes(&self) -> u32 {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => 0,
-            WasmJxlImageInner::Init(image) => image.num_loaded_keyframes() as u32,
-        }
+        self.inner
+            .as_init()
+            .map(|image| image.num_loaded_keyframes() as u32)
+            .unwrap_or(0)
     }
 
     #[wasm_bindgen(getter = animated)]
     pub fn is_animation(&self) -> Option<bool> {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => None,
-            WasmJxlImageInner::Init(image) => {
-                Some(image.image_header().metadata.animation.is_some())
-            }
-        }
+        let image = self.inner.as_init()?;
+        Some(image.image_header().metadata.animation.is_some())
     }
 
     #[wasm_bindgen(getter = width)]
     pub fn width(&self) -> Option<u32> {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => None,
-            WasmJxlImageInner::Init(image) => Some(image.width()),
-        }
+        let image = self.inner.as_init()?;
+        Some(image.width())
     }
 
     #[wasm_bindgen(getter = height)]
     pub fn height(&self) -> Option<u32> {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => None,
-            WasmJxlImageInner::Init(image) => Some(image.height()),
-        }
+        let image = self.inner.as_init()?;
+        Some(image.height())
     }
 
     #[wasm_bindgen(getter = numLoops)]
     pub fn num_loops(&self) -> Option<u32> {
-        match &self.inner {
-            WasmJxlImageInner::Uninit(_) => None,
-            WasmJxlImageInner::Init(image) => Some(
-                image
-                    .image_header()
-                    .metadata
-                    .animation
-                    .as_ref()
-                    .map(|anim| anim.num_loops)
-                    .unwrap_or(0),
-            ),
-        }
+        let image = self.inner.as_init()?;
+        Some(
+            image
+                .image_header()
+                .metadata
+                .animation
+                .as_ref()
+                .map(|anim| anim.num_loops)
+                .unwrap_or(0),
+        )
     }
 
     pub fn render(&mut self, keyframe_idx: Option<u32>) -> Result<RenderResult, String> {
@@ -336,4 +356,62 @@ impl RenderResult {
         writer.finish().map_err(|e| e.to_string())?;
         Ok(out)
     }
+}
+
+#[wasm_bindgen(inspectable)]
+pub struct RenderingRegion {
+    pub left: u32,
+    pub top: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<jxl_oxide::CropInfo> for RenderingRegion {
+    fn from(value: jxl_oxide::CropInfo) -> Self {
+        Self {
+            left: value.left,
+            top: value.top,
+            width: value.width,
+            height: value.height,
+        }
+    }
+}
+
+impl From<RenderingRegion> for jxl_oxide::CropInfo {
+    fn from(value: RenderingRegion) -> Self {
+        Self {
+            left: value.left,
+            top: value.top,
+            width: value.width,
+            height: value.height,
+        }
+    }
+}
+
+#[wasm_bindgen(typescript_custom_section)]
+const RENDERING_REGION_LIKE_TY: &str = r"
+interface RenderingRegionLike {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+";
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "RenderingRegionLike")]
+    pub type RenderingRegionLike;
+
+    #[wasm_bindgen(method, getter)]
+    fn left(this: &RenderingRegionLike) -> u32;
+
+    #[wasm_bindgen(method, getter)]
+    fn top(this: &RenderingRegionLike) -> u32;
+
+    #[wasm_bindgen(method, getter)]
+    fn width(this: &RenderingRegionLike) -> u32;
+
+    #[wasm_bindgen(method, getter)]
+    fn height(this: &RenderingRegionLike) -> u32;
 }

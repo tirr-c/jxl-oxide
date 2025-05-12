@@ -769,6 +769,12 @@ impl JxlImage {
         Ok(result)
     }
 
+    /// Returns current cropping region (region of interest).
+    pub fn current_image_region(&self) -> CropInfo {
+        let region = self.ctx.image_region();
+        region.into()
+    }
+
     /// Sets the cropping region (region of interest).
     ///
     /// Subsequent rendering methods will crop the image buffer according to the region.
@@ -1254,6 +1260,17 @@ impl From<CropInfo> for jxl_render::Region {
         Self {
             left: value.left as i32,
             top: value.top as i32,
+            width: value.width,
+            height: value.height,
+        }
+    }
+}
+
+impl From<jxl_render::Region> for CropInfo {
+    fn from(value: jxl_render::Region) -> Self {
+        Self {
+            left: value.left.max(0) as u32,
+            top: value.top.max(0) as u32,
             width: value.width,
             height: value.height,
         }
