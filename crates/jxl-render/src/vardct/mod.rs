@@ -62,15 +62,20 @@ pub(crate) fn render_vardct<S: Sample>(
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
 
-    let lf_global = if let Some(x) = &cache.lf_global {
-        x
-    } else {
-        let lf_global = frame
-            .try_parse_lf_global()
-            .ok_or(Error::IncompleteFrame)??;
-        cache.lf_global = Some(lf_global);
-        cache.lf_global.as_ref().unwrap()
+    let lf_global = match &cache.lf_global {
+        Some(x) if !x.gmodular.is_partial() => x,
+        _ => {
+            let lf_global = frame
+                .try_parse_lf_global()
+                .ok_or(Error::IncompleteFrame)??;
+            cache.lf_global = Some(lf_global);
+            cache.lf_global.as_ref().unwrap()
+        }
     };
+    if lf_frame.is_some() && lf_global.gmodular.is_partial() {
+        return Err(Error::IncompleteFrame);
+    }
+
     let mut gmodular = lf_global.gmodular.try_clone()?;
     let lf_global_vardct = lf_global.vardct.as_ref().unwrap();
 
