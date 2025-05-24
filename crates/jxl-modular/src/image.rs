@@ -409,6 +409,10 @@ impl<'dest, S: Sample> TransformedModularSubimage<'dest, S> {
         self.channel_info.is_empty()
     }
 
+    pub fn is_partial(&self) -> bool {
+        self.partial
+    }
+
     pub fn recursive(
         self,
         bitstream: &mut Bitstream,

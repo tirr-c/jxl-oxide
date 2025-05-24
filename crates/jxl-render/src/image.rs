@@ -592,6 +592,37 @@ impl ImageWithRegion {
         self.color_channels = count;
     }
 
+    pub(crate) fn fill_opaque_alpha(&mut self, ec_info: &[jxl_image::ExtraChannelInfo]) {
+        for (ec_idx, ec_info) in ec_info.iter().enumerate() {
+            if !matches!(ec_info.ty, jxl_image::ExtraChannelType::Alpha { .. }) {
+                continue;
+            }
+
+            let channel = &mut self.buffer[self.color_channels + ec_idx];
+            let opaque_int = match ec_info.bit_depth {
+                BitDepth::IntegerSample { bits_per_sample } => (1u32 << bits_per_sample) - 1,
+                BitDepth::FloatSample {
+                    bits_per_sample,
+                    exp_bits,
+                } => {
+                    let mantissa_bits = bits_per_sample - exp_bits - 1;
+                    ((1u32 << (exp_bits - 1)) - 1) << mantissa_bits
+                }
+            };
+            match channel {
+                ImageBuffer::I16(g) => {
+                    g.buf_mut().fill(opaque_int as i16);
+                }
+                ImageBuffer::I32(g) => {
+                    g.buf_mut().fill(opaque_int as i32);
+                }
+                ImageBuffer::F32(g) => {
+                    g.buf_mut().fill(1.0);
+                }
+            }
+        }
+    }
+
     #[inline]
     pub fn color_channels(&self) -> usize {
         self.color_channels
