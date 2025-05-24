@@ -424,7 +424,7 @@ impl UninitializedJxlImage {
             pool: self.pool.clone(),
             reader: self.reader,
             image_header,
-            ctx,
+            ctx: Box::new(ctx),
             render_spot_color,
             inner: JxlImageInner {
                 end_of_image: false,
@@ -454,7 +454,7 @@ pub struct JxlImage {
     pool: JxlThreadPool,
     reader: ContainerParser,
     image_header: Arc<ImageHeader>,
-    ctx: RenderContext,
+    ctx: Box<RenderContext>,
     render_spot_color: bool,
     inner: JxlImageInner,
 }
