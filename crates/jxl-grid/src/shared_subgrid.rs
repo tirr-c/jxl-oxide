@@ -233,6 +233,7 @@ impl<V: Copy> SharedSubgrid<'_, V> {
     /// Panics if the coordinate is out of range.
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> V {
+        debug_assert!(!(self.ptr.as_ptr() as usize == 1), "pointer can not be dangling");
         *self.get_ref(x, y)
     }
 }
