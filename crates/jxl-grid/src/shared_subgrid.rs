@@ -149,7 +149,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
     /// Split the grid horizontally at an index.
     ///
     /// # Panics
-    /// Panics if `x > self.width()`.
+    /// Panics if `x >= self.width()`.
     pub fn split_horizontal(&self, x: usize) -> (SharedSubgrid<'g, V>, SharedSubgrid<'g, V>) {
         assert!(x <= self.width);
 
@@ -167,7 +167,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
     /// Split the grid vertically at an index.
     ///
     /// # Panics
-    /// Panics if `y > self.height()`.
+    /// Panics if `y >= self.height()`.
     pub fn split_vertical(&self, y: usize) -> (SharedSubgrid<'g, V>, SharedSubgrid<'g, V>) {
         assert!(y <= self.height);
 
@@ -233,6 +233,7 @@ impl<V: Copy> SharedSubgrid<'_, V> {
     /// Panics if the coordinate is out of range.
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> V {
+        debug_assert!(!(self.ptr.as_ptr() as usize == 1), "pointer can not be dangling");
         *self.get_ref(x, y)
     }
 }
