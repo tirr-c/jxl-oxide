@@ -72,27 +72,19 @@ impl<'g, V> SharedSubgrid<'g, V> {
     }
 
     #[inline]
-    fn get_ptr(&self, x: usize, y: usize) -> *mut V {
-        let width = self.width;
-        let height = self.height;
-        let Some(ptr) = self.try_get_ptr(x, y) else {
-            panic!("coordinate out of range: ({x}, {y}) not in {width}x{height}");
-        };
-
-        ptr
-    }
-
-    #[inline]
     fn try_get_ptr(&self, x: usize, y: usize) -> Option<*mut V> {
         if x >= self.width || y >= self.height {
             return None;
         }
 
         // SAFETY: (x, y) is checked above and is in bounds.
-        Some(unsafe {
-            let offset = y * self.stride + x;
-            self.ptr.as_ptr().add(offset)
-        })
+        Some(unsafe { self.get_ptr_unchecked(x, y) })
+    }
+
+    #[inline]
+    unsafe fn get_ptr_unchecked(&self, x: usize, y: usize) -> *mut V {
+        let offset = y * self.stride + x;
+        unsafe { self.ptr.as_ptr().add(offset) }
     }
 
     /// Returns a reference to the sample at the given location.
@@ -154,7 +146,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(x <= self.width);
 
         let left_ptr = self.ptr;
-        let right_ptr = NonNull::new(self.get_ptr(x, 0)).unwrap();
+        let right_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(x, 0) }).unwrap();
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let left_grid = SharedSubgrid::new(left_ptr, x, self.height, self.stride);
@@ -172,7 +164,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(y <= self.height);
 
         let top_ptr = self.ptr;
-        let bottom_ptr = NonNull::new(self.get_ptr(0, y)).unwrap();
+        let bottom_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(0, y) }).unwrap();
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let top_grid = SharedSubgrid::new(top_ptr, self.width, y, self.stride);
@@ -220,9 +212,11 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(right <= self.width);
         assert!(bottom <= self.height);
 
-        let base_ptr = NonNull::new(self.get_ptr(left, top)).unwrap();
         // SAFETY: subgrid is contained in `self`.
-        unsafe { SharedSubgrid::new(base_ptr, right - left, bottom - top, self.stride) }
+        unsafe {
+            let base_ptr = NonNull::new(self.get_ptr_unchecked(left, top)).unwrap();
+            SharedSubgrid::new(base_ptr, right - left, bottom - top, self.stride)
+        }
     }
 }
 
