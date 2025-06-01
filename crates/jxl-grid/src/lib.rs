@@ -9,6 +9,9 @@ pub use mutable_subgrid::*;
 pub use shared_subgrid::*;
 pub use simd::SimdVector;
 
+#[cfg(test)]
+mod test;
+
 /// The error type for failed grid allocation.
 #[derive(Debug)]
 pub struct OutOfMemory {

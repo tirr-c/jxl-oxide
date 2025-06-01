@@ -112,10 +112,7 @@ impl<'g, V> MutableSubgrid<'g, V> {
         }
 
         // SAFETY: (x, y) is checked above and is in bounds.
-        Some(unsafe {
-            let offset = y * self.stride + x;
-            self.ptr.as_ptr().add(offset)
-        })
+        Some(unsafe { self.get_ptr_unchecked(x, y) })
     }
 
     #[inline]
