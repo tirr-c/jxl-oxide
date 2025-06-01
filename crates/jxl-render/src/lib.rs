@@ -872,7 +872,9 @@ impl RenderContext {
 
         let frame = self.loading_frame().unwrap();
         if frame.header().lf_level > 0 {
-            Ok(image.upsample_lf(frame.header().lf_level)?)
+            let mut render = image.upsample_lf(frame.header().lf_level)?;
+            render.fill_opaque_alpha(&self.image_header.metadata.ec_info);
+            Ok(render)
         } else {
             Ok(image)
         }

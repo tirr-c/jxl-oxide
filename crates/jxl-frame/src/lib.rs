@@ -324,7 +324,6 @@ impl Frame {
             );
             match lf_global {
                 Ok(lf_global) => {
-                    tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGlobal");
                     self.all_group_offsets
                         .lf_group
                         .store(bitstream.num_read_bits(), Ordering::Relaxed);
@@ -399,7 +398,6 @@ impl Frame {
 
             match result {
                 Ok(result) => {
-                    tracing::trace!(num_read_bits = bitstream.num_read_bits(), "LfGroup");
                     self.all_group_offsets
                         .hf_global
                         .store(bitstream.num_read_bits(), Ordering::Relaxed);

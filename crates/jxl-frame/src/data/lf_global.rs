@@ -181,6 +181,7 @@ pub struct GlobalModular<S: Sample> {
     pub ma_config: Option<MaConfig>,
     pub modular: Modular<S>,
     extra_channel_from: usize,
+    is_partial: bool,
 }
 
 impl<S: Sample> GlobalModular<S> {
@@ -189,6 +190,7 @@ impl<S: Sample> GlobalModular<S> {
             ma_config: self.ma_config.clone(),
             modular: self.modular.try_clone()?,
             extra_channel_from: self.extra_channel_from,
+            is_partial: self.is_partial,
         })
     }
 
@@ -198,6 +200,10 @@ impl<S: Sample> GlobalModular<S> {
 
     pub fn extra_channel_from(&self) -> usize {
         self.extra_channel_from
+    }
+
+    pub fn is_partial(&self) -> bool {
+        self.is_partial
     }
 }
 
@@ -290,15 +296,18 @@ impl<S: Sample> Bundle<LfGlobalParams<'_, '_>> for GlobalModular<S> {
             tracker,
         );
         let mut modular = Modular::<S>::parse(bitstream, modular_params)?;
+        let mut is_partial = false;
         if let Some(image) = modular.image_mut() {
             let mut gmodular = image.prepare_gmodular()?;
             gmodular.decode(bitstream, 0, allow_partial)?;
+            is_partial = gmodular.is_partial();
         }
 
         Ok(Self {
             ma_config,
             modular,
             extra_channel_from,
+            is_partial,
         })
     }
 }

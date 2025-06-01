@@ -55,10 +55,12 @@ pub(crate) fn render_frame<S: Sample>(
             );
             match (result, reference_frames.lf) {
                 (Ok(grid), _) => grid,
-                (Err(e), Some(lf)) if e.unexpected_eof() => {
+                (Err(e), Some(lf)) if matches!(e, Error::IncompleteFrame) || e.unexpected_eof() => {
                     let render = lf.image.run_with_image()?;
                     let render = render.blend(None, &pool)?;
-                    render.upsample_lf(1)?
+                    let mut render = render.upsample_lf(1)?;
+                    render.fill_opaque_alpha(&image_header.metadata.ec_info);
+                    render
                 }
                 (Err(e), _) => return Err(e),
             }
