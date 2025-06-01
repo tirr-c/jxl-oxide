@@ -84,7 +84,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
 
     #[inline]
     fn try_get_ptr(&self, x: usize, y: usize) -> Option<*mut V> {
-        if x >= self.width || y >= self.height {
+        if x > self.width || y > self.height {
             return None;
         }
 
@@ -149,7 +149,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
     /// Split the grid horizontally at an index.
     ///
     /// # Panics
-    /// Panics if `x >= self.width()`.
+    /// Panics if `x > self.width()`.
     pub fn split_horizontal(&self, x: usize) -> (SharedSubgrid<'g, V>, SharedSubgrid<'g, V>) {
         assert!(x <= self.width);
 
@@ -167,7 +167,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
     /// Split the grid vertically at an index.
     ///
     /// # Panics
-    /// Panics if `y >= self.height()`.
+    /// Panics if `y > self.height()`.
     pub fn split_vertical(&self, y: usize) -> (SharedSubgrid<'g, V>, SharedSubgrid<'g, V>) {
         assert!(y <= self.height);
 
