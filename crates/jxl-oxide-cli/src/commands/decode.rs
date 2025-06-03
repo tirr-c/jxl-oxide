@@ -79,6 +79,9 @@ pub struct DecodeArgs {
     /// External CMS will handle ICC profiles jxl-oxide cannot handle.
     #[arg(long)]
     pub cms: Option<Cms>,
+    /// (unstable) Force 32-bit Modular buffers when decoding.
+    #[arg(long)]
+    pub force_wide_buffers: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
