@@ -10,7 +10,9 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
 
     let pool = crate::create_thread_pool(args.num_threads);
 
-    let mut image_builder = JxlImage::builder().pool(pool.clone());
+    let mut image_builder = JxlImage::builder()
+        .pool(pool.clone())
+        .force_wide_buffers(args.force_wide_buffers);
     if args.approx_memory_limit != 0 {
         let tracker = AllocTracker::with_limit(args.approx_memory_limit);
         image_builder = image_builder.alloc_tracker(tracker);

@@ -54,6 +54,7 @@ pub struct RenderContext {
     requested_color_encoding: ColorEncodingWithProfile,
     cms: Box<dyn ColorManagementSystem + Send + Sync>,
     cached_transform: Mutex<Option<ColorTransform>>,
+    force_wide_buffers: bool,
 }
 
 impl std::fmt::Debug for RenderContext {
@@ -73,6 +74,7 @@ pub struct RenderContextBuilder {
     embedded_icc: Vec<u8>,
     pool: Option<JxlThreadPool>,
     tracker: Option<AllocTracker>,
+    force_wide_buffers: bool,
 }
 
 impl RenderContextBuilder {
@@ -88,6 +90,11 @@ impl RenderContextBuilder {
 
     pub fn alloc_tracker(mut self, tracker: AllocTracker) -> Self {
         self.tracker = Some(tracker);
+        self
+    }
+
+    pub fn force_wide_buffers(mut self, force_wide_buffers: bool) -> Self {
+        self.force_wide_buffers = force_wide_buffers;
         self
     }
 
@@ -176,6 +183,7 @@ impl RenderContextBuilder {
             requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
             cached_transform: Mutex::new(None),
+            force_wide_buffers: self.force_wide_buffers,
         })
     }
 }
@@ -270,7 +278,7 @@ impl RenderContext {
 
     #[inline]
     fn narrow_modular(&self) -> bool {
-        self.image_header.metadata.modular_16bit_buffers
+        !self.force_wide_buffers && self.image_header.metadata.modular_16bit_buffers
     }
 
     fn preserve_current_frame(&mut self) {
