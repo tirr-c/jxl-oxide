@@ -520,7 +520,7 @@ impl<W> VideoContext<W> {
             return Err(Error::from_ffmpeg_msg("video context not initialized"));
         }
 
-        let description = format!("{}\0", description);
+        let description = format!("{description}\0");
         let c_description = CStr::from_bytes_with_nul(description.as_bytes())
             .map_err(|_| Error::from_ffmpeg_msg("invalid description"))?;
 
@@ -572,7 +572,7 @@ impl<W> VideoContext<W> {
             return Err(Error::from_ffmpeg_msg("video context not initialized"));
         }
 
-        let description = format!("{}\0", description);
+        let description = format!("{description}\0");
         let c_description = CStr::from_bytes_with_nul(description.as_bytes())
             .map_err(|_| Error::from_ffmpeg_msg("invalid description"))?;
 

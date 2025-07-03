@@ -139,10 +139,8 @@ pub fn colour_encoding_to_icc(colour_encoding: &EnumColourEncoding) -> Vec<u8> {
 
     let mut tags = Vec::new();
     let mut data = Vec::new();
-    let desc = format!(
-        "{:?}_{:?}_{:?}_{:?}_{:?}",
-        colour_space, rendering_intent, white_point, primaries, tf,
-    );
+    let desc =
+        format!("{colour_space:?}_{rendering_intent:?}_{white_point:?}_{primaries:?}_{tf:?}",);
     append_tag_with_data(
         &mut tags,
         &mut data,

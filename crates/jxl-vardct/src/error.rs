@@ -36,10 +36,10 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match self {
-            Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Decoder(err) => write!(f, "entropy decoder error: {}", err),
-            Buffer(err) => write!(f, "{}", err),
-            Modular(err) => write!(f, "modular stream error: {}", err),
+            Bitstream(err) => write!(f, "bitstream error: {err}"),
+            Decoder(err) => write!(f, "entropy decoder error: {err}"),
+            Buffer(err) => write!(f, "{err}"),
+            Modular(err) => write!(f, "modular stream error: {err}"),
         }
     }
 }

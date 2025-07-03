@@ -21,7 +21,7 @@ impl std::fmt::Display for Spline {
         writeln!(f, "Spline")?;
         for i in self.xyb_dct.iter().chain(&[self.sigma_dct]) {
             for val in i {
-                write!(f, "{} ", val)?;
+                write!(f, "{val} ")?;
             }
             writeln!(f)?;
         }
