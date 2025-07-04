@@ -56,11 +56,11 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match self {
-            Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Decoder(err) => write!(f, "entropy decoder error: {}", err),
-            Buffer(err) => write!(f, "{}", err),
-            Modular(err) => write!(f, "modular subimage decode error: {}", err),
-            Frame(err) => write!(f, "frame error: {}", err),
+            Bitstream(err) => write!(f, "bitstream error: {err}"),
+            Decoder(err) => write!(f, "entropy decoder error: {err}"),
+            Buffer(err) => write!(f, "{err}"),
+            Modular(err) => write!(f, "modular subimage decode error: {err}"),
+            Frame(err) => write!(f, "frame error: {err}"),
             Color(err) => write!(f, "color management error: {err}"),
             IncompleteFrame => write!(f, "frame data is incomplete"),
             FailedReference => write!(f, "reference frame failed to render"),
@@ -69,7 +69,7 @@ impl std::fmt::Display for Error {
             }
             InvalidReference(idx) => write!(f, "invalid reference {idx}"),
             NotReady => write!(f, "image is not ready to be rendered"),
-            NotSupported(msg) => write!(f, "not supported: {}", msg),
+            NotSupported(msg) => write!(f, "not supported: {msg}"),
         }
     }
 }

@@ -33,15 +33,6 @@ let
     rustPlatform.bindgenHook
   ];
 
-  # Copied from naersk
-  pkgsDarwin = with pkgs.darwin; [
-    Security
-    apple_sdk.frameworks.CoreFoundation
-    apple_sdk.frameworks.CoreServices
-    apple_sdk.frameworks.SystemConfiguration
-    libiconv
-  ];
-
   rustToolchain = fenix.combine (
     with fenix.toolchainOf toolchainSpec;
     [
@@ -60,6 +51,5 @@ in
 
 pkgs.mkShell {
   name = "jxl-oxide";
-  nativeBuildInputs =
-    pkgsFromNixpkgs ++ pkgs.lib.optionals pkgs.stdenv.isDarwin pkgsDarwin ++ [ rustToolchain ];
+  nativeBuildInputs = pkgsFromNixpkgs ++ [ rustToolchain ];
 }

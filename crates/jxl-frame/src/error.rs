@@ -51,14 +51,14 @@ impl From<std::collections::TryReserveError> for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Self::Decoder(err) => write!(f, "entropy decoder error: {}", err),
-            Self::Buffer(err) => write!(f, "{}", err),
-            Self::Modular(err) => write!(f, "modular stream error: {}", err),
-            Self::VarDct(err) => write!(f, "vardct error: {}", err),
+            Self::Bitstream(err) => write!(f, "bitstream error: {err}"),
+            Self::Decoder(err) => write!(f, "entropy decoder error: {err}"),
+            Self::Buffer(err) => write!(f, "{err}"),
+            Self::Modular(err) => write!(f, "modular stream error: {err}"),
+            Self::VarDct(err) => write!(f, "vardct error: {err}"),
             Self::InvalidTocPermutation => write!(f, "invalid TOC permutation"),
             Self::IncompleteFrameData { field } => {
-                write!(f, "incomplete frame data: {} is missing", field)
+                write!(f, "incomplete frame data: {field} is missing")
             }
             Self::OutOfMemory => write!(f, "out of memory"),
             Self::HadError => write!(f, "previous parsing errored"),

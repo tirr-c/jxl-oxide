@@ -47,7 +47,7 @@ impl std::error::Error for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bitstream(err) => write!(f, "error from bitstream: {}", err),
+            Self::Bitstream(err) => write!(f, "error from bitstream: {err}"),
             Self::Lz77NotAllowed => write!(f, "LZ77-enabled decoder when it is not allowed"),
             Self::InvalidAnsHistogram => write!(f, "invalid ANS distribution"),
             Self::InvalidAnsStream => write!(f, "ANS stream verification failed"),

@@ -30,7 +30,7 @@ fn bench_one(c: &mut Criterion, bench_path: &Path, name: &str, pool: &JxlThreadP
     g.warm_up_time(Duration::from_secs(5));
     g.measurement_time(Duration::from_secs(15));
 
-    let path = bench_path.join(format!("{}.jxl", name));
+    let path = bench_path.join(format!("{name}.jxl"));
     let data = std::fs::read(path).unwrap();
 
     let pixels = {

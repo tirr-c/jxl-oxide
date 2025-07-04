@@ -502,7 +502,7 @@ impl ImageWithRegion {
         {
             let tracker = g.tracker();
             let ChannelShift::Shifts(upsampling_factor) = *shift else {
-                panic!("invalid channel shift for upsampling: {:?}", shift);
+                panic!("invalid channel shift for upsampling: {shift:?}");
             };
             let bit_depth = if let Some(ec_idx) = idx.checked_sub(color_channels) {
                 image_header.metadata.ec_info[ec_idx].bit_depth
@@ -577,7 +577,7 @@ impl ImageWithRegion {
                     *shift = ChannelShift::Shifts(upsampling_factor);
                 }
                 ChannelShift::JpegUpsampling { .. } => {
-                    panic!("unexpected chroma subsampling {:?}", shift);
+                    panic!("unexpected chroma subsampling {shift:?}");
                 }
             }
             *region = region.upsample(upsampling_factor);

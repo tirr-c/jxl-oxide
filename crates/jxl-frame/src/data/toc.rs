@@ -116,10 +116,9 @@ impl Toc {
     pub fn group_index_bitstream_order(&self, kind: TocGroupKind) -> usize {
         let original_order = match kind {
             TocGroupKind::All if self.is_single_entry() => 0,
-            _ if self.is_single_entry() => panic!(
-                "Cannot request group type of {:?} for single-group frame",
-                kind
-            ),
+            _ if self.is_single_entry() => {
+                panic!("Cannot request group type of {kind:?} for single-group frame",)
+            }
             TocGroupKind::All => panic!("Cannot request group type of All for multi-group frame"),
             TocGroupKind::LfGlobal => 0,
             TocGroupKind::LfGroup(lf_group_idx) => 1 + lf_group_idx as usize,

@@ -115,7 +115,7 @@ impl SizeHeader {
             5 => height * 16 / 9,
             6 => height * 5 / 4,
             7 => height * 2,
-            _ => panic!("Invalid ratio const: {}", ratio),
+            _ => panic!("Invalid ratio const: {ratio}"),
         };
         res as u32
     }

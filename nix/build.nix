@@ -1,7 +1,6 @@
 {
   pkgs,
   lib ? pkgs.lib,
-  darwin ? pkgs.darwin,
   windows ? pkgs.windows,
   hostPlatform ? pkgs.hostPlatform,
   stdenv ? pkgs.stdenv,
@@ -81,8 +80,7 @@ let
           ffmpeg_7-headless
           rustPlatform.bindgenHook
         ]
-      )
-      ++ lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.SystemConfiguration ];
+      );
     nativeBuildInputs = lib.optionals enableFfmpeg (
       with pkgs;
       [

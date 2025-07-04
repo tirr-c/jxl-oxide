@@ -111,7 +111,7 @@ impl ChannelShift {
             1 => (false, false),
             2 => (false, vscale),
             3 => (hscale, false),
-            _ => panic!("Invalid jpeg_upsampling value of {}", upsampling),
+            _ => panic!("Invalid jpeg_upsampling value of {upsampling}"),
         };
         Self::JpegUpsampling {
             has_h_subsample: hscale,

@@ -222,10 +222,7 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
 
         if args.with_offset {
             let offset = image.frame_offset(idx).unwrap();
-            println!(
-                "  Offset (in codestream): {offset} (0x{offset:x})",
-                offset = offset
-            );
+            println!("  Offset (in codestream): {offset} (0x{offset:x})");
 
             let toc = frame.toc();
             println!(

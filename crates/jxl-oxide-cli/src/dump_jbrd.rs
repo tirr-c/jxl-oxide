@@ -12,7 +12,7 @@ pub fn handle_dump_jbrd(args: DumpJbrd) -> Result<()> {
 
     let status = image.jpeg_reconstruction_status();
     if status != JpegReconstructionStatus::Available {
-        println!("No reconstruction data available: {:?}", status);
+        println!("No reconstruction data available: {status:?}");
         return Ok(());
     }
 

@@ -41,7 +41,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => {
-                write!(f, "I/O error: {}", e)
+                write!(f, "I/O error: {e}")
             }
             Self::InvalidBox => write!(f, "invalid container"),
             Self::NonZeroPadding => {
@@ -51,7 +51,7 @@ impl std::fmt::Display for Error {
                 write!(f, "F16() read NaN or Infinity")
             }
             Self::InvalidEnum { name, value } => {
-                write!(f, "Enum({}) read invalid enum value of {}", name, value)
+                write!(f, "Enum({name}) read invalid enum value of {value}")
             }
             Self::ValidationFailed(msg) => {
                 write!(f, "bitstream validation failed: {msg}")

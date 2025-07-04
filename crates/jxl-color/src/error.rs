@@ -30,8 +30,8 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match self {
-            Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Decoder(err) => write!(f, "entropy decoder error: {}", err),
+            Bitstream(err) => write!(f, "bitstream error: {err}"),
+            Decoder(err) => write!(f, "entropy decoder error: {err}"),
             InvalidIccStream(s) => write!(f, "invalid ICC stream: {s}"),
             IccParseFailure(s) => write!(f, "parsing ICC profile failed: {s}"),
             UnsupportedColorEncoding => write!(f, "unsupported color encoding"),

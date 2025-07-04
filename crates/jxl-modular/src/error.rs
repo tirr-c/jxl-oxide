@@ -39,16 +39,16 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match self {
-            Self::InvalidMaTree => write!(f, "invalid meta-adaptive tree"),
-            Self::GlobalMaTreeNotAvailable => {
+            InvalidMaTree => write!(f, "invalid meta-adaptive tree"),
+            GlobalMaTreeNotAvailable => {
                 write!(f, "global meta-adaptive tree requested but unavailable")
             }
-            Self::InvalidRctParams => write!(f, "invalid Rct transform parameters"),
-            Self::InvalidPaletteParams => write!(f, "invalid Palette transform parameters"),
-            Self::InvalidSqueezeParams => write!(f, "invalid Squeeze transform parameters"),
-            Bitstream(err) => write!(f, "bitstream error: {}", err),
-            Decoder(err) => write!(f, "entropy decoder error: {}", err),
-            Buffer(err) => write!(f, "{}", err),
+            InvalidRctParams => write!(f, "invalid Rct transform parameters"),
+            InvalidPaletteParams => write!(f, "invalid Palette transform parameters"),
+            InvalidSqueezeParams => write!(f, "invalid Squeeze transform parameters"),
+            Bitstream(err) => write!(f, "bitstream error: {err}"),
+            Decoder(err) => write!(f, "entropy decoder error: {err}"),
+            Buffer(err) => write!(f, "{err}"),
         }
     }
 }
