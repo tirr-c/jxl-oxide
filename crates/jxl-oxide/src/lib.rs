@@ -199,6 +199,7 @@ fn default_pool() -> JxlThreadPool {
 pub struct JxlImageBuilder {
     pool: Option<JxlThreadPool>,
     tracker: Option<AllocTracker>,
+    force_wide_buffers: bool,
 }
 
 impl JxlImageBuilder {
@@ -214,6 +215,12 @@ impl JxlImageBuilder {
         self
     }
 
+    /// Force 32-bit Modular buffers when decoding.
+    pub fn force_wide_buffers(mut self, force_wide_buffers: bool) -> Self {
+        self.force_wide_buffers = force_wide_buffers;
+        self
+    }
+
     /// Consumes the builder, and creates an empty, uninitialized JPEG XL image decoder.
     pub fn build_uninit(self) -> UninitializedJxlImage {
         UninitializedJxlImage {
@@ -222,6 +229,7 @@ impl JxlImageBuilder {
             reader: ContainerParser::new(),
             buffer: Vec::new(),
             aux_boxes: AuxBoxList::new(),
+            force_wide_buffers: self.force_wide_buffers,
         }
     }
 
@@ -307,6 +315,7 @@ pub struct UninitializedJxlImage {
     reader: ContainerParser,
     buffer: Vec<u8>,
     aux_boxes: AuxBoxList,
+    force_wide_buffers: bool,
 }
 
 impl UninitializedJxlImage {
@@ -413,6 +422,7 @@ impl UninitializedJxlImage {
         if let Some(tracker) = self.tracker {
             builder = builder.alloc_tracker(tracker);
         }
+        builder = builder.force_wide_buffers(self.force_wide_buffers);
         #[cfg_attr(not(any(feature = "lcms2", feature = "moxcms")), allow(unused_mut))]
         let mut ctx = builder.build(image_header.clone())?;
         #[cfg(feature = "lcms2")]
