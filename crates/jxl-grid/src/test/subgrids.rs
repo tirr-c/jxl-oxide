@@ -92,20 +92,20 @@ fn mutable_subgrid_split_merge() {
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_from_buf_with_width_exceeds_stride(){
+fn mutable_subgrid_from_buf_with_width_exceeds_stride() {
     let mut buf = [0; 2];
     let _ = MutableSubgrid::<u32>::from_buf(&mut buf, 2, 2, 1);
 }
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_from_buf_with_buffer_smaller_than_required_area(){
+fn mutable_subgrid_from_buf_with_buffer_smaller_than_required_area() {
     let mut buf = [1, 2];
     let _ = MutableSubgrid::from_buf(&mut buf, 1, 3, 1);
 }
 
 #[test]
-fn mutable_subgrid_get_row(){
+fn mutable_subgrid_get_row() {
     let mut buf = [1, 2, 3, 4, 5, 6];
     let sub = MutableSubgrid::<u32>::from_buf(&mut buf, 2, 2, 3);
     let row0 = sub.get_row(0);
@@ -115,7 +115,7 @@ fn mutable_subgrid_get_row(){
 }
 
 #[test]
-fn mutable_subgrid_get_row_mut(){
+fn mutable_subgrid_get_row_mut() {
     let mut buf = [1, 2, 3, 4, 5];
     let mut sub = MutableSubgrid::<u32>::from_buf(&mut buf, 2, 2, 3);
     let row = sub.get_row_mut(1);
@@ -126,7 +126,7 @@ fn mutable_subgrid_get_row_mut(){
 }
 
 #[test]
-fn mutable_subgrid_swap(){
+fn mutable_subgrid_swap() {
     let mut buf = [1, 2, 3, 4];
     let mut sub = MutableSubgrid::<u32>::from_buf(&mut buf, 2, 2, 2);
     sub.swap((0, 0), (1, 1));
@@ -134,7 +134,7 @@ fn mutable_subgrid_swap(){
 }
 
 #[test]
-fn mutable_subgrid_borrow_mut(){
+fn mutable_subgrid_borrow_mut() {
     let mut buf = [1, 2, 3, 4];
     let mut grid = MutableSubgrid::from_buf(&mut buf, 4, 1, 4);
     let m2 = grid.borrow_mut();
@@ -143,7 +143,7 @@ fn mutable_subgrid_borrow_mut(){
 }
 
 #[test]
-fn mutable_subgrid_as_shared(){
+fn mutable_subgrid_as_shared() {
     let mut buf = [1, 2, 3, 4];
     let grid = MutableSubgrid::from_buf(&mut buf, 4, 1, 4);
     let s2 = grid.as_shared();
@@ -153,7 +153,7 @@ fn mutable_subgrid_as_shared(){
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_split_horizontal_with_index_exceeds_width(){
+fn mutable_subgrid_split_horizontal_with_index_exceeds_width() {
     let mut buf = [0, 1, 2];
     let mut grid = MutableSubgrid::from_buf(&mut buf, 3, 1, 3);
     let _ = grid.split_horizontal(4);
@@ -161,7 +161,7 @@ fn mutable_subgrid_split_horizontal_with_index_exceeds_width(){
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_split_split_horizontal_in_place_with_index_exceeds_width(){
+fn mutable_subgrid_split_split_horizontal_in_place_with_index_exceeds_width() {
     let mut buf = [0, 1, 2];
     let mut grid = MutableSubgrid::from_buf(&mut buf, 3, 1, 3);
     let _ = grid.split_horizontal_in_place(4);
@@ -169,7 +169,7 @@ fn mutable_subgrid_split_split_horizontal_in_place_with_index_exceeds_width(){
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_split_split_vertical_with_index_exceeds_height(){
+fn mutable_subgrid_split_split_vertical_with_index_exceeds_height() {
     let mut buf = [0];
     let mut grid = MutableSubgrid::from_buf(&mut buf, 1, 1, 1);
     let _ = grid.split_vertical(2);
@@ -177,14 +177,14 @@ fn mutable_subgrid_split_split_vertical_with_index_exceeds_height(){
 
 #[test]
 #[should_panic]
-fn mutable_subgrid_split_split_vertical_in_place_with_index_exceeds_height(){
+fn mutable_subgrid_split_split_vertical_in_place_with_index_exceeds_height() {
     let mut buf = [0];
     let mut grid = MutableSubgrid::from_buf(&mut buf, 1, 1, 1);
     let _ = grid.split_vertical_in_place(2);
 }
 
 #[test]
-fn mutable_subgrid_into_groups(){
+fn mutable_subgrid_into_groups() {
     let mut buf = [1, 2, 3, 4];
     let grid1 = MutableSubgrid::from_buf(&mut buf, 2, 2, 2);
     let group1 = grid1.into_groups(1, 1);
@@ -202,7 +202,7 @@ fn mutable_subgrid_into_groups(){
 }
 
 #[test]
-fn mutable_subgrid_into_groups_with_fix_count(){
+fn mutable_subgrid_into_groups_with_fix_count() {
     let mut buf = [0, 1, 2, 3, 4, 5, 6, 7, 8];
     let grid = MutableSubgrid::from_buf(&mut buf, 3, 3, 3);
     let groups = grid.into_groups_with_fixed_count(2, 2, 2, 2);
@@ -218,7 +218,7 @@ fn mutable_subgrid_into_groups_with_fix_count(){
 }
 
 #[test]
-fn mutable_subgrid_as_vectored(){
+fn mutable_subgrid_as_vectored() {
     let mut data = vec![1.0; 8];
     let mut msg = MutableSubgrid::from_buf(&mut data[..], 4, 2, 4);
     let opt = msg.as_vectored::<float32x4_t>();
@@ -230,25 +230,25 @@ fn mutable_subgrid_as_vectored(){
 
 #[test]
 #[should_panic]
-fn shared_subgrid_from_buf_with_zero_width(){
+fn shared_subgrid_from_buf_with_zero_width() {
     let _ = SharedSubgrid::from_buf(&[1, 2, 3], 0, 1, 1);
 }
 
 #[test]
 #[should_panic]
-fn shared_subgrid_from_buf_with_zero_height(){
+fn shared_subgrid_from_buf_with_zero_height() {
     let _ = SharedSubgrid::from_buf(&[1, 2, 3], 1, 0, 1);
 }
 
 #[test]
 #[should_panic]
-fn shared_subgrid_from_buf_with_buffer_smaller_than_required_area(){
+fn shared_subgrid_from_buf_with_buffer_smaller_than_required_area() {
     let _ = SharedSubgrid::from_buf(&[1, 2], 1, 3, 1);
 }
 
 #[test]
 #[should_panic]
-fn shared_subgrid_split_horizontal_with_index_exceeds_width(){
+fn shared_subgrid_split_horizontal_with_index_exceeds_width() {
     let buf = [1, 2, 3];
     let grid = SharedSubgrid::from_buf(&buf, 3, 1, 3);
     grid.split_horizontal(4);
@@ -256,21 +256,21 @@ fn shared_subgrid_split_horizontal_with_index_exceeds_width(){
 
 #[test]
 #[should_panic]
-fn shared_subgrid_split_vertical_with_index_exceeds_height(){
+fn shared_subgrid_split_vertical_with_index_exceeds_height() {
     let buf = [1];
     let grid = SharedSubgrid::from_buf(&buf, 1, 1, 1);
     grid.split_vertical(2);
 }
 
 #[test]
-fn shared_subgrid_get_row(){
+fn shared_subgrid_get_row() {
     let buf = [10, 11, 12, 13];
     let grid = SharedSubgrid::from_buf(&buf, 2, 2, 2);
     assert_eq!(grid.get_row(0), &[10, 11]);
 }
 
 #[test]
-fn shared_subgrid_as_vectored(){
+fn shared_subgrid_as_vectored() {
     let buf: Vec<f32> = vec![1.0; 8];
     let ssg = SharedSubgrid::from_buf(&buf, 4, 2, 4);
     let opt = ssg.as_vectored::<float32x4_t>();
