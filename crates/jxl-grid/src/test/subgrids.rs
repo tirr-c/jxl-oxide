@@ -1,4 +1,4 @@
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64"))]
 use std::arch::aarch64::float32x4_t;
 use crate::AlignedGrid;
 use crate::MutableSubgrid;
@@ -218,16 +218,18 @@ fn mutable_subgrid_into_groups_with_fix_count() {
     assert_eq!(groups[3].height(), 1);
 }
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64"))]
 #[test]
 fn mutable_subgrid_as_vectored() {
-    let mut data = vec![1.0; 8];
-    let mut msg = MutableSubgrid::from_buf(&mut data[..], 4, 2, 4);
-    let opt = msg.as_vectored::<float32x4_t>();
-    assert!(opt.is_some());
-    let msv = opt.unwrap();
-    assert_eq!(msv.width(), 1);
-    assert_eq!(msv.height(), msg.height());
+    if std::arch::is_aarch64_feature_detected!("neon"){
+        let mut data = vec![1.0; 8];
+        let mut msg = MutableSubgrid::from_buf(&mut data[..], 4, 2, 4);
+        let opt = msg.as_vectored::<float32x4_t>();
+        assert!(opt.is_some());
+        let msv = opt.unwrap();
+        assert_eq!(msv.width(), 1);
+        assert_eq!(msv.height(), msg.height());
+    }
 }
 
 #[test]
@@ -271,14 +273,16 @@ fn shared_subgrid_get_row() {
     assert_eq!(grid.get_row(0), &[10, 11]);
 }
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64"))]
 #[test]
 fn shared_subgrid_as_vectored() {
-    let buf: Vec<f32> = vec![1.0; 8];
-    let ssg = SharedSubgrid::from_buf(&buf, 4, 2, 4);
-    let opt = ssg.as_vectored::<float32x4_t>();
-    assert!(opt.is_some());
-    let ssv = opt.unwrap();
-    assert_eq!(ssv.width(), ssg.width() / 4);
-    assert_eq!(ssv.height(), ssg.height());
+    if std::arch::is_aarch64_feature_detected!("neon"){
+        let buf: Vec<f32> = vec![1.0; 8];
+        let ssg = SharedSubgrid::from_buf(&buf, 4, 2, 4);
+        let opt = ssg.as_vectored::<float32x4_t>();
+        assert!(opt.is_some());
+        let ssv = opt.unwrap();
+        assert_eq!(ssv.width(), ssg.width() / 4);
+        assert_eq!(ssv.height(), ssg.height());
+    }
 }
