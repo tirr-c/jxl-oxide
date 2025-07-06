@@ -221,7 +221,7 @@ fn mutable_subgrid_into_groups_with_fix_count() {
 #[cfg(all(target_arch = "aarch64"))]
 #[test]
 fn mutable_subgrid_as_vectored() {
-    if std::arch::is_aarch64_feature_detected!("neon"){
+    if std::arch::is_aarch64_feature_detected!("neon") {
         let mut data = vec![1.0; 8];
         let mut msg = MutableSubgrid::from_buf(&mut data[..], 4, 2, 4);
         let opt = msg.as_vectored::<float32x4_t>();
@@ -276,7 +276,7 @@ fn shared_subgrid_get_row() {
 #[cfg(all(target_arch = "aarch64"))]
 #[test]
 fn shared_subgrid_as_vectored() {
-    if std::arch::is_aarch64_feature_detected!("neon"){
+    if std::arch::is_aarch64_feature_detected!("neon") {
         let buf: Vec<f32> = vec![1.0; 8];
         let ssg = SharedSubgrid::from_buf(&buf, 4, 2, 4);
         let opt = ssg.as_vectored::<float32x4_t>();
