@@ -1,6 +1,6 @@
 #[cfg(all(target_arch = "aarch64"))]
-
 use std::arch::aarch64::float32x4_t;
+
 use crate::AlignedGrid;
 use crate::MutableSubgrid;
 use crate::SharedSubgrid;
