@@ -1,3 +1,4 @@
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 use std::arch::aarch64::float32x4_t;
 use crate::AlignedGrid;
 use crate::MutableSubgrid;
@@ -217,6 +218,7 @@ fn mutable_subgrid_into_groups_with_fix_count() {
     assert_eq!(groups[3].height(), 1);
 }
 
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 #[test]
 fn mutable_subgrid_as_vectored() {
     let mut data = vec![1.0; 8];
@@ -269,6 +271,7 @@ fn shared_subgrid_get_row() {
     assert_eq!(grid.get_row(0), &[10, 11]);
 }
 
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 #[test]
 fn shared_subgrid_as_vectored() {
     let buf: Vec<f32> = vec![1.0; 8];
