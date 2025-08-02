@@ -174,7 +174,7 @@ impl<R: Read> JxlDecoder<R> {
     }
 
     fn load_until_first_keyframe(&mut self) -> crate::Result<()> {
-        self.load_until_condition(|image| Ok(image.ctx.loaded_frames() > 0))?;
+        self.load_until_condition(|image| Ok(image.ctx.loaded_keyframes() > 0))?;
 
         if self.image.frame_by_keyframe(0).is_none() {
             return Err(std::io::Error::new(
