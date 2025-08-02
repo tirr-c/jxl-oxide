@@ -86,3 +86,14 @@ fn icc_profile() {
         .unwrap();
     assert_eq!(&icc, include_bytes!("./grayscale.icc"));
 }
+
+#[test]
+fn with_reference_frame() {
+    let path = util::conformance_path("patches");
+    let file = File::open(path).unwrap();
+    let decoder = JxlDecoder::new(file).unwrap();
+
+    let image = DynamicImage::from_decoder(decoder).unwrap();
+    assert_eq!(image.width(), 1600);
+    assert_eq!(image.height(), 1096);
+}
