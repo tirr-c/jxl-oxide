@@ -8,7 +8,7 @@ keywords = ["jpeg-xl", "decoder", "jxl-oxide"]
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 
-version = "0.12.2"
+version = "0.12.3"
 edition = "2024"
 
 default-run = "jxl-oxide"
@@ -34,7 +34,7 @@ path = "../jxl-color"
 optional = true
 
 [dependencies.jxl-oxide]
-version = "0.12.2"
+version = "0.12.3"
 path = "../jxl-oxide"
 default-features = false
 features = ["lcms2", "moxcms"]
