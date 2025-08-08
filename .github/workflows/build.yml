@@ -18,8 +18,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         id: toolchain
+        with:
+          toolchain: '1.88.0'
       - uses: actions/cache@v4
         with:
           path: |
@@ -51,9 +53,10 @@ jobs:
           - armv7-unknown-linux-gnueabihf
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
+          toolchain: '1.88.0'
           targets: ${{ matrix.target }}
       - uses: actions/cache@v4
         with:
@@ -83,9 +86,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
+          toolchain: '1.88.0'
           targets: wasm32-unknown-unknown
       - uses: actions/cache@v4
         with:
