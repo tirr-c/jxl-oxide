@@ -153,6 +153,9 @@ impl Decoder {
     /// Returns the token to be decoded if the decoder always emits single token repeatedly.
     #[inline]
     pub fn single_token(&self, cluster: u8) -> Option<u32> {
+        if let Lz77::Enabled { .. } = self.lz77 {
+            return None;
+        }
         self.inner.single_token(cluster)
     }
 
