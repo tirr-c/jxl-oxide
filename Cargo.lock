@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-coding"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "jxl-bitstream",
  "tracing",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-frame"
-version = "0.13.2"
+version = "0.13.3"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-jbr"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "brotli-decompressor",
  "jxl-bitstream",
@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "brotli-decompressor",
  "bytemuck",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "clap",
  "crossterm",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1238,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "bytemuck",
  "jxl-bitstream",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-vardct"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
