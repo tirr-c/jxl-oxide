@@ -16,3 +16,6 @@ features = ["std"]
 [profile.opt]
 inherits = "release"
 debug = 1
+
+[patch.crates-io]
+image = {git = "https://github.com/image-rs/image"}
