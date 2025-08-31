@@ -234,7 +234,7 @@ impl NoiseGroup {
     }
 
     #[inline]
-    fn as_subgrid(&self, channel_idx: usize) -> SharedSubgrid<f32> {
+    fn as_subgrid(&self, channel_idx: usize) -> SharedSubgrid<'_, f32> {
         SharedSubgrid::from_buf(&self.buf[channel_idx], self.width, self.height, self.stride)
     }
 }

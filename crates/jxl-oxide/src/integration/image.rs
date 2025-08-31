@@ -337,20 +337,20 @@ impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     fn set_limits(&mut self, limits: image::Limits) -> ImageResult<()> {
         use image::error::{LimitError, LimitErrorKind};
 
-        if let Some(max_width) = limits.max_image_width {
-            if self.image.width() > max_width {
-                return Err(ImageError::Limits(LimitError::from_kind(
-                    LimitErrorKind::DimensionError,
-                )));
-            }
+        if let Some(max_width) = limits.max_image_width
+            && self.image.width() > max_width
+        {
+            return Err(ImageError::Limits(LimitError::from_kind(
+                LimitErrorKind::DimensionError,
+            )));
         }
 
-        if let Some(max_height) = limits.max_image_height {
-            if self.image.height() > max_height {
-                return Err(ImageError::Limits(LimitError::from_kind(
-                    LimitErrorKind::DimensionError,
-                )));
-            }
+        if let Some(max_height) = limits.max_image_height
+            && self.image.height() > max_height
+        {
+            return Err(ImageError::Limits(LimitError::from_kind(
+                LimitErrorKind::DimensionError,
+            )));
         }
 
         let alloc_tracker = self.image.ctx.alloc_tracker();

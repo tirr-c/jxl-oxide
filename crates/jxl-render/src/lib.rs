@@ -451,11 +451,11 @@ impl RenderContext {
     }
 
     fn try_finalize_current_frame(&mut self) -> bool {
-        if let Some(loading_frame) = &self.loading_frame {
-            if loading_frame.is_loading_done() {
-                self.preserve_current_frame();
-                return true;
-            }
+        if let Some(loading_frame) = &self.loading_frame
+            && loading_frame.is_loading_done()
+        {
+            self.preserve_current_frame();
+            return true;
         }
         false
     }

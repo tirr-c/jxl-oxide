@@ -63,28 +63,28 @@ impl<S: Sample> Bundle<LfGroupParams<'_, '_, '_, S>> for LfGroup<S> {
         })
         .transpose()?;
 
-        if let Some(lf_coeff_inner) = &lf_coeff {
-            if lf_coeff_inner.partial {
-                return Ok(Self {
-                    lf_coeff,
-                    hf_meta: None,
-                    partial: true,
-                });
-            }
+        if let Some(lf_coeff_inner) = &lf_coeff
+            && lf_coeff_inner.partial
+        {
+            return Ok(Self {
+                lf_coeff,
+                hf_meta: None,
+                partial: true,
+            });
         }
 
         let mut is_mlf_complete = true;
-        if let Some(image) = mlf_group {
-            if !image.is_empty() {
-                let mut subimage = image.recursive(bitstream, global_ma_config, tracker)?;
-                let mut subimage = subimage.prepare_subimage()?;
-                subimage.decode(
-                    bitstream,
-                    1 + frame_header.num_lf_groups() + lf_group_idx,
-                    allow_partial,
-                )?;
-                is_mlf_complete = subimage.finish(pool);
-            }
+        if let Some(image) = mlf_group
+            && !image.is_empty()
+        {
+            let mut subimage = image.recursive(bitstream, global_ma_config, tracker)?;
+            let mut subimage = subimage.prepare_subimage()?;
+            subimage.decode(
+                bitstream,
+                1 + frame_header.num_lf_groups() + lf_group_idx,
+                allow_partial,
+            )?;
+            is_mlf_complete = subimage.finish(pool);
         }
 
         let hf_meta = (frame_header.encoding == Encoding::VarDct && is_mlf_complete)

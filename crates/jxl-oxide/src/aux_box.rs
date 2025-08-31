@@ -341,7 +341,7 @@ impl AuxBoxList {
     }
 
     /// Returns the first Exif metadata, if any.
-    pub fn first_exif(&self) -> Result<AuxBoxData<RawExif>> {
+    pub fn first_exif(&self) -> Result<AuxBoxData<RawExif<'_>>> {
         let exif = self.first_of_type(ContainerBoxType::EXIF);
         exif.map(RawExif::new).transpose()
     }

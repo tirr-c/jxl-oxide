@@ -301,10 +301,10 @@ impl FlatMaTree {
                 if let Some(p) = pr.checked_sub(16) {
                     max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
                 }
-            } else if let FlatMaTreeNode::Table { prop, .. } = *node {
-                if let Some(p) = prop.checked_sub(16) {
-                    max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
-                }
+            } else if let FlatMaTreeNode::Table { prop, .. } = *node
+                && let Some(p) = prop.checked_sub(16)
+            {
+                max_prev_channel_depth = max_prev_channel_depth.max((p as usize / 4) + 1);
             }
         }
 
