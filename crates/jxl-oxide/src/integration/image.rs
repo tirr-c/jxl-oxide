@@ -455,14 +455,9 @@ pub fn register_decoding_hook() -> bool {
     );
     if registered_just_now {
         // according to https://en.wikipedia.org/wiki/JPEG_XL there are two different magic byte sequences
-        image::hooks::register_format_detection_hook("jxl".into(), &[0xff, 0x0a], None);
-        image::hooks::register_format_detection_hook(
-            "jxl".into(),
-            &[
-                0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a,
-            ],
-            None,
-        );
+        use jxl_bitstream::consts::{CODESTREAM_SIG, CONTAINER_SIG};
+        image::hooks::register_format_detection_hook("jxl".into(), CODESTREAM_SIG, None);
+        image::hooks::register_format_detection_hook("jxl".into(), CONTAINER_SIG, None);
     }
     registered_just_now
 }
