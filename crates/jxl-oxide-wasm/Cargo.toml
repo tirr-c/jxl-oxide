@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 miniz_oxide = "0.8.7"
-png = "0.17.13"
+png = "0.18.0"
 wasm-bindgen = "0.2.93"
 
 [dependencies.console_error_panic_hook]
