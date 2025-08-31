@@ -11,6 +11,7 @@
 //! including codestream data and auxiliary box data.
 
 mod bitstream;
+pub mod consts;
 pub mod container;
 mod error;
 
