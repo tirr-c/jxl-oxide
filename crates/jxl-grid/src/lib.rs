@@ -276,13 +276,13 @@ impl<S> AlignedGrid<S> {
 
     /// Borrows the grid into a `SharedSubgrid`.
     #[inline]
-    pub fn as_subgrid(&self) -> SharedSubgrid<S> {
+    pub fn as_subgrid(&self) -> SharedSubgrid<'_, S> {
         SharedSubgrid::from(self)
     }
 
     /// Borrows the grid into a `MutableSubgrid`.
     #[inline]
-    pub fn as_subgrid_mut(&mut self) -> MutableSubgrid<S> {
+    pub fn as_subgrid_mut(&mut self) -> MutableSubgrid<'_, S> {
         MutableSubgrid::from(self)
     }
 }

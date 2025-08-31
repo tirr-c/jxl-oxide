@@ -226,7 +226,7 @@ struct RawTag<'a> {
     data: &'a [u8],
 }
 
-pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile> {
+pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
     if profile.len() < 128 {
         return Err(Error::IccParseFailure("profile is too short"));
     }

@@ -58,10 +58,10 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
                 println!("Embedded ICC profile ({} bytes)", icc.len());
             }
 
-            if let Ok(encoding) = ColorEncodingWithProfile::with_icc(icc) {
-                if let ColourEncoding::Enum(encoding) = encoding.encoding() {
-                    print_colour_encoding(encoding, "      ");
-                }
+            if let Ok(encoding) = ColorEncodingWithProfile::with_icc(icc)
+                && let ColourEncoding::Enum(encoding) = encoding.encoding()
+            {
+                print_colour_encoding(encoding, "      ");
             }
         }
     }

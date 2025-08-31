@@ -130,17 +130,17 @@ impl WasmJxlImage {
                 InitializeResult::Initialized(mut image) => {
                     let tagged_color_encoding = &image.image_header().metadata.colour_encoding;
                     let xyb_encoded = image.image_header().metadata.xyb_encoded;
-                    if let ColourEncoding::Enum(color) = tagged_color_encoding {
-                        if xyb_encoded {
-                            if self.force_srgb {
-                                image.request_color_encoding(EnumColourEncoding::srgb(
-                                    RenderingIntent::Relative,
-                                ));
-                            } else if color.is_hdr() {
-                                image.request_color_encoding(EnumColourEncoding::bt2100_pq(
-                                    RenderingIntent::Perceptual,
-                                ));
-                            }
+                    if let ColourEncoding::Enum(color) = tagged_color_encoding
+                        && xyb_encoded
+                    {
+                        if self.force_srgb {
+                            image.request_color_encoding(EnumColourEncoding::srgb(
+                                RenderingIntent::Relative,
+                            ));
+                        } else if color.is_hdr() {
+                            image.request_color_encoding(EnumColourEncoding::bt2100_pq(
+                                RenderingIntent::Perceptual,
+                            ));
                         }
                     }
                     self.inner = WasmJxlImageInner::Init(image);

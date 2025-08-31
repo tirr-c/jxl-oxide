@@ -564,7 +564,7 @@ impl Frame {
         &self,
         pass_idx: u32,
         group_idx: u32,
-    ) -> Option<Result<PassGroupBitstream>> {
+    ) -> Option<Result<PassGroupBitstream<'_>>> {
         Some(if self.toc.is_single_entry() {
             if self.all_group_offsets.has_error.load(Ordering::Relaxed) != 0 {
                 return Some(Err(Error::HadError));
