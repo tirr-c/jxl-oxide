@@ -1130,7 +1130,7 @@ impl Render {
     ///
     /// The stream will include black and alpha channels, if exist, in addition to color channels.
     /// Orientation is applied.
-    pub fn stream(&self) -> ImageStream {
+    pub fn stream(&self) -> ImageStream<'_> {
         ImageStream::from_render(self, false)
     }
 
@@ -1138,7 +1138,7 @@ impl Render {
     ///
     /// The stream will include black channels if exist, but not alpha channels. Orientation is
     /// applied.
-    pub fn stream_no_alpha(&self) -> ImageStream {
+    pub fn stream_no_alpha(&self) -> ImageStream<'_> {
         ImageStream::from_render(self, true)
     }
 

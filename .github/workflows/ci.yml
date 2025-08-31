@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.88.0'
+          toolchain: '1.89.0'
           targets: ${{ matrix.target }}
       - uses: actions/cache@v4
         with:
@@ -78,7 +78,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.88.0'
+          toolchain: '1.89.0'
           components: clippy, rustfmt
       - uses: actions/cache@v4
         with:

@@ -300,32 +300,30 @@ pub(crate) fn blend<S: Sample>(
                         .subgrid(left as usize..right as usize, top as usize..bottom as usize)
                 };
 
-                if let Some(alpha_idx) = alpha_idx {
-                    if alpha_idx + color_channels != idx {
-                        let alpha_bit_depth = image_header.metadata.ec_info[alpha_idx].bit_depth;
-                        base_alpha_grid =
-                            base_grid.buffer()[alpha_idx + color_channels].try_clone()?;
-                        let base_alpha_grid =
-                            base_alpha_grid.convert_to_float_modular(alpha_bit_depth)?;
-                        base_alpha = Some({
-                            let grid_region =
-                                base_grid.regions_and_shifts()[alpha_idx + color_channels].0;
-                            let region =
-                                base_frame_region.translate(-grid_region.left, -grid_region.top);
-                            let Region {
-                                left,
-                                top,
-                                width,
-                                height,
-                            } = region;
-                            let right = left.wrapping_add_unsigned(width);
-                            let bottom = top.wrapping_add_unsigned(height);
-                            base_alpha_grid.as_subgrid().subgrid(
-                                left as usize..right as usize,
-                                top as usize..bottom as usize,
-                            )
-                        });
-                    }
+                if let Some(alpha_idx) = alpha_idx
+                    && alpha_idx + color_channels != idx
+                {
+                    let alpha_bit_depth = image_header.metadata.ec_info[alpha_idx].bit_depth;
+                    base_alpha_grid = base_grid.buffer()[alpha_idx + color_channels].try_clone()?;
+                    let base_alpha_grid =
+                        base_alpha_grid.convert_to_float_modular(alpha_bit_depth)?;
+                    base_alpha = Some({
+                        let grid_region =
+                            base_grid.regions_and_shifts()[alpha_idx + color_channels].0;
+                        let region =
+                            base_frame_region.translate(-grid_region.left, -grid_region.top);
+                        let Region {
+                            left,
+                            top,
+                            width,
+                            height,
+                        } = region;
+                        let right = left.wrapping_add_unsigned(width);
+                        let bottom = top.wrapping_add_unsigned(height);
+                        base_alpha_grid
+                            .as_subgrid()
+                            .subgrid(left as usize..right as usize, top as usize..bottom as usize)
+                    });
                 }
             }
         } else {
@@ -406,10 +404,10 @@ pub(crate) fn blend<S: Sample>(
 
     if header.can_reference() {
         let ref_idx = header.save_as_reference as usize;
-        if let Some(grid) = &reference_grids[ref_idx] {
-            if !grid.frame.header().is_keyframe() {
-                grid.image.reset();
-            }
+        if let Some(grid) = &reference_grids[ref_idx]
+            && !grid.frame.header().is_keyframe()
+        {
+            grid.image.reset();
         }
     }
 

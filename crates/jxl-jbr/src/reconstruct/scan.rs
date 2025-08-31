@@ -408,10 +408,11 @@ impl super::JpegBitstreamReconstructor<'_, '_, '_> {
         for y8 in 0..h8 {
             for x8 in 0..w8 {
                 let mcu_idx = x8 + w8 * y8;
-                if let Some(restart_interval) = self.restart_interval {
-                    if mcu_idx != 0 && mcu_idx % restart_interval == 0 {
-                        state.restart(self.padding_bitstream.as_mut(), &mut writer)?;
-                    }
+                if let Some(restart_interval) = self.restart_interval
+                    && mcu_idx != 0
+                    && mcu_idx % restart_interval == 0
+                {
+                    state.restart(self.padding_bitstream.as_mut(), &mut writer)?;
                 }
 
                 let group_idx = frame_header
