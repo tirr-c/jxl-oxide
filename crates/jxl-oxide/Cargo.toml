@@ -25,7 +25,7 @@ default-features = false
 optional = true
 
 [dependencies.jxl-bitstream]
-version = "1.0.0"
+version = "1.1.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
