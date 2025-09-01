@@ -20,7 +20,7 @@ workspace = true
 optional = true
 
 [dependencies.image]
-version = "0.25.5"
+version = "0.25.7"
 default-features = false
 optional = true
 
