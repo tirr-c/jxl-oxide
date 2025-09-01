@@ -443,3 +443,21 @@ fn stream_to_buf<Sample: crate::FrameBufferSample>(
         }
     }
 }
+
+/// Registers the decoder with the `image` crate so that non-format-specific calls such as
+/// `ImageReader::open("image.jxl")?.decode()?;` work with JPEG XL files.
+///
+/// Returns `true` on success, or `false` if the hook for JPEG XL is already registered.
+pub fn register_decoding_hook() -> bool {
+    let registered_just_now = image::hooks::register_decoding_hook(
+        "jxl".into(),
+        Box::new(|r| Ok(Box::new(JxlDecoder::new(r)?))),
+    );
+    if registered_just_now {
+        // according to https://en.wikipedia.org/wiki/JPEG_XL there are two different magic byte sequences
+        use jxl_bitstream::consts::{CODESTREAM_SIG, CONTAINER_SIG};
+        image::hooks::register_format_detection_hook("jxl".into(), &CODESTREAM_SIG, None);
+        image::hooks::register_format_detection_hook("jxl".into(), &CONTAINER_SIG, None);
+    }
+    registered_just_now
+}
