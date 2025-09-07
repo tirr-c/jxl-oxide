@@ -223,23 +223,23 @@ pub(super) unsafe fn run_epf_rows(
                 let image_y = top + base_y + dy;
 
                 let mut skip_inner = false;
-                if merged_input_rows.is_some() {
-                    if let Some(handle_row_simd) = handle_row_simd {
-                        skip_inner = true;
-                        let output_rows = [&mut *output0, &mut *output1, &mut *output2];
-                        let row = EpfRow {
-                            input_rows,
-                            merged_input_rows,
-                            output_rows,
-                            width,
-                            y: image_y,
-                            sigma_row,
-                            epf_params,
-                            skip_inner,
-                        };
-                        unsafe {
-                            handle_row_simd(row);
-                        }
+                if merged_input_rows.is_some()
+                    && let Some(handle_row_simd) = handle_row_simd
+                {
+                    skip_inner = true;
+                    let output_rows = [&mut *output0, &mut *output1, &mut *output2];
+                    let row = EpfRow {
+                        input_rows,
+                        merged_input_rows,
+                        output_rows,
+                        width,
+                        y: image_y,
+                        sigma_row,
+                        epf_params,
+                        skip_inner,
+                    };
+                    unsafe {
+                        handle_row_simd(row);
                     }
                 }
 

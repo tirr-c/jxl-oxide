@@ -244,13 +244,13 @@ impl<'g, V> MutableSubgrid<'g, V> {
     }
 
     /// Reborrows the mutable subgrid, and returns a mutable subgrid with shorter lifetime.
-    pub fn borrow_mut(&mut self) -> MutableSubgrid<V> {
+    pub fn borrow_mut(&mut self) -> MutableSubgrid<'_, V> {
         // SAFETY: We have unique reference to the grid, and the new grid borrows it.
         unsafe { MutableSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }
 
     /// Reborrows the mutable subgrid, and returns a shared subgrid.
-    pub fn as_shared(&self) -> SharedSubgrid<V> {
+    pub fn as_shared(&self) -> SharedSubgrid<'_, V> {
         // SAFETY: We have unique reference to the grid.
         unsafe { SharedSubgrid::new(self.ptr, self.width, self.height, self.stride) }
     }

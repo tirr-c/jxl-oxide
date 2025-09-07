@@ -24,7 +24,7 @@ in
 
 let
   pkgsFromNixpkgs = with pkgs; [
-    ffmpeg_7-headless
+    ffmpeg_8-headless
     nodejs
     pkg-config
     wasm-pack

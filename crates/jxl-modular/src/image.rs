@@ -27,7 +27,7 @@ impl<'dest, S: Sample> From<MutableSubgrid<'dest, S>> for TransformedGrid<'dest,
 }
 
 impl<S: Sample> TransformedGrid<'_, S> {
-    fn reborrow(&mut self) -> TransformedGrid<S> {
+    fn reborrow(&mut self) -> TransformedGrid<'_, S> {
         match self {
             TransformedGrid::Single(g) => TransformedGrid::Single(g.split_horizontal(0).1),
             TransformedGrid::Merged { leader, .. } => {
@@ -181,7 +181,7 @@ impl<S: Sample> ModularImageDestination<S> {
 }
 
 impl<S: Sample> ModularImageDestination<S> {
-    pub fn prepare_gmodular(&mut self) -> Result<TransformedModularSubimage<S>> {
+    pub fn prepare_gmodular(&mut self) -> Result<TransformedModularSubimage<'_, S>> {
         assert_ne!(self.group_dim, 0);
 
         let group_dim = self.group_dim;
@@ -209,7 +209,7 @@ impl<S: Sample> ModularImageDestination<S> {
     pub fn prepare_groups(
         &mut self,
         pass_shifts: &std::collections::BTreeMap<u32, (i32, i32)>,
-    ) -> Result<TransformedGlobalModular<S>> {
+    ) -> Result<TransformedGlobalModular<'_, S>> {
         assert_ne!(self.group_dim, 0);
 
         let num_passes = *pass_shifts.last_key_value().unwrap().0 as usize + 1;
@@ -340,7 +340,7 @@ impl<S: Sample> ModularImageDestination<S> {
         })
     }
 
-    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<S>> {
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<'_, S>> {
         let mut channels = self.channels.clone();
         let mut meta_channel_grids = self
             .meta_channels
@@ -622,7 +622,7 @@ pub struct RecursiveModularImage<'dest, S: Sample> {
 }
 
 impl<S: Sample> RecursiveModularImage<'_, S> {
-    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<S>> {
+    pub fn prepare_subimage(&mut self) -> Result<TransformedModularSubimage<'_, S>> {
         let mut channels = self.channels.clone();
         let mut meta_channel_grids = self
             .meta_channels

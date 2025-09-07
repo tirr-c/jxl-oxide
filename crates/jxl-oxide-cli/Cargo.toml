@@ -15,7 +15,7 @@ default-run = "jxl-oxide"
 
 [dependencies]
 miniz_oxide = "0.8.2"
-png = "0.17.16"
+png = "0.18.0"
 tracing.workspace = true
 
 [dependencies.clap]
@@ -47,7 +47,7 @@ version = "1.8.1"
 optional = true
 
 [dependencies.tracing-subscriber]
-version = "0.3.18"
+version = "0.3.20"
 features = ["env-filter"]
 
 [dependencies.va_list]
@@ -55,12 +55,12 @@ version = "0.2.0"
 optional = true
 
 [target.'cfg(windows)'.dependencies.rusty_ffmpeg]
-version = "0.16.1"
+version = "0.16.7"
 features = ["link_vcpkg_ffmpeg"]
 optional = true
 
 [target.'cfg(not(windows))'.dependencies.rusty_ffmpeg]
-version = "0.16.1"
+version = "0.16.7"
 features = ["link_system_ffmpeg"]
 optional = true
 
