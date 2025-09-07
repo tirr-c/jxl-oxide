@@ -448,7 +448,35 @@ fn stream_to_buf<Sample: crate::FrameBufferSample>(
 /// `ImageReader::open("image.jxl")?.decode()?;` work with JPEG XL files.
 ///
 /// Returns `true` on success, or `false` if the hook for JPEG XL is already registered.
-pub fn register_decoding_hook() -> bool {
+///
+/// # Examples
+///
+/// Converting JPEG XL image to PNG, by registering `.jxl` format to `image` crate:
+///
+/// ```no_run
+/// use image::{DynamicImage, ImageDecoder, ImageReader};
+///
+/// # type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
+/// # fn do_color_transform(_: &mut DynamicImage, _: Vec<u8>) -> Result<()> { Ok(()) }
+/// # fn main() -> Result<()> {
+/// // Register the decoding hook.
+/// jxl_oxide::integration::register_image_decoding_hook();
+///
+/// // Read and decode a JPEG XL image.
+/// let mut decoder = ImageReader::open("image.jxl")?.into_decoder()?;
+/// let icc = decoder.icc_profile()?;
+/// let mut image = DynamicImage::from_decoder(decoder)?;
+///
+/// // Perform color transform using the ICC profile.
+/// if let Some(icc) = icc {
+///     do_color_transform(&mut image, icc)?;
+/// }
+///
+/// // Save decoded image to PNG.
+/// image.save("image.png")?;
+/// # Ok(()) }
+/// ```
+pub fn register_image_decoding_hook() -> bool {
     let registered_just_now = image::hooks::register_decoding_hook(
         "jxl".into(),
         Box::new(|r| Ok(Box::new(JxlDecoder::new(r)?))),
