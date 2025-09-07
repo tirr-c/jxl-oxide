@@ -20,12 +20,12 @@ workspace = true
 optional = true
 
 [dependencies.image]
-version = "0.25.5"
+version = "0.25.7"
 default-features = false
 optional = true
 
 [dependencies.jxl-bitstream]
-version = "1.0.0"
+version = "1.1.0"
 path = "../jxl-bitstream"
 
 [dependencies.jxl-color]
