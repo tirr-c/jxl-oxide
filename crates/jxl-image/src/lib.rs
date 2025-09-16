@@ -453,6 +453,7 @@ impl BitDepth {
     }
 
     /// Parses the given Modular image sample to an `f32`.
+    // Note: This function can return non-finite values.
     #[inline]
     pub fn parse_integer_sample(self, sample: i32) -> f32 {
         match self {

@@ -86,4 +86,5 @@ test_by_include!(
     ma_lookup_overflow,
     hf_preset_out_of_range,
     hf_varblock_across_group,
+    upsampling_sum_not_finite,
 );
