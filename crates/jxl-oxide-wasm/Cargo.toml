@@ -9,7 +9,7 @@ categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 publish = false
 
-version = "0.12.4"
+version = "0.12.5"
 edition = "2024"
 
 [lib]
