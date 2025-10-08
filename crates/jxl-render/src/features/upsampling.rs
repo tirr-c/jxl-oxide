@@ -117,7 +117,14 @@ fn upsample_inner<const K: usize, const NW: usize>(
                     max = max.max(sample);
                 }
             }
-            grid_buf[y * frame_width + x] = sum.clamp(min, max);
+
+            grid_buf[y * frame_width + x] = if !min.is_finite() {
+                // This happens if all samples are NaN. f32::clamp would panic
+                // in this case.
+                f32::NAN
+            } else {
+                sum.clamp(min, max)
+            };
         }
     }
 
