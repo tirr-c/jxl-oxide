@@ -15,7 +15,7 @@ pub(crate) unsafe fn transpose_lane(lanes: &[Lane]) -> float32x4x4_t {
 
 #[inline(always)]
 pub(crate) unsafe fn dct_2d_aarch64_neon(io: &mut MutableSubgrid<'_>, direction: DctDirection) {
-    if io.width() % LANE_SIZE != 0 || io.height() % LANE_SIZE != 0 {
+    if !io.width().is_multiple_of(LANE_SIZE) || !io.height().is_multiple_of(LANE_SIZE) {
         return super::generic::dct_2d(io, direction);
     }
 
