@@ -61,6 +61,7 @@ impl Spline {
 
         const CHANNEL_WEIGHTS: [f32; 4] = [0.0042, 0.075, 0.07, 0.3333];
         for chan_idx in 0..3 {
+            #[allow(clippy::needless_range_loop)]
             for i in 0..32 {
                 xyb_dct[chan_idx][i] = quant_spline.xyb_dct[chan_idx][i] as f32
                     * CHANNEL_WEIGHTS[chan_idx]
@@ -68,6 +69,7 @@ impl Spline {
             }
         }
         let (corr_x, corr_b) = base_correlations_xb.unwrap_or((0.0, 1.0));
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             xyb_dct[0][i] += corr_x * xyb_dct[1][i];
             xyb_dct[2][i] += corr_b * xyb_dct[1][i];

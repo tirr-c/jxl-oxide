@@ -541,14 +541,14 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
         }
 
         // Check if we have more data to process.
-        if (avg_width - 1) % 4 != 0 || width % 2 == 0 {
+        if !(avg_width - 1).is_multiple_of(4) || width.is_multiple_of(2) {
             let mut avgs = transpose([
                 vld1_s16(rows[0].add(avg_width - 4) as *const _),
                 vld1_s16(rows[1].add(avg_width - 4) as *const _),
                 vld1_s16(rows[2].add(avg_width - 4) as *const _),
                 vld1_s16(rows[3].add(avg_width - 4) as *const _),
             ]);
-            if width % 2 == 0 {
+            if width.is_multiple_of(2) {
                 avgs = [avgs[1], avgs[2], avgs[3], avgs[3]];
             }
             let residuals = transpose([
@@ -604,7 +604,7 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
         }
     }
 
-    if height % 4 != 0 {
+    if !height.is_multiple_of(4) {
         inverse_h_i16_base(&mut merged.split_vertical(h4 * 4).1);
     }
 }
@@ -1038,7 +1038,7 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
         }
     }
 
-    if width % 4 != 0 {
+    if !width.is_multiple_of(4) {
         inverse_v_i16_base(&mut merged.split_horizontal(w4 * 4).1);
     }
 }
