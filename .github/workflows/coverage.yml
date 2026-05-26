@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture armhf
           sudo apt update && sudo apt install -y crossbuild-essential-armhf libc6:armhf
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@nightly
@@ -40,7 +40,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: 'llvm-tools-preview'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -50,7 +50,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ./crates/jxl-oxide-tests/tests/cache/
@@ -83,13 +83,13 @@ jobs:
             -ignore-filename-regex='/rustc/' \
             >coverage.lcov
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ./coverage.lcov
           flags: rust-${{ matrix.target }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: images
