@@ -14,11 +14,11 @@
 
   outputs =
     {
-      self,
       fenix,
       flake-utils,
       naersk,
       nixpkgs,
+      ...
     }:
     let
       crossTargets = [
@@ -75,23 +75,28 @@
 
         mapListToAttrs = f: l: listToAttrs (map f l);
 
-        rustToolchainSpec = {
-          channel = "1.91.1";
-          sha256 = "sha256-SDu4snEWjuZU475PERvu+iO50Mi39KVjqCeJeNvpguU=";
+        rustToolchainSpec.stable = {
+          channel = "1.95.0";
+          sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
+        };
+        rustToolchainSpec.nightly = {
+          channel = "nightly";
+          date = "2026-05-26";
+          sha256 = "sha256-D8GkGd+MrvPyB+dY94Sa8T/znAESyCg8P3OQ30X83AM=";
         };
 
         toolchainFor =
           target:
           with fenix.packages.${system};
           let
-            toolchain = toolchainOf rustToolchainSpec;
+            toolchain = toolchainOf rustToolchainSpec.stable;
           in
           combine (
             [
               toolchain.rustc
               toolchain.cargo
             ]
-            ++ (lib.optional (target != null) (targets.${target}.toolchainOf rustToolchainSpec).rust-std)
+            ++ (lib.optional (target != null) (targets.${target}.toolchainOf rustToolchainSpec.stable).rust-std)
           );
         naerskFor =
           target:
@@ -170,9 +175,16 @@
         } // crossPackages;
         defaultPackage = packages.native;
 
-        devShell = pkgs.callPackage ./nix/shell.nix {
-          fenix = fenix.packages.${system};
-          toolchainSpec = rustToolchainSpec;
+        devShells = {
+          default = pkgs.callPackage ./nix/shell.nix {
+            fenix = fenix.packages.${system};
+            toolchainSpec = rustToolchainSpec.stable;
+          };
+          nightly = pkgs.callPackage ./nix/shell.nix {
+            fenix = fenix.packages.${system};
+            toolchainSpec = rustToolchainSpec.nightly;
+            useMiri = true;
+          };
         };
 
         formatter = pkgs.nixfmt-rfc-style;

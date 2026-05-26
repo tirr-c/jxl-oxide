@@ -17,8 +17,10 @@ in
       inherit system;
     };
   },
+  lib,
   fenix ? (import (getFlake "fenix") { }).packages.${system},
   toolchainSpec,
+  useMiri ? false,
   ...
 }:
 
@@ -34,15 +36,17 @@ let
   ];
 
   rustToolchain = fenix.combine (
-    with fenix.toolchainOf toolchainSpec;
-    [
-      cargo
-      clippy
-      rust-analyzer
-      rust-src
-      rustc
-      rustfmt
-    ]
+    with fenix.toolchainOf toolchainSpec; (
+      [
+        cargo
+        clippy
+        rust-analyzer
+        rust-src
+        rustc
+        rustfmt
+      ]
+      ++ (lib.optional useMiri miri)
+    )
     ++ [
       (fenix.targets.wasm32-unknown-unknown.toolchainOf toolchainSpec).rust-std
     ]
