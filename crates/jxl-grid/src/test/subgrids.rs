@@ -287,3 +287,104 @@ fn shared_subgrid_as_vectored() {
         assert_eq!(ssv.height(), ssg.height());
     }
 }
+
+mod miri_ub {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    struct OversizedVector([u8; 64]);
+
+    impl crate::SimdVector for OversizedVector {
+        const SIZE: usize = 1;
+
+        fn available() -> bool {
+            true
+        }
+
+        unsafe fn zero() -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn set<const N: usize>(_val: [f32; N]) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn splat_f32(_val: f32) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn load(_ptr: *const f32) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn load_aligned(_ptr: *const f32) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn extract_f32<const N: i32>(self) -> f32 {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn store(self, _ptr: *mut f32) {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn store_aligned(self, _ptr: *mut f32) {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn add(self, _lhs: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn sub(self, _lhs: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn mul(self, _lhs: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn div(self, _lhs: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn abs(self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn muladd(self, _mul: Self, _add: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+
+        unsafe fn mulsub(self, _mul: Self, _sub: Self) -> Self {
+            unreachable!("not needed for the repro")
+        }
+    }
+
+    // `SimdVector` is a safe, public trait, but `SharedSubgrid::as_vectored` trusts implementors
+    // to have exactly `SIZE` f32 lanes of storage. This safe implementation advertises one lane
+    // while the type is 64 bytes wide, so the safe `get` below reads past a one-f32 allocation.
+    #[test]
+    fn shared_as_vectored_accepts_oversized_safe_simd_vector() {
+        let buf = [0.0f32; 1];
+        let grid = SharedSubgrid::from_buf(&buf, 1, 1, 1);
+        let vectored = grid.as_vectored::<OversizedVector>().unwrap();
+        let value = vectored.get(0, 0);
+        std::hint::black_box(value);
+    }
+
+    // The same unchecked `SimdVector` layout invariant affects mutable vectored views. Safe code
+    // gets an `&mut OversizedVector` to a single f32 and the write below reaches outside the
+    // allocation; Miri reports this as UB.
+    // This also triggers Address Sanitizer failures.
+    #[test]
+    fn mutable_as_vectored_accepts_oversized_safe_simd_vector() {
+        let mut buf = [0.0f32; 1];
+        let mut grid = MutableSubgrid::from_buf(&mut buf, 1, 1, 1);
+        let mut vectored = grid.as_vectored::<OversizedVector>().unwrap();
+        let value = vectored.get_mut(0, 0);
+        value.0[63] = 1;
+    }
+}
