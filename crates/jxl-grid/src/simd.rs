@@ -212,6 +212,13 @@ impl SimdVector for std::arch::x86_64::__m128 {
 }
 
 #[cfg(target_arch = "x86_64")]
+const _: () = {
+    use std::{arch::x86_64::__m128, mem::size_of};
+
+    assert!(size_of::<__m128>() == <__m128 as SimdVector>::SIZE * size_of::<f32>());
+};
+
+#[cfg(target_arch = "x86_64")]
 impl private::Sealed for std::arch::x86_64::__m256 {}
 
 #[cfg(target_arch = "x86_64")]
@@ -333,6 +340,13 @@ impl SimdVector for std::arch::x86_64::__m256 {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+const _: () = {
+    use std::{arch::x86_64::__m256, mem::size_of};
+
+    assert!(size_of::<__m256>() == <__m256 as SimdVector>::SIZE * size_of::<f32>());
+};
+
 #[cfg(target_arch = "aarch64")]
 impl private::Sealed for std::arch::aarch64::float32x4_t {}
 
@@ -421,6 +435,13 @@ impl SimdVector for std::arch::aarch64::float32x4_t {
         std::arch::aarch64::vfmsq_f32(sub, self, mul)
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+const _: () = {
+    use std::{arch::aarch64::float32x4_t, mem::size_of};
+
+    assert!(size_of::<float32x4_t>() == <float32x4_t as SimdVector>::SIZE * size_of::<f32>());
+};
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 impl private::Sealed for std::arch::wasm32::v128 {}
@@ -516,3 +537,10 @@ impl SimdVector for std::arch::wasm32::v128 {
         self.mul(mul).sub(sub)
     }
 }
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+const _: () = {
+    use std::{arch::wasm32::v128, mem::size_of};
+
+    assert!(size_of::<v128>() == <v128 as SimdVector>::SIZE * size_of::<f32>());
+};
