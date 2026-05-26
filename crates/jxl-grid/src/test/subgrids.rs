@@ -223,8 +223,16 @@ fn mutable_subgrid_into_groups_with_fix_count() {
 #[test]
 fn mutable_subgrid_as_vectored() {
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let mut data = [1.0; 8];
-        let mut msg = MutableSubgrid::from_buf(&mut data[..], 4, 2, 4);
+        let len = 8usize;
+        let align = std::mem::align_of::<float32x4_t>();
+
+        // Create aligned buffer
+        let mut buf = vec![1.0f32; len + align - 1];
+        let extra = buf.as_ptr() as usize & (align - 1);
+        let offset = (align - extra) / std::mem::size_of::<f32>();
+        let data = &mut buf[offset..][..len];
+
+        let mut msg = MutableSubgrid::from_buf(data, 4, 2, 4);
         let opt = msg.as_vectored::<float32x4_t>();
         assert!(opt.is_some());
         let msv = opt.unwrap();
@@ -278,8 +286,16 @@ fn shared_subgrid_get_row() {
 #[test]
 fn shared_subgrid_as_vectored() {
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let buf: Vec<f32> = vec![1.0; 8];
-        let ssg = SharedSubgrid::from_buf(&buf, 4, 2, 4);
+        let len = 8usize;
+        let align = std::mem::align_of::<float32x4_t>();
+
+        // Create aligned buffer
+        let buf = vec![1.0f32; len + align - 1];
+        let extra = buf.as_ptr() as usize & (align - 1);
+        let offset = (align - extra) / std::mem::size_of::<f32>();
+        let data = &buf[offset..][..len];
+
+        let ssg = SharedSubgrid::from_buf(data, 4, 2, 4);
         let opt = ssg.as_vectored::<float32x4_t>();
         assert!(opt.is_some());
         let ssv = opt.unwrap();
