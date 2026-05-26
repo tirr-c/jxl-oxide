@@ -17,12 +17,12 @@ jobs:
           - windows-2022
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
           toolchain: '1.95.0'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -38,7 +38,7 @@ jobs:
         run: |
           rustc -vV | sed -ne 's/^host: /host=/p' >> "$GITHUB_OUTPUT"
       - run: cargo build --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jxl-oxide-cli-${{ steps.detect-host.outputs.host }}
           path: |
@@ -52,13 +52,13 @@ jobs:
         target:
           - armv7-unknown-linux-gnueabihf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
           toolchain: '1.95.0'
           targets: ${{ matrix.target }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -69,13 +69,13 @@ jobs:
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
       - name: Install cross
-        uses: taiki-e/cache-cargo-install-action@v2
+        uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: cross
           git: https://github.com/cross-rs/cross
           rev: 4e64366af6095c84fa4f54a0fa5a2ba7d9a271aa
       - run: cross build --release --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jxl-oxide-cli-${{ matrix.target }}
           path: |
@@ -85,13 +85,13 @@ jobs:
     name: WebAssembly
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
           toolchain: '1.95.0'
           targets: wasm32-unknown-unknown
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -115,7 +115,7 @@ jobs:
           RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --release --target web --reference-types
           node ./update-package-json.mjs
           wasm-pack pack
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jxl-oxide-wasm
           path: crates/jxl-oxide-wasm/pkg/jxl-oxide-wasm-*.tgz

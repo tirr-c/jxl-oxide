@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture armhf
           sudo apt update && sudo apt install -y crossbuild-essential-armhf libc6:armhf
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@master
@@ -43,7 +43,7 @@ jobs:
         with:
           toolchain: '1.95.0'
           targets: ${{ matrix.target }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -53,7 +53,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dot-cargo-${{ steps.toolchain.outputs.cacheKey }}-
             ${{ runner.os }}-dot-cargo-
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ./crates/jxl-oxide-tests/tests/cache/
@@ -64,7 +64,7 @@ jobs:
         run: cargo test --release --target ${{ matrix.target }} -- --test-threads 1
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: 'arm-linux-gnueabihf-gcc'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: images
@@ -74,13 +74,13 @@ jobs:
     name: Rustfmt and Clippy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
           toolchain: '1.95.0'
           components: clippy, rustfmt
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
