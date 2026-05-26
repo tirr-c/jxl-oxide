@@ -628,14 +628,8 @@ impl ColorTransform {
             .iter_mut()
             .map(|ch| ch.chunks_mut(65536))
             .collect::<Vec<_>>();
-        loop {
-            let Some(chunk) = it
-                .iter_mut()
-                .map(|it| it.next())
-                .collect::<Option<Vec<_>>>()
-            else {
-                break;
-            };
+        // Transpose chunked channel buffers.
+        while let Some::<Vec<_>>(chunk) = it.iter_mut().map(|it| it.next()).collect() {
             chunks.push(chunk);
         }
 

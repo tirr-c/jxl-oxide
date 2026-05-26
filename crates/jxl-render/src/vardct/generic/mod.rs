@@ -51,14 +51,11 @@ pub fn adaptive_lf_smoothing_impl(
     let mut in_y_row = in_y.chunks_exact_mut(width).skip(1);
     let mut in_b_row = in_b.chunks_exact_mut(width).skip(1);
 
-    let mut udsum_x_row = udsum_x.buf_mut().chunks_exact(width);
+    let udsum_x_row = udsum_x.buf_mut().chunks_exact(width);
     let mut udsum_y_row = udsum_y.buf_mut().chunks_exact(width);
     let mut udsum_b_row = udsum_b.buf_mut().chunks_exact(width);
 
-    loop {
-        let Some(udsum_x) = udsum_x_row.next() else {
-            break;
-        };
+    for udsum_x in udsum_x_row {
         let udsum_y = udsum_y_row.next().unwrap();
         let udsum_b = udsum_b_row.next().unwrap();
         let in_x = in_x_row.next().unwrap();
