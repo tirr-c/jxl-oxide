@@ -76,8 +76,8 @@
         mapListToAttrs = f: l: listToAttrs (map f l);
 
         rustToolchainSpec = {
-          channel = "1.91.1";
-          sha256 = "sha256-SDu4snEWjuZU475PERvu+iO50Mi39KVjqCeJeNvpguU=";
+          channel = "1.95.0";
+          sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
         };
 
         toolchainFor =
