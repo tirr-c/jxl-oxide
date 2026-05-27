@@ -32,15 +32,15 @@ version = "0.1.39"
 optional = true
 
 [dependencies.rand]
-version = "0.9.0"
+version = "0.10.1"
 default-features = false
-features = ["os_rng", "small_rng"]
+features = ["sys_rng"]
 optional = true
 
 [dependencies.reqwest]
-version = "0.12.9"
+version = "0.13.4"
 default-features = false
-features = ["blocking", "rustls-tls"]
+features = ["blocking", "rustls"]
 optional = true
 
 [dependencies.ssimulacra2]

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use moxcms::{DataColorSpace, Layout};
 
 use crate::RenderingIntent;
@@ -6,7 +8,7 @@ use crate::RenderingIntent;
 pub struct Moxcms;
 
 struct PreparedTransform {
-    transform: Box<moxcms::TransformF32BitExecutor>,
+    transform: Arc<moxcms::TransformF32Executor>,
     from_channels: usize,
     to_channels: usize,
 }
