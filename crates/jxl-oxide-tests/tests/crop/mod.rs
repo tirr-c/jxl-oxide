@@ -5,7 +5,7 @@ use jxl_oxide_tests as util;
 use rand::prelude::*;
 
 fn run_test(buf: &[u8], name: &str) {
-    let mut rng = rand::rngs::SmallRng::from_os_rng();
+    let mut rng: rand::rngs::SmallRng = rand::make_rng();
 
     let image = JxlImage::builder()
         .read(Cursor::new(buf))
