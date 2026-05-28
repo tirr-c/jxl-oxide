@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `jxl-grid`: Prevent downstream crates from implementing `SimdVector` (#494).
+- `jxl-render`: Fix `f32::clamp` panic with `NaN`'s in upsampling (#485).
+
 ## [0.12.5] - 2025-09-30
 
 ### Added
@@ -243,6 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This is the first official release of jxl-oxide, a JPEG XL decoder written in Rust.
 - Frequently used features are mostly implemented.
 
+[Unreleased]: https://github.com/tirr-c/jxl-oxide/compare/0.12.5...HEAD
 [0.12.5]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.5
 [0.12.4]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.4
 [0.12.3]: https://github.com/tirr-c/jxl-oxide/releases/tag/0.12.3
