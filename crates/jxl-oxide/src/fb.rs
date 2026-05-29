@@ -16,12 +16,21 @@ impl FrameBuffer {
     ///
     /// Note that framebuffer allocations are not tracked.
     pub fn new(width: usize, height: usize, channels: usize) -> Self {
+        let len = Self::buffer_len(width, height, channels);
         Self {
             width,
             height,
             channels,
-            buf: vec![0.0f32; width * height * channels],
+            buf: vec![0.0f32; len],
         }
+    }
+
+    #[inline]
+    fn buffer_len(width: usize, height: usize, channels: usize) -> usize {
+        width
+            .checked_mul(height)
+            .and_then(|len| len.checked_mul(channels))
+            .expect("framebuffer dimensions overflow")
     }
 
     /// For internal use only.
@@ -144,8 +153,12 @@ impl FrameBuffer {
     /// Panics if `N != self.channels()`.
     #[inline]
     pub fn buf_grouped<const N: usize>(&self) -> &[[f32; N]] {
-        let grouped_len = self.width * self.height;
-        assert_eq!(self.buf.len(), grouped_len * N);
+        assert_eq!(self.channels, N);
+        let grouped_len = self
+            .width
+            .checked_mul(self.height)
+            .expect("framebuffer dimensions overflow");
+        assert_eq!(self.buf.len(), Self::buffer_len(self.width, self.height, N));
         // SAFETY: Arrays have size of size_of::<T> * N, alignment of T.
         // Buffer length is checked above.
         unsafe { std::slice::from_raw_parts(self.buf.as_ptr() as *const [f32; N], grouped_len) }
@@ -157,13 +170,45 @@ impl FrameBuffer {
     /// Panics if `N != self.channels()`.
     #[inline]
     pub fn buf_grouped_mut<const N: usize>(&mut self) -> &mut [[f32; N]] {
-        let grouped_len = self.width * self.height;
-        assert_eq!(self.buf.len(), grouped_len * N);
+        assert_eq!(self.channels, N);
+        let grouped_len = self
+            .width
+            .checked_mul(self.height)
+            .expect("framebuffer dimensions overflow");
+        assert_eq!(self.buf.len(), Self::buffer_len(self.width, self.height, N));
         // SAFETY: Arrays have size of size_of::<T> * N, alignment of T.
         // Buffer length is checked above.
         unsafe {
             std::slice::from_raw_parts_mut(self.buf.as_mut_ptr() as *mut [f32; N], grouped_len)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrameBuffer;
+
+    #[test]
+    #[should_panic(expected = "framebuffer dimensions overflow")]
+    fn framebuffer_grouped_len_overflow_creates_oversized_slice() {
+        // The allocation length must be computed with checked arithmetic. Previously this wrapped
+        // to zero in release mode, and `buf_grouped::<2>` created an oversized slice reported as
+        // UB by Miri under:
+        // cargo +nightly miri test -p jxl-oxide --release framebuffer_grouped_len_overflow_creates_oversized_slice
+        let fb = FrameBuffer::new(usize::MAX / 2 + 1, 1, 2);
+        let _grouped = fb.buf_grouped::<2>();
+    }
+
+    #[test]
+    #[should_panic(expected = "framebuffer dimensions overflow")]
+    fn framebuffer_grouped_len_overflow_exposes_mutable_oversized_slice() {
+        // Same overflow as above, but through the mutable safe API. This should now panic before
+        // any raw slice is formed.
+        //
+        // cargo +nightly miri test -p jxl-oxide --release framebuffer_grouped_len_overflow_exposes_mutable_oversized_slice
+        let mut fb = FrameBuffer::new(usize::MAX / 2 + 1, 1, 2);
+        let grouped = fb.buf_grouped_mut::<2>();
+        grouped[0] = [1.0, 2.0];
     }
 }
 
