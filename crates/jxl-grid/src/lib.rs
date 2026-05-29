@@ -82,8 +82,12 @@ impl<S: Default + Clone> AlignedGrid<S> {
         height: usize,
         tracker: Option<&AllocTracker>,
     ) -> Result<Self, OutOfMemory> {
-        let len = width * height;
-        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
+        let len = width
+            .checked_mul(height)
+            .expect("grid dimensions overflow usize");
+        let buf_len = len
+            .checked_add((Self::ALIGN - 1) / std::mem::size_of::<S>())
+            .expect("aligned grid buffer length overflows usize");
         let handle = tracker
             .map(|tracker| tracker.alloc::<S>(buf_len))
             .transpose()?;
@@ -91,7 +95,10 @@ impl<S: Default + Clone> AlignedGrid<S> {
 
         let extra = buf.as_ptr() as usize & (Self::ALIGN - 1);
         let offset = ((Self::ALIGN - extra) % Self::ALIGN) / std::mem::size_of::<S>();
-        buf.resize_with(len + offset, S::default);
+        let len_with_offset = len
+            .checked_add(offset)
+            .expect("aligned grid buffer length overflows usize");
+        buf.resize_with(len_with_offset, S::default);
 
         Ok(Self {
             width,
@@ -108,8 +115,12 @@ impl<S: Default + Clone> AlignedGrid<S> {
         height: usize,
         tracker: Option<&AllocTracker>,
     ) -> Result<Self, OutOfMemory> {
-        let len = width * height;
-        let buf_len = len + (Self::ALIGN - 1) / std::mem::size_of::<S>();
+        let len = width
+            .checked_mul(height)
+            .expect("grid dimensions overflow usize");
+        let buf_len = len
+            .checked_add((Self::ALIGN - 1) / std::mem::size_of::<S>())
+            .expect("aligned grid buffer length overflows usize");
         let handle = tracker
             .map(|tracker| tracker.alloc::<S>(buf_len))
             .transpose()?;

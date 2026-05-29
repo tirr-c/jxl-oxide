@@ -47,7 +47,11 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(width > 0);
         assert!(height > 0);
         assert!(width <= stride);
-        assert!(buf.len() >= stride * (height - 1) + width);
+        let required_len = stride
+            .checked_mul(height - 1)
+            .and_then(|offset| offset.checked_add(width))
+            .expect("subgrid area overflows usize");
+        assert!(buf.len() >= required_len);
         // SAFETY: the area is in bounds.
         unsafe {
             Self::new(
@@ -77,14 +81,22 @@ impl<'g, V> SharedSubgrid<'g, V> {
             return None;
         }
 
-        // SAFETY: (x, y) is checked above and is in bounds.
-        Some(unsafe { self.get_ptr_unchecked(x, y) })
+        Some(self.get_ptr_wrapping(x, y))
     }
 
+    /// Computes a raw pointer for a possibly empty subgrid boundary.
+    ///
+    /// The integer offset is still checked for overflow, but pointer arithmetic is wrapping so
+    /// callers may construct zero-sized views whose base is outside the backing allocation. The
+    /// returned pointer must only be dereferenced after separately checking that it names an actual
+    /// element in this subgrid.
     #[inline]
-    unsafe fn get_ptr_unchecked(&self, x: usize, y: usize) -> *mut V {
-        let offset = y * self.stride + x;
-        unsafe { self.ptr.as_ptr().add(offset) }
+    fn get_ptr_wrapping(&self, x: usize, y: usize) -> *mut V {
+        let offset = y
+            .checked_mul(self.stride)
+            .and_then(|offset| offset.checked_add(x))
+            .expect("subgrid offset overflows usize");
+        self.ptr.as_ptr().wrapping_add(offset)
     }
 
     /// Returns a reference to the sample at the given location.
@@ -130,9 +142,15 @@ impl<'g, V> SharedSubgrid<'g, V> {
             return None;
         }
 
+        if self.width == 0 {
+            return Some(&[]);
+        }
+
         // SAFETY: row is in bounds, `width` consecutive elements from the start of a row is valid.
         Some(unsafe {
-            let offset = row * self.stride;
+            let offset = row
+                .checked_mul(self.stride)
+                .expect("subgrid row offset overflows usize");
             let ptr = self.ptr.as_ptr().add(offset);
             std::slice::from_raw_parts(ptr as *const _, self.width)
         })
@@ -146,7 +164,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(x <= self.width);
 
         let left_ptr = self.ptr;
-        let right_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(x, 0) }).unwrap();
+        let right_ptr = NonNull::new(self.get_ptr_wrapping(x, 0)).unwrap();
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let left_grid = SharedSubgrid::new(left_ptr, x, self.height, self.stride);
@@ -164,7 +182,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
         assert!(y <= self.height);
 
         let top_ptr = self.ptr;
-        let bottom_ptr = NonNull::new(unsafe { self.get_ptr_unchecked(0, y) }).unwrap();
+        let bottom_ptr = NonNull::new(self.get_ptr_wrapping(0, y)).unwrap();
         // SAFETY: two grids are contained in `self`.
         unsafe {
             let top_grid = SharedSubgrid::new(top_ptr, self.width, y, self.stride);
@@ -214,7 +232,7 @@ impl<'g, V> SharedSubgrid<'g, V> {
 
         // SAFETY: subgrid is contained in `self`.
         unsafe {
-            let base_ptr = NonNull::new(self.get_ptr_unchecked(left, top)).unwrap();
+            let base_ptr = NonNull::new(self.get_ptr_wrapping(left, top)).unwrap();
             SharedSubgrid::new(base_ptr, right - left, bottom - top, self.stride)
         }
     }

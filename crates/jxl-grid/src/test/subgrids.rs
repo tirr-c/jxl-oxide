@@ -303,3 +303,158 @@ fn shared_subgrid_as_vectored() {
         assert_eq!(ssv.height(), ssg.height());
     }
 }
+
+mod miri_ub {
+    use super::*;
+
+    // These intentionally exercise currently unsound safe APIs
+
+    // `MutableSubgrid::from_buf` accepts `width == 0` with `height > 0` over an empty slice.
+    // The grid has no elements, but `get_row(1)` still treats the second row as in-bounds and
+    // computes `dangling.add(stride)` before creating a zero-length slice; `get_row_mut` uses the
+    // same calculation. Offsetting the dangling pointer from the empty backing slice is UB and is
+    // reported by Miri under:
+    // cargo +nightly miri test -p jxl-grid --release zero_width_mutable_subgrid_row_offsets_empty_slice_pointer
+    #[test]
+    fn zero_width_mutable_subgrid_row_offsets_empty_slice_pointer() {
+        let mut buf = [];
+        let grid = MutableSubgrid::<u8>::from_buf(&mut buf, 0, 2, 1);
+        let row = grid.get_row(1);
+        std::hint::black_box(row);
+    }
+
+    // Splitting a strided grid at its bottom edge creates an empty bottom subgrid.
+    // The implementation still computes `base + height * stride`, which is past the allocation
+    // when the final row has padding.
+    #[test]
+    fn mutable_split_vertical_at_bottom_with_padded_stride() {
+        let mut buf = [0u8; 3];
+        let mut grid = MutableSubgrid::from_buf(&mut buf, 1, 2, 2);
+        let split = grid.split_vertical(2);
+        std::hint::black_box(split);
+    }
+
+    // Same bottom-edge pointer arithmetic issue as above, but through the in-place split API.
+    #[test]
+    fn mutable_split_vertical_in_place_at_bottom_with_padded_stride() {
+        let mut buf = [0u8; 3];
+        let mut grid = MutableSubgrid::from_buf(&mut buf, 1, 2, 2);
+        let bottom = grid.split_vertical_in_place(2);
+        std::hint::black_box(bottom);
+    }
+
+    // The shared subgrid split has the same bottom-edge empty-subgrid bug as the mutable split.
+    #[test]
+    fn shared_split_vertical_at_bottom_with_padded_stride() {
+        let buf = [0u8; 3];
+        let grid = SharedSubgrid::from_buf(&buf, 1, 2, 2);
+        let split = grid.split_vertical(2);
+        std::hint::black_box(split);
+    }
+
+    // Creating an empty mutable subgrid at `height..height` uses the same invalid bottom-edge
+    // pointer calculation when stride includes padding.
+    #[test]
+    fn mutable_empty_subgrid_at_bottom_with_padded_stride() {
+        let mut buf = [0u8; 3];
+        let grid = MutableSubgrid::from_buf(&mut buf, 1, 2, 2);
+        let empty = grid.subgrid(.., 2..2);
+        std::hint::black_box(empty);
+    }
+
+    // Same empty bottom subgrid issue through `SharedSubgrid::subgrid`.
+    #[test]
+    fn shared_empty_subgrid_at_bottom_with_padded_stride() {
+        let buf = [0u8; 3];
+        let grid = SharedSubgrid::from_buf(&buf, 1, 2, 2);
+        let empty = grid.subgrid(.., 2..2);
+        std::hint::black_box(empty);
+    }
+
+    // Fixed-count grouping can ask for groups beyond the original height. Those out-of-bounds
+    // groups are zero-sized, but their base pointer is still computed past the allocation.
+    #[test]
+    fn fixed_count_groups_can_create_oob_empty_bottom_group() {
+        let mut buf = [0u8; 3];
+        let grid = MutableSubgrid::from_buf(&mut buf, 1, 2, 2);
+        let groups = grid.into_groups_with_fixed_count(1, 1, 1, 3);
+        std::hint::black_box(groups);
+    }
+
+    // `MutableSubgrid::from_buf` must reject area-size overflow instead of accepting a grid that
+    // can later produce invalid pointers.
+    #[test]
+    #[should_panic]
+    fn mutable_from_buf_area_check_overflows() {
+        let mut buf = [0u8; 1];
+        MutableSubgrid::from_buf(&mut buf, 1, 2, usize::MAX);
+    }
+
+    // Same area-size overflow check as above, through `SharedSubgrid::from_buf`.
+    #[test]
+    #[should_panic]
+    fn shared_from_buf_area_check_overflows() {
+        let buf = [0u8; 1];
+        SharedSubgrid::from_buf(&buf, 1, 2, usize::MAX);
+    }
+
+    // `AlignedGrid::with_alloc_tracker` must reject dimension-product overflow instead of
+    // accepting a grid that can later produce invalid pointers.
+    #[test]
+    #[should_panic]
+    fn aligned_grid_dimension_product_overflows() {
+        let width = usize::MAX / 2 + 1;
+        AlignedGrid::<u8>::with_alloc_tracker(width, 2, None).unwrap();
+    }
+
+    // `gy * group_height` must not wrap a later group back onto the first row.
+    #[test]
+    fn fixed_count_group_height_overflow_aliases_mutable_groups() {
+        let mut buf = [0u8; 1];
+        let grid = MutableSubgrid::from_buf(&mut buf, 1, 1, 1);
+        let mut groups = grid.into_groups_with_fixed_count(1, usize::MAX / 2 + 1, 1, 3);
+        assert_eq!(groups.len(), 3);
+        assert_eq!((groups[0].width(), groups[0].height()), (1, 1));
+        assert_eq!((groups[1].width(), groups[1].height()), (1, 0));
+        assert_eq!((groups[2].width(), groups[2].height()), (1, 0));
+
+        let (first, rest) = groups.split_at_mut(1);
+        let (_second, third) = rest.split_at_mut(1);
+        let first = &mut first[0];
+        let third = &mut third[0];
+
+        let a = first.get_mut(0, 0);
+        assert!(third.try_get_mut(0, 0).is_none());
+        *a = 1;
+    }
+
+    // `gx * group_width` must not wrap a later group back onto the first column.
+    #[test]
+    fn fixed_count_group_width_overflow_aliases_mutable_groups() {
+        let mut buf = [0u8; 1];
+        let grid = MutableSubgrid::from_buf(&mut buf, 1, 1, 1);
+        let mut groups = grid.into_groups_with_fixed_count(usize::MAX / 2 + 1, 1, 3, 1);
+        assert_eq!(groups.len(), 3);
+        assert_eq!((groups[0].width(), groups[0].height()), (1, 1));
+        assert_eq!((groups[1].width(), groups[1].height()), (0, 1));
+        assert_eq!((groups[2].width(), groups[2].height()), (0, 1));
+
+        let (first, rest) = groups.split_at_mut(1);
+        let (_second, third) = rest.split_at_mut(1);
+        let first = &mut first[0];
+        let third = &mut third[0];
+
+        let a = first.get_mut(0, 0);
+        assert!(third.try_get_mut(0, 0).is_none());
+        *a = 1;
+    }
+
+    // The requested fixed group count must fit in a `Vec` length.
+    #[test]
+    #[should_panic(expected = "subgrid group count overflows usize")]
+    fn fixed_count_group_count_overflow_panics() {
+        let mut buf = [];
+        let grid = MutableSubgrid::<u8>::from_buf(&mut buf, 0, 0, 0);
+        grid.into_groups_with_fixed_count(1, 1, usize::MAX, 2);
+    }
+}
