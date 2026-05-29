@@ -990,7 +990,9 @@ fn decode_simple_table<S: Sample>(
 
 #[inline(always)]
 fn cluster_from_table(sample: i32, value_base: i32, cluster_table: &[u8]) -> u8 {
-    let index = (sample - value_base).clamp(0, cluster_table.len() as i32 - 1);
+    let index = sample
+        .saturating_sub(value_base)
+        .clamp(0, cluster_table.len() as i32 - 1);
     cluster_table[index as usize]
 }
 
