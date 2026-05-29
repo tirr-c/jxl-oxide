@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-grid"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "tracing",
 ]
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-modular"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "jxl-bitstream",
  "jxl-coding",
@@ -1219,7 +1219,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide"
-version = "0.12.5"
+version = "0.12.6"
 dependencies = [
  "brotli-decompressor",
  "bytemuck",
@@ -1240,7 +1240,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-cli"
-version = "0.12.5"
+version = "0.12.6"
 dependencies = [
  "clap",
  "crossterm",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-oxide-wasm"
-version = "0.12.5"
+version = "0.12.6"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "jxl-render"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "bytemuck",
  "jxl-bitstream",
