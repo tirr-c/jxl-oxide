@@ -21,7 +21,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.97.1'
       - uses: actions/cache@v5
         with:
           path: |
@@ -56,7 +56,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.97.1'
           targets: ${{ matrix.target }}
       - uses: actions/cache@v5
         with:
@@ -89,7 +89,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.97.1'
           targets: wasm32-unknown-unknown
       - uses: actions/cache@v5
         with:
@@ -104,11 +104,11 @@ jobs:
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack@0.13.0
+          tool: wasm-pack@0.15.0
       - name: Install wasm-bindgen
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen@0.2.93
+          tool: wasm-bindgen@0.2.127
       - name: Build WebAssembly module
         working-directory: crates/jxl-oxide-wasm
         run: |
