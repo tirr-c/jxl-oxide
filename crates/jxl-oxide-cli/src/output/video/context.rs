@@ -213,23 +213,23 @@ impl<W> VideoContext<W> {
         let (primaries, colorspace, trc, video_color_range, video_pix_fmt);
         match hdr_type {
             Some(hdr_type) => {
-                // BT.2100, rgb48 full range -> BT.2100, yuv420p10 full range
+                // BT.2100, rgb48 full range -> BT.2100, yuv420p10le full range
                 primaries = ffmpeg::AVCOL_PRI_BT2020;
                 colorspace = ffmpeg::AVCOL_SPC_BT2020_NCL;
                 video_color_range = ffmpeg::AVCOL_RANGE_JPEG;
-                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10;
+                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10LE;
                 trc = match hdr_type {
                     HdrType::Pq => ffmpeg::AVCOL_TRC_SMPTE2084,
                     HdrType::Hlg => ffmpeg::AVCOL_TRC_ARIB_STD_B67,
                 };
             }
             None => {
-                // sRGB, rgb48 full range -> BT.709, yuv420p limited range
+                // sRGB, rgb48 full range -> BT.709, yuv420p10le limited range
                 primaries = ffmpeg::AVCOL_PRI_BT709;
                 colorspace = ffmpeg::AVCOL_SPC_RGB;
                 trc = ffmpeg::AVCOL_TRC_BT709;
                 video_color_range = ffmpeg::AVCOL_RANGE_MPEG;
-                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P;
+                video_pix_fmt = ffmpeg::AV_PIX_FMT_YUV420P10LE;
             }
         }
 
