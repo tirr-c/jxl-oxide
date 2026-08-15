@@ -78,7 +78,7 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         for (ec_idx, ec) in image_meta.ec_info.iter().enumerate() {
             print!("  #{ec_idx} ");
             if !ec.name.is_empty() {
-                print!("{} ", &*ec.name);
+                print!("{} ", *ec.name);
             }
 
             match &ec.ty {
@@ -169,7 +169,7 @@ pub fn handle_info(args: InfoArgs) -> Result<()> {
         println!();
 
         if !frame_header.name.is_empty() {
-            println!("  Name: {}", &*frame_header.name);
+            println!("  Name: {}", *frame_header.name);
         }
         match frame_header.encoding {
             Encoding::VarDct => println!("  VarDCT (lossy)"),

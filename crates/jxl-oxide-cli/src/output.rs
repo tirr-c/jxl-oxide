@@ -66,7 +66,7 @@ pub(crate) fn write_png<W: Write>(
 
     if let Some(cicp) = cicp {
         tracing::debug!(cicp = format_args!("{:?}", cicp), "Writing cICP chunk");
-        writer.write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)?;
+        writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &cicp)?;
     }
 
     tracing::debug!("Writing image data");
