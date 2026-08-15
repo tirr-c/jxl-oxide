@@ -319,7 +319,7 @@ impl RenderResult {
 
         if let Some(cicp) = self.cicp {
             writer
-                .write_chunk(png::chunk::ChunkType([b'c', b'I', b'C', b'P']), &cicp)
+                .write_chunk(png::chunk::ChunkType(*b"cICP"), &cicp)
                 .map_err(|e| e.to_string())?;
         } else if !self.icc.is_empty() {
             let compressed_icc = miniz_oxide::deflate::compress_to_vec_zlib(&self.icc, 7);

@@ -137,38 +137,38 @@ impl VideoFilter {
         let output_ctx = unsafe {
             let filter_ctx = self.alloc_filter(c"buffersink", None)?;
 
-            ffmpeg::avfilter_init_str(filter_ctx, std::ptr::null()).into_ffmpeg_result()?;
-
             let pix_fmts = [video_pix_fmt];
             let color_spaces = [video_colorspace];
             let color_ranges = [video_color_range];
 
             ffmpeg::av_opt_set_bin(
-                filter_ctx as *mut _,
+                filter_ctx.cast(),
                 c"pix_fmts".as_ptr(),
-                pix_fmts.as_ptr() as *const _,
-                size_of_val(&pix_fmts[0]) as c_int,
+                pix_fmts.as_ptr().cast(),
+                size_of_val(&pix_fmts) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
             )
             .into_ffmpeg_result()?;
 
             ffmpeg::av_opt_set_bin(
-                filter_ctx as *mut _,
+                filter_ctx.cast(),
                 c"color_spaces".as_ptr(),
-                color_spaces.as_ptr() as *const _,
-                size_of_val(&color_spaces[0]) as c_int,
+                color_spaces.as_ptr().cast(),
+                size_of_val(&color_spaces) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
             )
             .into_ffmpeg_result()?;
 
             ffmpeg::av_opt_set_bin(
-                filter_ctx as *mut _,
+                filter_ctx.cast(),
                 c"color_ranges".as_ptr(),
-                color_ranges.as_ptr() as *const _,
-                size_of_val(&color_ranges[0]) as c_int,
+                color_ranges.as_ptr().cast(),
+                size_of_val(&color_ranges) as c_int,
                 ffmpeg::AV_OPT_SEARCH_CHILDREN as c_int,
             )
             .into_ffmpeg_result()?;
+
+            ffmpeg::avfilter_init_str(filter_ctx, std::ptr::null()).into_ffmpeg_result()?;
 
             filter_ctx
         };
