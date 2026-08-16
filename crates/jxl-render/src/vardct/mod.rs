@@ -61,6 +61,9 @@ pub(crate) fn render_vardct<S: Sample>(
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
     let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
+    let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
+        ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
+    });
 
     let lf_global = match &cache.lf_global {
         Some(x) if !x.gmodular.is_partial() => x,
@@ -193,6 +196,7 @@ pub(crate) fn render_vardct<S: Sample>(
             if !frame_header.flags.skip_adaptive_lf_smoothing() {
                 tracing::trace_span!("Adaptive LF smoothing").in_scope(|| {
                     adaptive_lf_smoothing(
+                        shifts_cbycr,
                         lf_xyb.as_color_floats_mut(),
                         &lf_global.lf_dequant,
                         &lf_global_vardct.quantizer,
@@ -204,9 +208,6 @@ pub(crate) fn render_vardct<S: Sample>(
         };
 
         let fb = {
-            let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
-                ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
-            });
             let Region { width, height, .. } = modular_region;
 
             let mut fb = ImageWithRegion::new(3, tracker);
@@ -412,6 +413,7 @@ pub fn copy_lf_dequant<S: Sample>(
 }
 
 pub fn adaptive_lf_smoothing(
+    shifts: [ChannelShift; 3],
     lf_image: [&mut AlignedGrid<f32>; 3],
     lf_dequant: &LfChannelDequantization,
     quantizer: &Quantizer,
@@ -423,8 +425,8 @@ pub fn adaptive_lf_smoothing(
 
     let [in_x, in_y, in_b] = lf_image;
     let tracker = in_x.tracker();
-    let width = in_x.width();
-    let height = in_x.height();
+    let width = in_x.width().max(in_y.width()).max(in_b.width());
+    let height = in_x.height().max(in_y.height()).max(in_b.height());
 
     let in_x = in_x.buf_mut();
     let in_y = in_y.buf_mut();
@@ -433,6 +435,7 @@ pub fn adaptive_lf_smoothing(
     impls::adaptive_lf_smoothing_impl(
         width,
         height,
+        shifts,
         [in_x, in_y, in_b],
         [lf_x, lf_y, lf_b],
         tracker.as_ref(),
