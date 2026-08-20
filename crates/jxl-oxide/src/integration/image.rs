@@ -77,6 +77,32 @@ impl<R: Read> JxlDecoder<R> {
         Self::init(builder, reader)
     }
 
+    /// Renders VarDCT frames at 1:8 from the LF image alone.
+    ///
+    /// See [`JxlImage::set_lf_only`]. [`dimensions`][image::ImageDecoder::dimensions] follows
+    /// this, so `DynamicImage::from_decoder` allocates the reduced buffer rather than a
+    /// full-size one the render can never fill.
+    ///
+    /// **Loads up to the first keyframe before returning, which is why this can fail.** Whether
+    /// the request applies at all depends on that frame: modular frames have no LF image, and
+    /// the reduction factor includes the frame's own `upsampling`. Without the header,
+    /// `dimensions()` has nothing to answer from and falls back to the full size, while the
+    /// render still comes back reduced - and the two disagreeing is not a wrong picture but a
+    /// panic in `stream_to_buf`, whose length assertion is the only thing standing between a
+    /// mismatched buffer and a memory error.
+    pub fn set_lf_only(&mut self, lf_only: bool) -> ImageResult<()> {
+        if lf_only {
+            self.load_until_first_keyframe().map_err(|e| {
+                ImageError::Decoding(DecodingError::new(
+                    ImageFormatHint::PathExtension("jxl".into()),
+                    e,
+                ))
+            })?;
+        }
+        self.image.set_lf_only(lf_only);
+        Ok(())
+    }
+
     /// Initializes a decoder which reads from given image stream, with custom thread pool.
     pub fn with_thread_pool(reader: R, pool: crate::JxlThreadPool) -> ImageResult<Self> {
         let builder = JxlImage::builder()
@@ -255,7 +281,12 @@ impl<R: Read> JxlDecoder<R> {
 
 impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     fn dimensions(&self) -> (u32, u32) {
-        (self.image.width(), self.image.height())
+        // `render_size`, not `width`/`height`: under `set_lf_only` a VarDCT frame renders at
+        // 1:8 (times its own upsampling), and the `image` crate sizes its output buffer from
+        // this. Reporting the full size there fails the decode with a length mismatch.
+        self.image
+            .render_size(0)
+            .unwrap_or((self.image.width(), self.image.height()))
     }
 
     fn color_type(&self) -> image::ColorType {
