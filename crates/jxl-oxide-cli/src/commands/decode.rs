@@ -22,9 +22,7 @@ pub struct DecodeArgs {
     pub approx_memory_limit: usize,
     /// (unstable) Render VarDCT frames at 1:8 from the LF image alone
     ///
-    /// Skips HF coefficient parsing, the inverse DCT, the restoration filters and upsampling,
-    /// which is most of the decode cost. The result is an APPROXIMATION intended for
-    /// thumbnails and previews. Modular frames ignore this and render at 1:1.
+    /// Much faster, and approximate: intended for thumbnails and previews.
     #[arg(long)]
     pub lf_only: bool,
     /// Format to output

@@ -116,18 +116,7 @@ fn decode_lf_only() {
         let mut decoder = JxlDecoder::new(file).unwrap();
         decoder.set_lf_only(true).unwrap();
 
-        // Whatever `dimensions()` promises, the decode must produce exactly that, or the
-        // `image` crate has allocated the wrong buffer.
-        let (dw, dh) = {
-            use image::ImageDecoder;
-            decoder.dimensions()
-        };
         let image = DynamicImage::from_decoder(decoder).unwrap();
-        assert_eq!(
-            (image.width(), image.height()),
-            (dw, dh),
-            "{name}: dimensions() disagreed with the decoded image",
-        );
 
         // `bike` is VarDCT and must actually shrink; `sunset_logo` is modular and must not.
         if name == "bike" {

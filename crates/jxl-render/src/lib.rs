@@ -6,7 +6,10 @@ use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, ColorTransform, ColourEncoding, ColourSpace,
     EnumColourEncoding, RenderingIntent, TransferFunction,
 };
-use jxl_frame::{Frame, FrameContext, header::FrameType};
+use jxl_frame::{
+    Frame, FrameContext,
+    header::{Encoding, FrameHeader, FrameType},
+};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::Sample;
@@ -30,6 +33,18 @@ pub use features::render_spot_color;
 pub use image::{ImageBuffer, ImageWithRegion};
 pub use region::Region;
 use state::*;
+
+/// Whether a requested LF-only render applies to `frame_header`.
+///
+/// Frames that do not cover the canvas exactly are refused. The reduction applies to the frame,
+/// while callers size buffers from the image, so the two must describe the same rectangle.
+pub fn lf_only_applies(image_header: &ImageHeader, frame_header: &FrameHeader) -> bool {
+    frame_header.encoding == Encoding::VarDct
+        && frame_header.x0 == 0
+        && frame_header.y0 == 0
+        && frame_header.width == image_header.size.width
+        && frame_header.height == image_header.size.height
+}
 
 /// Render context that tracks loaded and rendered frames.
 pub struct RenderContext {

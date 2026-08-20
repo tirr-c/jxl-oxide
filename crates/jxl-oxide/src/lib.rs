@@ -705,19 +705,10 @@ impl JxlImage {
 
     /// Requests that VarDCT frames be rendered at 1:8 from the LF image alone.
     ///
-    /// JPEG XL codes a complete 8x-downsampled image (the LF image) ahead of the HF
-    /// coefficients, and a VarDCT frame's LF image is fully decoded - dequantized,
-    /// chroma-from-luma corrected and adaptively smoothed - before any HF parsing or inverse
-    /// DCT begins. Rendering stops there, which skips essentially the whole decode cost for
-    /// consumers that only need a small image, such as thumbnailers and preview panes.
+    /// The result is an approximation: restoration filters, feature rendering and upsampling
+    /// are skipped. Modular frames, and frames that do not cover the canvas, are unaffected.
     ///
-    /// **This is an approximation, and deliberately so.** In this mode the restoration filters
-    /// (Gabor-like and edge-preserving), feature rendering (patches, splines, noise) and
-    /// upsampling are all skipped, because each of them assumes 1:1 geometry.
-    ///
-    /// **Modular frames ignore the request** - they have no LF image - and render at 1:1 as
-    /// usual. The rendered size therefore depends on the frame, so read it from the result via
-    /// [`Render::image`] rather than assuming the image was reduced.
+    /// Use [`render_size`][Self::render_size] for the size a render will produce.
     #[inline]
     pub fn set_lf_only(&mut self, lf_only: bool) {
         self.ctx.request_lf_only(lf_only);
@@ -729,36 +720,27 @@ impl JxlImage {
         self.ctx.lf_only()
     }
 
-    /// The dimensions a render of `keyframe_index` will actually produce, with orientation
-    /// applied.
+    /// The dimensions a render of `keyframe_index` will produce, with orientation applied.
     ///
-    /// This equals [`width`][Self::width] by [`height`][Self::height] unless
-    /// [`set_lf_only`][Self::set_lf_only] is in effect AND the keyframe is VarDCT, in which
-    /// case it is an eighth of each, rounded up. Modular frames ignore the LF request, so
-    /// asking the frame is the only correct way to answer this.
+    /// Differs from [`width`][Self::width] by [`height`][Self::height] only where
+    /// [`set_lf_only`][Self::set_lf_only] applies to the keyframe.
     ///
     /// Returns `None` if the keyframe does not exist.
     pub fn render_size(&self, keyframe_index: usize) -> Option<(u32, u32)> {
         let frame = self.ctx.keyframe(keyframe_index)?;
         let (w, h) = (self.width(), self.height());
-        Some(match Self::lf_shift(self.ctx.lf_only(), frame.header()) {
+        Some(match self.lf_shift(frame.header()) {
             Some(shift) => (w.div_ceil(1 << shift), h.div_ceil(1 << shift)),
             None => (w, h),
         })
     }
 
-    /// How far an LF-only render reduces this frame, as a bit shift, or `None` if it does not
-    /// reduce it at all.
+    /// How far an LF-only render reduces this frame, as a bit shift, or `None` if it does not.
     ///
-    /// **The factor is 8 times the frame's own `upsampling`, not a flat 8**, and getting that
-    /// wrong is not subtle: the LF image is an eighth of the CODED frame, while every public
-    /// dimension on `JxlImage` describes the FINAL image. On a frame with `upsampling = 2` the
-    /// two differ by another factor of two, and assuming 8 lands the whole picture in the
-    /// top-left quadrant of a buffer four times too large.
-    ///
-    /// `None` for modular frames, which have no LF image and render at 1:1 regardless.
-    fn lf_shift(lf_only: bool, frame_header: &FrameHeader) -> Option<u32> {
-        if !lf_only || frame_header.encoding != jxl_frame::header::Encoding::VarDct {
+    /// The factor is 8 times the frame's own `upsampling`, not a flat 8: the LF image is an
+    /// eighth of the coded frame, while the public dimensions describe the final image.
+    fn lf_shift(&self, frame_header: &FrameHeader) -> Option<u32> {
+        if !self.ctx.lf_only() || !jxl_render::lf_only_applies(&self.image_header, frame_header) {
             return None;
         }
         // `upsampling` is one of 1, 2, 4, 8.
@@ -784,12 +766,9 @@ impl JxlImage {
         let frame = self.ctx.keyframe(keyframe_index).unwrap();
         let frame_header = frame.header();
         let mut target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
-        // An LF-only render produced a 1:8 buffer, so the region that selects pixels out of it
-        // has to be scaled to match. Left at 1:1 it would address rows and columns the buffer
-        // does not have, and the caller would get a mostly empty image at the wrong size.
-        // `image` is the authority on whether the reduction actually happened, since a modular
-        // frame ignores the request.
-        if let Some(shift) = Self::lf_shift(self.ctx.lf_only(), frame_header) {
+        // An LF-only render produced a 1:8 buffer, so the region selecting pixels out of it
+        // has to be scaled to match.
+        if let Some(shift) = self.lf_shift(frame_header) {
             target_frame_region = target_frame_region.downsample(shift);
         }
 
