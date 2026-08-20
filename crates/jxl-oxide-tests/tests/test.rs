@@ -10,6 +10,9 @@ mod crop;
 #[cfg(feature = "decode")]
 mod decode;
 
+#[cfg(feature = "conformance")]
+mod lf_only;
+
 #[cfg(feature = "image")]
 mod image;
 
