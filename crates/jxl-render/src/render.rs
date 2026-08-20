@@ -18,6 +18,7 @@ pub(crate) fn render_frame<S: Sample>(
     image_region: Region,
     pool: JxlThreadPool,
     frame_visibility: (usize, usize),
+    lf_only: bool,
 ) -> Result<ImageWithRegion> {
     let frame_region = util::image_region_to_frame(frame, image_region, false);
     tracing::debug!(
@@ -43,6 +44,8 @@ pub(crate) fn render_frame<S: Sample>(
     let color_padded_region = util::pad_color_region(image_header, frame_header, frame_region)
         .intersection(full_frame_region);
 
+    let lf_only = lf_only && crate::lf_only_applies(image_header, frame_header);
+
     let mut fb = match frame_header.encoding {
         Encoding::Modular => modular::render_modular(frame, cache, color_padded_region, &pool)?,
         Encoding::VarDct => {
@@ -52,6 +55,7 @@ pub(crate) fn render_frame<S: Sample>(
                 cache,
                 color_padded_region,
                 &pool,
+                lf_only,
             );
             match (result, reference_frames.lf) {
                 (Ok(grid), _) => grid,
@@ -66,6 +70,13 @@ pub(crate) fn render_frame<S: Sample>(
             }
         }
     };
+
+    if lf_only {
+        // Everything below assumes 1:1 geometry. The LF image carries colour channels only, so
+        // pad it out to the pixel format the caller expects.
+        fb.append_opaque_extra_channels(&image_header.metadata.ec_info)?;
+        return Ok(fb);
+    }
 
     if frame_header.do_ycbcr {
         fb.upsample_jpeg(color_padded_region, image_header.metadata.bit_depth)?;

@@ -77,6 +77,26 @@ impl<R: Read> JxlDecoder<R> {
         Self::init(builder, reader)
     }
 
+    /// Sets whether to render only the LF image of VarDCT frame.
+    ///
+    /// Decoded image will be downsampled if the frame has an LF image. This has no effect on
+    /// Modular frames.
+    ///
+    /// # Errors
+    /// This method returns an error if the frame header could not be decoded.
+    pub fn set_lf_only(&mut self, lf_only: bool) -> ImageResult<()> {
+        if lf_only {
+            self.load_until_first_keyframe().map_err(|e| {
+                ImageError::Decoding(DecodingError::new(
+                    ImageFormatHint::PathExtension("jxl".into()),
+                    e,
+                ))
+            })?;
+        }
+        self.image.set_lf_only(lf_only);
+        Ok(())
+    }
+
     /// Initializes a decoder which reads from given image stream, with custom thread pool.
     pub fn with_thread_pool(reader: R, pool: crate::JxlThreadPool) -> ImageResult<Self> {
         let builder = JxlImage::builder()
@@ -255,7 +275,11 @@ impl<R: Read> JxlDecoder<R> {
 
 impl<R: Read> image::ImageDecoder for JxlDecoder<R> {
     fn dimensions(&self) -> (u32, u32) {
-        (self.image.width(), self.image.height())
+        // `render_size`, not `width`/`height`: the `image` crate sizes its output buffer from
+        // this, and an LF-only render is smaller.
+        self.image
+            .render_size(0)
+            .unwrap_or((self.image.width(), self.image.height()))
     }
 
     fn color_type(&self) -> image::ColorType {

@@ -20,6 +20,11 @@ pub struct DecodeArgs {
     /// (unstable) Approximate memory limit, in bytes
     #[arg(long, default_value_t = 0)]
     pub approx_memory_limit: usize,
+    /// (unstable) Render VarDCT frames at 1:8 from the LF image alone
+    ///
+    /// Much faster, and approximate: intended for thumbnails and previews.
+    #[arg(long)]
+    pub lf_only: bool,
     /// Format to output
     #[arg(value_enum, short = 'f', long)]
     pub output_format: Option<OutputFormat>,

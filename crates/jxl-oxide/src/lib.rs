@@ -702,6 +702,50 @@ impl JxlImage {
         self.ctx
             .request_color_encoding(ColorEncodingWithProfile::new(color_encoding))
     }
+
+    /// Requests that VarDCT frames be rendered at 1:8 from the LF image alone.
+    ///
+    /// The result is an approximation: restoration filters, feature rendering and upsampling
+    /// are skipped. Modular frames, and frames that do not cover the canvas, are unaffected.
+    ///
+    /// Use [`render_size`][Self::render_size] for the size a render will produce.
+    #[inline]
+    pub fn set_lf_only(&mut self, lf_only: bool) {
+        self.ctx.request_lf_only(lf_only);
+    }
+
+    /// Whether 1:8 LF-only rendering is requested. See [`JxlImage::set_lf_only`].
+    #[inline]
+    pub fn lf_only(&self) -> bool {
+        self.ctx.lf_only()
+    }
+
+    /// The dimensions a render of `keyframe_index` will produce, with orientation applied.
+    ///
+    /// Differs from [`width`][Self::width] by [`height`][Self::height] only where
+    /// [`set_lf_only`][Self::set_lf_only] applies to the keyframe.
+    ///
+    /// Returns `None` if the keyframe does not exist.
+    pub fn render_size(&self, keyframe_index: usize) -> Option<(u32, u32)> {
+        let frame = self.ctx.keyframe(keyframe_index)?;
+        let (w, h) = (self.width(), self.height());
+        Some(match self.lf_shift(frame.header()) {
+            Some(shift) => (w.div_ceil(1 << shift), h.div_ceil(1 << shift)),
+            None => (w, h),
+        })
+    }
+
+    /// How far an LF-only render reduces this frame, as a bit shift, or `None` if it does not.
+    ///
+    /// The factor is 8 times the frame's own `upsampling`, not a flat 8: the LF image is an
+    /// eighth of the coded frame, while the public dimensions describe the final image.
+    fn lf_shift(&self, frame_header: &FrameHeader) -> Option<u32> {
+        if !self.ctx.lf_only() || !jxl_render::lf_only_applies(&self.image_header, frame_header) {
+            return None;
+        }
+        // `upsampling` is one of 1, 2, 4, 8.
+        Some(3 + frame_header.upsampling.trailing_zeros())
+    }
 }
 
 /// # Rendering to image buffers
@@ -721,7 +765,12 @@ impl JxlImage {
             .apply_orientation(&self.image_header);
         let frame = self.ctx.keyframe(keyframe_index).unwrap();
         let frame_header = frame.header();
-        let target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
+        let mut target_frame_region = image_region.translate(-frame_header.x0, -frame_header.y0);
+        // An LF-only render produced a 1:8 buffer, so the region selecting pixels out of it
+        // has to be scaled to match.
+        if let Some(shift) = self.lf_shift(frame_header) {
+            target_frame_region = target_frame_region.downsample(shift);
+        }
 
         let is_cmyk = self.ctx.requested_color_encoding().is_cmyk();
         let result = Render {
