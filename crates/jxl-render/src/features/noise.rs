@@ -344,6 +344,10 @@ fn fill_once(out: &mut [f32], fill_y: usize, adjacent_groups: [Option<SharedSubg
     };
 
     let (source_y, c, l, r) = if let Some(c) = c {
+        // `c` may be shorter than the 2-row halo of the convolution kernel; this happens when the
+        // frame height is one more than a multiple of the group dimension, making the last row of
+        // groups one pixel tall. Rows past the frame boundary are mirrored.
+        let source_y = crate::util::mirror(source_y as isize, c.height());
         (source_y, c, l, r)
     } else if let Some(y) = (height - 1).checked_sub(source_y) {
         let c = this;
@@ -455,4 +459,79 @@ fn split_mix_64(z: Wrapping<u64>) -> Wrapping<u64> {
     let z = (z ^ (z >> 30)) * Wrapping(0xBF58476D1CE4E5B9);
     let z = (z ^ (z >> 27)) * Wrapping(0x94D049BB133111EB);
     z ^ (z >> 31)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::mirror;
+
+    /// Convolves the noise of an 8x257 frame, so that the last row of groups is one pixel tall,
+    /// and checks the result against a scalar reference with mirrored boundaries.
+    #[test]
+    fn convolve_short_bottom_group() {
+        let width = 8usize;
+        let height = 257usize;
+        let group_dim = 256usize;
+
+        // Mimics `init_noise` for a single-column frame: two groups, the bottom one 8x1.
+        let noise_groups = (0..2)
+            .map(|group_y| {
+                let y0 = group_y * group_dim;
+                let group_height = group_dim.min(height - y0);
+                NoiseGroup::new(width, group_height, rng_seed0(1, 0), rng_seed1(0, y0), None)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let mut convolved = AlignedGrid::with_alloc_tracker(width, height, None).unwrap();
+        for (group_y, out_subgrid) in convolved
+            .as_subgrid_mut()
+            .into_groups(group_dim, group_dim)
+            .into_iter()
+            .enumerate()
+        {
+            let adjacent_groups: [_; 9] = std::array::from_fn(|idx| {
+                let offset_x = (idx % 3) as isize - 1;
+                let offset_y = (idx / 3) as isize - 1;
+                if offset_x != 0 {
+                    return None;
+                }
+                group_y
+                    .checked_add_signed(offset_y)
+                    .and_then(|group_y| noise_groups.get(group_y))
+                    .map(|group| group.as_subgrid(0))
+            });
+            convolve_fill(out_subgrid, adjacent_groups, None).unwrap();
+        }
+
+        // Assemble the full noise field for the reference computation.
+        let mut field = vec![0f32; width * height];
+        for (group_y, group) in noise_groups.iter().enumerate() {
+            let subgrid = group.as_subgrid(0);
+            for y in 0..subgrid.height() {
+                let row = subgrid.get_row(y);
+                field[(group_y * group_dim + y) * width..][..width].copy_from_slice(row);
+            }
+        }
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut sum = 0f32;
+                for dy in -2..=2 {
+                    let sy = mirror(y as isize + dy, height);
+                    for dx in -2..=2 {
+                        let sx = mirror(x as isize + dx, width);
+                        sum += field[sy * width + sx] * 0.16;
+                    }
+                }
+                let expected = sum - field[y * width + x] * 4.0;
+                let actual = *convolved.get_ref(x, y);
+                assert!(
+                    (expected - actual).abs() < 1e-4,
+                    "mismatch at ({x}, {y}): expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
 }

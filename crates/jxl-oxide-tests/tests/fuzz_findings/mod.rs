@@ -88,4 +88,5 @@ test_by_include!(
     hf_varblock_across_group,
     upsampling_sum_not_finite,
     ma_table_decode,
+    noise_short_bottom_group,
 );
