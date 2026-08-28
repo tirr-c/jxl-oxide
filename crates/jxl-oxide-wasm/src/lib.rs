@@ -1,3 +1,4 @@
+use bytemuck::cast_slice_mut;
 use jxl_oxide::{
     EnumColourEncoding, InitializeResult, JxlImage, PixelFormat, Render, RenderingIntent,
     UninitializedJxlImage, color::ColourEncoding,
@@ -371,14 +372,18 @@ impl RenderResult {
     #[wasm_bindgen(js_name = imageData)]
     pub fn image_data(&self) -> Vec<u8> {
         let mut stream = self.image.stream();
-        let bytes_per_channel = if self.need_high_precision { 2 } else { 1 };
-        let mut buf = vec![
-            0u8;
-            (stream.width() * stream.height() * stream.channels() * bytes_per_channel)
-                as usize
-        ];
-        stream.write_to_buffer(&mut buf);
-        buf
+        if self.need_high_precision {
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels()) as usize * 2];
+            let ar_slice: &mut [[u8; 2]] = cast_slice_mut(buf.as_mut_slice());
+            stream.write_to_buffer(ar_slice);
+            buf
+        } else {
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels()) as usize];
+            stream.write_to_buffer(&mut buf);
+            buf
+        }
     }
 }
 
