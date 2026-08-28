@@ -1,3 +1,4 @@
+use bytemuck::cast_slice_mut;
 use jxl_oxide::{
     EnumColourEncoding, InitializeResult, JxlImage, PixelFormat, Render, RenderingIntent,
     UninitializedJxlImage, color::ColourEncoding,
@@ -356,6 +357,42 @@ impl RenderResult {
         writer.finish().map_err(|e| e.to_string())?;
         Ok(out)
     }
+
+    #[wasm_bindgen(js_name = imageDimensions)]
+    pub fn image_dimensions(&self) -> ImageDimensions {
+        let stream = self.image.stream();
+        ImageDimensions {
+            width: stream.width(),
+            height: stream.height(),
+            channels: stream.channels(),
+            depth: if self.need_high_precision { 16 } else { 8 },
+        }
+    }
+
+    #[wasm_bindgen(js_name = imageData)]
+    pub fn image_data(&self) -> Vec<u8> {
+        let mut stream = self.image.stream();
+        if self.need_high_precision {
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels()) as usize * 2];
+            let ar_slice: &mut [[u8; 2]] = cast_slice_mut(buf.as_mut_slice());
+            stream.write_to_buffer(ar_slice);
+            buf
+        } else {
+            let mut buf =
+                vec![0u8; (stream.width() * stream.height() * stream.channels()) as usize];
+            stream.write_to_buffer(&mut buf);
+            buf
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct ImageDimensions {
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub depth: u32,
 }
 
 #[wasm_bindgen(inspectable)]

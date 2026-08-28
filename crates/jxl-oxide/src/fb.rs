@@ -459,6 +459,9 @@ impl FrameBufferSample for f32 {}
 /// Output as 16-bit unsigned integer samples.
 impl FrameBufferSample for u16 {}
 
+/// Output as 16-bit unsigned integer samples, stored as 2 bytes.
+impl FrameBufferSample for [u8; 2] {}
+
 /// Output as 8-bit unsigned integer samples.
 impl FrameBufferSample for u8 {}
 
@@ -532,6 +535,22 @@ mod private {
         #[inline]
         fn copy_from_f32(&mut self, val: f32) {
             *self = (val * 65535.0 + 0.5).clamp(0.0, 65535.0) as u16;
+        }
+    }
+
+    impl Sealed for [u8; 2] {
+        #[inline]
+        fn copy_from_grid(&mut self, grid: &ImageBuffer, x: usize, y: usize, bit_depth: BitDepth) {
+            let mut val16 = 0u16;
+            val16.copy_from_grid(grid, x, y, bit_depth);
+            *self = val16.to_ne_bytes();
+        }
+
+        #[inline]
+        fn copy_from_f32(&mut self, val: f32) {
+            let mut val16 = 0u16;
+            val16.copy_from_f32(val);
+            *self = val16.to_ne_bytes();
         }
     }
 

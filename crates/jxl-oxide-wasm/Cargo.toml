@@ -20,6 +20,9 @@ miniz_oxide = "0.8.7"
 png = "0.18.0"
 wasm-bindgen = "0.2.93"
 
+[dependencies.bytemuck]
+workspace = true
+
 [dependencies.console_error_panic_hook]
 version = "0.1.7"
 optional = true
@@ -31,6 +34,7 @@ optional = true
 [dependencies.jxl-oxide]
 version = "0.12.6"
 path = "../jxl-oxide"
+version = "0.12.6"
 default-features = false
 
 [dependencies.web-sys]

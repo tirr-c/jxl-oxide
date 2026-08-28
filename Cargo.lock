@@ -1246,6 +1246,7 @@ dependencies = [
 name = "jxl-oxide-wasm"
 version = "0.12.6"
 dependencies = [
+ "bytemuck",
  "console_error_panic_hook",
  "console_log",
  "jxl-oxide",
