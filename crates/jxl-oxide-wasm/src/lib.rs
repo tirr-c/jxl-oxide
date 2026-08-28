@@ -356,6 +356,38 @@ impl RenderResult {
         writer.finish().map_err(|e| e.to_string())?;
         Ok(out)
     }
+
+    #[wasm_bindgen(js_name = imageDimensions)]
+    pub fn image_dimensions(&self) -> ImageDimensions {
+        let stream = self.image.stream();
+        ImageDimensions {
+            width: stream.width(),
+            height: stream.height(),
+            channels: stream.channels(),
+            depth: if self.need_high_precision { 16 } else { 8 },
+        }
+    }
+
+    #[wasm_bindgen(js_name = imageData)]
+    pub fn image_data(&self) -> Vec<u8> {
+        let mut stream = self.image.stream();
+        let bytes_per_channel = if self.need_high_precision { 2 } else { 1 };
+        let mut buf = vec![
+            0u8;
+            (stream.width() * stream.height() * stream.channels() * bytes_per_channel)
+                as usize
+        ];
+        stream.write_to_buffer(&mut buf);
+        buf
+    }
+}
+
+#[wasm_bindgen]
+pub struct ImageDimensions {
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub depth: u32,
 }
 
 #[wasm_bindgen(inspectable)]
