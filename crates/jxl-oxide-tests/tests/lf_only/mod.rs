@@ -153,3 +153,34 @@ testcase! {
     // Modular, so it must fall back to a 1:1 render rather than fail.
     lz77_flower,
 }
+
+/// A JPEG-transcoded file keeps the JPEG's chroma subsampling, so on 4:2:0 the LF image's Cb
+/// and Cr planes are half the luma's size (half the width on 4:2:2). The LF path used to return
+/// them like that and `ycbcr_to_rgb` panicked with "Grid size mismatch"; every phone photo run
+/// through cjxl is a 4:2:0 transcode. None of the conformance files above is a subsampled JPEG
+/// reconstruction, so these two are checked in: 256x192, `cjxl` over a JPEG written with
+/// `-sampling-factor 4:2:0` and `4:2:2` respectively.
+#[test]
+fn jpeg_transcode_420() {
+    run_test(
+        include_bytes!("jpeg420_transcode.jxl"),
+        "jpeg_transcode_420",
+    );
+}
+
+#[test]
+fn jpeg_transcode_422() {
+    run_test(
+        include_bytes!("jpeg422_transcode.jxl"),
+        "jpeg_transcode_422",
+    );
+}
+
+/// The same shape on a real photograph from the decode corpus.
+#[cfg(feature = "decode")]
+#[test]
+fn genshin_ycbcr_420() {
+    let path = util::decode_testcases_dir().join("genshin_ycbcr_420/input.jxl");
+    let buf = std::fs::read(path).expect("Failed to open file");
+    run_test(&buf, "genshin_ycbcr_420");
+}
