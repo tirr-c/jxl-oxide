@@ -592,6 +592,38 @@ impl ImageWithRegion {
         self.color_channels = count;
     }
 
+    /// Appends one grid per extra channel, matching the colour channels' region, and fills
+    /// the alpha channels opaque.
+    ///
+    /// This exists for the 1:8 LF-only render, whose image carries colour channels ONLY. The
+    /// extra channels of a VarDCT frame are modular-coded at full resolution and have no 1:8
+    /// representation to decode, so there is nothing to downsample: the honest options are to
+    /// synthesise them or to refuse the mode for images that have any. Filling alpha opaque is
+    /// the same answer the incomplete-frame fallback already gives, and it means a preview of
+    /// a transparent image comes back opaque rather than not at all.
+    pub(crate) fn append_opaque_extra_channels(
+        &mut self,
+        ec_info: &[jxl_image::ExtraChannelInfo],
+    ) -> Result<()> {
+        if ec_info.is_empty() || self.buffer.len() > self.color_channels {
+            return Ok(());
+        }
+        let Some(&(region, _)) = self.regions.first() else {
+            return Ok(());
+        };
+        let tracker = self.tracker.clone();
+        for _ in ec_info {
+            let buffer = AlignedGrid::<f32>::with_alloc_tracker(
+                region.width as usize,
+                region.height as usize,
+                tracker.as_ref(),
+            )?;
+            self.append_channel(ImageBuffer::F32(buffer), region);
+        }
+        self.fill_opaque_alpha(ec_info);
+        Ok(())
+    }
+
     pub(crate) fn fill_opaque_alpha(&mut self, ec_info: &[jxl_image::ExtraChannelInfo]) {
         for (ec_idx, ec_info) in ec_info.iter().enumerate() {
             if !matches!(ec_info.ty, jxl_image::ExtraChannelType::Alpha { .. }) {

@@ -6,7 +6,10 @@ use jxl_color::{
     ColorEncodingWithProfile, ColorManagementSystem, ColorTransform, ColourEncoding, ColourSpace,
     EnumColourEncoding, RenderingIntent, TransferFunction,
 };
-use jxl_frame::{Frame, FrameContext, header::FrameType};
+use jxl_frame::{
+    Frame, FrameContext,
+    header::{Encoding, FrameHeader, FrameType},
+};
 use jxl_grid::AllocTracker;
 use jxl_image::{ImageHeader, ImageMetadata};
 use jxl_modular::Sample;
@@ -30,6 +33,18 @@ pub use features::render_spot_color;
 pub use image::{ImageBuffer, ImageWithRegion};
 pub use region::Region;
 use state::*;
+
+/// Whether a requested LF-only render applies to `frame_header`.
+///
+/// Frames that do not cover the canvas exactly are refused. The reduction applies to the frame,
+/// while callers size buffers from the image, so the two must describe the same rectangle.
+pub fn lf_only_applies(image_header: &ImageHeader, frame_header: &FrameHeader) -> bool {
+    frame_header.encoding == Encoding::VarDct
+        && frame_header.x0 == 0
+        && frame_header.y0 == 0
+        && frame_header.width == image_header.size.width
+        && frame_header.height == image_header.size.height
+}
 
 /// Render context that tracks loaded and rendered frames.
 pub struct RenderContext {
@@ -55,6 +70,7 @@ pub struct RenderContext {
     cms: Box<dyn ColorManagementSystem + Send + Sync>,
     cached_transform: Mutex<Option<ColorTransform>>,
     force_wide_buffers: bool,
+    lf_only: bool,
 }
 
 impl std::fmt::Debug for RenderContext {
@@ -179,6 +195,7 @@ impl RenderContextBuilder {
             loading_render_cache_narrow: None,
             loading_region: None,
             requested_image_region: full_image_region,
+            lf_only: false,
             embedded_icc: self.embedded_icc,
             requested_color_encoding,
             cms: Box::new(jxl_color::NullCms),
@@ -237,6 +254,24 @@ impl RenderContext {
     #[inline]
     pub fn image_region(&self) -> Region {
         self.requested_image_region
+    }
+
+    /// Renders VarDCT frames at 1:8 from the LF image alone, skipping HF coefficient parsing,
+    /// the inverse DCT, the restoration filters and upsampling.
+    ///
+    /// This is an approximation intended for previews and thumbnails; see [`Self::lf_only`].
+    #[inline]
+    pub fn request_lf_only(&mut self, lf_only: bool) {
+        if self.lf_only != lf_only {
+            self.lf_only = lf_only;
+            self.reset_cache();
+        }
+    }
+
+    /// Whether 1:8 LF-only rendering is requested.
+    #[inline]
+    pub fn lf_only(&self) -> bool {
+        self.lf_only
     }
 }
 
@@ -492,6 +527,7 @@ impl RenderContext {
         image_region: Region,
         prev_frame_visibility: (usize, usize),
         pool: &JxlThreadPool,
+        lf_only: bool,
     ) -> FrameRender<S> {
         if let Some(lf) = &reference_frames.lf {
             tracing::trace!(idx = lf.frame.idx, "Spawn LF frame renderer");
@@ -526,6 +562,7 @@ impl RenderContext {
             image_region,
             pool.clone(),
             prev_frame_visibility,
+            lf_only,
         );
         match result {
             Ok(grid) => FrameRender::Done(grid),
@@ -548,6 +585,7 @@ impl RenderContext {
         let prev_frame_visibility = self.get_previous_frames_visibility(&frame);
 
         let pool = self.pool.clone();
+        let lf_only = self.lf_only;
         Arc::new(move |state, image_region| {
             Self::do_render(
                 &frame,
@@ -556,6 +594,7 @@ impl RenderContext {
                 image_region,
                 prev_frame_visibility,
                 &pool,
+                lf_only,
             )
         })
     }
@@ -782,6 +821,7 @@ impl RenderContext {
                 image_region,
                 prev_frame_visibility,
                 &self.pool,
+                self.lf_only,
             );
 
             match state {
@@ -844,6 +884,7 @@ impl RenderContext {
                 image_region,
                 prev_frame_visibility,
                 &self.pool,
+                self.lf_only,
             );
 
             match state {

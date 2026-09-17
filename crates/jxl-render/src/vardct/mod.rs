@@ -51,6 +51,7 @@ pub(crate) fn render_vardct<S: Sample>(
     cache: &mut RenderCache<S>,
     region: Region,
     pool: &JxlThreadPool,
+    lf_only: bool,
 ) -> Result<ImageWithRegion> {
     let span = tracing::span!(tracing::Level::TRACE, "Render VarDCT");
     let _guard = span.enter();
@@ -151,8 +152,8 @@ pub(crate) fn render_vardct<S: Sample>(
     let group_dim = frame_header.group_dim();
 
     let result = std::sync::RwLock::new(Result::Ok(()));
-    let (mut fb, lf_xyb) = pool.scope(|scope| -> Result<_> {
-        if hf_global.is_none() {
+    let (fb, lf_xyb) = pool.scope(|scope| -> Result<_> {
+        if hf_global.is_none() && !lf_only {
             scope.spawn(|_| {
                 let ret = tracing::trace_span!("Parse HfGlobal").in_scope(|| -> Result<_> {
                     *hf_global = frame.try_parse_hf_global(Some(lf_global)).transpose()?;
@@ -207,7 +208,9 @@ pub(crate) fn render_vardct<S: Sample>(
             lf_xyb
         };
 
-        let fb = {
+        let fb = if lf_only {
+            None
+        } else {
             let Region { width, height, .. } = modular_region;
 
             let mut fb = ImageWithRegion::new(3, tracker);
@@ -219,12 +222,20 @@ pub(crate) fn render_vardct<S: Sample>(
                     AlignedGrid::with_alloc_tracker(width as usize, height as usize, tracker)?;
                 fb.append_channel_shifted(ImageBuffer::F32(buffer), modular_region, shift);
             }
-            fb
+            Some(fb)
         };
 
         Ok((fb, lf_xyb))
     })?;
     result.into_inner().unwrap()?;
+
+    if lf_only {
+        // `lf_xyb` is dequantized, chroma-from-luma corrected and adaptively smoothed at this
+        // point: a complete 1:8 image. Everything after this line parses HF coefficients and
+        // runs the inverse DCT, which is the cost this path exists to avoid.
+        return Ok(lf_xyb);
+    }
+    let mut fb = fb.expect("framebuffer is only skipped for lf_only, which returned above");
 
     let hf_global = cache.hf_global.as_ref();
     let lf_groups = &mut cache.lf_groups;

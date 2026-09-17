@@ -99,6 +99,11 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         ));
     }
 
+    if args.lf_only {
+        tracing::debug!("Rendering VarDCT frames at 1:8 from the LF image");
+        image.set_lf_only(true);
+    }
+
     let image_meta = &image.image_header().metadata;
     tracing::info!("Image dimension: {}x{}", image.width(), image.height());
     tracing::debug!(colour_encoding = format_args!("{:?}", image_meta.colour_encoding));
@@ -153,7 +158,23 @@ pub fn handle_decode(args: DecodeArgs) -> Result<()> {
         left: 0,
         top: 0,
     });
-    let CropInfo { width, height, .. } = crop_region;
+    // The REGION stays in full-image coordinates - that is its contract, and the library
+    // reduces it itself when rendering at 1:8. Only the OUTPUT BUFFER shrinks, so ask
+    // `render_size` for that rather than assuming the header dimensions. Sizing the region
+    // from it instead reduces twice and yields a 63x47 image where 500x375 was meant.
+    let (width, height) = if image.lf_only() {
+        let (rw, rh) = image
+            .render_size(0)
+            .unwrap_or((crop_region.width, crop_region.height));
+        let scale_w = image.width().max(1);
+        let scale_h = image.height().max(1);
+        (
+            (crop_region.width as u64 * rw as u64 / scale_w as u64).max(1) as u32,
+            (crop_region.height as u64 * rh as u64 / scale_h as u64).max(1) as u32,
+        )
+    } else {
+        (crop_region.width, crop_region.height)
+    };
     let total_pixels = width * height;
     let mps = total_pixels as f64 / 1e6;
 
