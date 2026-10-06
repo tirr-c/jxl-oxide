@@ -203,8 +203,12 @@ pub fn render_spline(
                 continuous_idct(&spline.xyb_dct[2], t) * arc.length,
             ];
 
-            let max_color = f32::max(0.01, values.into_iter().reduce(f32::max).unwrap());
-            let max_distance = f32::sqrt(2.0 * (f32::ln(10.0) * 3.0 + max_color)) * sigma.abs();
+            let max_color = f32::max(
+                0.01 * arc.length,
+                values.into_iter().map(f32::abs).reduce(f32::max).unwrap(),
+            );
+            let max_distance =
+                f32::sqrt(2.0 * (f32::ln(10.0) * 3.0 + max_color.ln())) * sigma.abs();
 
             let xbegin = i32::max(0, (arc.point.x - max_distance + 0.5).floor() as i32);
             let xend = i32::min(
