@@ -56,3 +56,10 @@ test! {
         "21ddc2688c89ec279a2e9415bc2e82c4d4b56362316d1332131b6fb97b0d1ea0",
     ),
 }
+
+test! {
+    progressive_420(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/jbrd/progressive_420.jxl"),
+        "8718daca9089be7663871d06cdc82d423baf5ba01cd4a32efb37637c9cf62fc9",
+    ),
+}

@@ -560,8 +560,19 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                     .map(|c| [1u32, 2, 1, 2][jpeg_upsampling_ycbcr[c.comp_idx as usize] as usize])
                     .collect::<Vec<_>>();
 
-                let mut max_hsample = hsamples.iter().copied().max().unwrap().trailing_zeros();
-                let mut max_vsample = vsamples.iter().copied().max().unwrap().trailing_zeros();
+                // MCU geometry depends on the maximum sampling factors of the frame, not the scan.
+                let mut max_hsample = jpeg_upsampling_ycbcr
+                    .iter()
+                    .map(|&x| [1u32, 2, 2, 1][x as usize])
+                    .max()
+                    .unwrap()
+                    .trailing_zeros();
+                let mut max_vsample = jpeg_upsampling_ycbcr
+                    .iter()
+                    .map(|&x| [1u32, 2, 1, 2][x as usize])
+                    .max()
+                    .unwrap()
+                    .trailing_zeros();
                 let mut w8 = (frame_header.width.div_ceil(8) + max_hsample) >> max_hsample;
                 let mut h8 = (frame_header.height.div_ceil(8) + max_vsample) >> max_vsample;
 
