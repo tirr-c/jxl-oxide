@@ -56,3 +56,10 @@ test! {
         "21ddc2688c89ec279a2e9415bc2e82c4d4b56362316d1332131b6fb97b0d1ea0",
     ),
 }
+
+test! {
+    equal_sampling_1x2(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/jbrd/equal_sampling_1x2.jxl"),
+        "4364ecfea09cc4cf520b2d05a0971d5cc8406a313792d5b353c569865f7269ba",
+    ),
+}
