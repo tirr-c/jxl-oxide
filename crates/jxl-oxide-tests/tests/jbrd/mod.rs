@@ -56,3 +56,10 @@ test! {
         "21ddc2688c89ec279a2e9415bc2e82c4d4b56362316d1332131b6fb97b0d1ea0",
     ),
 }
+
+test! {
+    empty_dht(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/jbrd/empty_dht.jxl"),
+        "2bec27081b80afe6141754f2c68327389dbfe03958e69f582f2a274ef1e8af59",
+    ),
+}

@@ -11,7 +11,15 @@ pub(crate) struct HuffmanCode {
 }
 
 impl HuffmanCode {
+    /// An all-zero code stands for an empty DHT marker.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
     pub fn encoded_len(&self) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
         1 + 16 + self.values.len() - 1
     }
 

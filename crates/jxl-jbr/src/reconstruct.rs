@@ -466,6 +466,10 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                     .map_err(Error::ReconstructionWrite)?;
 
                 for hc in hcs {
+                    if hc.is_empty() {
+                        continue;
+                    }
+
                     let mut id_and_counts = [0u8; 17];
                     id_and_counts[0] = hc.id | if hc.is_ac { 0x10 } else { 0 };
                     id_and_counts[1..].copy_from_slice(&hc.counts[1..]);
