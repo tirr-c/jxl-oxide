@@ -431,8 +431,12 @@ impl RenderContext {
 
         let header = frame.header();
         // Check if LF frame exists
-        if header.flags.use_lf_frame() && self.lf_frame[header.lf_level as usize] == usize::MAX {
-            return Err(Error::UninitializedLfFrame(header.lf_level));
+        if header.flags.use_lf_frame() {
+            // `lf_level` goes up to 4, where there is no LF frame left to refer to.
+            let lf_frame_idx = self.lf_frame.get(header.lf_level as usize);
+            if lf_frame_idx.is_none_or(|&idx| idx == usize::MAX) {
+                return Err(Error::UninitializedLfFrame(header.lf_level));
+            }
         }
 
         self.loading_frame = Some(IndexedFrame::new(frame, self.frames.len()));
@@ -741,10 +745,13 @@ impl RenderContext {
             return Err(Error::IncompleteFrame);
         }
 
-        let lf_frame_idx = self.lf_frame[header.lf_level as usize];
-        if header.flags.use_lf_frame() {
+        let lf_frame_idx = if header.flags.use_lf_frame() {
+            let lf_frame_idx = self.lf_frame[header.lf_level as usize];
             self.spawn_renderer(lf_frame_idx);
-        }
+            lf_frame_idx
+        } else {
+            usize::MAX
+        };
         for idx in self.reference {
             if idx != usize::MAX {
                 self.spawn_renderer(idx);
