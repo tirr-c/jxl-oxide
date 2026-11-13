@@ -581,6 +581,10 @@ impl<Ctx> Bundle<Ctx> for TransferFunction {
         let has_gamma = bitstream.read_bool()?;
         if has_gamma {
             let gamma = bitstream.read_bits(24)?;
+            // Gamma is the exponent scaled by 1e7, and is between 1/8192 and 1.
+            if gamma > 10_000_000 || (gamma as u64) * 8192 < 10_000_000 {
+                return Err(Error::ValidationFailed("invalid gamma value"));
+            }
             Ok(Self::Gamma {
                 g: gamma,
                 inverted: true,
