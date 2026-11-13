@@ -89,3 +89,15 @@ test_by_include!(
     upsampling_sum_not_finite,
     ma_table_decode,
 );
+
+/// Synthesizes the ICC profile, which `fuzz_decode` does not do.
+#[test]
+fn gamma_zero() {
+    let data = include_bytes!("gamma_zero.fuzz");
+    let image = JxlImage::builder()
+        .alloc_tracker(AllocTracker::with_limit(128 * 1024 * 1024)) // 128 MiB
+        .read(std::io::Cursor::new(data));
+    if let Ok(image) = image {
+        let _ = image.rendered_icc();
+    }
+}
