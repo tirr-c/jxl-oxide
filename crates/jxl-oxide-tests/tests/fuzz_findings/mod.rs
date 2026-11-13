@@ -89,3 +89,15 @@ test_by_include!(
     upsampling_sum_not_finite,
     ma_table_decode,
 );
+
+/// Renders the frame that is still loading, which `fuzz_decode` does not do.
+#[test]
+fn blend_empty_grid() {
+    let data = include_bytes!("blend_empty_grid.fuzz");
+    let image = JxlImage::builder()
+        .alloc_tracker(AllocTracker::with_limit(128 * 1024 * 1024)) // 128 MiB
+        .read(std::io::Cursor::new(data));
+    if let Ok(mut image) = image {
+        let _ = image.render_loading_frame();
+    }
+}
