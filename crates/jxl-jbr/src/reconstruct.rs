@@ -454,7 +454,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
             // DHT
             0xc4 => {
                 let last_idx = self.huffman_code_ptr.iter().position(|hc| hc.is_last);
-                let num_tables = last_idx.expect("is_last not found") + 1;
+                let num_tables = last_idx.ok_or(Error::InvalidData)? + 1;
                 let (hcs, remainder) = self.huffman_code_ptr.split_at(num_tables);
                 self.huffman_code_ptr = remainder;
 
@@ -618,7 +618,7 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                 let hf_global = &self.parsed.hf_global;
 
                 let last_idx = self.quant_ptr.iter().position(|qt| qt.is_last);
-                let num_tables = last_idx.expect("is_last not found") + 1;
+                let num_tables = last_idx.ok_or(Error::InvalidData)? + 1;
                 let (qts, remainder) = self.quant_ptr.split_at(num_tables);
                 self.quant_ptr = remainder;
 
@@ -694,14 +694,17 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
 
             // APPn
             0xe0..=0xef => {
-                let am = self.app_marker_ptr.next().unwrap();
+                let am = self.app_marker_ptr.next().ok_or(Error::InvalidData)?;
                 let encoded_len = ((am.length - 1) as u16).to_be_bytes();
                 match am.ty {
                     0 => {
                         writer
                             .write_all(&[0xff])
                             .map_err(Error::ReconstructionWrite)?;
-                        let (app_data, next) = self.app_data.split_at(am.length as usize);
+                        let (app_data, next) = self
+                            .app_data
+                            .split_at_checked(am.length as usize)
+                            .ok_or(Error::InvalidData)?;
                         self.app_data = next;
                         writer
                             .write_all(app_data)
@@ -727,7 +730,12 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                         self.icc_marker_offset += len;
 
                         writer
-                            .write_all(&self.icc_profile[from..][..len])
+                            .write_all(
+                                self.icc_profile
+                                    .get(from..)
+                                    .and_then(|rest| rest.get(..len))
+                                    .ok_or(Error::InvalidData)?,
+                            )
                             .map_err(Error::ReconstructionWrite)?;
                     }
                     2 => {
@@ -760,8 +768,11 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
 
             // COM
             0xfe => {
-                let length = *self.com_length.next().unwrap();
-                let (com_data, next) = self.com_data.split_at(length as usize);
+                let length = *self.com_length.next().ok_or(Error::InvalidData)?;
+                let (com_data, next) = self
+                    .com_data
+                    .split_at_checked(length as usize)
+                    .ok_or(Error::InvalidData)?;
                 self.com_data = next;
                 writer
                     .write_all(&[0xff, 0xfe])
@@ -773,8 +784,11 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
 
             // Unrecognized
             0xff => {
-                let length = *self.intermarker_length.next().unwrap();
-                let (data, next) = self.intermarker_data.split_at(length as usize);
+                let length = *self.intermarker_length.next().ok_or(Error::InvalidData)?;
+                let (data, next) = self
+                    .intermarker_data
+                    .split_at_checked(length as usize)
+                    .ok_or(Error::InvalidData)?;
                 self.intermarker_data = next;
                 writer.write_all(data).map_err(Error::ReconstructionWrite)?;
             }
