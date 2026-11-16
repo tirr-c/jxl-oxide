@@ -533,6 +533,15 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                     .map_err(Error::ReconstructionWrite)?;
 
                 let comps = &si.component_info;
+                let num_frame_comps = self.header.components.len().min(3);
+                if comps.iter().any(|c| c.comp_idx as usize >= num_frame_comps) {
+                    tracing::error!("Component index out of range in SOS marker");
+                    return Err(Error::InvalidData);
+                }
+                if si.ss > si.se || si.se > 63 || si.ah > 13 || si.al > 13 {
+                    tracing::error!("Invalid spectral selection or approximation in SOS marker");
+                    return Err(Error::InvalidData);
+                }
                 for c in comps {
                     let id = self.header.components[c.comp_idx as usize].id;
                     let table = (c.dc_tbl_idx << 4) | c.ac_tbl_idx;
