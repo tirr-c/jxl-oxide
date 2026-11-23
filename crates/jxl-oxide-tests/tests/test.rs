@@ -15,4 +15,6 @@ mod image;
 
 mod jbrd;
 
+mod dequant;
+
 mod fuzz_findings;

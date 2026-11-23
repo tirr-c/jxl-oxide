@@ -455,6 +455,15 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixParams {
             Ok(out)
         }
 
+        // Identity and DCT2 weights are stored divided by 64.
+        fn read_fixed_scaled<const N: usize>(bitstream: &mut Bitstream) -> Result<[[f32; N]; 3]> {
+            let mut out = read_fixed::<N>(bitstream)?;
+            for val in out.iter_mut().flatten() {
+                *val *= 64.0;
+            }
+            Ok(out)
+        }
+
         fn read_dct_params(bitstream: &mut Bitstream) -> Result<[Vec<f32>; 3]> {
             let num_params = bitstream.read_bits(4)? as usize + 1;
             let mut params = [
@@ -510,8 +519,8 @@ impl Bundle<DequantMatrixSetParams<'_, '_, '_>> for DequantMatrixParams {
 
         let encoding = match encoding_mode {
             0 => DequantMatrixParamsEncoding::default_with(dct_select),
-            1 => Hornuss(read_fixed(bitstream)?),
-            2 => Dct2(read_fixed(bitstream)?),
+            1 => Hornuss(read_fixed_scaled(bitstream)?),
+            2 => Dct2(read_fixed_scaled(bitstream)?),
             3 => Dct4 {
                 params: read_fixed(bitstream)?,
                 dct_params: read_dct_params(bitstream)?,
