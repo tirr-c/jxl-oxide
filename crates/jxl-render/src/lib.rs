@@ -971,11 +971,13 @@ impl RenderContext {
             }
 
             let mut has_black = false;
-            for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
-                if ec_info.is_black() {
-                    channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
-                    has_black = true;
-                    break;
+            if !metadata.xyb_encoded {
+                for (grid, ec_info) in extra_channels.iter_mut().zip(&metadata.ec_info) {
+                    if ec_info.is_black() {
+                        channels.push(grid.convert_to_float_modular(ec_info.bit_depth)?.buf_mut());
+                        has_black = true;
+                        break;
+                    }
                 }
             }
 
