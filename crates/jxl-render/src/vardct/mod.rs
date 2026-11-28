@@ -60,7 +60,8 @@ pub(crate) fn render_vardct<S: Sample>(
     let tracker = frame.alloc_tracker();
 
     let jpeg_upsampling = frame_header.jpeg_upsampling;
-    let subsampled = jpeg_upsampling.into_iter().any(|x| x != 0);
+    // Channels with the same sampling factors are not subsampled relative to each other.
+    let subsampled = jpeg_upsampling.into_iter().any(|x| x != jpeg_upsampling[0]);
     let shifts_cbycr: [_; 3] = std::array::from_fn(|idx| {
         ChannelShift::from_jpeg_upsampling(frame_header.jpeg_upsampling, idx)
     });

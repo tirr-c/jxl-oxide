@@ -115,7 +115,10 @@ impl<'jbrd, 'frame, 'meta> JpegBitstreamReconstructor<'jbrd, 'frame, 'meta> {
 
         let mut jpeg_upsampling_ycbcr = frame_header.jpeg_upsampling;
         jpeg_upsampling_ycbcr.swap(0, 1);
-        let is_subsampled = jpeg_upsampling_ycbcr.iter().any(|&x| x != 0);
+        // Channels with the same sampling factors are not subsampled relative to each other.
+        let is_subsampled = jpeg_upsampling_ycbcr
+            .iter()
+            .any(|&x| x != jpeg_upsampling_ycbcr[0]);
         let upsampling_shifts_ycbcr: [_; 3] = std::array::from_fn(|idx| {
             ChannelShift::from_jpeg_upsampling(jpeg_upsampling_ycbcr, idx)
         });
