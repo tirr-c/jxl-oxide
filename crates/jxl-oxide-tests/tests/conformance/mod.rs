@@ -19,7 +19,7 @@ fn read_numpy(mut r: impl std::io::Read, frames: usize, channels: usize) -> Vec<
     let mut buf = vec![0u8; channels * 4];
     while r.read_exact(&mut buf).is_ok() {
         let mut val = [0u8; 4];
-        for c in buf.chunks_exact(4) {
+        for c in buf.as_chunks::<4>().0 {
             val.copy_from_slice(c);
             let x = u32::from_le_bytes(val);
             fb.push(f32::from_bits(x));

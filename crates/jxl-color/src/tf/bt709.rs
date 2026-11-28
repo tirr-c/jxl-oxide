@@ -3,8 +3,8 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
     #[cfg(target_arch = "aarch64")]
     let samples = {
         if std::arch::is_aarch64_feature_detected!("neon") {
-            let mut it = samples.chunks_exact_mut(4);
-            for chunk in &mut it {
+            let (chunks, remainder) = samples.as_chunks_mut::<4>();
+            for chunk in chunks {
                 unsafe {
                     let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
                     let mask =
@@ -20,7 +20,7 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
                     std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
                 }
             }
-            it.into_remainder()
+            remainder
         } else {
             samples
         }
@@ -32,8 +32,8 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
         {
             unsafe { linear_to_bt709_x86_64_avx2(samples) }
         } else {
-            let mut it = samples.chunks_exact_mut(4);
-            for chunk in &mut it {
+            let (chunks, remainder) = samples.as_chunks_mut::<4>();
+            for chunk in chunks {
                 unsafe {
                     let v = std::arch::x86_64::_mm_loadu_ps(chunk.as_ptr());
                     let mask =
@@ -54,7 +54,7 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
                     std::arch::x86_64::_mm_storeu_ps(chunk.as_mut_ptr(), v);
                 }
             }
-            it.into_remainder()
+            remainder
         }
     };
 
@@ -74,8 +74,8 @@ pub fn linear_to_bt709(samples: &mut [f32]) {
 unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
     use std::arch::x86_64::*;
 
-    let mut it = samples.chunks_exact_mut(8);
-    for chunk in &mut it {
+    let (chunks, remainder) = samples.as_chunks_mut::<8>();
+    for chunk in chunks {
         let v = _mm256_loadu_ps(chunk.as_ptr());
         let mask = _mm256_cmp_ps(v, _mm256_set1_ps(0.018), _CMP_LE_OS);
         let lin = _mm256_mul_ps(v, _mm256_set1_ps(4.5));
@@ -84,12 +84,11 @@ unsafe fn linear_to_bt709_x86_64_avx2(samples: &mut [f32]) -> &mut [f32] {
         let v = _mm256_blendv_ps(exp, lin, mask);
         _mm256_storeu_ps(chunk.as_mut_ptr(), v);
     }
-    let remainder = it.into_remainder();
     if remainder.len() < 4 {
         return remainder;
     }
 
-    let (chunk, remainder) = remainder.split_at_mut(4);
+    let (chunk, remainder) = remainder.split_first_chunk_mut::<4>().unwrap();
     let v = _mm_loadu_ps(chunk.as_ptr());
     let mask = _mm_cmple_ps(v, _mm_set1_ps(0.018));
     let lin = _mm_mul_ps(v, _mm_set1_ps(4.5));

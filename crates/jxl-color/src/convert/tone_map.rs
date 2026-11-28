@@ -235,10 +235,10 @@ unsafe fn tone_map_x86_64_avx2(
     let vlr = _mm256_set1_ps(lr);
     let vlg = _mm256_set1_ps(lg);
     let vlb = _mm256_set1_ps(lb);
-    let mut r = r.chunks_exact_mut(8);
-    let mut g = g.chunks_exact_mut(8);
-    let mut b = b.chunks_exact_mut(8);
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    let (r_chunks, r) = r.as_chunks_mut::<8>();
+    let (g_chunks, g) = g.as_chunks_mut::<8>();
+    let (b_chunks, b) = b.as_chunks_mut::<8>();
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let vr = _mm256_loadu_ps(r.as_ptr());
         let vg = _mm256_loadu_ps(g.as_ptr());
         let vb = _mm256_loadu_ps(b.as_ptr());
@@ -261,9 +261,9 @@ unsafe fn tone_map_x86_64_avx2(
     }
 
     tone_map_x86_64_fma(
-        r.into_remainder(),
-        g.into_remainder(),
-        b.into_remainder(),
+        r,
+        g,
+        b,
         luminances,
         intensity_target,
         from_luminance_range,
@@ -295,10 +295,10 @@ unsafe fn tone_map_x86_64_fma(
     let vlr = _mm_set1_ps(lr);
     let vlg = _mm_set1_ps(lg);
     let vlb = _mm_set1_ps(lb);
-    let mut r = r.chunks_exact_mut(4);
-    let mut g = g.chunks_exact_mut(4);
-    let mut b = b.chunks_exact_mut(4);
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    let (r_chunks, r) = r.as_chunks_mut::<4>();
+    let (g_chunks, g) = g.as_chunks_mut::<4>();
+    let (b_chunks, b) = b.as_chunks_mut::<4>();
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let vr = _mm_loadu_ps(r.as_ptr());
         let vg = _mm_loadu_ps(g.as_ptr());
         let vb = _mm_loadu_ps(b.as_ptr());
@@ -320,9 +320,9 @@ unsafe fn tone_map_x86_64_fma(
     }
 
     tone_map_generic(
-        r.into_remainder(),
-        g.into_remainder(),
-        b.into_remainder(),
+        r,
+        g,
+        b,
         luminances,
         intensity_target,
         from_luminance_range,
@@ -352,10 +352,10 @@ unsafe fn tone_map_x86_64_sse2(
     let vlr = _mm_set1_ps(lr);
     let vlg = _mm_set1_ps(lg);
     let vlb = _mm_set1_ps(lb);
-    let mut r = r.chunks_exact_mut(4);
-    let mut g = g.chunks_exact_mut(4);
-    let mut b = b.chunks_exact_mut(4);
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    let (r_chunks, r) = r.as_chunks_mut::<4>();
+    let (g_chunks, g) = g.as_chunks_mut::<4>();
+    let (b_chunks, b) = b.as_chunks_mut::<4>();
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let vr = _mm_loadu_ps(r.as_ptr());
         let vg = _mm_loadu_ps(g.as_ptr());
         let vb = _mm_loadu_ps(b.as_ptr());
@@ -382,9 +382,9 @@ unsafe fn tone_map_x86_64_sse2(
     }
 
     tone_map_generic(
-        r.into_remainder(),
-        g.into_remainder(),
-        b.into_remainder(),
+        r,
+        g,
+        b,
         luminances,
         intensity_target,
         from_luminance_range,
@@ -410,10 +410,10 @@ unsafe fn tone_map_aarch64_neon(
     let scale = intensity_target / to_luminance_range.1;
 
     let [lr, lg, lb] = luminances;
-    let mut r = r.chunks_exact_mut(4);
-    let mut g = g.chunks_exact_mut(4);
-    let mut b = b.chunks_exact_mut(4);
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    let (r_chunks, r) = r.as_chunks_mut::<4>();
+    let (g_chunks, g) = g.as_chunks_mut::<4>();
+    let (b_chunks, b) = b.as_chunks_mut::<4>();
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let vr = vld1q_f32(r.as_ptr());
         let vg = vld1q_f32(g.as_ptr());
         let vb = vld1q_f32(b.as_ptr());
@@ -437,9 +437,9 @@ unsafe fn tone_map_aarch64_neon(
     }
 
     tone_map_generic(
-        r.into_remainder(),
-        g.into_remainder(),
-        b.into_remainder(),
+        r,
+        g,
+        b,
         luminances,
         intensity_target,
         from_luminance_range,
@@ -483,8 +483,8 @@ unsafe fn tone_map_luma_x86_64_avx2(
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm256_set1_ps(scale);
 
-    let mut luma = luma.chunks_exact_mut(8);
-    for y in &mut luma {
+    let (chunks, remainder) = luma.as_chunks_mut::<8>();
+    for y in chunks {
         let vy = _mm256_loadu_ps(y.as_ptr());
         let vy_pq = crate::tf::pq::linear_to_pq_x86_64_avx2(vy, intensity_target);
         let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_avx2(
@@ -498,7 +498,7 @@ unsafe fn tone_map_luma_x86_64_avx2(
     }
 
     tone_map_luma_x86_64_fma(
-        luma.into_remainder(),
+        remainder,
         intensity_target,
         from_luminance_range,
         to_luminance_range,
@@ -519,8 +519,8 @@ unsafe fn tone_map_luma_x86_64_fma(
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm_set1_ps(scale);
 
-    let mut luma = luma.chunks_exact_mut(4);
-    for y in &mut luma {
+    let (chunks, remainder) = luma.as_chunks_mut::<4>();
+    for y in chunks {
         let vy = _mm_loadu_ps(y.as_ptr());
         let vy_pq = crate::tf::pq::linear_to_pq_x86_64_fma(vy, intensity_target);
         let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_fma(
@@ -534,7 +534,7 @@ unsafe fn tone_map_luma_x86_64_fma(
     }
 
     tone_map_luma_generic(
-        luma.into_remainder(),
+        remainder,
         intensity_target,
         from_luminance_range,
         to_luminance_range,
@@ -553,8 +553,8 @@ unsafe fn tone_map_luma_x86_64_sse2(
     let scale = intensity_target / to_luminance_range.1;
     let vscale = _mm_set1_ps(scale);
 
-    let mut luma = luma.chunks_exact_mut(4);
-    for y in &mut luma {
+    let (chunks, remainder) = luma.as_chunks_mut::<4>();
+    for y in chunks {
         let vy = _mm_loadu_ps(y.as_ptr());
         let vy_pq = crate::tf::pq::linear_to_pq_x86_64_sse2(vy, intensity_target);
         let vy_mapped = crate::tf::rec2408::rec2408_eetf_x86_64_sse2(
@@ -568,7 +568,7 @@ unsafe fn tone_map_luma_x86_64_sse2(
     }
 
     tone_map_luma_generic(
-        luma.into_remainder(),
+        remainder,
         intensity_target,
         from_luminance_range,
         to_luminance_range,
@@ -587,8 +587,8 @@ unsafe fn tone_map_luma_aarch64_neon(
 
     let scale = intensity_target / to_luminance_range.1;
 
-    let mut luma = luma.chunks_exact_mut(4);
-    for y in &mut luma {
+    let (chunks, remainder) = luma.as_chunks_mut::<4>();
+    for y in chunks {
         let vy = vld1q_f32(y.as_ptr());
         let vy_pq = crate::tf::pq::linear_to_pq_aarch64_neon(vy, intensity_target);
         let vy_mapped = crate::tf::rec2408::rec2408_eetf_aarch64_neon(
@@ -602,7 +602,7 @@ unsafe fn tone_map_luma_aarch64_neon(
     }
 
     tone_map_luma_generic(
-        luma.into_remainder(),
+        remainder,
         intensity_target,
         from_luminance_range,
         to_luminance_range,
@@ -640,16 +640,16 @@ unsafe fn detect_peak_luminance_avx2(r: &[f32], g: &[f32], b: &[f32], luminances
     assert_eq!(r.len(), g.len());
     assert_eq!(g.len(), b.len());
 
-    let mut r = r.chunks_exact(8);
-    let mut g = g.chunks_exact(8);
-    let mut b = b.chunks_exact(8);
+    let (r_chunks, mut r) = r.as_chunks::<8>();
+    let (g_chunks, mut g) = g.as_chunks::<8>();
+    let (b_chunks, mut b) = b.as_chunks::<8>();
 
     let [lr, lg, lb] = luminances;
     let vlr = _mm256_set1_ps(lr);
     let vlg = _mm256_set1_ps(lg);
     let vlb = _mm256_set1_ps(lb);
     let mut peak_luminance = _mm256_setzero_ps();
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    for ((r, g), b) in r_chunks.iter().zip(g_chunks).zip(b_chunks) {
         let vr = _mm256_loadu_ps(r.as_ptr());
         let vg = _mm256_loadu_ps(g.as_ptr());
         let vb = _mm256_loadu_ps(b.as_ptr());
@@ -661,13 +661,10 @@ unsafe fn detect_peak_luminance_avx2(r: &[f32], g: &[f32], b: &[f32], luminances
         _mm256_extractf128_ps::<0>(peak_luminance),
         _mm256_extractf128_ps::<1>(peak_luminance),
     );
-    let mut r = r.remainder();
-    let mut g = g.remainder();
-    let mut b = b.remainder();
     if r.len() >= 4 {
-        let (vr, remainder_r) = r.split_at(4);
-        let (vg, remainder_g) = g.split_at(4);
-        let (vb, remainder_b) = b.split_at(4);
+        let (vr, remainder_r) = r.split_first_chunk::<4>().unwrap();
+        let (vg, remainder_g) = g.split_first_chunk::<4>().unwrap();
+        let (vb, remainder_b) = b.split_first_chunk::<4>().unwrap();
         let vlr = _mm256_extractf128_ps::<0>(vlr);
         let vlg = _mm256_extractf128_ps::<0>(vlg);
         let vlb = _mm256_extractf128_ps::<0>(vlb);
@@ -707,13 +704,13 @@ unsafe fn detect_peak_luminance_neon(r: &[f32], g: &[f32], b: &[f32], luminances
     assert_eq!(r.len(), g.len());
     assert_eq!(g.len(), b.len());
 
-    let mut r = r.chunks_exact(4);
-    let mut g = g.chunks_exact(4);
-    let mut b = b.chunks_exact(4);
+    let (r_chunks, r) = r.as_chunks::<4>();
+    let (g_chunks, g) = g.as_chunks::<4>();
+    let (b_chunks, b) = b.as_chunks::<4>();
 
     let [lr, lg, lb] = luminances;
     let mut peak_luminance = vdupq_n_f32(0.0);
-    for ((r, g), b) in (&mut r).zip(&mut g).zip(&mut b) {
+    for ((r, g), b) in r_chunks.iter().zip(g_chunks).zip(b_chunks) {
         let vr = vld1q_f32(r.as_ptr());
         let vg = vld1q_f32(g.as_ptr());
         let vb = vld1q_f32(b.as_ptr());
@@ -722,7 +719,7 @@ unsafe fn detect_peak_luminance_neon(r: &[f32], g: &[f32], b: &[f32], luminances
     }
 
     let mut peak_luminance = vmaxvq_f32(peak_luminance);
-    for ((r, g), b) in r.remainder().iter().zip(g.remainder()).zip(b.remainder()) {
+    for ((r, g), b) in r.iter().zip(g).zip(b) {
         let y = b.mul_add(lb, g.mul_add(lg, *r * lr));
         peak_luminance = peak_luminance.max(y);
     }

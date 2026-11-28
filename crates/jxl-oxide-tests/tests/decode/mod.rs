@@ -69,8 +69,8 @@ fn decode<R: Read>(data: &[u8], mut expected: R) {
             let mut expected_buf = vec![0u8; grid.width() * grid.height() * 2];
             expected.read_exact(&mut expected_buf).unwrap();
 
-            for (&actual_float, expected) in buf.iter().zip(expected_buf.chunks_exact(2)) {
-                let expected = u16::from_le_bytes([expected[0], expected[1]]);
+            for (&actual_float, &expected) in buf.iter().zip(expected_buf.as_chunks::<2>().0) {
+                let expected = u16::from_le_bytes(expected);
                 let actual = (actual_float * 65535.0 + 0.5) as u16;
                 let diff = actual.abs_diff(expected);
                 assert!(diff < peak_error_threshold);

@@ -12,8 +12,8 @@ pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
     #[cfg(target_arch = "aarch64")]
     let samples = {
         if std::arch::is_aarch64_feature_detected!("neon") {
-            let mut it = samples.chunks_exact_mut(4);
-            for chunk in &mut it {
+            let (chunks, remainder) = samples.as_chunks_mut::<4>();
+            for chunk in chunks {
                 unsafe {
                     let v = std::arch::aarch64::vld1q_f32(chunk.as_ptr());
                     let mask =
@@ -27,7 +27,7 @@ pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
                     std::arch::aarch64::vst1q_f32(chunk.as_mut_ptr(), v);
                 }
             }
-            it.into_remainder()
+            remainder
         } else {
             samples
         }
@@ -39,8 +39,8 @@ pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
         {
             unsafe { linear_to_gamma_x86_64_avx2(samples, gamma) }
         } else {
-            let mut it = samples.chunks_exact_mut(4);
-            for chunk in &mut it {
+            let (chunks, remainder) = samples.as_chunks_mut::<4>();
+            for chunk in chunks {
                 unsafe {
                     let v = std::arch::x86_64::_mm_loadu_ps(chunk.as_ptr());
                     let mask =
@@ -53,7 +53,7 @@ pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
                     std::arch::x86_64::_mm_storeu_ps(chunk.as_mut_ptr(), v);
                 }
             }
-            it.into_remainder()
+            remainder
         }
     };
 
@@ -73,20 +73,19 @@ pub fn apply_gamma(samples: &mut [f32], gamma: f32) {
 unsafe fn linear_to_gamma_x86_64_avx2(samples: &mut [f32], gamma: f32) -> &mut [f32] {
     use std::arch::x86_64::*;
 
-    let mut it = samples.chunks_exact_mut(8);
-    for chunk in &mut it {
+    let (chunks, remainder) = samples.as_chunks_mut::<8>();
+    for chunk in chunks {
         let v = _mm256_loadu_ps(chunk.as_ptr());
         let mask = _mm256_cmp_ps(v, _mm256_set1_ps(1e-7), _CMP_LE_OS);
         let exp = crate::fastmath::fast_powf_x86_64_avx2(v, _mm256_set1_ps(gamma));
         let v = _mm256_andnot_ps(mask, exp);
         _mm256_storeu_ps(chunk.as_mut_ptr(), v);
     }
-    let remainder = it.into_remainder();
     if remainder.len() < 4 {
         return remainder;
     }
 
-    let (chunk, remainder) = remainder.split_at_mut(4);
+    let (chunk, remainder) = remainder.split_first_chunk_mut::<4>().unwrap();
     let v = _mm_loadu_ps(chunk.as_ptr());
     let mask = _mm_cmple_ps(v, _mm_set1_ps(1e-7));
     let exp = crate::fastmath::fast_powf_x86_64_fma(v, _mm_set1_ps(gamma));

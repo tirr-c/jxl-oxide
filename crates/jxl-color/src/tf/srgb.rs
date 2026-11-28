@@ -60,9 +60,9 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
         &*(SRGB_POWTABLE_LOWER.0.as_ptr() as *const _),
     ));
 
-    let mut chunks = samples.chunks_exact_mut(8);
+    let (chunks, remainder) = samples.as_chunks_mut::<8>();
     let sign_mask = _mm256_set1_ps(f32::from_bits(0x8000_0000));
-    for chunk in &mut chunks {
+    for chunk in chunks {
         let v = _mm256_loadu_ps(chunk.as_ptr());
         let sign = _mm256_and_ps(sign_mask, v);
         let v = _mm256_andnot_ps(sign_mask, v);
@@ -100,7 +100,7 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
         _mm256_storeu_ps(chunk.as_mut_ptr(), ret);
     }
 
-    for s in chunks.into_remainder() {
+    for s in remainder {
         let v = s.to_bits() & 0x7fff_ffff;
         let v_adj = f32::from_bits((v | 0x3e80_0000) & 0x3eff_ffff);
         let pow = 0.059914046f32;
@@ -126,8 +126,8 @@ unsafe fn linear_to_srgb_avx2(samples: &mut [f32]) {
 unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
     use std::arch::aarch64::*;
 
-    let mut it = samples.chunks_exact_mut(4);
-    for chunk in &mut it {
+    let (chunks, remainder) = samples.as_chunks_mut::<4>();
+    for chunk in chunks {
         let v = vld1q_u32(chunk.as_ptr() as *const _);
         let sign = vandq_u32(v, vdupq_n_u32(0x8000_0000));
         let v = vandq_u32(v, vdupq_n_u32(0x7fff_ffff));
@@ -169,7 +169,7 @@ unsafe fn linear_to_srgb_aarch64_neon(samples: &mut [f32]) {
         vst1q_u32(chunk.as_mut_ptr() as *mut _, ret);
     }
 
-    for s in it.into_remainder() {
+    for s in remainder {
         let v = s.to_bits() & 0x7fff_ffff;
         let v_adj = f32::from_bits((v | 0x3e80_0000) & 0x3eff_ffff);
         let pow = 0.059914046f32;

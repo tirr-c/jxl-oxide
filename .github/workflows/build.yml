@@ -21,7 +21,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.97.1'
+          toolchain: '1.100.1'
       - uses: actions/cache@v5
         with:
           path: |
@@ -56,7 +56,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.97.1'
+          toolchain: '1.100.1'
           targets: ${{ matrix.target }}
       - uses: actions/cache@v5
         with:
@@ -89,7 +89,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: '1.97.1'
+          toolchain: '1.100.1'
           targets: wasm32-unknown-unknown
       - uses: actions/cache@v5
         with:

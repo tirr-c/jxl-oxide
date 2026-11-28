@@ -283,7 +283,9 @@ impl DequantMatrixParams {
                 {
                     let mat = dct_quant_weights(&dct_params, 8, 4)?;
                     *ret = mat
-                        .chunks_exact(8)
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
                         .flat_map(|v| [v, v])
                         .flatten()
                         .copied()
@@ -335,10 +337,12 @@ impl DequantMatrixParams {
                         }
                     }
 
-                    let weights_4x8 = weights_4x8.chunks_exact(8);
-                    let weights_4x4 = weights_4x4.chunks_exact(4);
+                    let weights_4x8 = weights_4x8.as_chunks::<8>().0;
+                    let weights_4x4 = weights_4x4.as_chunks::<4>().0;
                     for (y, ((rows, weights_8), weights_4)) in ret
-                        .chunks_exact_mut(16)
+                        .as_chunks_mut::<16>()
+                        .0
+                        .iter_mut()
                         .zip(weights_4x8)
                         .zip(weights_4x4)
                         .enumerate()
@@ -351,8 +355,12 @@ impl DequantMatrixParams {
                                 dct_weight
                             };
                         }
-                        for (x, (pair, &dct_weight)) in
-                            row0.chunks_exact_mut(2).zip(weights_4).enumerate()
+                        for (x, (pair, &dct_weight)) in row0
+                            .as_chunks_mut::<2>()
+                            .0
+                            .iter_mut()
+                            .zip(weights_4)
+                            .enumerate()
                         {
                             pair[1] = if y == 0 && x == 0 {
                                 params[1]

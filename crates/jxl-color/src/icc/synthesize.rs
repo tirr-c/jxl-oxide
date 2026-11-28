@@ -69,7 +69,7 @@ fn create_curv_lut(lut: &[u16]) -> Vec<u8> {
     let mut trc = vec![b'c', b'u', b'r', b'v', 0, 0, 0, 0, 0, 0, 0, 0];
     trc[8..12].copy_from_slice(&len.to_be_bytes());
     trc.resize(trc.len() + lut.len() * 2, 0);
-    for (buf, &v) in trc[12..].chunks_exact_mut(2).zip(lut) {
+    for (buf, &v) in trc[12..].as_chunks_mut::<2>().0.iter_mut().zip(lut) {
         buf.copy_from_slice(&v.to_be_bytes());
     }
     trc

@@ -9,7 +9,7 @@
       url = "github:nix-community/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nixpkgs.url = "nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
   };
 
   outputs =
@@ -68,21 +68,18 @@
             };
           };
         inherit (pkgs) lib;
-        inherit (builtins)
-          map
-          listToAttrs
-          ;
+        inherit (builtins) listToAttrs;
 
         mapListToAttrs = f: l: listToAttrs (map f l);
 
         rustToolchainSpec.stable = {
-          channel = "1.97.1";
-          sha256 = "sha256-A1abGIbOtcBSdrUMhDGrER3pRM1hQP4fp9gh3Y4PKc8=";
+          channel = "1.100.1";
+          sha256 = "sha256-W3A3rtdDaQW5yOvFr5JVTfngRUCKKUqPCPIW/3aH0nM=";
         };
         rustToolchainSpec.nightly = {
           channel = "nightly";
-          date = "2026-05-26";
-          sha256 = "sha256-D8GkGd+MrvPyB+dY94Sa8T/znAESyCg8P3OQ30X83AM=";
+          date = "2026-11-26";
+          sha256 = "sha256-SMBrQO4Rlye0bGUvP4W9eovqWsAgVHkPM2DR2ghsNgM=";
         };
 
         toolchainFor =
