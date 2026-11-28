@@ -21,7 +21,7 @@ optional = true
 criterion = "0.5.1"
 mimalloc = "0.1.39"
 ring = "0.17.8"
-zstd = "0.13.0"
+zstd = "0.14.5"
 
 [dev-dependencies.image]
 version = "0.25.4"
