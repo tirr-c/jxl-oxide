@@ -942,6 +942,15 @@ impl RenderContext {
             let transform = self.cached_transform.lock().unwrap();
             let transform = transform.as_ref().unwrap();
             if transform.is_noop() && !frame_header.do_ycbcr {
+                let grid = if grid.color_channels() == transform.output_channels() {
+                    grid
+                } else {
+                    let mut new_grid =
+                        ImageWithRegion::new(transform.output_channels(), grid.alloc_tracker());
+                    let (region, shift) = grid.regions_and_shifts()[0];
+                    new_grid.append_channel_shifted(grid.buffer()[0].try_clone()?, region, shift);
+                    Arc::new(new_grid)
+                };
                 return Ok(grid);
             }
 
