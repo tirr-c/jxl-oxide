@@ -27,11 +27,11 @@ pub(super) fn gamut_map(
     } else {
         // SAFETY: x86_64 implies SSE2.
         unsafe {
-            let mut r_it = r.chunks_exact_mut(4);
-            let mut g_it = g.chunks_exact_mut(4);
-            let mut b_it = b.chunks_exact_mut(4);
+            let (r_chunks, r) = r.as_chunks_mut::<4>();
+            let (g_chunks, g) = g.as_chunks_mut::<4>();
+            let (b_chunks, b) = b.as_chunks_mut::<4>();
 
-            for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
+            for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
                 let rgb = [
                     std::arch::x86_64::_mm_loadu_ps(r.as_ptr()),
                     std::arch::x86_64::_mm_loadu_ps(g.as_ptr()),
@@ -44,9 +44,6 @@ pub(super) fn gamut_map(
                 std::arch::x86_64::_mm_storeu_ps(b.as_mut_ptr(), vb);
             }
 
-            let r = r_it.into_remainder();
-            let g = g_it.into_remainder();
-            let b = b_it.into_remainder();
             (r, g, b)
         }
     };
@@ -80,11 +77,11 @@ pub(super) unsafe fn gamut_map_x86_64_avx2<'r, 'g, 'b>(
     luminances: [f32; 3],
     saturation_factor: f32,
 ) -> (&'r mut [f32], &'g mut [f32], &'b mut [f32]) {
-    let mut r_it = r.chunks_exact_mut(8);
-    let mut g_it = g.chunks_exact_mut(8);
-    let mut b_it = b.chunks_exact_mut(8);
+    let (r_chunks, r) = r.as_chunks_mut::<8>();
+    let (g_chunks, g) = g.as_chunks_mut::<8>();
+    let (b_chunks, b) = b.as_chunks_mut::<8>();
 
-    for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let rgb = [
             std::arch::x86_64::_mm256_loadu_ps(r.as_ptr()),
             std::arch::x86_64::_mm256_loadu_ps(g.as_ptr()),
@@ -96,11 +93,7 @@ pub(super) unsafe fn gamut_map_x86_64_avx2<'r, 'g, 'b>(
         std::arch::x86_64::_mm256_storeu_ps(b.as_mut_ptr(), vb);
     }
 
-    (
-        r_it.into_remainder(),
-        g_it.into_remainder(),
-        b_it.into_remainder(),
-    )
+    (r, g, b)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -113,11 +106,11 @@ pub(super) unsafe fn gamut_map_x86_64_fma<'r, 'g, 'b>(
     luminances: [f32; 3],
     saturation_factor: f32,
 ) -> (&'r mut [f32], &'g mut [f32], &'b mut [f32]) {
-    let mut r_it = r.chunks_exact_mut(4);
-    let mut g_it = g.chunks_exact_mut(4);
-    let mut b_it = b.chunks_exact_mut(4);
+    let (r_chunks, r) = r.as_chunks_mut::<4>();
+    let (g_chunks, g) = g.as_chunks_mut::<4>();
+    let (b_chunks, b) = b.as_chunks_mut::<4>();
 
-    for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let rgb = [
             std::arch::x86_64::_mm_loadu_ps(r.as_ptr()),
             std::arch::x86_64::_mm_loadu_ps(g.as_ptr()),
@@ -129,11 +122,7 @@ pub(super) unsafe fn gamut_map_x86_64_fma<'r, 'g, 'b>(
         std::arch::x86_64::_mm_storeu_ps(b.as_mut_ptr(), vb);
     }
 
-    (
-        r_it.into_remainder(),
-        g_it.into_remainder(),
-        b_it.into_remainder(),
-    )
+    (r, g, b)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -145,11 +134,11 @@ pub(super) unsafe fn gamut_map_aarch64_neon<'r, 'g, 'b>(
     luminances: [f32; 3],
     saturation_factor: f32,
 ) -> (&'r mut [f32], &'g mut [f32], &'b mut [f32]) {
-    let mut r_it = r.chunks_exact_mut(4);
-    let mut g_it = g.chunks_exact_mut(4);
-    let mut b_it = b.chunks_exact_mut(4);
+    let (r_chunks, r) = r.as_chunks_mut::<4>();
+    let (g_chunks, g) = g.as_chunks_mut::<4>();
+    let (b_chunks, b) = b.as_chunks_mut::<4>();
 
-    for ((r, g), b) in (&mut r_it).zip(&mut g_it).zip(&mut b_it) {
+    for ((r, g), b) in r_chunks.iter_mut().zip(g_chunks).zip(b_chunks) {
         let rgb = [
             std::arch::aarch64::vld1q_f32(r.as_ptr()),
             std::arch::aarch64::vld1q_f32(g.as_ptr()),
@@ -161,9 +150,5 @@ pub(super) unsafe fn gamut_map_aarch64_neon<'r, 'g, 'b>(
         std::arch::aarch64::vst1q_f32(b.as_mut_ptr(), vb);
     }
 
-    (
-        r_it.into_remainder(),
-        g_it.into_remainder(),
-        b_it.into_remainder(),
-    )
+    (r, g, b)
 }

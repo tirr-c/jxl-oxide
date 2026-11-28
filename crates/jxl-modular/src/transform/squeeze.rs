@@ -68,8 +68,8 @@ fn inverse_h_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
         let (avg_row, residu_row) = scratch.split_at_mut(avg_width);
         let mut avg = avg_row[0];
         let mut left = avg;
-        let mut row_out_it = row_out.chunks_exact_mut(2);
-        for (x, pair) in (&mut row_out_it).enumerate() {
+        let (pairs, remainder) = row_out.as_chunks_mut::<2>();
+        for (x, pair) in pairs.iter_mut().enumerate() {
             let residu = residu_row[x];
             let next_avg = avg_row.get(x + 1).copied().unwrap_or(avg);
             let diff = residu.wrapping_add(tendency_i32(left, avg, next_avg));
@@ -81,7 +81,7 @@ fn inverse_h_i32_base(merged: &mut MutableSubgrid<'_, i32>) {
             left = second;
         }
 
-        if let [v] = row_out_it.into_remainder() {
+        if let [v] = remainder {
             *v = avg_row[avg_width - 1];
         }
     }
@@ -100,8 +100,8 @@ fn inverse_h_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
         let (avg_row, residu_row) = scratch.split_at_mut(avg_width);
         let mut avg = avg_row[0];
         let mut left = avg;
-        let mut row_out_it = row_out.chunks_exact_mut(2);
-        for (x, pair) in (&mut row_out_it).enumerate() {
+        let (pairs, remainder) = row_out.as_chunks_mut::<2>();
+        for (x, pair) in pairs.iter_mut().enumerate() {
             let residu = residu_row[x];
             let next_avg = avg_row.get(x + 1).copied().unwrap_or(avg);
             let diff = residu.wrapping_add(tendency_i16(left, avg, next_avg));
@@ -113,7 +113,7 @@ fn inverse_h_i16_base(merged: &mut MutableSubgrid<'_, i16>) {
             left = second;
         }
 
-        if let [v] = row_out_it.into_remainder() {
+        if let [v] = remainder {
             *v = avg_row[avg_width - 1];
         }
     }
@@ -321,8 +321,8 @@ unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
             scratch.last_mut().unwrap().write(avg);
         }
 
-        let mut chunks_it = scratch.chunks_exact(8);
-        for (x8, chunk) in (&mut chunks_it).enumerate() {
+        let (chunks, remainder) = scratch.as_chunks::<8>();
+        for (x8, chunk) in chunks.iter().enumerate() {
             let x = x8 * 8;
             let v = transpose_i16x8(std::array::from_fn(|idx| unsafe {
                 chunk[idx].assume_init_read()
@@ -332,7 +332,7 @@ unsafe fn inverse_h_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
             }
         }
 
-        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+        for (dx, v) in remainder.iter().enumerate() {
             let x = width / 8 * 8 + dx;
             let v = v.assume_init_read();
             *rows[0x0].add(x) = _mm_extract_epi16::<0x0>(v) as i16;
@@ -431,8 +431,8 @@ unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
             scratch.last_mut().unwrap().write(avg);
         }
 
-        let mut chunks_it = scratch.chunks_exact(8);
-        for (x8, chunk) in (&mut chunks_it).enumerate() {
+        let (chunks, remainder) = scratch.as_chunks::<8>();
+        for (x8, chunk) in chunks.iter().enumerate() {
             let x = x8 * 8;
             let v = transpose_i16x8(std::array::from_fn(|idx| unsafe {
                 chunk[idx].assume_init_read()
@@ -442,7 +442,7 @@ unsafe fn inverse_h_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
             }
         }
 
-        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+        for (dx, v) in remainder.iter().enumerate() {
             let x = width / 8 * 8 + dx;
             let v = v.assume_init_read();
             *rows[0x0].add(x) = _mm_extract_epi16::<0x0>(v) as i16;
@@ -579,8 +579,8 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
             scratch.last_mut().unwrap().write(avg);
         }
 
-        let mut chunks_it = scratch.chunks_exact(4);
-        for (x4, chunk) in (&mut chunks_it).enumerate() {
+        let (chunks, remainder) = scratch.as_chunks::<4>();
+        for (x4, chunk) in chunks.iter().enumerate() {
             let x = x4 * 4;
             let v = transpose([
                 chunk[0].assume_init_read(),
@@ -594,7 +594,7 @@ unsafe fn inverse_h_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
             vst1_s16(rows[3].add(x), v[3]);
         }
 
-        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+        for (dx, v) in remainder.iter().enumerate() {
             let x = width / 4 * 4 + dx;
             let v = v.assume_init_read();
             *rows[0].add(x) = vget_lane_s16::<0>(v);
@@ -722,8 +722,8 @@ unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
             scratch.last_mut().unwrap().write(avg);
         }
 
-        let mut chunks_it = scratch.chunks_exact(8);
-        for (x8, chunk) in (&mut chunks_it).enumerate() {
+        let (chunks, remainder) = scratch.as_chunks::<8>();
+        for (x8, chunk) in chunks.iter().enumerate() {
             let x = x8 * 8;
             let v = transpose(std::array::from_fn(|idx| unsafe {
                 chunk[idx].assume_init_read()
@@ -733,7 +733,7 @@ unsafe fn inverse_h_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
             }
         }
 
-        for (dx, v) in chunks_it.remainder().iter().enumerate() {
+        for (dx, v) in remainder.iter().enumerate() {
             let x = width / 8 * 8 + dx;
             let v = v.assume_init_read();
             *rows[0x0].add(x) = i16x8_extract_lane::<0x0>(v);
@@ -886,8 +886,8 @@ unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
 
         let mut avg = _mm256_loadu_si256(merged.get_mut(x, 0) as *mut i16 as *const _);
         let mut top = avg;
-        let mut chunks_it = scratch.chunks_exact_mut(2);
-        for (y, pair) in (&mut chunks_it).enumerate() {
+        let (pairs, remainder) = scratch.as_chunks_mut::<2>();
+        for (y, pair) in pairs.iter_mut().enumerate() {
             let residual =
                 _mm256_loadu_si256(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
             let next_avg = if y + 1 < avg_height {
@@ -907,7 +907,7 @@ unsafe fn inverse_v_i16_x86_64_avx2(merged: &mut MutableSubgrid<'_, i16>) {
             top = second;
         }
 
-        if let [v] = chunks_it.into_remainder() {
+        if let [v] = remainder {
             v.write(avg);
         }
 
@@ -948,8 +948,8 @@ unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
 
         let mut avg = _mm_loadu_si128(merged.get_mut(x, 0) as *mut i16 as *const _);
         let mut top = avg;
-        let mut chunks_it = scratch.chunks_exact_mut(2);
-        for (y, pair) in (&mut chunks_it).enumerate() {
+        let (pairs, remainder) = scratch.as_chunks_mut::<2>();
+        for (y, pair) in pairs.iter_mut().enumerate() {
             let residual = _mm_loadu_si128(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
             let next_avg = if y + 1 < avg_height {
                 _mm_loadu_si128(merged.get_mut(x, y + 1) as *mut _ as *const _)
@@ -967,7 +967,7 @@ unsafe fn inverse_v_i16_x86_64_sse41(merged: &mut MutableSubgrid<'_, i16>) {
             top = second;
         }
 
-        if let [v] = chunks_it.into_remainder() {
+        if let [v] = remainder {
             v.write(avg);
         }
 
@@ -1007,8 +1007,8 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
 
         let mut avg = vld1_s16(merged.get_mut(x, 0) as *mut i16);
         let mut top = avg;
-        let mut chunks_it = scratch.chunks_exact_mut(2);
-        for (y, pair) in (&mut chunks_it).enumerate() {
+        let (pairs, remainder) = scratch.as_chunks_mut::<2>();
+        for (y, pair) in pairs.iter_mut().enumerate() {
             let residual = vld1_s16(merged.get_mut(x, avg_height + y) as *mut i16);
             let next_avg = if y + 1 < avg_height {
                 vld1_s16(merged.get_mut(x, y + 1) as *mut i16)
@@ -1029,7 +1029,7 @@ unsafe fn inverse_v_i16_aarch64_neon(merged: &mut MutableSubgrid<'_, i16>) {
             top = second;
         }
 
-        if let [v] = chunks_it.into_remainder() {
+        if let [v] = remainder {
             v.write(avg);
         }
 
@@ -1065,8 +1065,8 @@ unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
 
         let mut avg = v128_load(merged.get_mut(x, 0) as *mut _ as *const _);
         let mut top = avg;
-        let mut chunks_it = scratch.chunks_exact_mut(2);
-        for (y, pair) in (&mut chunks_it).enumerate() {
+        let (pairs, remainder) = scratch.as_chunks_mut::<2>();
+        for (y, pair) in pairs.iter_mut().enumerate() {
             let residual = v128_load(merged.get_mut(x, avg_height + y) as *mut _ as *const _);
             let next_avg = if y + 1 < avg_height {
                 v128_load(merged.get_mut(x, y + 1) as *mut _ as *const _)
@@ -1084,7 +1084,7 @@ unsafe fn inverse_v_i16_wasm32_simd128(merged: &mut MutableSubgrid<'_, i16>) {
             top = second;
         }
 
-        if let [v] = chunks_it.into_remainder() {
+        if let [v] = remainder {
             v.write(avg);
         }
 

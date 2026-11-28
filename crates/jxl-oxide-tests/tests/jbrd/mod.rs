@@ -25,7 +25,6 @@ macro_rules! test {
     };
 }
 
-#[cfg(feature = "conformance")]
 test! {
     bench_oriented_brg(
         util::conformance_path("bench_oriented_brg"),
@@ -39,10 +38,6 @@ test! {
         util::conformance_path("grayscale_jpeg"),
         "a170600cc02b2b029dc79c5ee72dbf9107e8de5a64f1d8b1732c759e09a3d41d",
     ),
-}
-
-#[cfg(feature = "decode")]
-test! {
     genshin_ycbcr_420(
         util::decode_testcases_dir().join("genshin_ycbcr_420/input.jxl"),
         "24e05ce200df019710eb56cad43e4349bd6edee05865b1eb0eee1581406535b5",

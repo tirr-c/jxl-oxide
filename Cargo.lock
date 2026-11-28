@@ -1140,7 +1140,6 @@ name = "jxl-image"
 version = "0.13.0"
 dependencies = [
  "jxl-bitstream",
- "jxl-grid",
  "jxl-oxide-common",
  "tracing",
 ]

@@ -268,7 +268,7 @@ pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
 
     let mut tags = Vec::new();
     let tag_bytes = &profile[0x84..][..12 * tag_count as usize];
-    for raw_tag in tag_bytes.chunks_exact(12) {
+    for raw_tag in tag_bytes.as_chunks::<12>().0 {
         let tag = [raw_tag[0], raw_tag[1], raw_tag[2], raw_tag[3]];
         let offset = u32::from_be_bytes([raw_tag[4], raw_tag[5], raw_tag[6], raw_tag[7]]);
         let tag_size = u32::from_be_bytes([raw_tag[8], raw_tag[9], raw_tag[10], raw_tag[11]]);

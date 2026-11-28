@@ -26,9 +26,9 @@ pub fn handle_generate_fixture(args: GenerateFixtureArgs) {
         for grid in frame.image_planar() {
             let buf = grid.buf();
             let mut output_buf = vec![0u8; grid.width() * grid.height() * 2];
-            for (&sample_float, output) in buf.iter().zip(output_buf.chunks_exact_mut(2)) {
+            for (&sample_float, output) in buf.iter().zip(output_buf.as_chunks_mut::<2>().0) {
                 let sample = (sample_float * 65535.0 + 0.5) as u16;
-                output.copy_from_slice(&sample.to_le_bytes());
+                *output = sample.to_le_bytes();
             }
             output.write_all(&output_buf).unwrap();
         }

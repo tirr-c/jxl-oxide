@@ -338,7 +338,7 @@ impl RenderResult {
             let buf_it = buf.chunks_exact_mut((stream.width() * stream.channels() * 2) as usize);
             for buf_row in buf_it {
                 stream.write_to_buffer(&mut fb_row);
-                for (b, s) in buf_row.chunks_exact_mut(2).zip(&fb_row) {
+                for (b, s) in buf_row.as_chunks_mut::<2>().0.iter_mut().zip(&fb_row) {
                     let [b0, b1] = s.to_be_bytes();
                     b[0] = b0;
                     b[1] = b1;

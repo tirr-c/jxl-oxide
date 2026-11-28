@@ -179,7 +179,7 @@ unsafe fn column_dct_lane(
             *input = io.get(x, y);
         }
         dct(io_lanes, scratch_lanes, direction);
-        for (y, output) in io_lanes.chunks_exact(LANE_SIZE).enumerate() {
+        for (y, output) in io_lanes.as_chunks::<LANE_SIZE>().0.iter().enumerate() {
             let [o0, o1, o2, o3] = transpose_lane(output);
             *io.get_mut(x, y * LANE_SIZE) = o0;
             *io.get_mut(x, y * LANE_SIZE + 1) = o1;
@@ -198,13 +198,14 @@ unsafe fn row_dct_lane(
     let height = io.height();
     let (io_lanes, scratch_lanes) = scratch[..width * 2].split_at_mut(width);
     for y in (0..height).step_by(LANE_SIZE) {
-        for (x, input) in io_lanes.chunks_exact_mut(LANE_SIZE).enumerate() {
+        let (inputs, _) = io_lanes.as_chunks_mut::<LANE_SIZE>();
+        for (x, input) in inputs.iter_mut().enumerate() {
             for (dy, input) in input.iter_mut().enumerate() {
                 *input = io.get(x, y + dy);
             }
         }
         dct(io_lanes, scratch_lanes, direction);
-        for (x, output) in io_lanes.chunks_exact(LANE_SIZE).enumerate() {
+        for (x, output) in io_lanes.as_chunks::<LANE_SIZE>().0.iter().enumerate() {
             let [o0, o1, o2, o3] = transpose_lane(output);
             *io.get_mut(x, y) = o0;
             *io.get_mut(x, y + 1) = o1;

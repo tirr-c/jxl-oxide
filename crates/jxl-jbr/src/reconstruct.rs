@@ -670,8 +670,8 @@ impl JpegBitstreamReconstructor<'_, '_, '_> {
                     } else {
                         let mut buf = vec![0u8; 129];
                         buf[0] = qt.index | (qt.precision << 4);
-                        for (&q, out) in std::iter::zip(q_val, buf[1..].chunks_exact_mut(2)) {
-                            out.copy_from_slice(&q.to_be_bytes());
+                        for (&q, out) in q_val.iter().zip(buf[1..].as_chunks_mut::<2>().0) {
+                            *out = q.to_be_bytes();
                         }
                         buf
                     };

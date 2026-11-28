@@ -3,7 +3,6 @@ use std::{io::Cursor, path::Path, time::Duration};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use jxl_oxide::{EnumColourEncoding, JxlThreadPool, RenderingIntent};
 
-#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

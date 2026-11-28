@@ -42,44 +42,44 @@ pub fn linear_to_pq(mut samples: &mut [f32], intensity_target: f32) {
     #[target_feature(enable = "fma")]
     #[target_feature(enable = "sse4.1")]
     unsafe fn run_avx2(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(8);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<8>();
+        for s in chunks {
             let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
             std::arch::x86_64::_mm256_storeu_ps(
                 s.as_mut_ptr(),
                 linear_to_pq_x86_64_avx2(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "fma")]
     #[target_feature(enable = "sse4.1")]
     unsafe fn run_fma(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(4);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
+        for s in chunks {
             let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
             std::arch::x86_64::_mm_storeu_ps(
                 s.as_mut_ptr(),
                 linear_to_pq_x86_64_fma(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "aarch64")]
     #[target_feature(enable = "neon")]
     unsafe fn run_neon(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(4);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
+        for s in chunks {
             let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
             std::arch::aarch64::vst1q_f32(
                 s.as_mut_ptr(),
                 linear_to_pq_aarch64_neon(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -96,10 +96,10 @@ pub fn linear_to_pq(mut samples: &mut [f32], intensity_target: f32) {
             samples = run_fma(samples, intensity_target);
         }
     } else {
-        let mut it = samples.chunks_exact_mut(4);
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
         // SAFETY: x86_64 implies SSE2.
         unsafe {
-            for s in &mut it {
+            for s in chunks {
                 let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
                 std::arch::x86_64::_mm_storeu_ps(
                     s.as_mut_ptr(),
@@ -107,7 +107,7 @@ pub fn linear_to_pq(mut samples: &mut [f32], intensity_target: f32) {
                 );
             }
         }
-        samples = it.into_remainder();
+        samples = remainder;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -252,44 +252,44 @@ pub fn pq_to_linear(mut samples: &mut [f32], intensity_target: f32) {
     #[target_feature(enable = "fma")]
     #[target_feature(enable = "sse4.1")]
     unsafe fn run_avx2(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(8);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<8>();
+        for s in chunks {
             let v = std::arch::x86_64::_mm256_loadu_ps(s.as_ptr());
             std::arch::x86_64::_mm256_storeu_ps(
                 s.as_mut_ptr(),
                 pq_to_linear_x86_64_avx2(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "fma")]
     #[target_feature(enable = "sse4.1")]
     unsafe fn run_fma(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(4);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
+        for s in chunks {
             let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
             std::arch::x86_64::_mm_storeu_ps(
                 s.as_mut_ptr(),
                 pq_to_linear_x86_64_fma(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "aarch64")]
     #[target_feature(enable = "neon")]
     unsafe fn run_neon(samples: &mut [f32], intensity_target: f32) -> &mut [f32] {
-        let mut it = samples.chunks_exact_mut(4);
-        for s in &mut it {
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
+        for s in chunks {
             let v = std::arch::aarch64::vld1q_f32(s.as_ptr());
             std::arch::aarch64::vst1q_f32(
                 s.as_mut_ptr(),
                 pq_to_linear_aarch64_neon(v, intensity_target),
             );
         }
-        it.into_remainder()
+        remainder
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -306,10 +306,10 @@ pub fn pq_to_linear(mut samples: &mut [f32], intensity_target: f32) {
             samples = run_fma(samples, intensity_target);
         }
     } else {
-        let mut it = samples.chunks_exact_mut(4);
+        let (chunks, remainder) = samples.as_chunks_mut::<4>();
         // SAFETY: x86_64 implies SSE2.
         unsafe {
-            for s in &mut it {
+            for s in chunks {
                 let v = std::arch::x86_64::_mm_loadu_ps(s.as_ptr());
                 std::arch::x86_64::_mm_storeu_ps(
                     s.as_mut_ptr(),
@@ -317,7 +317,7 @@ pub fn pq_to_linear(mut samples: &mut [f32], intensity_target: f32) {
                 );
             }
         }
-        samples = it.into_remainder();
+        samples = remainder;
     }
 
     #[cfg(target_arch = "aarch64")]

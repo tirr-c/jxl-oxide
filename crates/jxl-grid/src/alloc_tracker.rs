@@ -29,11 +29,12 @@ impl AllocTracker {
     /// Returns an error if the allocation exceeds the current limit.
     pub fn alloc<T>(&self, count: usize) -> Result<AllocHandle, crate::OutOfMemory> {
         let bytes = count * std::mem::size_of::<T>();
-        let result = self.inner.bytes_left.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |bytes_left| bytes_left.checked_sub(bytes),
-        );
+        let result =
+            self.inner
+                .bytes_left
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |bytes_left| {
+                    bytes_left.checked_sub(bytes)
+                });
 
         match result {
             Ok(prev) => {
@@ -60,11 +61,12 @@ impl AllocTracker {
     /// Returns an error if the total amount of current allocation doesn't allow shrinking the
     /// limit.
     pub fn shrink_limit(&self, by_bytes: usize) -> Result<(), crate::OutOfMemory> {
-        let result = self.inner.bytes_left.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |bytes_left| bytes_left.checked_sub(by_bytes),
-        );
+        let result =
+            self.inner
+                .bytes_left
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |bytes_left| {
+                    bytes_left.checked_sub(by_bytes)
+                });
 
         if result.is_ok() {
             Ok(())
